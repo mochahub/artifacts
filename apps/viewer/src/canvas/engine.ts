@@ -240,6 +240,15 @@ export class CanvasEngine {
     this.apply();
   }
 
+  /** Where a live frame goes, on top of the frame's picture. */
+  liveHost(key: string) {
+    return this.imgs.get(key)?.box ?? null;
+  }
+
+  closeLive(key: string) {
+    this.imgs.get(key)?.box.querySelector(".live")?.remove();
+  }
+
   setPins(pins: Pin[]) {
     this.pins = pins;
     const keep = new Set(pins.map((pin) => pin.id));

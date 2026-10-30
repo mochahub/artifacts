@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./data": "./src/data.ts",
-    "./backend": "./src/backend.ts"
+    "./data": "./src/data.js",
+    "./backend": "./src/backend.js"
   }
 }

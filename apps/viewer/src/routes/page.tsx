@@ -4,12 +4,14 @@ import { lazy, useLocation, useRoute } from "preact-iso";
 import type { ArticlePage } from "../article/view.tsx";
 import type { CanvasPage } from "../canvas/view.tsx";
 import { PageSwitcher, VersionSheet } from "../components/sheets.tsx";
+import type { PrototypePage } from "../live/prototype.tsx";
 import { usePoll } from "../poll.ts";
 import { artifactPath } from "./artifact.tsx";
 import { Deleted } from "./deleted.tsx";
 import { useSignInOn401 } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
 
+const PrototypeView = lazy(() => import("../live/prototype.tsx").then((m) => m.PrototypeView));
 const CanvasView = lazy(() => import("../canvas/view.tsx").then((m) => m.CanvasView));
 const ArticleView = lazy(() => import("../article/view.tsx").then((m) => m.ArticleView));
 
@@ -54,7 +56,15 @@ function Page() {
   };
   return (
     <>
-      {page.kind === "article" ? (
+      {page.kind === "prototype" ? (
+        <PrototypeView
+          artifact={artifact}
+          page={page as unknown as PrototypePage}
+          version={version}
+          onPages={chrome.onPages}
+          onVersions={chrome.onVersions}
+        />
+      ) : page.kind === "article" ? (
         <ArticleView artifact={artifact} page={page as ArticlePage} version={version} {...chrome} />
       ) : (
         <CanvasView artifact={artifact} page={page as CanvasPage} version={version} {...chrome} />

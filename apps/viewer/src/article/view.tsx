@@ -373,9 +373,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
                 key={entry.id}
                 onClick={() => {
                   contents.value = false;
-                  body.current
-                    ?.querySelector(`[data-block="${CSS.escape(entry.id)}"]`)
-                    ?.scrollIntoView({ behavior: "smooth" });
+                  body.current?.querySelector(`[data-block="${CSS.escape(entry.id)}"]`)?.scrollIntoView();
                 }}
               >
                 <div class="grow">

@@ -3,6 +3,8 @@ import { basename, join } from "node:path";
 import { PublishPrepared, PublishResult } from "@artifacts/schema";
 import article from "../../../kit/src/article.css" with { type: "text" };
 // @ts-expect-error: embedded as text
+import data from "../../../kit/src/data.js" with { type: "text" };
+// @ts-expect-error: embedded as text
 import frames from "../../../kit/src/frames/index.js" with { type: "text" };
 import tokens from "../../../kit/src/tokens.css" with { type: "text" };
 import { detectAgent } from "../agent.ts";
@@ -275,6 +277,7 @@ export function initCommand(flags: { project?: string; slug?: string; kind?: str
   mkdirSync(join(root, "fixtures"), { recursive: true });
   mkdirSync(join(root, "vendor/artifacts-kit"), { recursive: true });
   writeFileSync(join(root, "vendor/artifacts-kit/frames.js"), frames);
+  writeFileSync(join(root, "vendor/artifacts-kit/data.js"), data);
   writeFileSync(join(root, "vendor/artifacts-kit/tokens.css"), tokens);
   writeFileSync(join(root, "vendor/artifacts-kit/article.css"), article);
   writeFileSync(join(root, "vendor/artifacts-kit/VERSION"), `${VERSION}\n`);

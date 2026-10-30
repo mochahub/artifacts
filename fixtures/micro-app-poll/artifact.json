@@ -1,0 +1,16 @@
+{
+  "project": "demo",
+  "slug": "poll",
+  "title": "Which direction?",
+  "pages": [
+    { "id": "poll", "kind": "prototype", "src": "index.html", "device": "iphone" },
+    {
+      "id": "frames",
+      "kind": "canvas",
+      "title": "Frames",
+      "boards": [{ "id": "main", "title": "Main", "src": "boards/main.html" }],
+      "styles": [],
+      "scripts": []
+    }
+  ]
+}

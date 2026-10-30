@@ -58,7 +58,7 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
   await shot(guest, info.project.name, "05-2-guest");
   await guest.getByLabel("Your name").fill("Riley");
   await guest.getByRole("button", { name: "Start reviewing" }).click();
-  await expect(guest.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy roadmap");
+  await expect(guest).toHaveURL(/\/camerabuddy\/roadmap$/);
   await guest.getByRole("link", { name: /Start reviewing|Review changes/ }).click();
   await guest.locator(".vbar").getByRole("button", { name: "Comment", exact: true }).click();
   await guest.locator("[data-block]").first().click();
@@ -74,10 +74,7 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
     await expect(revoke).toHaveCount(before - 1);
   }
   await guest.reload();
-  await expect(guest).toHaveURL(/\/sign-in|\/roadmap/);
-  await expect(
-    guest.getByText("Nothing here").or(guest.getByRole("heading", { name: "Sign in", exact: true })),
-  ).toBeVisible();
+  await expect(guest.getByRole("heading", { level: 1 })).toHaveText("Nothing here");
   await context.close();
 });
 

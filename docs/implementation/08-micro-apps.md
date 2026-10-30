@@ -6,12 +6,12 @@
 
 | Part | Package | Runs in |
 |---|---|---|
-| `@artifacts/kit/data` | `packages/kit/src/data.ts` | The artifact's frontend, inside the sandboxed iframe |
+| `@artifacts/kit/data` | `packages/kit/src/data.js`, vendored by `artifacts init` as `vendor/artifacts-kit/data.js` | The artifact's frontend, inside the sandboxed iframe |
 | The bridge | `apps/viewer/src/live/bridge.ts` | The viewer page, the iframe's parent |
 | Data store | `apps/server/src/data/` | The app: the data API (03), and `env.DATA` for backends |
 | Backend proxy | `apps/server/src/content/proxy.ts` | The app, content port: `/t/<token>/v<n>/api/*` |
 | Sandbox | `apps/server/src/sandbox/` | Child processes of the app: QuickJS in WebAssembly, one instance per backend |
-| `@artifacts/kit/backend` | `packages/kit/src/backend.ts` | Inside the artifact's backend (`caller()`, types for `Env`) |
+| `@artifacts/kit/backend` | `packages/kit/src/backend.js` | Inside the artifact's backend (`caller()`, types for `Env`) |
 
 ## Try it
 
@@ -22,7 +22,7 @@
   3. Starts the bridge for that iframe.
 - **Done:** removes the iframe and puts the image back.
 - **One at a time:** only one live iframe at a time on phones; two on desktop.
-- **Notice:** if the artifact has saved data or a backend, a one-line notice shows above the frame: "Saved for everyone" or "Saved for you", and "Its author can see what's saved".
+- **Notice:** the first time a frame reads or saves data, a one-line notice shows: "Saved for everyone" or "Saved for you", and "Its author can see what's saved".
 
 ## The bridge
 

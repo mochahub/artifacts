@@ -41,6 +41,18 @@ describe("lint catches seeded problems", () => {
     );
   }, 60_000);
 
+  test("data rules: storage outside the kit, and fixtures for data", async () => {
+    const dir = copyFixture(fixture("small"));
+    writeFileSync(
+      join(dir, "boards/main.html"),
+      `${readFileSync(join(dir, "boards/main.html"), "utf8")}<script>localStorage.setItem("a","1");fetch("https://x.test/y")</script>`,
+    );
+    const bad = await cli(["lint", "--json"], env, dir);
+    const rules = JSON.parse(bad.stdout).problems.map((problem: { rule: string }) => problem.rule);
+    expect(rules.filter((rule: string) => rule === "data/api")).toHaveLength(2);
+    expect(bad.code).toBe(1);
+  }, 60_000);
+
   test("files and ids", async () => {
     const result = await lint("refs", env);
     const rules = result.problems.map((problem) => problem.rule);

@@ -315,6 +315,7 @@ export const CanvasFrame = z.object({
   contentHash: z.string(),
   renders: z.object({ "1x": z.string(), "2x": z.string(), "3x": z.string(), thumb: z.string() }),
   live: z.boolean(),
+  livePath: z.string().nullable().optional(),
   changed: z.boolean(),
 });
 export type CanvasFrame = z.infer<typeof CanvasFrame>;

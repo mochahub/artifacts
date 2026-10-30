@@ -1,0 +1,1 @@
+{ "shared": { "votes": { "schema": 1, "a": 3, "b": 1 } }, "me": { "choice": "a" } }
