@@ -25,7 +25,7 @@
 
 - **Where:** tokens go in the OS keychain via `Bun.secrets`, which works on macOS (spike S5). On Linux without a desktop session it throws `ERR_SECRETS_PLATFORM_ERROR` (no D-Bus), so the CLI falls back to the file below. Windows is untested. If `Bun.secrets` is missing or throws, the CLI uses the fallback.
 - **Fallback:** `~/.config/artifacts/credentials.json` with mode 0600, and a warning.
-- **CI:** `ARTIFACTS_TOKEN` and `ARTIFACTS_URL` environment variables override everything.
+- **CI:** `ARTIFACTS_TOKEN` and `ARTIFACTS_URL` environment variables override everything. The token is for one server: `ARTIFACTS_URL`, or the default server in config if that isn't set. A command aimed at any other server with `--server` doesn't get it (it looks in the keychain for that server's own token). Only when no server is known at all does `--server` receive it.
 - **Tests:** `ARTIFACTS_CREDENTIALS=file` forces the file, and config honours `HOME` and `XDG_CONFIG_HOME`, so tests never touch the real keychain.
 - **No prompts:** `ARTIFACTS_PASSWORD`, `ARTIFACTS_SETUP_TOKEN` and `--org`, `--name`, `--email` answer `setup`'s questions; `ARTIFACTS_NO_BROWSER=1` stops `login` opening a browser.
 
