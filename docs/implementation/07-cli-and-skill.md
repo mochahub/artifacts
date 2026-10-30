@@ -56,9 +56,10 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 2. **Sign-in:** `railway whoami --json`. If not signed in, `railway login`.
 3. **Workspace:** choose one if there are several (`railway list --json` shows projects; workspaces come from `whoami`).
 4. **Project:** in `~/.config/artifacts/railway/<name>/`, run `railway init --name <name> --workspace <ws> --json`.
-5. **Deploy the template:** `railway deploy --template <template code>`. The template generates the variables (09).
+5. **Deploy the template:** `railway deploy --template <template code>`. The template generates the variables (09). Until it's published, the code comes from `ARTIFACTS_RAILWAY_TEMPLATE`.
 6. **Wait:** poll `railway service status --service artifacts --json` until deployed (timeout 10 minutes, with progress), then `GET <url>/api/health`.
 7. **URLs:** `railway domain list --service artifacts --json` → the viewer and content domains.
+   Then `railway variable set CONTENT_URL=https://<content domain> --service artifacts`, and wait for the redeploy (spike S1).
 8. **Token:** `railway variable list --service artifacts --json` → `SETUP_TOKEN` (never printed).
 9. **Claim:** `POST /api/setup` with org name, your name, email and password (asked twice), client name and agent.
 10. **Save:** write the server to config, and the token to the keychain.

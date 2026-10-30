@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
 import { doctor } from "./commands/doctor.ts";
+import { domainCommand, upgradeCommand } from "./commands/operate.ts";
 import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
 import {
   archiveCommand,
@@ -29,6 +30,8 @@ const USAGE = `artifacts ${VERSION}
   artifacts login [<url>] | logout | whoami
   artifacts recover <url>
   artifacts doctor
+  artifacts upgrade [--server] [--to <version>]
+  artifacts domain add <domain> | list
   artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype]
   artifacts lint | render
   artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]
@@ -69,6 +72,7 @@ const OPTIONS = {
   fixed: { type: "boolean" },
   all: { type: "boolean" },
   role: { type: "string" },
+  to: { type: "string" },
   undo: { type: "boolean" },
   link: { type: "boolean" },
   invite: { type: "string" },
@@ -86,17 +90,26 @@ function optionAfter(flag: string) {
   return index > 0 ? process.argv[index + 1] : undefined;
 }
 
+/** `upgrade --server` is a flag, unlike `--server <url>` everywhere else. */
+const optionFlag = (flag: string) => process.argv.includes(flag);
+const serverValue = () => undefined;
+
 async function main(argv: string[]) {
   let parsed: ReturnType<
     typeof parseArgs<{ args: string[]; options: typeof OPTIONS; allowPositionals: true }>
   >;
   try {
     // Its number would otherwise be read as a positional.
+    const isUpgrade = argv[0] === "upgrade";
     const takesVersion = ["open", "delete", "undelete"].includes(argv[0] ?? "");
     const args = takesVersion
       ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
       : argv;
-    parsed = parseArgs({ args, options: OPTIONS, allowPositionals: true });
+    parsed = parseArgs({
+      args: isUpgrade ? args.filter((arg) => arg !== "--server") : args,
+      options: OPTIONS,
+      allowPositionals: true,
+    });
   } catch (error) {
     throw new UsageError((error as Error).message);
   }
@@ -166,6 +179,10 @@ async function main(argv: string[]) {
       return deleteCommand(first, { version: optionAfter("--version"), server: values.server }, out);
     case "undelete":
       return undeleteCommand(first, { version: optionAfter("--version"), server: values.server }, out);
+    case "upgrade":
+      return upgradeCommand({ server: optionFlag("--server"), to: values.to, target: serverValue() }, out);
+    case "domain":
+      return domainCommand(first, positionals[2], { target: values.server }, out);
     case "org":
       return orgCommand(first, positionals[2], { role: values.role, server: values.server }, out);
     case "visibility":

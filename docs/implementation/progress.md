@@ -13,8 +13,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M4 Viewer | `m4-viewer` | `530c18a` | green (run 41052782581) |
 | M5 Review loop | `m5-review` | `84a68ad` | green |
 | M6 People and sharing | `m6-people` | `d79e2a1` | green |
-| M7 Lifecycle | `m7-lifecycle` | in progress | |
-| M8–M11 | not started | | |
+| M7 Lifecycle | `m7-lifecycle` | `7c59d9e` | green |
+| M8 Distribution | `m8-distribution` | in progress | |
+| M9–M11 | not started | | |
 
 ## Verified
 
@@ -29,6 +30,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 
 - **M6 (2026-10-30):** full permission matrix, 328 tests, every one of 70 routes reached. Passkeys: a software authenticator covers registration, sign-in, re-auth, Related Origin Requests, and refuses no user verification, foreign origins, the content host, replayed and expired challenges; a Chromium virtual authenticator covers the real browser flow. WebKit e2e covers invites, guests, revocation and settings.
 - **M6 independent review (subagent, 2026-10-30):** 15 findings, all fixed with tests. The worst: passkey-only accounts accepted the dummy password in the source.
+
+- **M7 (2026-10-30):** API tests for every lifecycle transition, purge erasing rows, data and crops while leaving one tombstone, the slug rule, GC keeping referenced, young and removed-version blobs, the 30-day job. `versions`, `diff`, `restore`, `archive`, `delete` and `undelete` via the real CLI. WebKit e2e for the menu, delete sheet, deleted link, Recently deleted, version history and Activity.
+- **M8 (2026-10-30):** the release dry run built the image (with sharp loading and encoding inside it) and all five CLI binaries, with `SHA256SUMS`. The compiled macOS binary renders in WebKit via `BUN_BE_BUN`. **Clean machine (`scripts/clean-install-test.sh`):** a bare Debian trixie container with its own Docker daemon, a non-root user, no Bun or Node: `install.sh` verified the checksum and installed, then `artifacts setup --docker` claimed a working server, and `whoami` and `doctor` passed. The Railway path passes against a fake `railway` binary only; **it has not run on Railway.**
 
 ## Decisions to review
 
@@ -62,6 +66,10 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 23. **M6 review, turning link sharing off stops existing links** at once, and turning it back on restores them. SPEC only says admins can turn it off. To change: remove the check in `liveLink` and `guestCaller`.
 24. **M6 review, an admin's token can invite only members and reviewers,** and can't issue a reset link for an admin or itself; otherwise a token could mint itself a browser session, which 04 forbids. The viewer has no such limit.
 
+25. **M8, `artifacts setup` on Railway needs `ARTIFACTS_RAILWAY_TEMPLATE` until the template exists.** There's no piecewise fallback. To change: add `railway add` steps in `packages/cli/src/railway/setup.ts`.
+26. **M8, no Windows installer,** only the binary in the release, because Windows is untested.
+27. **M8, `ARTIFACTS_RAILWAY_HTTP`** exists only so tests can reach a fake server over http.
+
 ## Needs you
 
 Gathered as each milestone is reached. So far, from the brief:
@@ -73,6 +81,8 @@ Gathered as each milestone is reached. So far, from the brief:
 
 ## Known gaps
 
+- **`artifacts dev`** isn't built yet (M9, with the data folder and live frames). Phase 1 lists it.
+- **The admin "new version available" notice** isn't built.
 - **`frames/renamed`, `data/*` and `backend/*` lint rules** aren't built yet: M5 and M9–M10.
 - **The render tests** share one helper install in the temp folder and the machine's WebKit cache.
 - **Reauth with a passkey** arrives in M6; until then `POST /api/auth/reauth` takes a password.

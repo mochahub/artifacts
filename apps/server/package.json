@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
-    "build": "bun build src/index.ts --target=bun --outfile=dist/server.js",
+    "build": "bun build src/index.ts --target=bun --external sharp --outfile=dist/server.js",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
