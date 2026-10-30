@@ -1,0 +1,7 @@
+**/node_modules
+**/dist
+**/test-results
+.git
+.artifacts
+docs
+spikes

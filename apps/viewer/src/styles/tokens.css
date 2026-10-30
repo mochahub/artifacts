@@ -10,6 +10,9 @@
   --ok: #2fb36b;
   --ok-word: #1d8a50;
   --warn: #ff7a59;
+  --warn-word: #c0392b;
+  --soft: rgba(0, 0, 0, 0.06);
+  --sheet: rgba(250, 250, 252, 0.985);
   --canvas: #1b1d22;
 
   --bg: #f5f6f8;
@@ -32,6 +35,9 @@
     --mark-word: var(--mark);
     --agent-word: var(--agent);
     --ok-word: var(--ok);
+    --warn-word: var(--warn);
+    --soft: rgba(255, 255, 255, 0.1);
+    --sheet: rgba(34, 36, 42, 0.96);
 
     --bg: #15171c;
     --card: #20232a;

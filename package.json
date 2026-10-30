@@ -16,7 +16,8 @@
     "format": "biome check --write .",
     "build": "bun run --filter @artifacts/viewer build && bun run --filter @artifacts/server build",
     "size": "bun run --filter @artifacts/viewer size",
-    "db:generate": "bun run --filter @artifacts/server db:generate"
+    "db:generate": "bun run --filter @artifacts/server db:generate",
+    "cli": "bun packages/cli/src/index.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",

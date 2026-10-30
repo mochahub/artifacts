@@ -1,0 +1,13 @@
+{
+  "name": "@artifacts/cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "artifacts": "src/index.ts"
+  },
+  "dependencies": {
+    "@artifacts/schema": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}
