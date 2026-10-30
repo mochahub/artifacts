@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { configDir, writePrivateFile } from "../config.ts";
+import { configDir, normalizeUrl, readConfig, writePrivateFile } from "../config.ts";
 
 const SERVICE = "artifacts";
 const filePath = () => join(configDir(), "credentials.json");
@@ -50,8 +50,25 @@ async function withFallback<T>(use: (backend: Backend) => Promise<T>): Promise<T
   }
 }
 
+/**
+ * ARTIFACTS_TOKEN belongs to one server: ARTIFACTS_URL if that's set, else the default server in
+ * config. Without this, `--server https://elsewhere` (or a command a prompt-injected agent was talked
+ * into running) would send the CI token to a host it was never made for.
+ */
+function envTokenFits(url: string) {
+  try {
+    if (process.env.ARTIFACTS_URL) return normalizeUrl(process.env.ARTIFACTS_URL) === url;
+    const servers = readConfig().servers;
+    const own = servers.find((server) => server.default) ?? servers[0];
+    // With no server known at all, `--server` is the only way to name one, so the token goes there.
+    return !own || own.url === url;
+  } catch {
+    return false;
+  }
+}
+
 export const getToken = async (url: string): Promise<string | null> => {
-  if (process.env.ARTIFACTS_TOKEN) return process.env.ARTIFACTS_TOKEN;
+  if (process.env.ARTIFACTS_TOKEN && envTokenFits(url)) return process.env.ARTIFACTS_TOKEN;
   return (await withFallback((backend) => backend.get(url))) ?? (await fileBackend.get(url));
 };
 export const setToken = (url: string, token: string) => withFallback((backend) => backend.set(url, token));
