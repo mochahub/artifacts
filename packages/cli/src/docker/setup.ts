@@ -22,6 +22,10 @@ export function writeDeployment(dir: string, image: string, port: number) {
   if (existsSync(join(dir, ".env"))) {
     throw new CliError(`${dir} already has a deployment. Pick another folder with --dir.`);
   }
+  // The image is written into .env as KEY=value, so a newline in it (--image, or ARTIFACTS_IMAGE) would add a variable.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$/.test(image)) {
+    throw new CliError(`"${image}" isn't an image name like ghcr.io/mochahub/artifacts:0.2.0.`);
+  }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const accessKey = secret(16);
   const secretKey = secret(32);
