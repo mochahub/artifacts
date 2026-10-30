@@ -39,7 +39,7 @@
 | `name` | text | "Mochahub" |
 | `home_domain` | text not null | Hostname that `artifacts setup` ran against; the passkey RP ID. Never changes (SPEC §7.3). |
 | `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
-| `vapid_public` | text null | Phase 2. Generated on first boot. |
+| `vapid_public` | text null | Phase 2. Generated the first time push needs it, not at boot, because there's no `org` row on first boot. |
 | `vapid_private` | text null | Phase 2. Stored as is: anyone who can read this table can already read everything else, and tying it to `SESSION_SECRET` would stop that secret being rotated. |
 | `last_digest_at` | timestamptz null | Phase 2. When the daily push digest last went out, so a restart doesn't send it again. |
 | `pseudonym_key` | bytea not null | 32 random bytes generated at setup. Keys the per-artifact caller pseudonyms (08). Separate from `SESSION_SECRET` so that secret can be rotated; never rotated itself, because `me` data is keyed by pseudonym. |

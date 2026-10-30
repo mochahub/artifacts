@@ -215,7 +215,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
   "threadsOnChanged": [3, 4, 6, 8], "orphaned": [], "uploaded": { "files": 7, "bytes": 421888 }, "reused": 214 }
 ```
 
-Commit checks: every hash in `files` and every render hash exists in the bucket with the declared size (`HEAD`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
+Commit checks: every hash in `files` and every render hash is proved, either by a `blobs` row or by downloading the object, hashing it and comparing it with the declared hash and size (05, "Presigned URLs"; a mismatch deletes the object and answers 400 `invalid`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
 
 ## Review
 
@@ -281,7 +281,7 @@ The CSP's `sandbox allow-scripts` forces an opaque origin on any document from t
 
 | Method, path | Caller | Notes |
 |---|---|---|
-| `POST /internal/jobs/:name` | `Authorization: Bearer <OPS_SECRET>` (operators and tests) | Run a job now: `purge`, `gc`, `expire`, `usage` ([05](05-publish-and-storage.md#clean-up)) |
+| `POST /internal/jobs/:name` | `Authorization: Bearer <OPS_SECRET>` (operators and tests) | Run a job now: `purge`, `gc`, `expire`, `usage`, `digest` ([05](05-publish-and-storage.md#clean-up)) |
 
 Backends don't use the internal API: they run in sandbox processes that talk to the app over IPC ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
 

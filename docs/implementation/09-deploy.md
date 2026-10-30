@@ -23,7 +23,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
    - the content host equal to a viewer host
    - the content host sharing a registrable domain with a viewer host (a warning, not an error)
 2. **Migrate:** run Drizzle migrations under `pg_advisory_lock`, so only one replica migrates.
-3. **First boot only:** if `org` is absent, enter setup mode. Generate VAPID keys if missing (Phase 2). If `org` exists, exit if `CONTENT_URL`'s host is the home domain.
+3. **First boot only:** if `org` is absent, enter setup mode. (The VAPID keys are made the first time push needs them, not here: there's no `org` row to hold them yet.) If `org` exists, exit if `CONTENT_URL`'s host is the home domain.
 4. **Bucket:** `HeadBucket`, and create the bucket only on a 404 (Compose). Any other failure logs a warning and boot continues, so a key that can't call `HeadBucket` doesn't stop the app.
 5. **Listen** on the three ports (03).
 6. **Start jobs** (05 clean-up, usage recount, log expiry) on timers, guarded by advisory locks.

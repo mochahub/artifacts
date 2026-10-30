@@ -140,10 +140,11 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 | File | Runs in | Does |
 |---|---|---|
 | `pool.ts` | The app | Starts and supervises the sandbox processes, routes requests, answers `env.DATA` calls and writes logs |
+| `packages/sandbox/src/host.js` | The app, `artifacts dev` and `artifacts render` | Starts one child and speaks the IPC protocol with it |
 | `packages/sandbox/src/child.js` | Each sandbox process | Holds QuickJS instances and runs requests |
 
 **Processes:**
-- The app starts `sandboxProcesses` children (default 2) with `Bun.spawn([process.execPath, child.js], { env: {}, ipc })`. The environment is **empty**: a child never has the database URL, bucket keys, `SESSION_SECRET` or `OPS_SECRET`. Its only channel is IPC to the app.
+- The app starts `sandboxProcesses` children (default 2) with `Bun.spawn([process.execPath, child.js], { env: { BUN_BE_BUN: "1" }, ipc })` (`packages/sandbox/src/host.js`). The environment holds **nothing but `BUN_BE_BUN=1`**, which lets a compiled CLI binary run itself as Bun: a child never has the database URL, bucket keys, `SESSION_SECRET` or `OPS_SECRET`. Its only channel is IPC to the app.
 - If a child exits, its in-flight requests answer 502 and the app starts a new one.
 
 **Instances:**
