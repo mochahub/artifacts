@@ -165,9 +165,10 @@ The expected result is computed from a second, deliberately simple table in the 
 - **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Token-authenticated requests are exempt, since they carry no cookies.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
-  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`
+  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'`
   - `Strict-Transport-Security: max-age=31536000`
   - `X-Frame-Options: DENY`
+  - `Cross-Origin-Opener-Policy: same-origin`
   - `Referrer-Policy: same-origin`
   - `X-Content-Type-Options: nosniff`
 - **The live preview iframe:** `sandbox="allow-scripts"` (never `allow-same-origin`), `allow="fullscreen"`, `referrerpolicy="no-referrer"`.

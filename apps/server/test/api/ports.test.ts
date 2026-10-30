@@ -80,6 +80,10 @@ describe("the three ports", () => {
         const csp = response.headers.get("content-security-policy");
         expect(csp).toContain("frame-src http://content.test");
         expect(csp).toContain("frame-ancestors 'none'");
+        // These two don't fall back to default-src.
+        expect(csp).toContain("object-src 'none'");
+        expect(csp).toContain("form-action 'self'");
+        expect(response.headers.get("cross-origin-opener-policy")).toBe("same-origin");
         expect(csp).toContain("img-src 'self' data: blob: http://127.0.0.1:18333");
       }
     });
