@@ -71,7 +71,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | Command | Does |
 |---|---|
 | `artifacts init [--project <slug>] [--slug <slug>] [--kind canvas\|article\|prototype]` | Writes `artifact.json`, a starter page, `fixtures/`, `.artifacts/` in `.gitignore`, and copies the kit (`@artifacts/kit`) into `vendor/artifacts-kit/` (pinned to the CLI's version, so bundles stay self-contained). |
-| `artifacts dev [--port 4321]` | Local viewer and content host with hot reload, using the real viewer build bundled in the CLI, a local data folder, and local backends (08). No server needed. |
+| `artifacts dev [--port 4321]` | Local viewer and content host with hot reload, using the real viewer build bundled in the CLI, a local data folder, and local backends (08). No server needed. It listens on loopback only (`localhost` for the viewer, `127.0.0.1` for the content host on port + 1), answers only requests whose `Host` is one of those (so DNS rebinding gets nothing), and puts a random per-run secret in the content host's path, as the real host's signed token does, because that host answers any website with CORS `*` and runs the backend. |
 | `artifacts lint [--json]` | Rules below. Errors fail; warnings print. |
 | `artifacts render [--json]` | Renders (05), writes `.artifacts/contact-sheet.png` and prints its path. |
 | `artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]… [--json]` | lint → render → hash → prepare → upload → commit. Output below. |
