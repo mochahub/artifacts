@@ -1,0 +1,226 @@
+{
+  "webkit": "27.2",
+  "explicit": {
+    "msgs": [
+      {
+        "origin": "null",
+        "fromLive": false,
+        "data": {
+          "artifacts": 1,
+          "kind": "result",
+          "r": {
+            "spoof": true
+          }
+        }
+      },
+      {
+        "origin": "null",
+        "fromLive": true,
+        "data": {
+          "artifacts": 1,
+          "kind": "result",
+          "r": {
+            "module": "ok",
+            "origin": "null",
+            "location": "http://127.0.0.1:18081/t/…/v1/index.html",
+            "fetchRelative": "world",
+            "apiPost": "200 {\"path\":\"api/votes\",\"got\":\"{\\\"choice\\\":\\\"B\\\"}\"}",
+            "font": "loaded",
+            "image": "loaded",
+            "localStorage": "blocked: SecurityError",
+            "cookie": "blocked: SecurityError",
+            "viewerFetch": "blocked",
+            "externalFetch": "blocked"
+          }
+        }
+      }
+    ],
+    "hits": [
+      {
+        "path": "/t/…/v1/index.html",
+        "dest": "iframe",
+        "mode": "navigate",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/style.css",
+        "dest": "style",
+        "mode": "no-cors",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/main.js",
+        "dest": "script",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/pixel.svg",
+        "dest": "image",
+        "mode": "no-cors",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/helper.js",
+        "dest": "script",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/font.ttf",
+        "dest": "font",
+        "mode": "no-cors",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/data.json",
+        "dest": "empty",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/api/votes",
+        "dest": "empty",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "OPTIONS"
+      },
+      {
+        "path": "/t/…/v1/api/votes",
+        "dest": "empty",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "POST"
+      }
+    ],
+    "console": [
+      "Refused to connect to http://localhost:18080/api/me because it does not appear in the connect-src directive of the Content Security Policy.",
+      "Refused to connect to https://example.com/ because it does not appear in the connect-src directive of the Content Security Policy."
+    ]
+  },
+  "self": {
+    "msgs": [
+      {
+        "origin": "null",
+        "fromLive": false,
+        "data": {
+          "artifacts": 1,
+          "kind": "result",
+          "r": {
+            "spoof": true
+          }
+        }
+      },
+      {
+        "origin": "null",
+        "fromLive": true,
+        "data": {
+          "artifacts": 1,
+          "kind": "result",
+          "r": {
+            "module": "ok",
+            "origin": "null",
+            "location": "http://127.0.0.1:18081/t/…/v1/index.html",
+            "fetchRelative": "ERR TypeError: Load failed",
+            "apiPost": "ERR TypeError: Load failed",
+            "font": "loaded",
+            "image": "loaded",
+            "localStorage": "blocked: SecurityError",
+            "cookie": "blocked: SecurityError",
+            "viewerFetch": "blocked",
+            "externalFetch": "blocked"
+          }
+        }
+      }
+    ],
+    "hits": [
+      {
+        "path": "/t/…/v1/index.html",
+        "dest": "iframe",
+        "mode": "navigate",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/style.css",
+        "dest": "style",
+        "mode": "no-cors",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/main.js",
+        "dest": "script",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/pixel.svg",
+        "dest": "image",
+        "mode": "no-cors",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/helper.js",
+        "dest": "script",
+        "mode": "cors",
+        "site": "cross-site",
+        "origin": "null",
+        "method": "GET"
+      },
+      {
+        "path": "/t/…/v1/font.ttf",
+        "dest": "font",
+        "mode": "no-cors",
+        "site": "cross-site",
+        "origin": null,
+        "method": "GET"
+      }
+    ],
+    "console": [
+      "Refused to connect to http://127.0.0.1:18081/t/self/v1/data.json because it does not appear in the connect-src directive of the Content Security Policy.",
+      "Blocked by Content Security Policy.",
+      "Failed to load resource: Blocked by Content Security Policy.",
+      "Refused to connect to http://127.0.0.1:18081/t/self/v1/api/votes because it does not appear in the connect-src directive of the Content Security Policy.",
+      "Blocked by Content Security Policy.",
+      "Failed to load resource: Blocked by Content Security Policy.",
+      "Refused to connect to http://localhost:18080/api/me because it does not appear in the connect-src directive of the Content Security Policy.",
+      "Refused to connect to https://example.com/ because it does not appear in the connect-src directive of the Content Security Policy."
+    ]
+  },
+  "topLevel": {
+    "status": 403,
+    "hits": [
+      {
+        "path": "/t/…/v1/index.html",
+        "dest": "document",
+        "mode": "navigate",
+        "site": "none",
+        "origin": null,
+        "method": "GET"
+      }
+    ]
+  }
+}

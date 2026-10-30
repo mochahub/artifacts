@@ -1,0 +1,50 @@
+
+<--- Last few GCs --->
+
+[25768:0x7a1a478000]     1655 ms: Incremental Mark-Compact (reduce) 508.9 (511.0) -> 508.3 (510.2) MB, pooled: 0.0 MB, 133.53 / 0.00 ms (+ 0.3 ms in 5 steps since start of marking, biggest step 0.3 ms, walltime since start of marking 135 ms) (average mu =
+
+
+#
+# Fatal JavaScript out of memory: Ineffective mark-compacts near heap limit
+#
+==== C stack trace ===============================
+
+    0   deno                                0x00000001028ee48c v8::base::debug::StackTrace::StackTrace() + 28
+    1   deno                                0x00000001028f2e40 v8::platform::(anonymous namespace)::PrintStackTrace() + 24
+    2   deno                                0x00000001028e9f68 v8::base::FatalOOM(v8::base::OOMType, char const*) + 68
+    3   deno                                0x000000010295e89c v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) + 352
+    4   deno                                0x0000000102b5af68 v8::internal::Heap::stack() + 0
+    5   deno                                0x0000000102b5ac5c v8::internal::Heap::OldGenerationConsumedBytes() const + 0
+    6   deno                                0x0000000102b59b64 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags, v8::internal::PerformHeapLimitCheck, v8::internal::PerformIneffectiveMarkCompactCheck) + 1184
+    7   deno                                0x0000000102acf338 v8::internal::StackGuard::HandleInterrupts(v8::internal::StackGuard::InterruptLevel) + 80
+    8   deno                                0x0000000102fb49bc v8::internal::Runtime_HandleNoHeapWritesInterrupts(int, unsigned long*, v8::internal::Isolate*) + 76
+    9   deno                                0x000000010415788c Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit + 76
+    10  ???                                 0x00000070200892bc 0x0 + 481573769916
+    11  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    12  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    13  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    14  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    15  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    16  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    17  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    18  deno                                0x00000001040b1644 Builtins_InterpreterEntryTrampoline + 324
+    19  deno                                0x00000001040f0ac4 Builtins_AsyncFunctionAwaitResolveClosure + 68
+    20  deno                                0x00000001041de738 Builtins_PromiseFulfillReactionJob + 56
+    21  deno                                0x00000001040df6cc Builtins_RunMicrotasks + 620
+    22  deno                                0x00000001040ae878 Builtins_JSRunMicrotasksEntry + 152
+    23  deno                                0x0000000102a76ffc v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) + 1720
+    24  deno                                0x0000000102a778c4 v8::internal::(anonymous namespace)::InvokeWithTryCatch(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) + 88
+    25  deno                                0x0000000102a779fc v8::internal::Execution::TryRunMicrotasks(v8::internal::Isolate*, v8::internal::MicrotaskQueue*) + 56
+    26  deno                                0x0000000102acd688 v8::internal::MicrotaskQueue::RunMicrotasks(v8::internal::Isolate*) + 156
+    27  deno                                0x0000000102acd5c0 v8::internal::MicrotaskQueue::PerformCheckpointInternal(v8::Isolate*) + 88
+    28  deno                                0x0000000101413418 _RNvMsc_NtNtCsgOlsLBMiYuC_9deno_core7runtime9jsruntimeNtB5_9JsRuntime21poll_event_loop_inner + 6096
+    29  deno                                0x0000000101411b74 _RNvMsc_NtNtCsgOlsLBMiYuC_9deno_core7runtime9jsruntimeNtB5_9JsRuntime15poll_event_loop + 188
+    30  deno                                0x0000000101d20b1c _RNvMs6_NtCs8QfYsR0TSq4_12deno_runtime10web_workerNtB5_9WebWorker15poll_event_loop + 488
+    31  deno                                0x0000000101d1d3c4 _RNCNvNtCs8QfYsR0TSq4_12deno_runtime10web_worker14run_web_worker0B5_ + 4932
+    32  deno                                0x0000000101d1b1ec _RNvXs4_NtNtCslJQAJdJAfVo_11deno_unsync5tokio4taskINtB5_16MaskFutureAsSendNCNCNvMs0_NvNtNtCs8QfYsR0TSq4_12deno_runtime3ops11worker_host16op_create_workerNtB1j_16op_create_worker4calls1_00ENtNtNtCs9nEiEE0E2Vj_4core6future6future6Future4pollB1p_ + 2604
+    33  deno                                0x0000000101d1770c _RINvNtNtNtCsfVlXCFvYHd3_5tokio7runtime4task3raw4pollINtNtNtCslJQAJdJAfVo_11deno_unsync5tokio4task16MaskFutureAsSendNCNCNvMs0_NvNtNtCs8QfYsR0TSq4_12deno_runtime3ops11worker_host16op_create_workerNtB1Z_16op_create_worker4calls1_00EINtNtCs3vUkWdPtNor_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEEB25_ + 208
+    34  deno                                0x0000000101d15d90 _RINvNtNtCs1coMeGJvsuS_3std3sys9backtrace28___rust_begin_short_backtraceNCNvMs0_NvNtNtCs8QfYsR0TSq4_12deno_runtime3ops11worker_host16op_create_workerNtB1f_16op_create_worker4calls1_0uEB1l_ + 4008
+    35  deno                                0x0000000101dba0a8 _RNSNvYNCINvNtNtCs1coMeGJvsuS_3std6thread9lifecycle15spawn_uncheckedNCNvMs0_NvNtNtCs8QfYsR0TSq4_12deno_runtime3ops11worker_host16op_create_workerNtB1b_16op_create_worker4calls1_0uEs_0INtNtNtCs9nEiEE0E2Vj_4core3ops8function6FnOnceuE9call_once6vtableB1h_ + 76
+    36  deno                                0x00000001023bdd38 _RNvNvMs0_NtNtNtCs1coMeGJvsuS_3std3sys6thread4unixNtB7_6Thread3new12thread_start + 380
+    37  libsystem_pthread.dylib             0x000000019d28dd00 _pthread_start + 136
+    38  libsystem_pthread.dylib             0x000000019d288cec thread_start + 8

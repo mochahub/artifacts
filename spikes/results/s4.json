@@ -1,0 +1,243 @@
+{
+  "workerd": "workerd 2026-10-30",
+  "args": [
+    "serve",
+    "/Users/zahinmohammad/.t3/projects/artifacts/spikes/s4/config.capnp",
+    "--experimental"
+  ],
+  "noSecret": 401,
+  "hello": [
+    {
+      "status": 200,
+      "body": "{\"n\":1,\"caller\":{\"id\":\"caller-1\",\"name\":\"Sam\",\"kind\":\"member\"},\"path\":\"/votes\",\"envKeys\":[\"DATA\"],\"propsVisible\":{\"dataKey\":\"dk_art1:rid1\"},\"hasProcess\":true}",
+      "ms": 20
+    },
+    {
+      "status": 200,
+      "body": "{\"n\":2,\"caller\":{\"id\":\"caller-1\",\"name\":\"Sam\",\"kind\":\"member\"},\"path\":\"/votes\",\"envKeys\":[\"DATA\"],\"propsVisible\":{\"dataKey\":\"dk_art1:rid1\"},\"hasProcess\":true}",
+      "ms": 1
+    },
+    {
+      "status": 200,
+      "body": "{\"n\":3,\"caller\":{\"id\":\"caller-1\",\"name\":\"Sam\",\"kind\":\"member\"},\"path\":\"/votes\",\"envKeys\":[\"DATA\"],\"propsVisible\":{\"dataKey\":\"dk_art1:rid2\"},\"hasProcess\":true}",
+      "ms": 0
+    }
+  ],
+  "backendFetchesAfter3Hello": 1,
+  "data": {
+    "status": 200,
+    "body": "{\"before\":null,\"after\":{\"b\":1}}",
+    "ms": 6
+  },
+  "dataCalls": [
+    {
+      "key": "votes",
+      "method": "GET",
+      "dataKey": "dk_art1:rid3"
+    },
+    {
+      "key": "votes",
+      "method": "PUT",
+      "dataKey": "dk_art1:rid3"
+    },
+    {
+      "key": "votes",
+      "method": "GET",
+      "dataKey": "dk_art1:rid3"
+    }
+  ],
+  "net": {
+    "status": 200,
+    "body": "{\"internet\":\"blocked: This worker is not permitted to access the internet via global functions like fetch(). It must use capabilities (such as bindings in 'env') to talk to the outside world.\",\"app\":\"blocked: This worker is not permitted to access the internet via global functions like fetch(). It must use capabilities (such as bindings in 'env') to talk to the outside world.\",\"appByName\":\"blocked: This worker is not permitted to access the internet via global functions like fetch(). It must use capabilities (such as bindings in 'env') to talk to the outside world.\",\"connect\":\"blocked: This worker is not permitted to access the internet via global functions like fetch(). It must use capabilities (such as bindings in 'env') to talk to the outside world.\"}",
+    "ms": 6
+  },
+  "log": {
+    "status": 200,
+    "body": "logged",
+    "ms": 5
+  },
+  "throws": {
+    "status": 500,
+    "body": "{\"runnerError\":\"boom in backend\",\"ms\":4}",
+    "ms": 5
+  },
+  "isolation": {
+    "a": {
+      "status": 200,
+      "body": "A's value",
+      "ms": 3
+    },
+    "b": {
+      "status": 200,
+      "body": "undefined",
+      "ms": 3
+    }
+  },
+  "cpuNoLimit": {
+    "status": 200,
+    "body": "survived 20s of CPU",
+    "ms": 20005
+  },
+  "cpuWithLimit50": {
+    "status": 200,
+    "body": "survived 20s of CPU",
+    "ms": 20003
+  },
+  "cpuNewHashWithLimit": {
+    "status": 200,
+    "body": "survived 20s of CPU",
+    "ms": 20006
+  },
+  "helloAfterCpu": {
+    "status": 200,
+    "body": "{\"n\":4,\"caller\":{\"id\":\"caller-1\",\"name\":\"Sam\",\"kind\":\"member\"},\"path\":\"/votes\",\"envKeys\":[\"DATA\"],\"propsVisible\":{\"dataKey\":\"dk_art1:rid1\"},\"hasProcess\":true}",
+    "ms": 21
+  },
+  "mem": {
+    "status": 200,
+    "body": "allocated 4000 MB",
+    "ms": 1236
+  },
+  "helloAfterMem": {
+    "status": 200,
+    "body": "{\"n\":5,\"caller\":{\"id\":\"caller-1\",\"name\":\"Sam\",\"kind\":\"member\"},\"path\":\"/votes\",\"envKeys\":[\"DATA\"],\"propsVisible\":{\"dataKey\":\"dk_art1:rid1\"},\"hasProcess\":true}",
+    "ms": 2
+  },
+  "logs": [
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126011
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126022
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126022
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126026
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126032
+    },
+    {
+      "level": "log",
+      "message": [
+        "hello from backend",
+        {
+          "x": 1
+        }
+      ],
+      "at": 1793329126038,
+      "outcome": "ok"
+    },
+    {
+      "level": "error",
+      "message": [
+        "something bad"
+      ],
+      "at": 1793329126039,
+      "outcome": "ok"
+    },
+    {
+      "level": "error",
+      "message": [
+        "Error: boom in backend"
+      ],
+      "at": 1793329126043,
+      "outcome": "exception"
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126047
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126050
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329126052
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329146056
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329166062
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329186085
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329186115
+    },
+    {
+      "level": "outcome",
+      "message": [
+        "ok"
+      ],
+      "at": 1793329187323
+    }
+  ],
+  "appHits": [
+    "GET /internal/backends/hello",
+    "POST /internal/logs",
+    "GET /internal/backends/data",
+    "GET /internal/data/shared/votes",
+    "PUT /internal/data/shared/votes",
+    "GET /internal/backends/net",
+    "GET /internal/backends/log",
+    "GET /internal/backends/throws",
+    "GET /internal/backends/isoA",
+    "GET /internal/backends/isoB",
+    "GET /internal/backends/cpu",
+    "GET /internal/backends/cpu2",
+    "GET /internal/backends/mem"
+  ],
+  "workerdAlive": true,
+  "workerdStderr": "something bad\n"
+}

@@ -1,0 +1,9 @@
+{
+  "workerdStarted": false,
+  "args": [
+    "serve",
+    "/Users/zahinmohammad/.t3/projects/artifacts/spikes/s4/config.capnp"
+  ],
+  "exitCode": 1,
+  "stderr": "service main: Worker loader bindings are an experimental feature which may change or go away in the future. You must run workerd with `--experimental` to use this feature.\n"
+}

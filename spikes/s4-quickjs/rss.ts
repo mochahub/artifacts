@@ -1,0 +1,11 @@
+const w = new Worker(new URL("./runner.ts", import.meta.url).href);
+let n = 0; const pending = new Map<number, (v: unknown) => void>();
+w.onmessage = (e) => pending.get(e.data.id)?.(e.data.result);
+const call = (hash: string, src: string, opts = { timeoutMs: 1000, memoryMb: 32 }) => new Promise<any>((ok) => { const id = ++n; pending.set(id, ok); w.postMessage({ id, hash, src, req: { method: "GET", url: "x", body: "" }, opts }); });
+const mb = () => Math.round(process.memoryUsage().rss / 1e6);
+console.log("start", mb());
+await call("h", `export default { async fetch() { return new Response("ok"); } };`); console.log("after hello", mb());
+for (let i = 0; i < 50; i++) await call("h" + i, `export default { async fetch() { return new Response("ok"); } };`); console.log("after 50 backends loaded", mb());
+await call("buf", `export default { async fetch() { const k = []; while (true) k.push(new Uint8Array(1024 * 1024)); } };`); console.log("after one 32 MB OOM", mb());
+for (let i = 0; i < 5; i++) await call("buf" + i, `export default { async fetch() { const k = []; while (true) k.push(new Uint8Array(1024 * 1024)); } };`); console.log("after 5 more OOMs", mb());
+w.terminate(); await Bun.sleep(200); console.log("after terminating the worker", mb());

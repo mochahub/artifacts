@@ -1,0 +1,450 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1b1d22">
+<title>Artifacts · Viewer mocks</title>
+<style>/*MOCK_CSS*/</style>
+<style>
+:root {
+  --foreground: #f4f4f5; --muted-foreground: #a1a1aa; --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --acc: #ffd84d; --line: rgba(255, 255, 255, .1); --panel: rgba(30, 30, 34, .96);
+}
+html, body { height: 100%; margin: 0; overflow: hidden; background: #1b1d22; color: var(--foreground); font-family: var(--font-sans); -webkit-text-size-adjust: 100%; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+#stage { position: fixed; inset: 0; touch-action: none; cursor: grab; background: #1b1d22 radial-gradient(circle, rgba(255, 255, 255, .07) 1px, transparent 1px) 0 0 / 24px 24px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#stage.commenting { cursor: crosshair; }
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.board { position: absolute; top: 0; }
+.board-title { position: absolute; top: -78px; left: 0; font: 700 32px/1 var(--font-sans); color: #fff; white-space: nowrap; }
+.board-title small { display: block; font: 500 15px/1.4 var(--font-sans); color: var(--muted-foreground); margin-top: 8px; }
+
+#rv-pins { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+.rv-pin { position: absolute; left: 0; top: 0; margin-top: -32px; width: 32px; height: 32px; border-radius: 16px 16px 16px 3px; background: var(--acc); color: #2a2100; font: 700 13px/28px var(--font-sans); text-align: center; pointer-events: auto; border: 2px solid #fff; box-shadow: 0 3px 10px rgba(0, 0, 0, .55); cursor: pointer; box-sizing: border-box; }
+.rv-pin.resolved { background: #3a3a3e; color: #ccc; border-color: #888; }
+.rv-pin.draft { background: #fff; color: #000; font-size: 18px; }
+.rv-pin.active { box-shadow: 0 0 0 4px rgba(255, 216, 77, .45), 0 3px 10px rgba(0, 0, 0, .55); }
+
+.rv-float { position: fixed; z-index: 20; background: rgba(32, 32, 36, .84); backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%); border: 1px solid var(--line); box-shadow: 0 8px 30px rgba(0, 0, 0, .45); }
+#rv-top { top: calc(env(safe-area-inset-top) + 10px); left: calc(env(safe-area-inset-left) + 10px); border-radius: 999px; padding: 7px 12px; display: flex; align-items: center; gap: 10px; font: 600 12.5px var(--font-sans); }
+#rv-top span { color: var(--muted-foreground); font-weight: 500; font-variant-numeric: tabular-nums; cursor: pointer; }
+#rv-hint { top: calc(env(safe-area-inset-top) + 54px); left: 50%; transform: translateX(-50%); border-radius: 999px; padding: 7px 14px; font: 600 12.5px var(--font-sans); color: var(--acc); display: none; white-space: nowrap; }
+#rv-hint.show { display: block; }
+#rv-toast { top: calc(env(safe-area-inset-top) + 98px); left: 50%; transform: translateX(-50%); border-radius: 999px; padding: 7px 14px; font: 600 12.5px var(--font-sans); opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+#rv-toast.show { opacity: 1; }
+
+#rv-bar { bottom: calc(env(safe-area-inset-bottom) + 10px); left: 50%; transform: translateX(-50%); border-radius: 999px; padding: 5px; display: flex; gap: 2px; }
+#rv-bar button { all: unset; position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 56px; padding: 7px 6px 6px; border-radius: 999px; font: 600 10.5px var(--font-sans); color: #fff; cursor: pointer; }
+#rv-bar button svg { width: 21px; height: 21px; }
+#rv-bar button.on { background: rgba(255, 216, 77, .18); color: var(--acc); }
+#rv-bar .rv-sep { width: 1px; background: var(--line); margin: 8px 2px; }
+#rv-count { position: absolute; top: 1px; right: 7px; min-width: 17px; height: 17px; border-radius: 9px; background: var(--acc); color: #000; font: 700 10px/17px var(--font-sans); text-align: center; padding: 0 4px; box-sizing: border-box; }
+#rv-count:empty { display: none; }
+
+#rv-panel { position: fixed; z-index: 30; left: 8px; right: 8px; bottom: var(--pb, 84px); max-height: min(68vh, calc(100vh - var(--pb, 84px) - 70px)); overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; background: var(--panel); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--line); border-radius: 22px; padding: 14px; box-sizing: border-box; transform: translateY(calc(100% + var(--pb, 84px) + 40px)); visibility: hidden; transition: transform .26s cubic-bezier(.2, .8, .2, 1), visibility 0s .26s; box-shadow: 0 -10px 40px rgba(0, 0, 0, .5); font: 14px/1.4 var(--font-sans); }
+#rv-panel.open { transform: none; visibility: visible; transition: transform .26s cubic-bezier(.2, .8, .2, 1); }
+@media (min-width: 760px) {
+  #rv-panel { left: auto; right: 12px; top: 12px; bottom: 12px; width: 370px; max-height: none; transform: translateX(calc(100% + 40px)); }
+  #rv-panel.open { transform: none; }
+}
+.rv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.rv-title { font: 700 17px/1.25 var(--font-sans); }
+.rv-sub { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
+.rv-x { all: unset; flex: none; width: 30px; height: 30px; border-radius: 50%; background: rgba(255, 255, 255, .1); text-align: center; line-height: 30px; cursor: pointer; color: #ccc; }
+#rv-panel textarea, #rv-panel input { display: block; width: 100%; box-sizing: border-box; font: 16px/1.4 var(--font-sans); color: #fff; background: #141416; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; resize: vertical; outline: none; }
+#rv-panel textarea:focus, #rv-panel input:focus { border-color: rgba(255, 216, 77, .6); }
+.rv-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.rv-b { all: unset; padding: 9px 16px; border-radius: 999px; font: 600 14px var(--font-sans); cursor: pointer; background: rgba(255, 255, 255, .1); color: #fff; }
+.rv-b.primary { background: var(--acc); color: #000; }
+.rv-b.danger { color: #ff453a; }
+.rv-b.left { margin-right: auto; }
+.rv-msg { padding: 10px 0; border-top: 1px solid var(--line); }
+.rv-msg:first-child { border-top: 0; padding-top: 2px; }
+.rv-who { font-weight: 700; font-size: 13.5px; }
+.rv-who span { font-weight: 500; color: var(--muted-foreground); margin-left: 6px; }
+.rv-txt { white-space: pre-wrap; margin-top: 3px; word-wrap: break-word; }
+.rv-seg { display: flex; background: rgba(255, 255, 255, .08); border-radius: 999px; padding: 3px; margin: 4px 0 10px; }
+.rv-seg button { all: unset; flex: 1; text-align: center; padding: 6px 0; border-radius: 999px; font: 600 13px var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
+.rv-seg button.on { background: rgba(255, 255, 255, .16); color: #fff; }
+.rv-item { all: unset; display: flex; gap: 10px; width: 100%; box-sizing: border-box; padding: 10px 4px; border-top: 1px solid var(--line); cursor: pointer; }
+.rv-item .rv-pin { position: static; margin: 0; flex: none; transform: none !important; }
+.rv-item .rv-txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
+.rv-grp { margin-top: 12px; }
+.rv-grp-h { all: unset; display: block; font: 700 15px var(--font-sans); padding: 6px 4px; cursor: pointer; }
+.rv-nav { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; color: #ddd; cursor: pointer; font-size: 14px; }
+.rv-nav:active, .rv-item:active { background: rgba(255, 255, 255, .06); }
+.rv-empty { color: var(--muted-foreground); text-align: center; padding: 24px 8px; }
+.rv-foot { margin-top: 12px; font-size: 12.5px; color: var(--muted-foreground); display: flex; justify-content: space-between; gap: 8px; }
+.rv-foot a { color: var(--acc); text-decoration: none; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="world">
+<!--BOARDS-->
+</div></div>
+<div id="rv-pins"></div>
+<div id="rv-top" class="rv-float">Artifacts viewer mocks <span id="rv-zoom">100%</span></div>
+<div id="rv-hint" class="rv-float">Tap a screen to drop a comment</div>
+<div id="rv-toast" class="rv-float"></div>
+<div id="rv-bar" class="rv-float">
+  <button id="rv-move" class="on" title="Move (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>Move</button>
+  <button id="rv-comment" title="Comment (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>Comment</button>
+  <i class="rv-sep"></i>
+  <button id="rv-fit" title="Fit all (0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Fit</button>
+  <button id="rv-screens" title="Screens"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Screens</button>
+  <button id="rv-list" title="Comments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Comments<b id="rv-count"></b></button>
+</div>
+<div id="rv-panel"></div>
+<script>/*MOCK_JS*/</script>
+<script>
+(() => {
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const stage = $('#stage'), world = $('#world'), pinsEl = $('#rv-pins'), panelEl = $('#rv-panel');
+  const NAME_KEY = 'art-review-name';
+  let tx = 0, ty = 0, s = .5, mode = 'move', comments = [], draft = null, openId = null, panel = null, listFilter = 'open';
+
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ago = ms => { const m = (Date.now() - ms) / 60000; return m < 1 ? 'now' : m < 60 ? `${Math.floor(m)}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
+  const author = () => localStorage.getItem(NAME_KEY) || '';
+  // Caption titles are "<b><i>3</i>A project</b>"; keep the "3 · A project" form comments already use.
+  const labelOf = el => {
+    const b = el?.querySelector('.cap b'), n = b?.querySelector('i');
+    if (!b) return '';
+    return n ? `${n.textContent.trim()} · ${b.textContent.slice(n.textContent.length).trim()}` : b.textContent.trim();
+  };
+  const where = c => c.screen.startsWith(c.board) ? c.screen : `${c.board} · ${c.screen}`;
+
+  // View transform
+  function apply() {
+    world.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+    positionPins();
+    $('#rv-zoom').textContent = Math.round(s * 100) + '%';
+  }
+  function zoomAt(cx, cy, factor) {
+    const ns = clamp(s * factor, .04, 8), wx = (cx - tx) / s, wy = (cy - ty) / s;
+    s = ns; tx = cx - wx * s; ty = cy - wy * s;
+    apply();
+  }
+  const toWorld = (cx, cy) => ({ x: (cx - tx) / s, y: (cy - ty) / s });
+  function rectOf(el) {
+    const r = el.getBoundingClientRect();
+    return { x: (r.left - tx) / s, y: (r.top - ty) / s, w: r.width / s, h: r.height / s };
+  }
+  let anim;
+  function flyTo(ns, ntx, nty) {
+    cancelAnimationFrame(anim);
+    const s0 = s, x0 = tx, y0 = ty, t0 = performance.now();
+    const step = t => {
+      let k = Math.min(1, (t - t0) / 320); k = 1 - Math.pow(1 - k, 3);
+      s = s0 + (ns - s0) * k; tx = x0 + (ntx - x0) * k; ty = y0 + (nty - y0) * k;
+      apply();
+      if (k < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  }
+  function viewArea() {
+    const top = $('#rv-top').getBoundingClientRect().bottom + 8;
+    const bottom = $('#rv-bar').getBoundingClientRect().top - 8;
+    const wide = innerWidth >= 760 && panelEl.classList.contains('open');
+    return { left: 0, top, width: innerWidth - (wide ? 394 : 0), height: bottom - top };
+  }
+  function fitRect(r, pad = 16) {
+    const v = viewArea();
+    const ns = clamp(Math.min((v.width - 2 * pad) / r.w, (v.height - 2 * pad) / r.h), .04, 8);
+    flyTo(ns, v.left + (v.width - r.w * ns) / 2 - r.x * ns, v.top + (v.height - r.h * ns) / 2 - r.y * ns);
+  }
+  function boardRect(board) {
+    const r = rectOf(board);
+    return { x: r.x, y: r.y - 90, w: r.w, h: r.h + 90 };
+  }
+  function fitAll() {
+    const rs = [...document.querySelectorAll('.board')].map(boardRect);
+    const x = Math.min(...rs.map(r => r.x)), y = Math.min(...rs.map(r => r.y));
+    fitRect({ x, y, w: Math.max(...rs.map(r => r.x + r.w)) - x, h: Math.max(...rs.map(r => r.y + r.h)) - y }, 20);
+  }
+  function centerOn(x, y, minScale = .9) {
+    const v = viewArea(), ns = Math.max(s, minScale);
+    const narrowPanel = innerWidth < 760 && panelEl.classList.contains('open');
+    const cy = narrowPanel ? v.top + Math.min(v.height, innerHeight * .28) / 2 + 30 : v.top + v.height / 2;
+    flyTo(ns, v.left + v.width / 2 - x * ns, cy - y * ns);
+  }
+
+  // Pointer input: one finger pans, two fingers pinch, tap comments or double-tap zooms to a screen.
+  const pts = new Map();
+  let start = null, pinch = null, lastTap = null;
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  stage.addEventListener('pointerdown', e => {
+    cancelAnimationFrame(anim);
+    try { stage.setPointerCapture(e.pointerId); } catch { /* the pointer already ended */ }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 1) start = { x: e.clientX, y: e.clientY, t: performance.now(), tx, ty, moved: false };
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      pinch = { d: dist(a, b), m: mid(a, b), s, tx, ty };
+      if (start) start.moved = true;
+    }
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size >= 2 && pinch) {
+      const [a, b] = [...pts.values()], m = mid(a, b);
+      const ns = clamp(pinch.s * dist(a, b) / pinch.d, .04, 8);
+      const wx = (pinch.m.x - pinch.tx) / pinch.s, wy = (pinch.m.y - pinch.ty) / pinch.s;
+      s = ns; tx = m.x - wx * s; ty = m.y - wy * s;
+      apply();
+    } else if (pts.size === 1 && start) {
+      const dx = e.clientX - start.x, dy = e.clientY - start.y;
+      if (!start.moved && Math.hypot(dx, dy) > 6) { start.moved = true; stage.style.cursor = 'grabbing'; }
+      if (start.moved) { tx = start.tx + dx; ty = start.ty + dy; apply(); }
+    }
+  });
+  function endPointer(e, cancelled) {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    stage.style.cursor = '';
+    if (pts.size === 0) {
+      if (!cancelled && start && !start.moved && performance.now() - start.t < 400) onTap(e.clientX, e.clientY);
+      start = null; pinch = null;
+    } else if (pts.size === 1) {
+      const p = [...pts.values()][0];
+      start = { x: p.x, y: p.y, t: 0, tx, ty, moved: true }; pinch = null;
+    }
+  }
+  stage.addEventListener('pointerup', e => endPointer(e, false));
+  stage.addEventListener('pointercancel', e => endPointer(e, true));
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * .01));
+    else { tx -= e.deltaX; ty -= e.deltaY; apply(); }
+  }, { passive: false });
+  let gestureScale = 1;
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(type, e => {
+      e.preventDefault();
+      if (type === 'gesturestart') gestureScale = 1;
+      if (type === 'gesturechange' && pts.size < 2) { zoomAt(e.clientX, e.clientY, e.scale / gestureScale); gestureScale = e.scale; }
+    }, { passive: false });
+  }
+
+  function onTap(cx, cy) {
+    const el = document.elementsFromPoint(cx, cy).find(n => world.contains(n));
+    const cell = el?.closest('.cell, .wide'), board = el?.closest('.board');
+    if (mode === 'comment') {
+      if (!board) return toast('Tap on a screen to comment');
+      draft = { ...toWorld(cx, cy), board: board.dataset.title, screen: labelOf(cell) || board.dataset.title };
+      renderPins(); openComposer();
+      return;
+    }
+    if (panel) { closePanel(); return; }
+    const now = performance.now();
+    if (lastTap && now - lastTap.t < 330 && Math.hypot(cx - lastTap.x, cy - lastTap.y) < 30) {
+      lastTap = null;
+      if (cell) fitRect(rectOf(cell), 12); else zoomAt(cx, cy, 2);
+    } else lastTap = { t: now, x: cx, y: cy };
+  }
+
+  // Pins
+  const pinEls = new Map();
+  function makePin(id) {
+    const el = document.createElement('div');
+    el.className = 'rv-pin';
+    el.addEventListener('click', e => { e.stopPropagation(); if (id !== 'draft') openThread(id); });
+    pinsEl.append(el); pinEls.set(id, el);
+    return el;
+  }
+  function renderPins() {
+    const visible = comments.filter(c => !c.resolved || c.id === openId || listFilter !== 'open');
+    const keep = new Set(visible.map(c => c.id));
+    if (draft) keep.add('draft');
+    for (const [id, el] of pinEls) if (!keep.has(id)) { el.remove(); pinEls.delete(id); }
+    for (const c of visible) {
+      const el = pinEls.get(c.id) || makePin(c.id);
+      el.textContent = c.n; el._at = c;
+      el.classList.toggle('resolved', !!c.resolved);
+      el.classList.toggle('active', c.id === openId);
+    }
+    if (draft) { const el = pinEls.get('draft') || makePin('draft'); el.textContent = '+'; el.classList.add('draft'); el._at = draft; }
+    positionPins();
+    const open = comments.filter(c => !c.resolved).length;
+    $('#rv-count').textContent = open || '';
+  }
+  function positionPins() {
+    for (const el of pinEls.values()) el.style.transform = `translate(${tx + el._at.x * s}px,${ty + el._at.y * s}px)`;
+  }
+
+  // Panels
+  function openPanel(kind, htmlText) {
+    panel = kind; panelEl.innerHTML = htmlText; panelEl.classList.add('open'); panelEl.scrollTop = 0;
+  }
+  function closePanel() {
+    panel = null; openId = null;
+    if (draft) draft = null;
+    panelEl.classList.remove('open');
+    renderPins();
+  }
+  const nameField = () => author() ? '' : '<input id="rv-name" placeholder="Your name" autocomplete="name" maxlength="60">';
+  function takeName() {
+    const input = $('#rv-name');
+    if (!input) return author();
+    const value = input.value.trim();
+    if (!value) { input.focus(); return ''; }
+    localStorage.setItem(NAME_KEY, value);
+    return value;
+  }
+  function openComposer() {
+    openId = null;
+    openPanel('compose', `
+      <div class="rv-head"><div><div class="rv-title">New comment</div><div class="rv-sub">${esc(where(draft))}</div></div><button class="rv-x" data-act="close">✕</button></div>
+      ${nameField()}<textarea id="rv-text" rows="4" maxlength="4000" placeholder="What should change?"></textarea>
+      <div class="rv-actions"><button class="rv-b" data-act="close">Cancel</button><button class="rv-b primary" data-act="post">Post</button></div>`);
+    setTimeout(() => $('#rv-text')?.focus(), 60);
+  }
+  function openThread(id, fly = false) {
+    const c = comments.find(c => c.id === id);
+    if (!c) return closePanel();
+    draft = null; openId = id;
+    const msgs = [c, ...(c.replies || [])].map(m => `<div class="rv-msg"><div class="rv-who">${esc(m.author)}<span>${ago(m.created)}</span></div><div class="rv-txt">${esc(m.text)}</div></div>`).join('');
+    openPanel('thread', `
+      <div class="rv-head"><div><div class="rv-title">#${c.n} ${c.resolved ? '· Resolved' : ''}</div><div class="rv-sub">${esc(where(c))}</div></div><button class="rv-x" data-act="close">✕</button></div>
+      <div>${msgs}</div>
+      ${nameField()}<textarea id="rv-text" rows="2" maxlength="4000" placeholder="Reply"></textarea>
+      <div class="rv-actions"><button class="rv-b danger left" data-act="delete">Delete</button><button class="rv-b" data-act="${c.resolved ? 'reopen' : 'resolve'}">${c.resolved ? 'Reopen' : 'Resolve'}</button><button class="rv-b primary" data-act="reply">Reply</button></div>`);
+    renderPins();
+    if (fly) centerOn(c.x, c.y);
+  }
+  function openList() {
+    const items = comments.filter(c => listFilter === 'all' || (listFilter === 'open' ? !c.resolved : c.resolved)).sort((a, b) => a.n - b.n);
+    const rows = items.map(c => `<button class="rv-item" data-act="goto" data-id="${c.id}"><div class="rv-pin ${c.resolved ? 'resolved' : ''}">${c.n}</div><div style="min-width:0"><div class="rv-who">${esc(where(c))}</div><div class="rv-txt">${esc(c.text)}</div><div class="rv-sub">${esc(c.author)} · ${ago(c.created)}${c.replies?.length ? ` · ${c.replies.length} repl${c.replies.length > 1 ? 'ies' : 'y'}` : ''}</div></div></button>`).join('');
+    const seg = ['open', 'resolved', 'all'].map(f => `<button class="${f === listFilter ? 'on' : ''}" data-act="filter" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('');
+    openPanel('list', `
+      <div class="rv-head"><div class="rv-title">Comments</div><button class="rv-x" data-act="close">✕</button></div>
+      <div class="rv-seg">${seg}</div>
+      ${rows || '<div class="rv-empty">No comments here yet. Tap Comment, then tap a screen.</div>'}
+      <div class="rv-foot"><span>${author() ? `Commenting as ${esc(author())} · <a data-act="rename">Change</a>` : ''}</span><a href="/comments.md" target="_blank">Export</a></div>`);
+    renderPins();
+  }
+  function openScreens() {
+    const groups = [...document.querySelectorAll('.board')].map((b, i) => {
+      const cells = [...b.querySelectorAll('.cell, .wide')].map((c, j) => `<button class="rv-nav" data-act="fit-cell" data-b="${i}" data-c="${j}">${esc(labelOf(c))}</button>`).join('');
+      return `<div class="rv-grp"><button class="rv-grp-h" data-act="fit-board" data-b="${i}">${esc(b.dataset.title)}</button>${cells}</div>`;
+    }).join('');
+    openPanel('screens', `<div class="rv-head"><div class="rv-title">Screens</div><button class="rv-x" data-act="close">✕</button></div>${groups}`);
+  }
+
+  async function api(method, path, body) {
+    const res = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+    return res.json();
+  }
+  function upsert(c) {
+    const i = comments.findIndex(x => x.id === c.id);
+    if (i < 0) comments.push(c); else comments[i] = c;
+  }
+  panelEl.addEventListener('click', async e => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act, c = comments.find(c => c.id === openId);
+    try {
+      if (act === 'close') closePanel();
+      else if (act === 'post') {
+        const text = $('#rv-text').value.trim(), who = takeName();
+        if (!text || !who) return;
+        upsert(await api('POST', '/api/comments', { ...draft, author: who, text }));
+        draft = null; closePanel(); toast('Comment posted');
+      } else if (act === 'reply') {
+        const text = $('#rv-text').value.trim(), who = takeName();
+        if (!text || !who) return;
+        upsert(await api('POST', `/api/comments/${c.id}/replies`, { author: who, text }));
+        openThread(c.id);
+      } else if (act === 'resolve' || act === 'reopen') {
+        upsert(await api('PATCH', `/api/comments/${c.id}`, { resolved: act === 'resolve' }));
+        if (act === 'resolve') { closePanel(); toast(`#${c.n} resolved`); } else openThread(c.id);
+      } else if (act === 'delete') {
+        if (!confirm(`Delete comment #${c.n}?`)) return;
+        await api('DELETE', `/api/comments/${c.id}`);
+        comments = comments.filter(x => x.id !== c.id); closePanel(); toast('Comment deleted');
+      } else if (act === 'filter') { listFilter = btn.dataset.f; openList(); }
+      else if (act === 'goto') {
+        const id = btn.dataset.id;
+        if (innerWidth < 760) panelEl.classList.remove('open');
+        openThread(id, true);
+      } else if (act === 'rename') { localStorage.removeItem(NAME_KEY); openList(); toast('You will be asked for a name next time'); }
+      else if (act === 'fit-board' || act === 'fit-cell') {
+        const board = document.querySelectorAll('.board')[btn.dataset.b];
+        const target = act === 'fit-board' ? boardRect(board) : rectOf(board.querySelectorAll('.cell, .wide')[btn.dataset.c]);
+        closePanel(); requestAnimationFrame(() => fitRect(target, act === 'fit-board' ? 16 : 12));
+      }
+    } catch (error) { toast(`Couldn't save: ${error.message}`); }
+  });
+
+  // Toolbar, keyboard and helpers
+  function setMode(m) {
+    mode = m;
+    $('#rv-move').classList.toggle('on', m === 'move');
+    $('#rv-comment').classList.toggle('on', m === 'comment');
+    stage.classList.toggle('commenting', m === 'comment');
+    $('#rv-hint').classList.toggle('show', m === 'comment');
+    if (m === 'move' && draft) closePanel();
+  }
+  let toastTimer;
+  function toast(text) {
+    const el = $('#rv-toast'); el.textContent = text; el.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  }
+  $('#rv-move').onclick = () => setMode('move');
+  $('#rv-comment').onclick = () => setMode(mode === 'comment' ? 'move' : 'comment');
+  $('#rv-fit').onclick = () => { closePanel(); fitAll(); };
+  $('#rv-zoom').onclick = () => { closePanel(); fitAll(); };
+  $('#rv-screens').onclick = () => panel === 'screens' ? closePanel() : openScreens();
+  $('#rv-list').onclick = () => panel === 'list' ? closePanel() : openList();
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, textarea')) {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) panelEl.querySelector('.rv-b.primary')?.click();
+      if (e.key === 'Escape') closePanel();
+      return;
+    }
+    if (e.key === 'c') setMode('comment');
+    else if (e.key === 'v' || e.key === 'm') setMode('move');
+    else if (e.key === '0') fitAll();
+    else if (e.key === '=' || e.key === '+') zoomAt(innerWidth / 2, innerHeight / 2, 1.25);
+    else if (e.key === '-') zoomAt(innerWidth / 2, innerHeight / 2, .8);
+    else if (e.key === 'Escape') { closePanel(); setMode('move'); }
+  });
+  // Keep the sheet above the toolbar, or above the keyboard while typing.
+  function placePanel() {
+    const vv = window.visualViewport, kb = vv ? Math.max(0, innerHeight - vv.height - vv.offsetTop) : 0;
+    const bar = innerHeight - $('#rv-bar').getBoundingClientRect().top + 8;
+    document.documentElement.style.setProperty('--pb', (kb > 40 ? kb + 8 : bar) + 'px');
+  }
+  window.visualViewport?.addEventListener('resize', placePanel);
+  window.visualViewport?.addEventListener('scroll', placePanel);
+  addEventListener('resize', placePanel);
+  placePanel();
+
+  // Sync with the server so several devices see the same comments.
+  let lastJSON = '';
+  async function sync() {
+    try {
+      const res = await fetch('/api/comments', { cache: 'no-store' });
+      const text = await res.text();
+      if (text === lastJSON) return;
+      lastJSON = text; comments = JSON.parse(text);
+      renderPins();
+      const typing = document.activeElement?.matches('#rv-panel textarea, #rv-panel input') || $('#rv-text')?.value;
+      if (!typing && panel === 'list') openList();
+      if (!typing && panel === 'thread' && openId) openThread(openId);
+    } catch { /* offline: try again on the next tick */ }
+  }
+  setInterval(sync, 4000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+
+  apply();
+  requestAnimationFrame(() => { fitRect(boardRect(document.querySelector('.board')), 12); sync(); });
+})();
+</script>
+</body>
+</html>
