@@ -3,11 +3,13 @@ import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
 import { doctor } from "./commands/doctor.ts";
+import { commentsCommand, replyCommand, statusCommand } from "./commands/review.ts";
 import { setup } from "./commands/setup.ts";
 import { initCommand, lintCommand, openCommand, publishCommand, renderCommand } from "./commands/write.ts";
 import { normalizeUrl, pickServer } from "./config.ts";
 import { CliError, createOutput, UsageError } from "./output.ts";
 import { closePrompts } from "./prompt.ts";
+import { installSkill } from "./skill/install.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE = `artifacts ${VERSION}
@@ -20,6 +22,10 @@ const USAGE = `artifacts ${VERSION}
   artifacts lint | render
   artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]
   artifacts open [<project>/<slug>] [--version <n>] [--page <key>]
+  artifacts status [<project>/<slug>]
+  artifacts comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]
+  artifacts reply <n> "<text>" [--fixed]
+  artifacts skill install [--claude] [--codex]
 
 Every command takes --json and --server <url|name>.`;
 
@@ -41,6 +47,12 @@ const OPTIONS = {
   message: { type: "string", short: "m" },
   note: { type: "string", multiple: true },
   page: { type: "string" },
+  open: { type: "boolean" },
+  fixed: { type: "boolean" },
+  all: { type: "boolean" },
+  claude: { type: "boolean" },
+  codex: { type: "boolean" },
+  "no-skill": { type: "boolean" },
 } as const;
 
 /** `--version` is a boolean everywhere except `open --version <n>`, where it takes a number. */
@@ -82,6 +94,7 @@ async function main(argv: string[]) {
           org: values.org,
           name: values.name,
           email: values.email,
+          skill: !values["no-skill"],
         },
         out,
       );
@@ -101,6 +114,21 @@ async function main(argv: string[]) {
       return recover(first, values.email, out);
     case "doctor":
       return doctor(values.server, out);
+    case "status":
+      return statusCommand(first, values.server, out);
+    case "comments":
+      return commentsCommand(
+        first,
+        { open: values.open, fixed: values.fixed, all: values.all, page: values.page, server: values.server },
+        out,
+      );
+    case "reply":
+      return replyCommand(first, positionals[2], { fixed: values.fixed, server: values.server }, out);
+    case "skill": {
+      if (first !== "install") throw new UsageError("Usage: artifacts skill install [--claude] [--codex]");
+      const dirs = installSkill({ claude: values.claude, codex: values.codex }, out);
+      return out.result({ installed: dirs }, () => {});
+    }
     case "init":
       return initCommand({ project: values.project, slug: values.slug, kind: values.kind }, out);
     case "lint":

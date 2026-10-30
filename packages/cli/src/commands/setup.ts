@@ -1,6 +1,7 @@
 import { setupDocker } from "../docker/setup.ts";
 import { CliError, type Output } from "../output.ts";
-import { ask } from "../prompt.ts";
+import { ask, confirm } from "../prompt.ts";
+import { installSkill } from "../skill/install.ts";
 import { type ClaimAnswers, setupExisting } from "./account.ts";
 
 type Flags = ClaimAnswers & {
@@ -9,6 +10,7 @@ type Flags = ClaimAnswers & {
   image?: string;
   port?: number;
   setupToken?: string;
+  skill?: boolean;
 };
 
 export async function setup(url: string | undefined, flags: Flags, out: Output) {
@@ -33,5 +35,15 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
       throw new CliError("Railway setup isn't available in this build yet. Use --docker or a URL.");
     }
   }
-  out.result({ server: target, person }, () => out.say(`Signed in as ${person.name}.`));
+  if (
+    flags.skill !== false &&
+    (await confirm("Install the skill for Claude Code and Codex?").catch(() => false))
+  ) {
+    installSkill({}, out);
+  }
+  out.result({ server: target, person }, () => {
+    out.say(`Signed in as ${person.name}.`);
+    out.say(`  Add a passkey     open ${target}/settings/sign-in`);
+    out.say("  Invite someone    artifacts org invite sam@example.com");
+  });
 }
