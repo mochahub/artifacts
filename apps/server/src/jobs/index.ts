@@ -1,7 +1,9 @@
-import { inArray, lt, sql } from "drizzle-orm";
+import { gt, inArray, lt, sql } from "drizzle-orm";
 import type { Deps } from "../api/deps.ts";
+import { recountUsage } from "../data/store.ts";
 import {
   artifacts,
+  artifactUsage,
   blobs,
   deviceCodes,
   frames,
@@ -117,10 +119,22 @@ export async function expireLeftovers(deps: Deps) {
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
 }
 
+/** Recounts usage for artifacts written since yesterday (08). */
+export async function recountRecent(deps: Deps) {
+  const since = new Date(deps.clock.now().getTime() - 2 * DAY);
+  const rows = await deps.db
+    .selectDistinct({ artifactId: artifactUsage.artifactId, orgId: artifactUsage.orgId })
+    .from(artifactUsage)
+    .where(gt(artifactUsage.updatedAt, since));
+  for (const row of rows) await recountUsage(deps, row.orgId, row.artifactId);
+  return { artifacts: rows.length };
+}
+
 export const jobsFor = (deps: Deps): Record<string, () => Promise<unknown>> => ({
   purge: () => purgeExpired(deps),
   gc: () => collectGarbage(deps),
   expire: () => expireLeftovers(deps),
+  usage: () => recountRecent(deps),
 });
 
 /** Once a day, on one replica at a time (05). */

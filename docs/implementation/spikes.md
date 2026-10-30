@@ -193,7 +193,9 @@ The content host refused the top-level navigation with 403, as 03 specifies.
 
 **The bridge:** messages from the live frame arrive with `event.origin === "null"`. A second sandboxed iframe sending the same message was rejected by the `event.source === liveIframe.contentWindow` check, as 08 says.
 
-03 now records the confirmed `Sec-Fetch-Dest` values. Media (`audio`, `video`, `track`) wasn't tested; M9 adds a test for it.
+03 now records the confirmed `Sec-Fetch-Dest` values.
+
+**Rerun with the CSP's `sandbox allow-scripts`, and media (2026-10-30, `spikes/s8-csp-sandbox.ts`, WebKit 27.2).** All passed: module script and relative import, `@font-face`, image, relative `fetch`, preflighted `POST api/votes`, and `audio`, `video` and `track` (`Sec-Fetch-Dest` `audio`, `video` and `track`, mode `no-cors`, no `Origin`). `self.origin` is `"null"`; `localStorage` and cookies throw `SecurityError`; `top.location` is blocked; `fetch` to the viewer or the internet is refused by `connect-src`. A page on an origin not in `frame-ancestors` can't embed the frame. A document served with `sandbox allow-scripts` opened at the top level is still opaque, with no storage. Real Safari on an iPhone asks for byte ranges on media, so the content host answers `Range` requests (M9); that part needs a real device.
 
 ## S1, S3 and S6 on Railway (run 2026-10-30)
 

@@ -1,3 +1,4 @@
+import { dataRoutes } from "../data/routes.ts";
 import { publishRoutes } from "../publish/routes.ts";
 import { reviewRoutes } from "../review/routes.ts";
 import { authRoutes } from "./auth.ts";
@@ -27,4 +28,5 @@ export function mountApi(routes: Routes, deps: Deps) {
   versionRoutes(routes, deps);
   lifecycleRoutes(routes, deps);
   fileRoutes(routes, deps);
+  dataRoutes(routes, deps);
 }

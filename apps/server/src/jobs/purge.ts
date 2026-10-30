@@ -4,6 +4,7 @@ import {
   activity,
   artifactAccess,
   artifacts,
+  artifactUsage,
   blocks,
   comments,
   decisions,
@@ -62,6 +63,7 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
     await tx.delete(views).where(eq(views.artifactId, artifact.id));
     await tx.delete(guestViews).where(eq(guestViews.artifactId, artifact.id));
     await tx.delete(artifactAccess).where(eq(artifactAccess.artifactId, artifact.id));
+    await tx.delete(artifactUsage).where(eq(artifactUsage.artifactId, artifact.id));
     const links = await tx
       .select({ id: shareLinks.id })
       .from(shareLinks)
