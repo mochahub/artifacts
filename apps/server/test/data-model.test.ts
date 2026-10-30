@@ -40,9 +40,9 @@ function docPipeTables(): Record<string, string[]> {
 
 /** Tables 02 describes in a sentence. Kept by hand; `docMentions` below catches a renamed column. */
 const SENTENCE_TABLES: Record<string, string[]> = {
-  passwords: ["person_id", "hash", "updated_at"],
-  webauthn_challenges: ["id", "challenge", "kind", "person_id", "expires_at"],
-  guest_links: ["guest_id", "share_link_id", "name", "created_at", "expires_at"],
+  passwords: ["person_id", "org_id", "hash", "updated_at"],
+  webauthn_challenges: ["id", "org_id", "challenge", "kind", "person_id", "expires_at"],
+  guest_links: ["guest_id", "org_id", "share_link_id", "name", "created_at", "expires_at"],
   reset_links: [
     "id",
     "org_id",
@@ -54,7 +54,7 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "used_at",
   ],
   projects: ["id", "org_id", "slug", "name", "repo", "created_at", "updated_at"],
-  artifact_access: ["artifact_id", "person_id", "permission", "granted_by", "created_at"],
+  artifact_access: ["artifact_id", "org_id", "person_id", "permission", "granted_by", "created_at"],
   share_links: [
     "id",
     "org_id",
@@ -66,8 +66,8 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "expires_at",
     "revoked_at",
   ],
-  pages: ["id", "version_id", "page_key", "kind", "title", "group", "position", "meta"],
-  blocks: ["id", "version_id", "page_key", "block_key", "content_hash", "text"],
+  pages: ["id", "org_id", "version_id", "page_key", "kind", "title", "group", "position", "meta"],
+  blocks: ["id", "org_id", "version_id", "page_key", "block_key", "content_hash", "text"],
   comments: [
     "id",
     "thread_id",
@@ -83,8 +83,8 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "edited_at",
   ],
   decisions: ["id", "org_id", "artifact_id", "version", "person_id", "kind", "note", "created_at"],
-  views: ["person_id", "artifact_id", "last_seen_version", "last_seen_at", "positions"],
-  guest_views: ["guest_id", "artifact_id", "last_seen_version", "last_seen_at", "positions"],
+  views: ["person_id", "org_id", "artifact_id", "last_seen_version", "last_seen_at", "positions"],
+  guest_views: ["guest_id", "org_id", "artifact_id", "last_seen_version", "last_seen_at", "positions"],
   activity: [
     "id",
     "org_id",
@@ -171,11 +171,26 @@ describe("the database matches 02-data-model.md", () => {
     for (const [table, columns] of Object.entries(SENTENCE_TABLES)) {
       expect({ table, columns: await columnsOf(table) }).toEqual({ table, columns: [...columns].sort() });
       const sentence = docSentence(table);
-      const missing = columns.filter(
-        (column) => !sentence.includes(column) && !["id", "org_id"].includes(column),
-      );
+      const missing = columns.filter((column) => !sentence.includes(column) && column !== "id");
       expect({ table, missing }).toEqual({ table, missing: [] });
     }
+  });
+
+  test("every table but org has org_id, not null, referencing org", async () => {
+    const tables = await sql`
+      select table_name from information_schema.tables
+      where table_schema = 'public' and table_name <> 'org'`;
+    const columns = await sql`
+      select table_name from information_schema.columns
+      where table_schema = 'public' and column_name = 'org_id' and is_nullable = 'NO'`;
+    const references = await sql`
+      select conrelid::regclass::text as table_name from pg_constraint
+      where contype = 'f' and confrelid = 'org'::regclass
+        and conkey = array[(select attnum from pg_attribute where attrelid = conrelid and attname = 'org_id')]`;
+    const names = (rows: postgres.Row[]) => rows.map((row) => row.table_name as string).sort();
+    expect(tables).toHaveLength(26);
+    expect(names(columns)).toEqual(names(tables));
+    expect(names(references)).toEqual(names(tables));
   });
 
   test("org.pseudonym_key is bytea not null", async () => {
@@ -259,6 +274,7 @@ describe("the database matches 02-data-model.md", () => {
       });
       await db.insert(passkeys).values({
         id: Bun.randomUUIDv7(),
+        orgId,
         personId,
         credentialId: new Uint8Array([1, 2, 3]),
         publicKey: new Uint8Array([255, 0, 128]),

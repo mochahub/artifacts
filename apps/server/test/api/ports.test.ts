@@ -73,6 +73,7 @@ describe("the three ports", () => {
         expect(response.headers.get("x-request-id")).toBeTruthy();
         expect(response.headers.get("x-frame-options")).toBe("DENY");
         expect(response.headers.get("referrer-policy")).toBe("same-origin");
+        expect(response.headers.get("x-content-type-options")).toBe("nosniff");
         expect(response.headers.get("strict-transport-security")).toBe("max-age=31536000");
         const csp = response.headers.get("content-security-policy");
         expect(csp).toContain("frame-src http://content.test");

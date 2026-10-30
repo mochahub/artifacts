@@ -101,12 +101,18 @@ export const passwords = pgTable("passwords", {
   personId: uuid("person_id")
     .primaryKey()
     .references(() => people.id),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
   hash: text("hash").notNull(),
   updatedAt: time("updated_at").notNull().defaultNow(),
 });
 
 export const passkeys = pgTable("passkeys", {
   id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
   personId: uuid("person_id")
     .notNull()
     .references(() => people.id),
@@ -122,6 +128,9 @@ export const passkeys = pgTable("passkeys", {
 
 export const webauthnChallenges = pgTable("webauthn_challenges", {
   id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
   challenge: text("challenge").notNull(),
   kind: text("kind").notNull(),
   personId: uuid("person_id").references(() => people.id),
@@ -130,6 +139,9 @@ export const webauthnChallenges = pgTable("webauthn_challenges", {
 
 export const sessions = pgTable("sessions", {
   id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
   tokenHash: text("token_hash").notNull().unique(),
   personId: uuid("person_id")
     .notNull()
@@ -210,6 +222,9 @@ export const artifactAccess = pgTable(
     artifactId: uuid("artifact_id")
       .notNull()
       .references(() => artifacts.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id),
@@ -246,6 +261,9 @@ export const guestLinks = pgTable(
     guestId: uuid("guest_id")
       .notNull()
       .references(() => guests.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     shareLinkId: uuid("share_link_id")
       .notNull()
       .references(() => shareLinks.id),
@@ -293,6 +311,9 @@ export const resetLinks = pgTable("reset_links", {
 
 export const deviceCodes = pgTable("device_codes", {
   id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
   deviceCodeHash: text("device_code_hash").notNull().unique(),
   userCode: text("user_code").notNull().unique(),
   clientName: text("client_name").notNull(),
@@ -358,6 +379,9 @@ export const pages = pgTable(
   "pages",
   {
     id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     versionId: uuid("version_id")
       .notNull()
       .references(() => versions.id),
@@ -375,6 +399,9 @@ export const frames = pgTable(
   "frames",
   {
     id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     versionId: uuid("version_id")
       .notNull()
       .references(() => versions.id),
@@ -398,6 +425,9 @@ export const blocks = pgTable(
   "blocks",
   {
     id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     versionId: uuid("version_id")
       .notNull()
       .references(() => versions.id),
@@ -493,6 +523,9 @@ export const views = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     artifactId: uuid("artifact_id")
       .notNull()
       .references(() => artifacts.id),
@@ -509,6 +542,9 @@ export const guestViews = pgTable(
     guestId: uuid("guest_id")
       .notNull()
       .references(() => guests.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
     artifactId: uuid("artifact_id")
       .notNull()
       .references(() => artifacts.id),

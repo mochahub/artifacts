@@ -24,6 +24,7 @@ CREATE TABLE "activity" (
 --> statement-breakpoint
 CREATE TABLE "artifact_access" (
 	"artifact_id" uuid NOT NULL,
+	"org_id" uuid NOT NULL,
 	"person_id" uuid NOT NULL,
 	"permission" "permission" NOT NULL,
 	"granted_by" uuid NOT NULL,
@@ -53,6 +54,7 @@ CREATE TABLE "artifacts" (
 --> statement-breakpoint
 CREATE TABLE "blocks" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"version_id" uuid NOT NULL,
 	"page_key" text NOT NULL,
 	"block_key" text NOT NULL,
@@ -91,6 +93,7 @@ CREATE TABLE "decisions" (
 --> statement-breakpoint
 CREATE TABLE "device_codes" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"device_code_hash" text NOT NULL,
 	"user_code" text NOT NULL,
 	"client_name" text NOT NULL,
@@ -105,6 +108,7 @@ CREATE TABLE "device_codes" (
 --> statement-breakpoint
 CREATE TABLE "frames" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"version_id" uuid NOT NULL,
 	"page_key" text NOT NULL,
 	"board_key" text NOT NULL,
@@ -123,6 +127,7 @@ CREATE TABLE "frames" (
 --> statement-breakpoint
 CREATE TABLE "guest_links" (
 	"guest_id" uuid NOT NULL,
+	"org_id" uuid NOT NULL,
 	"share_link_id" uuid NOT NULL,
 	"name" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -132,6 +137,7 @@ CREATE TABLE "guest_links" (
 --> statement-breakpoint
 CREATE TABLE "guest_views" (
 	"guest_id" uuid NOT NULL,
+	"org_id" uuid NOT NULL,
 	"artifact_id" uuid NOT NULL,
 	"last_seen_version" integer NOT NULL,
 	"last_seen_at" timestamp with time zone NOT NULL,
@@ -178,6 +184,7 @@ CREATE TABLE "org" (
 --> statement-breakpoint
 CREATE TABLE "pages" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"version_id" uuid NOT NULL,
 	"page_key" text NOT NULL,
 	"kind" "page_kind" NOT NULL,
@@ -190,6 +197,7 @@ CREATE TABLE "pages" (
 --> statement-breakpoint
 CREATE TABLE "passkeys" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"person_id" uuid NOT NULL,
 	"credential_id" "bytea" NOT NULL,
 	"public_key" "bytea" NOT NULL,
@@ -204,6 +212,7 @@ CREATE TABLE "passkeys" (
 --> statement-breakpoint
 CREATE TABLE "passwords" (
 	"person_id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"hash" text NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -243,6 +252,7 @@ CREATE TABLE "reset_links" (
 --> statement-breakpoint
 CREATE TABLE "sessions" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"token_hash" text NOT NULL,
 	"person_id" uuid NOT NULL,
 	"domain" text NOT NULL,
@@ -341,6 +351,7 @@ CREATE TABLE "versions" (
 --> statement-breakpoint
 CREATE TABLE "views" (
 	"person_id" uuid NOT NULL,
+	"org_id" uuid NOT NULL,
 	"artifact_id" uuid NOT NULL,
 	"last_seen_version" integer NOT NULL,
 	"last_seen_at" timestamp with time zone NOT NULL,
@@ -350,6 +361,7 @@ CREATE TABLE "views" (
 --> statement-breakpoint
 CREATE TABLE "webauthn_challenges" (
 	"id" uuid PRIMARY KEY NOT NULL,
+	"org_id" uuid NOT NULL,
 	"challenge" text NOT NULL,
 	"kind" text NOT NULL,
 	"person_id" uuid,
@@ -362,6 +374,7 @@ ALTER TABLE "activity" ADD CONSTRAINT "activity_project_id_projects_id_fk" FOREI
 ALTER TABLE "activity" ADD CONSTRAINT "activity_actor_person_id_people_id_fk" FOREIGN KEY ("actor_person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "activity" ADD CONSTRAINT "activity_actor_guest_id_guests_id_fk" FOREIGN KEY ("actor_guest_id") REFERENCES "public"."guests"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact_access" ADD CONSTRAINT "artifact_access_artifact_id_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifacts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "artifact_access" ADD CONSTRAINT "artifact_access_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact_access" ADD CONSTRAINT "artifact_access_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact_access" ADD CONSTRAINT "artifact_access_granted_by_people_id_fk" FOREIGN KEY ("granted_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -369,6 +382,7 @@ ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_project_id_projects_id_fk" FOR
 ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_publisher_id_people_id_fk" FOREIGN KEY ("publisher_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_archived_by_people_id_fk" FOREIGN KEY ("archived_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_deleted_by_people_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "blocks" ADD CONSTRAINT "blocks_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "blocks" ADD CONSTRAINT "blocks_version_id_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."versions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "comments" ADD CONSTRAINT "comments_thread_id_threads_id_fk" FOREIGN KEY ("thread_id") REFERENCES "public"."threads"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "comments" ADD CONSTRAINT "comments_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -377,24 +391,32 @@ ALTER TABLE "comments" ADD CONSTRAINT "comments_author_guest_id_guests_id_fk" FO
 ALTER TABLE "decisions" ADD CONSTRAINT "decisions_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "decisions" ADD CONSTRAINT "decisions_artifact_id_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifacts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "decisions" ADD CONSTRAINT "decisions_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_codes" ADD CONSTRAINT "device_codes_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "device_codes" ADD CONSTRAINT "device_codes_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "frames" ADD CONSTRAINT "frames_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "frames" ADD CONSTRAINT "frames_version_id_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."versions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "guest_links" ADD CONSTRAINT "guest_links_guest_id_guests_id_fk" FOREIGN KEY ("guest_id") REFERENCES "public"."guests"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "guest_links" ADD CONSTRAINT "guest_links_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "guest_links" ADD CONSTRAINT "guest_links_share_link_id_share_links_id_fk" FOREIGN KEY ("share_link_id") REFERENCES "public"."share_links"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "guest_views" ADD CONSTRAINT "guest_views_guest_id_guests_id_fk" FOREIGN KEY ("guest_id") REFERENCES "public"."guests"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "guest_views" ADD CONSTRAINT "guest_views_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "guest_views" ADD CONSTRAINT "guest_views_artifact_id_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifacts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "guests" ADD CONSTRAINT "guests_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invites" ADD CONSTRAINT "invites_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invites" ADD CONSTRAINT "invites_artifact_id_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifacts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invites" ADD CONSTRAINT "invites_created_by_people_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pages" ADD CONSTRAINT "pages_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pages" ADD CONSTRAINT "pages_version_id_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."versions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "passkeys" ADD CONSTRAINT "passkeys_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "passkeys" ADD CONSTRAINT "passkeys_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "passwords" ADD CONSTRAINT "passwords_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "passwords" ADD CONSTRAINT "passwords_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "projects" ADD CONSTRAINT "projects_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reset_links" ADD CONSTRAINT "reset_links_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reset_links" ADD CONSTRAINT "reset_links_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "reset_links" ADD CONSTRAINT "reset_links_created_by_people_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sessions" ADD CONSTRAINT "sessions_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sessions" ADD CONSTRAINT "sessions_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "share_links" ADD CONSTRAINT "share_links_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "share_links" ADD CONSTRAINT "share_links_artifact_id_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifacts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -414,7 +436,9 @@ ALTER TABLE "versions" ADD CONSTRAINT "versions_artifact_id_artifacts_id_fk" FOR
 ALTER TABLE "versions" ADD CONSTRAINT "versions_published_by_people_id_fk" FOREIGN KEY ("published_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "versions" ADD CONSTRAINT "versions_deleted_by_people_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "views" ADD CONSTRAINT "views_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "views" ADD CONSTRAINT "views_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "views" ADD CONSTRAINT "views_artifact_id_artifacts_id_fk" FOREIGN KEY ("artifact_id") REFERENCES "public"."artifacts"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "webauthn_challenges" ADD CONSTRAINT "webauthn_challenges_org_id_org_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."org"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "webauthn_challenges" ADD CONSTRAINT "webauthn_challenges_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "activity_org_created_idx" ON "activity" USING btree ("org_id","created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "artifacts_org_updated_idx" ON "artifacts" USING btree ("org_id","updated_at" DESC NULLS LAST) WHERE "artifacts"."deleted_at" is null;--> statement-breakpoint
