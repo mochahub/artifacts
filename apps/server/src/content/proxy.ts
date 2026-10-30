@@ -227,17 +227,25 @@ export async function runBackend(
       .catch((error) => deps.log.warn(`couldn't save backend logs: ${error}`));
   }
 
-  if (Buffer.byteLength(response.body) > limits.backendResponseBytes) {
-    return new Response('{"error":"The response is too big."}', {
+  const refused = (message: string) =>
+    new Response(JSON.stringify({ error: message }), {
       status: 502,
       headers: { ...CORS, "Content-Type": "application/json" },
     });
+  // The answer is whatever the backend's own code made of it, so no part of it can be assumed valid.
+  try {
+    if (typeof response.body !== "string") throw new TypeError("The body isn't text.");
+    if (Buffer.byteLength(response.body) > limits.backendResponseBytes) {
+      return refused("The response is too big.");
+    }
+    // A caller's own answer, so nothing between here and them may keep it.
+    const headers = new Headers({ ...CORS, "Cache-Control": "no-store" });
+    for (const [name, value] of response.headers)
+      if (SAFE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
+    return new Response(response.body, { status: response.status, headers });
+  } catch {
+    return refused("The backend gave an answer that can't be sent.");
   }
-  // A caller's own answer, so nothing between here and them may keep it.
-  const headers = new Headers({ ...CORS, "Cache-Control": "no-store" });
-  for (const [name, value] of response.headers)
-    if (SAFE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
-  return new Response(response.body, { status: response.status, headers });
 }
 
 export const expireLogs = (deps: Deps) =>

@@ -245,6 +245,20 @@ describe("the backend sandbox", () => {
     await t.server.db.update(org).set({ settings });
   });
 
+  test("an answer the browser can't be sent is a 502, not an unhandled error", async () => {
+    for (const answer of [
+      `new Response("x", { status: 99 })`,
+      `new Response("x", { headers: { etag: "a\\r\\nSet-Cookie: x=1" } })`,
+      `Object.defineProperty(new Response("x"), "_text", { value: { not: "text" } })`,
+    ]) {
+      const { call } = await deploy(`export default { fetch() { return ${answer}; } };`);
+      const response = await call("x");
+      expect(response.status).toBe(502);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    }
+  });
+
   test("a loop in top-level code times out, and doesn't hold other backends", async () => {
     const { org } = await import("../../src/db/schema.ts");
     const [row] = await t.server.db.select().from(org);
