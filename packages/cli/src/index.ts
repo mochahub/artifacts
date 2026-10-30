@@ -4,6 +4,7 @@ import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
 import { doctor } from "./commands/doctor.ts";
 import { setup } from "./commands/setup.ts";
+import { initCommand, lintCommand, openCommand, publishCommand, renderCommand } from "./commands/write.ts";
 import { normalizeUrl, pickServer } from "./config.ts";
 import { CliError, createOutput, UsageError } from "./output.ts";
 import { closePrompts } from "./prompt.ts";
@@ -15,6 +16,10 @@ const USAGE = `artifacts ${VERSION}
   artifacts login [<url>] | logout | whoami
   artifacts recover <url>
   artifacts doctor
+  artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype]
+  artifacts lint | render
+  artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]
+  artifacts open [<project>/<slug>] [--version <n>] [--page <key>]
 
 Every command takes --json and --server <url|name>.`;
 
@@ -30,14 +35,31 @@ const OPTIONS = {
   org: { type: "string" },
   name: { type: "string" },
   email: { type: "string" },
+  project: { type: "string" },
+  slug: { type: "string" },
+  kind: { type: "string" },
+  message: { type: "string", short: "m" },
+  note: { type: "string", multiple: true },
+  page: { type: "string" },
 } as const;
+
+/** `--version` is a boolean everywhere except `open --version <n>`, where it takes a number. */
+function optionAfter(flag: string) {
+  const index = process.argv.indexOf(flag);
+  return index > 0 ? process.argv[index + 1] : undefined;
+}
 
 async function main(argv: string[]) {
   let parsed: ReturnType<
     typeof parseArgs<{ args: string[]; options: typeof OPTIONS; allowPositionals: true }>
   >;
   try {
-    parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
+    // Its number would otherwise be read as a positional.
+    const args =
+      argv[0] === "open"
+        ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
+        : argv;
+    parsed = parseArgs({ args, options: OPTIONS, allowPositionals: true });
   } catch (error) {
     throw new UsageError((error as Error).message);
   }
@@ -79,6 +101,23 @@ async function main(argv: string[]) {
       return recover(first, values.email, out);
     case "doctor":
       return doctor(values.server, out);
+    case "init":
+      return initCommand({ project: values.project, slug: values.slug, kind: values.kind }, out);
+    case "lint":
+      return lintCommand(out);
+    case "render":
+      return renderCommand(out);
+    case "publish":
+      return publishCommand(
+        { message: values.message, name: values.name, notes: values.note ?? [], server: values.server },
+        out,
+      );
+    case "open":
+      return openCommand(
+        first,
+        { version: optionAfter("--version"), page: values.page, server: values.server },
+        out,
+      );
     default:
       throw new UsageError(`Unknown command "${command}".\n\n${USAGE}`);
   }

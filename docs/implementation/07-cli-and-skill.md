@@ -6,7 +6,7 @@
 
 - **Code:** TypeScript in `packages/cli`, compiled with `bun build --compile` for macOS (arm64, x64), Linux (x64, arm64) and Windows (x64).
 - **Release:** GitHub Releases attaches binaries and an `install.sh` that downloads the right one to `~/.artifacts/bin` and adds it to `PATH`. The npm package `@artifacts/cli` (with a `bin`) works with `bun add -g` and `bunx`.
-- **Playwright WebKit and sharp** are not bundled. On first `render`, the CLI installs `playwright-core`, `sharp`, `quickjs-emscripten` (for running backends locally; 08), the WebKit browser and its own render helper script into `~/.artifacts/playwright/`. It runs rendering, image encoding and pixel hashing by spawning **itself** as Bun on that helper (`BUN_BE_BUN=1 <cli binary> ~/.artifacts/playwright/render.mjs`), so nobody needs Bun or Node installed. Installs use the same trick: `BUN_BE_BUN=1 <cli> add playwright-core@<pinned> sharp@<pinned>`, then `BUN_BE_BUN=1 <cli> node_modules/playwright-core/cli.js install webkit`. Call `cli.js` directly, because `bun x` follows the package's `#!/usr/bin/env node` line and fails without Node. Spike S5 found that sharp can't load from inside a compiled binary, and that the binary doesn't resolve dependencies of packages loaded from another folder. The helper runs with normal module resolution, and this was verified on a Linux machine with no Bun or Node ([spikes.md](spikes.md#s5--the-compiled-bun-cli)).
+- **Playwright WebKit and sharp** are not bundled. On first `render`, the CLI installs `playwright-core`, `sharp`, `mermaid`, `quickjs-emscripten` (for running backends locally; 08), the WebKit browser and its own render helper script into `~/.artifacts/playwright/` (`ARTIFACTS_HELPER_DIR` moves it, for tests). It runs rendering, image encoding and pixel hashing by spawning **itself** as Bun on that helper (`BUN_BE_BUN=1 <cli binary> ~/.artifacts/playwright/render.mjs`), so nobody needs Bun or Node installed. Installs use the same trick: `BUN_BE_BUN=1 <cli> add playwright-core@<pinned> sharp@<pinned>`, then `BUN_BE_BUN=1 <cli> node_modules/playwright-core/cli.js install webkit`. Call `cli.js` directly, because `bun x` follows the package's `#!/usr/bin/env node` line and fails without Node. Spike S5 found that sharp can't load from inside a compiled binary, and that the binary doesn't resolve dependencies of packages loaded from another folder. The helper runs with normal module resolution, and this was verified on a Linux machine with no Bun or Node ([spikes.md](spikes.md#s5--the-compiled-bun-cli)).
 - **Linux needs WebKit's system libraries,** installed once as root. Without them, Playwright's install stops at its host check. `artifacts doctor` and the first `render` print the exact command: `sudo env BUN_BE_BUN=1 <cli> ~/.artifacts/playwright/node_modules/playwright-core/cli.js install-deps webkit`. macOS needs nothing extra.
 - **Version:** `artifacts --version`. Every request sends `Artifacts-CLI: <semver>`; a 426 from the server prints "Run artifacts upgrade".
 
@@ -18,7 +18,7 @@
 | `~/.config/artifacts/railway/<server name>/` | Folder the Railway CLI is linked in, so `railway init` never links the user's repo |
 | OS keychain, service `artifacts`, account `<server url>` | The CLI token |
 | `<repo>/artifact.json` | The manifest (05) |
-| `<repo>/.artifacts/` | Cache, renders, contact sheet, local data; the CLI adds it to `.gitignore` |
+| `<repo>/.artifacts/` | Renders, contact sheet, local data; the CLI adds it to `.gitignore` |
 | `<repo>/fixtures/` | Fixtures for rendering (05) |
 
 ## Credentials

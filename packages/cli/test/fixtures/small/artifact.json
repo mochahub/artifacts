@@ -1,0 +1,15 @@
+{
+  "project": "demo",
+  "slug": "small",
+  "title": "Small",
+  "pages": [
+    { "id": "plan", "kind": "article", "src": "README.md" },
+    {
+      "id": "mocks",
+      "kind": "canvas",
+      "boards": [{ "id": "main", "title": "Main", "src": "boards/main.html" }],
+      "styles": ["style.css"],
+      "scripts": []
+    }
+  ]
+}

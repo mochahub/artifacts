@@ -1,41 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { OWNER, signIn, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import { cli, sandbox, start } from "./sandbox.ts";
 
-const CLI = join(import.meta.dir, "../src/index.ts");
 const SETUP_TOKEN = "s".repeat(48);
-
-/** A throwaway home: tests must never touch the real keychain, config or skills folders. */
-function sandbox() {
-  const home = mkdtempSync(join(tmpdir(), "artifacts-cli-"));
-  return {
-    home,
-    env: {
-      PATH: process.env.PATH ?? "",
-      HOME: home,
-      XDG_CONFIG_HOME: join(home, ".config"),
-      ARTIFACTS_CREDENTIALS: "file",
-      ARTIFACTS_NO_BROWSER: "1",
-    } as Record<string, string>,
-  };
-}
-
-function start(args: string[], env: Record<string, string>) {
-  return Bun.spawn(["bun", CLI, ...args], { env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-}
-
-async function cli(args: string[], env: Record<string, string>) {
-  const child = start(args, env);
-  child.stdin.end();
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { stdout, stderr, code };
-}
 
 describe("the account commands against a real server", () => {
   let t: TestServer;

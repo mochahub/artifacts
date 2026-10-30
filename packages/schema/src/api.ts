@@ -315,6 +315,8 @@ export const PublishPrepared = z.object({
   artifactId: Id,
   missing: z.array(z.object({ sha256: Sha256, url: z.string(), headers: z.record(z.string(), z.string()) })),
 });
+export type PublishPrepared = z.infer<typeof PublishPrepared>;
+
 export const BoardRecord = z.object({
   key: z.string(),
   title: z.string(),

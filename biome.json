@@ -3,6 +3,8 @@
   "files": {
     "includes": [
       "**",
+      "!fixtures",
+      "!**/test/fixtures",
       "!spikes",
       "!docs",
       "!**/dist",
@@ -12,7 +14,18 @@
       "!**/*.svg"
     ]
   },
-  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 110 },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
-  "assist": { "enabled": true }
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 110
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": {
+    "enabled": true
+  }
 }
