@@ -463,4 +463,33 @@ describe("garbage collection", () => {
     expect(await t.server.bucket.head(`data/${ghost}/shared/x`)).toBeNull();
     expect(await t.server.bucket.head(`crops/${ghost}.webp`)).toBeNull();
   });
+
+  test("the sweep removes a crop no thread points at, even when its thread is still there", async () => {
+    // What purging a version leaves if the bucket failed after the thread's crop_key was cleared.
+    await publish(t, token, { slug: "crops", frameHash: hash("crops") });
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "crops"));
+    const make = async (pointed: boolean) => {
+      const threadId = Bun.randomUUIDv7();
+      const key = `crops/${threadId}.webp`;
+      await t.server.db.insert(threads).values({
+        id: threadId,
+        orgId: row?.orgId as string,
+        artifactId: row?.id as string,
+        n: pointed ? 101 : 100,
+        pageKey: "mocks",
+        createdVersion: 1,
+        authorName: "x",
+        authorPersonId: (await t.server.db.select().from(people))[0]?.id as string,
+        cropKey: pointed ? key : null,
+      });
+      await t.server.bucket.put(key, "x");
+      return key;
+    };
+    const forgotten = await make(false);
+    const kept = await make(true);
+    t.clock.advance(25 * 3600_000);
+    await gc();
+    expect(await t.server.bucket.head(forgotten)).toBeNull();
+    expect(await t.server.bucket.head(kept)).not.toBeNull();
+  });
 });
