@@ -221,6 +221,28 @@ describe("publishing", () => {
       json: { uploadId, files, pages: [], frames: [], blocks: [] },
     });
     expect(await error(commit)).toBe("too_large");
+
+    // Renders count too: each is looked up, and downloaded if it's new.
+    const frames = Array.from({ length: 5001 }, (_, i) => ({
+      pageKey: "mocks",
+      boardKey: "main",
+      frameKey: `f${i}`,
+      title: null,
+      device: null,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      contentHash: hash(`c${i}`),
+      renders: Object.fromEntries(["1x", "2x", "3x", "thumb"].map((size) => [size, hash(`${size}${i}`)])),
+      livePath: null,
+    }));
+    const withRenders = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: { uploadId, files: {}, pages: [], frames, blocks: [] },
+    });
+    expect(await error(withRenders)).toBe("too_large");
   });
 
   test("a backend module over the code limit is refused at commit, before it can be fetched per request", async () => {

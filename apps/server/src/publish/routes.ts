@@ -193,10 +193,6 @@ export function publishRoutes(routes: Routes, deps: Deps) {
 
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();
-    // Prepare takes at most this many (the schema), and every one is looked up and maybe downloaded here.
-    if (Object.keys(body.files).length > MAX_FILES) {
-      throw new ApiError("too_large", "That's too many files.", { limit: MAX_FILES });
-    }
     for (const [path, file] of Object.entries(body.files)) {
       checkType(path, file.type);
       wanted.set(file.hash, file.size);
@@ -210,6 +206,11 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     }
     if (body.backendHash && !wanted.has(body.backendHash)) {
       throw new ApiError("invalid", "The backend module isn't in the bundle.");
+    }
+    // Prepare declared at most this many files, renders included, and each hash is looked up and maybe
+    // downloaded here, so a manifest can't name more.
+    if (wanted.size > MAX_FILES) {
+      throw new ApiError("too_large", "That's too many files.", { limit: MAX_FILES });
     }
     await verifyBlobs(deps, org.id, wanted);
     // The sandbox fetches this module on every request, so a huge one must never get in (08).
