@@ -8,6 +8,7 @@ import {
   watch,
   writeFileSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { isDataKey } from "@artifacts/schema";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
@@ -48,6 +49,16 @@ export async function devCommand(flags: { port: number }, out: Output) {
   if (assets.size === 0) throw new CliError("The viewer isn't built. Run: bun run build");
   const viewerOrigin = `http://localhost:${flags.port}`;
   const contentOrigin = `http://127.0.0.1:${flags.port + 1}`;
+  // The content host answers any website with CORS *, as the real one does, and the real one keeps
+  // out strangers with a signed token in the path. This is that token: a page you happen to have
+  // open can't guess it, so it can't read the draft or drive its backend through your browser.
+  const secret = randomBytes(16).toString("hex");
+  /** Only these Host headers, so a name that a stranger's DNS points at this machine gets nothing (DNS rebinding). */
+  const hostsOf = (port: number) => new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]);
+  const viewerHosts = hostsOf(flags.port);
+  const contentHosts = hostsOf(flags.port + 1);
+  const wrongHost = (request: Request, allowed: Set<string>) =>
+    allowed.has(request.headers.get("host") ?? "") ? null : new Response("Wrong host", { status: 403 });
   const dataDir = join(root, ".artifacts/data");
   let version = 0;
   let built: RenderResult | null = null;
@@ -222,6 +233,8 @@ export async function devCommand(flags: { port: number }, out: Output) {
   }
 
   async function handle(request: Request) {
+    const refused = wrongHost(request, viewerHosts);
+    if (refused) return refused;
     const url = new URL(request.url);
     const path = url.pathname;
     const inArtifact = `/api/artifacts/${ID}`;
@@ -274,7 +287,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
     if (path === `${inArtifact}/versions/${version}`) return json(versionBody());
     if (path === `${inArtifact}/content-token`) {
       return json({
-        base: `${contentOrigin}/v${version}/`,
+        base: `${contentOrigin}/${secret}/v${version}/`,
         expiresAt: new Date(Date.now() + 7200_000).toISOString(),
       });
     }
@@ -285,7 +298,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
         ? new Response(Bun.file(found.path), { headers: { "Content-Type": found.type } })
         : fail(404, "not_found", "Not found.");
     }
-    const article = new RegExp(`^${inArtifact}/v/\\\\d+/article/(.+)$`).exec(path);
+    const article = new RegExp(`^${inArtifact}/v/\\d+/article/(.+)$`).exec(path);
     if (article) {
       const hash = built?.pages.find((page) => page.key === article[1])?.meta.htmlHash;
       const found = hash ? blob(hash) : null;
@@ -407,9 +420,11 @@ export async function devCommand(flags: { port: number }, out: Output) {
 
   /** Bundle files, under the same CSP the content host uses, so what works here works published. */
   function content(request: Request) {
-    const api = /^\/v\d+\/api\/(.*)$/.exec(new URL(request.url).pathname);
+    const refused = wrongHost(request, contentHosts);
+    if (refused) return refused;
+    const api = new RegExp(`^/${secret}/v\\d+/api/(.*)$`).exec(new URL(request.url).pathname);
     if (api) return backend(request, api[1] as string);
-    const match = /^\/v\d+\/(.*)$/.exec(new URL(request.url).pathname);
+    const match = new RegExp(`^/${secret}/v\\d+/(.*)$`).exec(new URL(request.url).pathname);
     const file = match ? built?.files.get(decodeURIComponent(match[1] as string)) : undefined;
     if (!file) return new Response("Not found", { status: 404 });
     return new Response(Bun.file(file.source), {
