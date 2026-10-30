@@ -35,6 +35,7 @@ import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, storedType, verifyBl
 const UPLOAD_INFO = "upload";
 const UPLOAD_HOURS = 2;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
+const MAX_FILES = 20_000;
 /** `type/subtype`, then optional parameters, in printable ASCII only: it becomes a response header (03). */
 const MEDIA_TYPE = /^[A-Za-z0-9][\w.+-]*\/[\w.+-]+(;[\x20-\x7e]*)?$/;
 const checkType = (path: string, type: string) => {
@@ -192,6 +193,10 @@ export function publishRoutes(routes: Routes, deps: Deps) {
 
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();
+    // Prepare takes at most this many (the schema), and every one is looked up and maybe downloaded here.
+    if (Object.keys(body.files).length > MAX_FILES) {
+      throw new ApiError("too_large", "That's too many files.", { limit: MAX_FILES });
+    }
     for (const [path, file] of Object.entries(body.files)) {
       checkType(path, file.type);
       wanted.set(file.hash, file.size);

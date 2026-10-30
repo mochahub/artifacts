@@ -205,6 +205,24 @@ describe("publishing", () => {
     expect(await error(commit)).toBe("invalid");
   });
 
+  test("commit takes no more files than prepare does", async () => {
+    const prepared = await t.api("/api/publish/prepare", {
+      method: "POST",
+      bearer: owner.token,
+      json: { project: "camerabuddy", slug: "many", title: "Many", files: [] },
+    });
+    const { uploadId } = PublishPrepared.parse(await prepared.json());
+    const files = Object.fromEntries(
+      Array.from({ length: 20_001 }, (_, i) => [`f${i}.txt`, { hash: hash(`f${i}`), size: 1, type: "text/plain" }]),
+    );
+    const commit = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: { uploadId, files, pages: [], frames: [], blocks: [] },
+    });
+    expect(await error(commit)).toBe("too_large");
+  });
+
   test("a backend module over the code limit is refused at commit, before it can be fetched per request", async () => {
     const big = `export default { fetch() { return new Response("x"); } };//${"x".repeat(1024 * 1024)}`;
     const response = await publish(t, owner.token, { slug: "bigbackend", backend: big });
