@@ -41,8 +41,15 @@ export function saveServer(entry: ServerEntry) {
   writeConfig({
     servers: [
       ...rest.map((server) => ({ ...server, default: false })),
-      // The name stays: it names the Railway folder (railwayDir), so a later `login` mustn't rename it.
-      { ...previous, ...entry, name: previous?.name ?? entry.name, default: true },
+      // A server set up here names itself (setup saves the hostname first, then "artifacts" with its
+      // Railway details). After that the name stays: railwayDir is named after it, so a later `login`
+      // saving the hostname mustn't rename it and point domain and upgrade at an unlinked folder.
+      {
+        ...previous,
+        ...entry,
+        name: entry.railway || entry.docker ? entry.name : (previous?.name ?? entry.name),
+        default: true,
+      },
     ],
   });
 }
