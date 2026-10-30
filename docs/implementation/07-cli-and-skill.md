@@ -126,7 +126,7 @@ Each rule has an id, a severity, and a message saying what's wrong and how to fi
 | `manifest/schema` | error | The manifest against the zod schema. |
 | `files/missing` | error | Referenced files exist. |
 | `files/absolute` | error | No absolute paths or URLs to other hosts (fonts, CDNs). |
-| `files/outside` | error | No paths outside the manifest folder. |
+| `files/outside` | error | No paths outside the manifest folder, and no symlinks that lead out of it (the crawl resolves links, so a cloned repo can't publish `~/.ssh` through one). |
 | `frames/ids` | error | Every frame has a unique `data-frame`; ids match `[a-z0-9-]+`. |
 | `frames/renamed` | warning, or error if it has open comments | A frame or block id that existed in the latest published version is missing; suggests the likely rename by pixel similarity. |
 | `frames/overlap` | error | Interactive elements that overlap other interactive elements in a frame (bounding boxes, after layout). |
