@@ -29,7 +29,8 @@ scripts/            dev.ts, test.ts, e2e.ts (behind the root scripts)
 |---|---|
 | Runtime and package manager | Bun (pinned in `.bun-version`), with workspaces in the root `package.json` |
 | Language | TypeScript, `strict: true`, project references per package |
-| Lint and format | Biome (one config at the root) |
+| Lint and format | Biome (one config at the root; it skips ignored files, like Playwright's `.auth.json`) |
+| Dependency updates | Dependabot: bun, Docker, Compose and Actions, weekly, minor and patch grouped |
 | Server framework | Hono on `Bun.serve`, one app per port |
 | Database | Postgres 17 (Railway Postgres in production), Drizzle ORM and drizzle-kit, the `postgres` driver |
 | Object storage | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` |
