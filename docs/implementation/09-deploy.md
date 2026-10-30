@@ -91,7 +91,7 @@ Put a reverse proxy (Caddy example in the README) in front for HTTPS. Passkeys a
 
 ## Releases (`.github/workflows/`)
 
-1. **`ci.yml`, on every push:**
+1. **`ci.yml`, on every push, on a Blacksmith runner (`blacksmith-4vcpu-ubuntu-2404`):**
    - `bun install`, typecheck, Biome lint
    - unit tests
    - API tests against Postgres and SeaweedFS, started from `docker-compose.test.yml` (SeaweedFS needs a command and a mounted key file, which `services:` can't give it)

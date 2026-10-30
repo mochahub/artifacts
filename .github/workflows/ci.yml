@@ -4,7 +4,8 @@ on: [push]
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Blacksmith, as in Perpetua. It only serves organizations, so this repo must live under one.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
