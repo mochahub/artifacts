@@ -188,6 +188,17 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   await page.getByRole("button", { name: "Sans" }).click();
   await expect(page.locator(".article")).toHaveAttribute("style", /--ui/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem("artifacts.read.font"))).toBe("sans");
+
+  // Dark is the reader's choice whatever the system is (these browsers run light), and only on this page.
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.getByRole("button", { name: "Dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect.poll(background).toBe("rgb(21, 23, 28)");
+  await page.getByRole("button", { name: "Light" }).click();
+  await expect.poll(background).toBe("rgb(245, 246, 248)");
+  await page.getByRole("button", { name: "Dark" }).click();
+  await page.getByRole("button", { name: "Auto" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
   await page.reload();
   await expect(page.locator(".article")).toHaveAttribute("style", /21px/);
   await expect(page.locator(".article")).toHaveAttribute("style", /--ui/);
