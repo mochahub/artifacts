@@ -28,6 +28,7 @@ export async function publish(
     renderBytes?: Uint8Array;
     frameKey?: string;
     backend?: string;
+    agent?: string;
   } = {},
 ) {
   const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame"), visibility } = options;
@@ -78,6 +79,7 @@ export async function publish(
     json: {
       uploadId: ready.uploadId,
       message: "First",
+      agent: options.agent,
       backendHash: module?.sha256 ?? null,
       files: bundle,
       pages: [

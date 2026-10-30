@@ -27,9 +27,11 @@ import {
   tokens,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { VERSION } from "../version.ts";
 import { isUuid } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
+import { latestRelease } from "./updates.ts";
 
 const HOUR = 3600_000;
 const OWNER_LOCK = 7_316_003;
@@ -86,10 +88,12 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     }
   }
 
-  routes.get("/api/org", { action: "org.read" }, (c) => {
+  routes.get("/api/org", { action: "org.read" }, async (c) => {
     const row = c.get("org");
+    const latest = await latestRelease(deps);
     return c.json({
       name: row.name,
+      newVersion: latest && Bun.semver.order(latest, VERSION) > 0 ? latest : null,
       settings: row.settings,
       domains: {
         home: row.homeDomain,

@@ -1,5 +1,10 @@
+import { useSignal } from "@preact/signals";
 import { render } from "preact";
+import { useEffect } from "preact/hooks";
 import { ErrorBoundary, LocationProvider, Route, Router } from "preact-iso";
+import { InstallSheet } from "./components/install.tsx";
+import { Sheet } from "./components/sheets.tsx";
+import { askInstall } from "./notify.ts";
 import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
 import { ArtifactPage } from "./routes/artifact.tsx";
@@ -14,12 +19,37 @@ import { PageRoute } from "./routes/page.tsx";
 import { ProjectPage } from "./routes/project.tsx";
 import { Projects } from "./routes/projects.tsx";
 import { Reset } from "./routes/reset.tsx";
+import { SearchBox, SearchPage } from "./routes/search.tsx";
 import { Settings } from "./routes/settings.tsx";
 import { SignIn } from "./routes/sign-in.tsx";
-import { boot, bootFailed, meta, ready } from "./session.ts";
+import { boot, bootFailed, me, meta, ready } from "./session.ts";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/kit.css";
+
+/** ⌘K, anywhere for anyone signed in (board 04). */
+function QuickSearch() {
+  const open = useSignal(false);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "k" && (event.metaKey || event.ctrlKey) && me.value) {
+        event.preventDefault();
+        open.value = !open.value;
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+  if (!open.value) return null;
+  const close = () => {
+    open.value = false;
+  };
+  return (
+    <Sheet title="Search" onClose={close}>
+      <SearchBox onPick={close} />
+    </Sheet>
+  );
+}
 
 function App() {
   if (!ready.value) return null;
@@ -39,6 +69,7 @@ function App() {
           <Route path="/" component={Home} />
           <Route path="/projects" component={Projects} />
           <Route path="/activity" component={Activity} />
+          <Route path="/search" component={SearchPage} />
           <Route path="/sign-in" component={SignIn} />
           <Route path="/device" component={Device} />
           <Route path="/reset/:token" component={Reset} />
@@ -55,10 +86,21 @@ function App() {
           <Route path="/:project/:artifact/:page" component={PageRoute} />
           <Route default component={NotFound} />
         </Router>
+        <QuickSearch />
+        {askInstall.value && (
+          <InstallSheet
+            onClose={() => {
+              askInstall.value = false;
+            }}
+          />
+        )}
       </ErrorBoundary>
     </LocationProvider>
   );
 }
 
 boot();
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 render(<App />, document.getElementById("app") as HTMLElement);

@@ -34,3 +34,6 @@ export async function api<T>(
 }
 
 export const post = <T>(path: string, json: unknown = {}) => api<T>(path, { method: "POST", json });
+export const del = <T>(path: string, json: unknown = {}) => api<T>(path, { method: "DELETE", json });
+export const message = (failure: unknown) =>
+  failure instanceof ApiFailure ? failure.message : "Something went wrong.";

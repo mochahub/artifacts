@@ -57,6 +57,13 @@
       "when": 1793375049948,
       "tag": "0007_rare_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793379470390,
+      "tag": "0008_gigantic_kat_farrell",
+      "breakpoints": true
     }
   ]
 }

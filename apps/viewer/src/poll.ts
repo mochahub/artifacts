@@ -1,6 +1,7 @@
 import { type Signal, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import { ApiFailure } from "./api.ts";
+import { live } from "./events.ts";
 
 export type Remote<T> = {
   data: Signal<T | null>;
@@ -45,7 +46,11 @@ export function usePoll<T>(path: string | null, everyMs: number): Remote<T> {
     data.value = null;
     last.value = "";
     refresh().catch(() => {});
+    let ticks = 0;
     const timer = setInterval(() => {
+      ticks += 1;
+      // With a stream open, fast polls drop to one a minute: a safety net for an event that got lost.
+      if (live.value && everyMs < 60_000 && (ticks * everyMs) % 60_000 !== 0) return;
       if (document.visibilityState === "visible") refresh().catch(() => {});
     }, everyMs);
     return () => clearInterval(timer);

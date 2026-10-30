@@ -1,0 +1,17 @@
+{
+  "project": "demo",
+  "projectName": "Demo",
+  "slug": "gallery",
+  "title": "Field photos",
+  "pages": [
+    {
+      "id": "photos",
+      "kind": "gallery",
+      "title": "Photos",
+      "items": [
+        { "src": "img/02-01.jpg", "caption": "First light" },
+        { "src": "img/02-03.jpg", "caption": "Second take" }
+      ]
+    }
+  ]
+}

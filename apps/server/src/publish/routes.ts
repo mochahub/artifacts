@@ -28,6 +28,7 @@ import {
   versions,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { notifyPublished } from "../push/notify.ts";
 import { reanchor } from "../review/reanchor.ts";
 import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
 
@@ -332,6 +333,14 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       };
     });
 
+    void deps.events.emit(ticket.artifactId, "version", { version: result.version });
+    void notifyPublished(deps, org.id, ticket.artifactId, {
+      project: ticket.project,
+      slug: ticket.slug,
+      title: ticket.title,
+      version: result.version,
+      agent: body.agent ?? null,
+    }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
     const response: PublishResult = {
       version: result.version,
       url: `${env.publicUrl}/${ticket.project}/${ticket.slug}`,

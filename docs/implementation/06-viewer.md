@@ -188,7 +188,7 @@ See [08-micro-apps.md](08-micro-apps.md#try-it). Phase 2.
 ## Polling, realtime and the service worker
 
 - **MVP polling:** poll with ETags: the open artifact's threads and versions every 10 seconds while the tab is visible; home and lists every 60 seconds.
-- **Phase 2 realtime:** switch to `GET /api/events` (SSE) when available.
+- **Phase 2 realtime:** an open artifact uses `GET /api/events` (SSE) and refreshes on each event. With a stream open, its fast polls drop to one a minute as a safety net.
 - **Service worker** (Phase 2, with the install prompt):
   - caches the app shell, plus renders and article HTML of versions you've opened (cache-first, since they're immutable)
   - fetches API calls network-first, with the last response kept for offline reading

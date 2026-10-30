@@ -503,6 +503,12 @@ export const Seen = z.object({
   position: z.unknown().optional(),
 });
 
+// Push
+export const PushSubscribe = z.object({
+  endpoint: z.string().url().max(1024),
+  keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(200) }),
+});
+
 // Data store
 export const DataPut = z.object({ value: z.json() });
 export const DataList = z.object({

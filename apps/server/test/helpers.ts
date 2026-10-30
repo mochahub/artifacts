@@ -52,7 +52,7 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
 export function viewerFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "artifacts-viewer-"));
   mkdirSync(join(dir, "assets"));
-  writeFileSync(join(dir, "index.html"), "<!doctype html><title>viewer</title>");
+  writeFileSync(join(dir, "index.html"), "<!doctype html><head><title>viewer</title></head>");
   writeFileSync(join(dir, "icon.svg"), "<svg/>");
   writeFileSync(join(dir, "assets/index-abc.js"), "console.log(1)");
   return dir;
@@ -74,7 +74,10 @@ export function testClock(start = new Date()) {
 const hitsFile = process.env.ARTIFACTS_ROUTE_HITS;
 
 /** A real server on a fresh database, with helpers for calling it as a browser or a CLI. */
-export async function startTestServer(overrides: Record<string, string> = {}) {
+export async function startTestServer(
+  overrides: Record<string, string> = {},
+  options: { pushAllow?: (endpoint: string) => boolean } = {},
+) {
   const database = await createDatabase();
   const clock = testClock();
   const server = await startServer(testEnv(database.url, overrides), {
@@ -82,6 +85,7 @@ export async function startTestServer(overrides: Record<string, string> = {}) {
     clock,
     viewerDir: viewerFixture(),
     jobs: false,
+    pushAllow: options.pushAllow,
     onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
   });
   const base = `http://127.0.0.1:${server.ports.viewer}`;

@@ -94,6 +94,9 @@ async function applyData(
       ifMatch: op.ifMatch === "*" ? undefined : op.ifMatch,
       ifNoneMatch: op.ifMatch === "*",
     });
+    if (path.scope === "shared") {
+      void deps.events.emit(scope.artifactId, "data", { scope: "shared", key: op.key, etag: written.etag });
+    }
     return { value: written };
   }
   await deleteValue(deps, {
@@ -103,6 +106,9 @@ async function applyData(
     objectKey: path.key,
     ifMatch: op.ifMatch,
   });
+  if (path.scope === "shared") {
+    void deps.events.emit(scope.artifactId, "data", { scope: "shared", key: op.key, etag: null });
+  }
   return { value: true };
 }
 

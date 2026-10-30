@@ -70,6 +70,7 @@ export const ManifestPage = z.discriminatedUnion("kind", [
   z.object({
     id: Key,
     kind: z.literal("gallery"),
+    title: z.string().optional(),
     items: z.array(z.object({ src: RelPath, caption: z.string().optional() })),
   }),
 ]);

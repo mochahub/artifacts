@@ -38,6 +38,12 @@ export function dataRoutes(routes: Routes, deps: Deps) {
   };
   const prefix = (c: ApiContext, files = false) =>
     scopePath(c.req.param("id") as string, scopeOf(c), scopeOf(c) === "me" ? myId(c) : null, files);
+  /** Only `shared`: a `me` key is one person's, and its name says nothing anyone else should see. */
+  const changed = (c: ApiContext, key: string, etag: string | null) => {
+    if (scopeOf(c) === "shared") {
+      void deps.events.emit(c.req.param("id") as string, "data", { scope: "shared", key, etag });
+    }
+  };
   const limited = (c: ApiContext) => {
     const key = callerKey(c.get("caller")) ?? "token";
     rate.hit(`data:${c.req.param("id")}:${key}`, c.get("org").settings.limits.writesPerSecond, 1000);
@@ -95,6 +101,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
           ifNoneMatch: c.req.header("if-none-match") === "*",
         }),
       );
+      changed(c as ApiContext, key, result.etag);
       return c.json(result);
     },
   );
@@ -114,6 +121,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
           ifMatch: c.req.header("if-match")?.replaceAll('"', ""),
         }),
       );
+      changed(c as ApiContext, key, null);
       return c.json({ ok: true });
     },
   );

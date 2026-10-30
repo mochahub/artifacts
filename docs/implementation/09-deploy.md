@@ -61,7 +61,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 | `OPS_SECRET` | yes | 64 random chars | For `/internal/jobs/*` |
 | `PORT`, `CONTENT_PORT`, `INTERNAL_PORT` | no | 8080, 8081, 8082 | |
 | `LOG_LEVEL` | no | `info` | JSON logs to stdout |
-| `GITHUB_RELEASES_REPO` | no | `<org>/artifacts` | For the "new version available" notice |
+| `GITHUB_RELEASES_REPO` | no | none | `<org>/artifacts`, for the "new version available" notice in Settings. Unset, or a private repo: no notice. |
 
 
 **Rotating `SESSION_SECRET`** signs everyone out and invalidates open content tokens (short-lived). Nothing stored depends on it, so it's safe to rotate after a suspected leak. `org.pseudonym_key`, in Postgres, is never rotated, because `me` data is keyed by pseudonym.

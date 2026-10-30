@@ -1,22 +1,26 @@
 import { join, resolve, sep } from "node:path";
 import type { Context, MiddlewareHandler } from "hono";
+import type { Deps } from "../api/deps.ts";
 import type { Env } from "../env.ts";
 import { ApiError } from "./errors.ts";
+import { unfurl } from "./unfurl.ts";
 
 /** Response headers from 04, "CSRF, hosts and headers". */
 export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
-  const csp = [
-    "default-src 'self'",
-    ...(env.contentUrl ? [`frame-src ${env.contentUrl}`] : []),
-    `img-src 'self' data: blob: ${bucket}`,
-    "connect-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "base-uri 'none'",
-    "frame-ancestors 'none'",
-  ].join("; ");
+  const csp = (connect: string) =>
+    [
+      "default-src 'self'",
+      ...(env.contentUrl ? [`frame-src ${env.contentUrl}`] : []),
+      `img-src 'self' data: blob: ${bucket}`,
+      `connect-src ${connect}`,
+      "style-src 'self' 'unsafe-inline'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'",
+    ].join("; ");
   return async (c, next) => {
     await next();
-    c.header("Content-Security-Policy", csp);
+    // Only the service worker fetches from the bucket: renders redirect there, and it caches them.
+    c.header("Content-Security-Policy", csp(c.req.path === "/sw.js" ? `'self' ${bucket}` : "'self'"));
     c.header("Strict-Transport-Security", "max-age=31536000");
     c.header("X-Frame-Options", "DENY");
     c.header("Referrer-Policy", "same-origin");
@@ -40,7 +44,7 @@ export function requireViewerHost(env: Env, homeDomain: () => Promise<string | n
 }
 
 /** Serves the built viewer: hashed assets forever, and index.html for every client-side route. */
-export function serveViewer(dir: string | null) {
+export function serveViewer(dir: string | null, deps: Deps) {
   const root = dir && resolve(dir);
   const file = (path: string, cacheControl: string) =>
     new Response(Bun.file(path), { headers: { "Cache-Control": cacheControl } });
@@ -59,6 +63,7 @@ export function serveViewer(dir: string | null) {
       return file(target, immutable ? "public, max-age=31536000, immutable" : "no-cache");
     }
     if (immutable) throw new ApiError("not_found", "Not found.");
-    return file(join(root, "index.html"), "no-cache");
+    const html = await Bun.file(join(root, "index.html")).text();
+    return c.html(await unfurl(c, deps, html), 200, { "Cache-Control": "no-cache" });
   };
 }

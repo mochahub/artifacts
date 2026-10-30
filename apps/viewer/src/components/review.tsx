@@ -4,6 +4,7 @@ import { Check, X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { ApiFailure, api, post } from "../api.ts";
 import { agentInitials, agentShort, ago } from "../format.ts";
+import { askInstall, shouldAsk } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { me } from "../session.ts";
 import { Sheet } from "./sheets.tsx";
@@ -64,6 +65,7 @@ export function CommentSheet({
           version,
         }),
       );
+      if (me.value && shouldAsk()) askInstall.value = true;
     } catch (failure) {
       error.value = message(failure);
       busy.value = false;

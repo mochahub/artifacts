@@ -9,6 +9,7 @@ import { activity, artifacts, blocks, comments, decisions, frames, threads, vers
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
 import { blobKey } from "../publish/blobs.ts";
+import { notifyReply } from "../push/notify.ts";
 import { cropAround } from "./crop.ts";
 
 const MINUTE = 60_000;
@@ -283,6 +284,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
       { thread: row.n, version: body.version },
       author.agent,
     );
+    void deps.events.emit(row.artifactId, "thread", { thread: row.n });
     return c.json((await threadViews([final]))[0]);
   });
 
@@ -348,6 +350,12 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
         { thread: thread.n, version: latest },
         author.agent,
       );
+      void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
+      void notifyReply(deps, c.get("org").id, thread, {
+        authorName: author.agent ?? (comment as CommentRow).authorName,
+        body: (comment as CommentRow).body,
+        actor: author.agent ? null : (comment as CommentRow).authorPersonId,
+      });
       return c.json(commentView(comment as CommentRow));
     },
   );
@@ -366,6 +374,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
       .where(eq(threads.id, thread.id))
       .returning();
     await recordActivity(c, thread, resolved ? "resolved" : "reopened", { thread: thread.n });
+    void deps.events.emit(thread.artifactId, "thread", { thread: thread.n });
     return c.json((await threadViews([row as ThreadRow]))[0]);
   };
   routes.post("/api/threads/:id/resolve", { action: "thread.resolve", resource: threadArtifact }, (c) =>
@@ -471,6 +480,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
         version: body.version,
         note: body.note ?? null,
       });
+      void deps.events.emit(artifactId, "decision", { version: body.version });
       return c.json({ ok: true });
     },
   );

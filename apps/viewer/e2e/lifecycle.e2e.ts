@@ -23,7 +23,7 @@ test("archive shows the banner and stops comments; unarchive undoes it", async (
   await page.goto("/camerabuddy");
   await page.getByRole("button", { name: "Archived" }).click();
   // The iPhone and desktop runs share a project, so this looks for its own.
-  await expect(page.locator(".tile").filter({ hasText: slug })).toHaveCount(1);
+  await expect(page.getByText(`Roadmap ${slug}`)).toBeVisible();
   await shot(page, info.project.name, "07-4-archived-filter");
   await page.goto(`/camerabuddy/${slug}`);
   await page.getByRole("button", { name: "Unarchive" }).click();
@@ -73,7 +73,7 @@ test("version history: preview, name, restore and compare", async ({ page }, inf
   await expect(sheet.getByText("First draft")).toBeVisible();
   await sheet.getByRole("link", { name: "Compare" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("v1 and v2");
-  await expect(page.getByText("mocks/live-view")).toBeVisible();
+  await expect(page.locator(".tt", { hasText: "mocks/live-view" })).toBeVisible();
 
   await page.goto(`/camerabuddy/${slug}`);
   await page.getByRole("button", { name: "Version history" }).click();

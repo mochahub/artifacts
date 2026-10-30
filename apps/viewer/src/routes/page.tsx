@@ -4,10 +4,12 @@ import { lazy, useLocation, useRoute } from "preact-iso";
 import type { ArticlePage } from "../article/view.tsx";
 import type { CanvasPage } from "../canvas/view.tsx";
 import { PageSwitcher, VersionSheet } from "../components/sheets.tsx";
+import { useEvents } from "../events.ts";
 import type { PrototypePage } from "../live/prototype.tsx";
 import { usePoll } from "../poll.ts";
 import { artifactPath } from "./artifact.tsx";
 import { Deleted } from "./deleted.tsx";
+import { type GalleryPage, GalleryView } from "./gallery.tsx";
 import { useSignInOn401 } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
 
@@ -32,6 +34,10 @@ function Page() {
     3_600_000,
   );
   const threads = usePoll<Thread[]>(artifact ? `/api/artifacts/${artifact.id}/threads` : null, 10_000);
+  useEvents(artifact?.id, () => {
+    remote.refresh().catch(() => {});
+    threads.refresh().catch(() => {});
+  });
   const pages = useSignal(false);
   const versions = useSignal(false);
 
@@ -60,6 +66,14 @@ function Page() {
         <PrototypeView
           artifact={artifact}
           page={page as unknown as PrototypePage}
+          version={version}
+          onPages={chrome.onPages}
+          onVersions={chrome.onVersions}
+        />
+      ) : page.kind === "gallery" ? (
+        <GalleryView
+          artifact={artifact}
+          page={page as unknown as GalleryPage}
           version={version}
           onPages={chrome.onPages}
           onVersions={chrome.onVersions}

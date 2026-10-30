@@ -137,7 +137,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. If deleted: 410 `gone` with only `details: { deletedAt }` for a caller who passes the visibility rule in 04 with `deleted_at` ignored, otherwise 404. |
 | `GET /api/artifacts/:id` | `artifact.read` | Same. |
 | `PATCH /api/artifacts/:id` | `artifact.manage` | `{ visibility? }` |
-| `GET /api/search?q=` | `home.read` | Phase 2 (⌘K): artifacts, pages, comments. |
+| `GET /api/search?q=` | `home.read` | Phase 2 (⌘K, Search tab): `{ artifacts, pages, comments }`, 20 each, only what the caller can see. |
 | `GET /api/activity?filter=all\|agents\|people&before=` | `home.read` | Activity rows the caller can see. |
 
 `ArtifactCard` = `{ id, project, slug, title, cover: { renderHash } | { title }, pageCount, latestVersion, status: { kind: "waiting"|"with_agent"|"approved"|"not_reviewed", agent?, version? }, counts: { open, repliesToYou, changedFrames }, publishedBy, agent, publishedAt, archivedAt }`.
@@ -176,7 +176,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 | `GET /api/artifacts/:id/versions/:n` | `artifact.read` | `{ n, pages: [Page], notes }`. `Page` for canvas: `{ key, kind, title, boards, frames: [{ key, board, title, device, x, y, w, h, contentHash, renders, live: bool, changed: bool }] }`; for article: `{ key, kind, title, htmlHash, outline, blocks: [{ key, contentHash, changed }] }`. |
 | `PATCH /api/artifacts/:id/versions/:n` | `artifact.publish` | `{ name }` |
 | `POST /api/artifacts/:id/versions/:n/restore` | `artifact.publish` | Publishes a copy as the next version (same `files`, `backend_hash`, frames, blocks), with `restored_from = n`; re-anchors threads; → `{ n }` |
-| `GET /api/artifacts/:id/compare?from=&to=` | `artifact.read` | `{ frames: { added, removed, changed }, blocks: { added, removed, changed }, notes }`. Phase 2 adds pixel regions per changed frame: `regions: [{ x, y, w, h }]` as 0–1 fractions. |
+| `GET /api/artifacts/:id/compare?from=&to=` | `artifact.read` | `{ frames: { added, removed, changed }, blocks: { added, removed, changed }, notes }`. `frames.regions` maps each changed frame (the first 40) to `{ before, after, regions }`: the two @2x render hashes and `[{ x, y, w, h }]` as 0–1 fractions, at most 12. |
 
 ## Files and renders (viewer port)
 
@@ -289,6 +289,6 @@ Backends don't use the internal API: they run in sandbox processes that talk to 
 
 | Method, path | Notes |
 |---|---|
-| `GET /api/events?artifact=<id>` | Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`). Fan-out across replicas with Postgres `LISTEN/NOTIFY`. |
-| `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → VAPID public key. |
+| `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. A stream closes after 5 minutes and the browser reconnects, which rechecks access. 10 streams per caller. |
+| `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. 10 devices per person. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |

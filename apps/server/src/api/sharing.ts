@@ -229,6 +229,15 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     return row;
   }
 
+  const ogHash = async (artifactId: string, n: number) => {
+    const [version] = await db
+      .select({ files: versions.files })
+      .from(versions)
+      .where(and(eq(versions.artifactId, artifactId), eq(versions.n, n)))
+      .limit(1);
+    return (version?.files as Record<string, { hash: string }> | undefined)?.["__og.webp"]?.hash ?? null;
+  };
+
   routes.get("/api/s/:token", { public: true }, async (c) => {
     const { link, artifact: row, project, sharedBy } = await liveLink(c as ApiContext);
     const [first] = await db
@@ -265,6 +274,8 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
 
   routes.get("/api/s/:token/cover", { public: true }, async (c) => {
     const { artifact: row } = await liveLink(c as ApiContext);
+    const hash = await ogHash(row.id, row.latestVersion);
+    if (hash) return c.redirect(await deps.bucket.presignGet(`blobs/${hash}`), 302);
     const [first] = await db
       .select({ renders: frames.renders })
       .from(frames)

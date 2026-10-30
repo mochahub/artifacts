@@ -1,6 +1,6 @@
 import type { Artifact, ArtifactCard, Home } from "@artifacts/schema";
 import { Seen } from "@artifacts/schema";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
 import {
@@ -32,6 +32,8 @@ const viewerId = (caller: Caller) =>
     : caller.kind === "guest"
       ? { guest: caller.guestId }
       : {};
+
+const RESULTS = 20;
 
 /** Everything this caller can see, filtered by can() and nothing else. */
 async function visible(deps: Deps, c: ApiContext, projectId?: string): Promise<Loaded[]> {
@@ -247,6 +249,66 @@ const matches = (text: string, q: string | undefined) => !q || text.toLowerCase(
 export function listRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
   const artifactById = artifactParam(deps);
+
+  routes.get("/api/search", { action: "home.read" }, async (c) => {
+    const q = (c.req.query("q") ?? "").trim().toLowerCase().slice(0, 100);
+    if (q.length < 2) return c.json({ artifacts: [], pages: [], comments: [] });
+    const list = await visible(deps, c as ApiContext);
+    const known = new Map(list.map((entry) => [entry.row.id, entry]));
+    const ids = [...known.keys()];
+    if (ids.length === 0) return c.json({ artifacts: [], pages: [], comments: [] });
+    const where = (entry: Loaded) => ({
+      id: entry.row.id,
+      project: entry.projectSlug,
+      slug: entry.row.slug,
+      title: entry.row.title,
+    });
+    const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    const [pageRows, commentRows] = await Promise.all([
+      deps.db
+        .select({ artifactId: versions.artifactId, n: versions.n, key: pages.pageKey, title: pages.title })
+        .from(pages)
+        .innerJoin(versions, eq(versions.id, pages.versionId))
+        .innerJoin(artifacts, eq(artifacts.id, versions.artifactId))
+        .where(
+          and(
+            inArray(versions.artifactId, ids),
+            eq(versions.n, artifacts.latestVersion),
+            ilike(pages.title, like),
+          ),
+        )
+        .limit(RESULTS),
+      deps.db
+        .select({
+          thread: threads.n,
+          artifactId: threads.artifactId,
+          body: comments.body,
+          author: comments.authorName,
+        })
+        .from(comments)
+        .innerJoin(threads, eq(threads.id, comments.threadId))
+        .where(and(inArray(threads.artifactId, ids), ilike(comments.body, like)))
+        .orderBy(desc(comments.createdAt))
+        .limit(RESULTS),
+    ]);
+    return c.json({
+      artifacts: list
+        .filter((entry) => entry.row.title.toLowerCase().includes(q) || entry.row.slug.includes(q))
+        .slice(0, RESULTS)
+        .map(where),
+      pages: pageRows.map((row) => ({
+        ...where(known.get(row.artifactId) as Loaded),
+        pageKey: row.key,
+        pageTitle: row.title,
+      })),
+      comments: commentRows.map((row) => ({
+        ...where(known.get(row.artifactId) as Loaded),
+        thread: row.thread,
+        body: row.body.slice(0, 200),
+        author: row.author,
+      })),
+    });
+  });
 
   routes.get("/api/home", { action: "home.read" }, async (c) => {
     const list = await visible(deps, c as ApiContext);
