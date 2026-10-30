@@ -1,6 +1,7 @@
+import { isDataKey } from "@artifacts/schema";
 import { type Output, UsageError } from "../output.ts";
 import { signedIn } from "./account.ts";
-import { resolveArtifact } from "./review.ts";
+import { resolveArtifact, versionNumber } from "./review.ts";
 
 type ListPage = { keys: { key: string; size: number; updatedAt: string }[]; nextCursor: string | null };
 
@@ -11,6 +12,7 @@ export async function logsCommand(
   flags: { follow?: boolean; version?: string; server?: string },
   out: Output,
 ) {
+  if (flags.version) versionNumber(flags.version, "--version");
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
   const query = flags.version ? `version=${flags.version}&` : "";
@@ -37,6 +39,8 @@ export async function dataCommand(
 ) {
   const scope = flags.scope ?? "shared";
   if (scope !== "shared" && scope !== "me") throw new UsageError("--scope is shared or me.");
+  // A key with a ".." part would climb out of the data/ path in the URL.
+  if (sub === "get" && key && !isDataKey(key)) throw new UsageError(`"${key}" isn't a valid data key.`);
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, flags.target);
   const base = `/api/artifacts/${artifact.id}`;

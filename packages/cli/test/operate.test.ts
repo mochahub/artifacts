@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OWNER, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import { checksumFor } from "../src/commands/operate.ts";
 import { fakeRailway } from "./fake-railway.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
@@ -125,6 +126,47 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
       "service source connect --image ghcr.io/mochahub/artifacts:0.1.0 --service artifacts",
     );
   });
+
+  test("a domain that is really a flag or a list of origins is refused", async () => {
+    const { env: e, log } = env();
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length : 0);
+    const before = calls();
+    for (const bad of ["art.example.com,https://evil.test", "https://art.example.com", "a b.com"]) {
+      expect((await cli(["domain", "add", bad], e)).code).toBe(2);
+    }
+    // After "--", a value that starts with a dash is still a value.
+    expect((await cli(["domain", "add", "--", "--help"], e)).code).toBe(2);
+    expect(calls()).toBe(before);
+  });
+
+  test("upgrade refuses a version that isn't a number, and a release site that isn't https", async () => {
+    const { env: e, log } = env();
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length : 0);
+    const before = calls();
+    expect((await cli(["upgrade", "--server", "--to", "1.0.0\nSESSION_SECRET=x"], e)).code).toBe(2);
+    expect((await cli(["upgrade", "--server", "--to", "../../x"], e)).code).toBe(2);
+    expect(calls()).toBe(before);
+
+    const insecure = await cli(["upgrade"], {
+      ...e,
+      ARTIFACTS_LATEST_URL: "http://releases.example.com/latest",
+    });
+    expect(insecure.code).toBe(1);
+    expect(insecure.stderr).toContain("isn't https");
+  });
+});
+
+describe("checksums", () => {
+  test("a file name has to match whole, not just at its end", () => {
+    const sums = `${"a".repeat(64)}  evil-artifacts-linux-x64\n${"b".repeat(64)}  artifacts-linux-x64\n`;
+    expect(checksumFor(sums, "artifacts-linux-x64")).toBe("b".repeat(64));
+    expect(
+      checksumFor(`${"a".repeat(64)}  evil-artifacts-linux-x64\n`, "artifacts-linux-x64"),
+    ).toBeUndefined();
+    expect(checksumFor(`${"c".repeat(64)} *artifacts-linux-x64\n`, "artifacts-linux-x64")).toBe(
+      "c".repeat(64),
+    );
+  });
 });
 
 describe("install.sh", () => {
@@ -163,5 +205,65 @@ describe("install.sh", () => {
     expect(await bad.exited).toBe(1);
     expect(await new Response(bad.stderr).text()).toContain("checksum");
     server.stop(true);
+  });
+});
+
+describe("install.sh, when something is off", () => {
+  const box = sandbox();
+  const site = join(box.home, "site");
+  const os = process.platform === "darwin" ? "darwin" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const name = `artifacts-${os}-${arch}`;
+  const body = "#!/bin/sh\necho installed\n";
+  const sum = createHash("sha256").update(body).digest("hex");
+  mkdirSync(join(site, "v9.9.9"), { recursive: true });
+  writeFileSync(join(site, "v9.9.9", name), body);
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (request) => new Response(Bun.file(join(site, new URL(request.url).pathname))),
+  });
+  afterAll(() => server.stop(true));
+  const script = join(import.meta.dir, "../../../scripts/install.sh");
+
+  async function install(env: Record<string, string> = {}) {
+    const child = Bun.spawn(["sh", script], {
+      env: {
+        ...box.env,
+        ARTIFACTS_RELEASES_URL: `http://127.0.0.1:${server.port}`,
+        ARTIFACTS_VERSION: "9.9.9",
+        ...env,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return { code: await child.exited, stderr: await new Response(child.stderr).text() };
+  }
+
+  test("a sums file with no line for this binary stops it, even if another name ends the same", async () => {
+    writeFileSync(join(site, "v9.9.9/SHA256SUMS"), `${sum}  evil-${name}\n`);
+    const result = await install();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("no checksum");
+  });
+
+  test("a version that isn't a number, or a site that isn't https, stops it", async () => {
+    writeFileSync(join(site, "v9.9.9/SHA256SUMS"), `${sum}  ${name}\n`);
+    const version = await install({ ARTIFACTS_VERSION: "../../evil" });
+    expect(version.code).toBe(1);
+    expect(version.stderr).toContain("isn't a version number");
+    const plain = await install({ ARTIFACTS_RELEASES_URL: "http://releases.example.com" });
+    expect(plain.code).toBe(1);
+    expect(plain.stderr).toContain("isn't https");
+  });
+
+  test("running it twice adds the PATH line once", async () => {
+    writeFileSync(join(site, "v9.9.9/SHA256SUMS"), `${sum}  ${name}\n`);
+    writeFileSync(join(box.home, ".zshrc"), "# mine\n");
+    expect((await install()).code).toBe(0);
+    expect((await install()).code).toBe(0);
+    const profile = readFileSync(join(box.home, ".zshrc"), "utf8");
+    expect(profile.split(".artifacts/bin").length - 1).toBe(1);
+    expect(profile).toStartWith("# mine\n");
   });
 });

@@ -24,9 +24,16 @@ const stty = (arg: string) => {
 /** Reads without echoing it. */
 export async function askSecret(question: string): Promise<string> {
   stty("-echo");
+  // Ctrl-C at a password prompt would otherwise leave the person's terminal not echoing what they type.
+  const interrupted = () => {
+    stty("echo");
+    process.exit(130);
+  };
+  process.once("SIGINT", interrupted);
   try {
     return await ask(question);
   } finally {
+    process.off("SIGINT", interrupted);
     stty("echo");
     if (process.stdin.isTTY) process.stderr.write("\n");
   }
