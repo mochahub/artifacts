@@ -308,6 +308,19 @@ describe("lifecycle", () => {
     expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(200);
   });
 
+  test("the daily purge leaves what was restored and deleted again since it chose it", async () => {
+    const row = await fresh();
+    await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    // The job chose this one when its 30 days were up; then it came back, and went again.
+    const chosen = { ...row, deletedAt: row.createdAt, purgeAfter: new Date(0) };
+    await post(`/api/artifacts/${row.id}/undelete`, { bearer: token });
+    await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    expect(await purgeArtifact(t.server.deps, chosen, null)).toBe(false);
+    expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(410);
+    // A person's purge doesn't wait for the 30 days.
+    expect(await purgeArtifact(t.server.deps, chosen, personId)).toBe(true);
+  });
+
   test("agents' lifecycle actions are marked as theirs", async () => {
     const row = await fresh();
     await t.api(`/api/artifacts/${row.id}/archive`, {
