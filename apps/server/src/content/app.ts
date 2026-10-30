@@ -11,6 +11,7 @@ import { createApp } from "../http/app.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { bucketOrigin } from "../s3.ts";
+import { corsPreflight, runBackend } from "./proxy.ts";
 import { type ContentPayload, verifyContentToken } from "./token.ts";
 
 const RECHECK_MS = 5000;
@@ -188,6 +189,28 @@ export function createContentApp(deps: Deps) {
       throw new ApiError("forbidden", "Live previews only open inside the viewer.");
     }
     await next();
+  });
+
+  /** The token and access checks every path shares; returns the caller as they are now. */
+  async function authorize(token: string, version: number) {
+    const payload = verifyContentToken(env, token);
+    if (!payload || payload.exp <= clock.now().getTime() || payload.v !== version) {
+      throw new ApiError("forbidden", "This link expired.");
+    }
+    if (!(await stillAllowed(token, payload))) throw new ApiError("not_found", "Not found.");
+    const caller = await currentCaller(payload);
+    if (!caller) throw new ApiError("not_found", "Not found.");
+    return { payload, caller };
+  }
+
+  app.all("/t/:token/:version/api/*", async (c) => {
+    const match = /^v(\d+)$/.exec(c.req.param("version"));
+    if (!match) throw new ApiError("not_found", "Not found.");
+    const prefix = `/t/${c.req.param("token")}/${c.req.param("version")}/api/`;
+    const { payload, caller } = await authorize(c.req.param("token"), Number(match[1]));
+    if (c.req.method === "OPTIONS") return corsPreflight();
+    if (!deps.sandbox) throw new ApiError("not_found", "Not found.");
+    return runBackend(c, deps, deps.sandbox, payload, caller, c.req.path.slice(prefix.length));
   });
 
   app.get("/t/:token/:version/*", async (c) => {

@@ -1,5 +1,6 @@
 import { gt, inArray, lt, sql } from "drizzle-orm";
 import type { Deps } from "../api/deps.ts";
+import { expireLogs } from "../content/proxy.ts";
 import { recountUsage } from "../data/store.ts";
 import {
   artifacts,
@@ -117,6 +118,7 @@ export async function expireLeftovers(deps: Deps) {
   await deps.db.delete(deviceCodes).where(lt(deviceCodes.expiresAt, now));
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
+  await expireLogs(deps);
 }
 
 /** Recounts usage for artifacts written since yesterday (08). */

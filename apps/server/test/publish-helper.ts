@@ -27,6 +27,7 @@ export async function publish(
     tamper?: string;
     renderBytes?: Uint8Array;
     frameKey?: string;
+    backend?: string;
   } = {},
 ) {
   const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame"), visibility } = options;
@@ -43,7 +44,12 @@ export async function publish(
         size: options.renderBytes.length,
       }
     : file("__renders/a.webp", `render-${frameHash}`, "image/webp");
-  const files = [...(options.files ?? [page, article, render]), ...(options.extra ?? [])];
+  const module = options.backend ? file("__backend.js", options.backend, "text/javascript") : null;
+  const files = [
+    ...(options.files ?? [page, article, render]),
+    ...(options.extra ?? []),
+    ...(module ? [module] : []),
+  ];
   const prepared = await t.api("/api/publish/prepare", {
     method: "POST",
     bearer,
@@ -72,6 +78,7 @@ export async function publish(
     json: {
       uploadId: ready.uploadId,
       message: "First",
+      backendHash: module?.sha256 ?? null,
       files: bundle,
       pages: [
         {

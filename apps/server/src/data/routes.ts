@@ -1,9 +1,9 @@
 import { DataClear, DataPut } from "@artifacts/schema";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { artifactParam } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
-import { artifactUsage, guestLinks, people, shareLinks } from "../db/schema.ts";
+import { artifactUsage, backendLogs, guestLinks, people, shareLinks } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { deletePrefix } from "../jobs/purge.ts";
 import { PreconditionFailed } from "../s3.ts";
@@ -173,6 +173,33 @@ export function dataRoutes(routes: Routes, deps: Deps) {
       return c.json({ ok: true });
     },
   );
+
+  routes.get("/api/artifacts/:id/logs", { action: "data.export", resource: artifact }, async (c) => {
+    const version = Number(c.req.query("version"));
+    const after = c.req.query("after");
+    const rows = await db
+      .select()
+      .from(backendLogs)
+      .where(
+        and(
+          eq(backendLogs.artifactId, c.req.param("id") as string),
+          Number.isInteger(version) && version > 0 ? eq(backendLogs.version, version) : undefined,
+          after ? gt(backendLogs.id, after) : undefined,
+        ),
+      )
+      .orderBy(asc(backendLogs.id))
+      .limit(500);
+    return c.json(
+      rows.map((row) => ({
+        id: row.id,
+        version: row.version,
+        level: row.level,
+        message: row.message,
+        requestId: row.requestId,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    );
+  });
 
   /** Pseudonym to display name, for the publisher's export (08). */
   async function names(c: ApiContext) {

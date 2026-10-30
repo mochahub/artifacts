@@ -50,6 +50,13 @@
       "when": 1793372912497,
       "tag": "0006_noisy_diamondback",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793375049948,
+      "tag": "0007_rare_junta",
+      "breakpoints": true
     }
   ]
 }

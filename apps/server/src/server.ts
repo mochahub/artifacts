@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_ORG_SETTINGS } from "@artifacts/schema";
 import type { Context } from "hono";
 import { routePath } from "hono/route";
 import type { Deps } from "./api/deps.ts";
@@ -20,6 +21,7 @@ import { createInternalApp } from "./internal/app.ts";
 import { jobsFor, startJobs } from "./jobs/index.ts";
 import type { Logger } from "./log.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
+import { SandboxPool } from "./sandbox/pool.ts";
 
 export type StartOptions = {
   log: Logger;
@@ -92,7 +94,12 @@ export async function startServer(env: Env, options: StartOptions) {
     limits: new RateLimits(clock),
     origins: async () => viewerOrigins(env, await currentHomeDomain()),
     clientIp,
+    sandbox: null,
   };
+  deps.sandbox = new SandboxPool(
+    org?.settings.sandboxProcesses ?? DEFAULT_ORG_SETTINGS.sandboxProcesses,
+    log,
+  );
 
   const viewer = createApp(log) as unknown as ReturnType<typeof createApp> & import("hono").Hono<ApiVars>;
   viewer.use(viewerHeaders(env, bucketOrigin(env.s3)));
@@ -140,6 +147,7 @@ export async function startServer(env: Env, options: StartOptions) {
     deps,
     async stop() {
       stopJobs();
+      deps.sandbox?.stop();
       await Promise.all(servers.map((server) => server.stop(true)));
       await close();
     },

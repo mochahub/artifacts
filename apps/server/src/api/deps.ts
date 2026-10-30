@@ -5,6 +5,7 @@ import type { Db } from "../db/index.ts";
 import type { Env } from "../env.ts";
 import type { Logger } from "../log.ts";
 import type { Bucket } from "../s3.ts";
+import type { SandboxPool } from "../sandbox/pool.ts";
 
 /** What route handlers need from the server. */
 export type Deps = {
@@ -17,4 +18,6 @@ export type Deps = {
   /** Every viewer origin, including the home domain once setup has run. */
   origins(): Promise<string[]>;
   clientIp(c: Context): string;
+  /** Null until the first backend runs on a server with none; tests can leave it out. */
+  sandbox: SandboxPool | null;
 };

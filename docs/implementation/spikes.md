@@ -130,6 +130,18 @@ The capability boundary is WebAssembly memory safety in Bun's engine, a strong, 
 
 **Recommendation: D, QuickJS in a child process of the app** (after the Fable audit, 2026-10-30): the same code, but the sandbox runs in a `Bun.spawn` child with an empty environment and only an IPC channel, so even an engine-level escape can't reach the database URL, bucket keys or `SESSION_SECRET`. One capped WebAssembly instance per backend, a small pool, per-request deadlines, size caps on requests, responses and logs, and eviction of instances whose memory grew. It's the simplest of the four, and the only one that enforces both the 10-second and the 128 MB limit per backend. **Decided 2026-10-30** (the user agreed): SPEC §7, §7.5, §7.9, §11, §12 and §15, and 01, 02, 03, 04, 08, 09, 10 and 11 now describe the sandbox, and the runner service is gone.
 
+### Pre-checks for M10 (2026-10-30, `spikes/s10/`)
+
+`bun spikes/s10/run.ts`, against the real child-process design:
+
+| Check | Result |
+|---|---|
+| `Bun.spawn` with `ipc` and an empty environment | ✓ The child sees no variables, and a secret set in the parent doesn't reach it. An async host call over IPC works. |
+| One backend per child | ✓ A second child answered in 37 ms during a busy loop in the first, which was interrupted at its 1,000 ms deadline. |
+| Freeing with `env.DATA` in flight | ✗ as designed: `JS_FreeRuntime` asserts, which aborts emscripten. **But the abort is a catchable `RuntimeError`,** and the same child ran the next request. So teardown tries, ignores a failure and drops the instance. |
+| Floods and recursion | ✓ Typed-array, string and heap floods give "out of memory", deep recursion gives "stack overflow", all inside the backend. RSS stayed at 97–214 MB and the child stayed up. |
+| A crash | ✓ The exit reaches the parent. |
+
 ## S5 · The compiled Bun CLI
 
 **Scripts:** `spikes/s5-cli.ts` (compiled probe), `spikes/s5-linux-inner.sh` (the same in Linux containers), `spikes/s5-server-sharp.ts`, `spikes/.pw/rt/helper.mjs`.
