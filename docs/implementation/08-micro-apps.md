@@ -159,7 +159,7 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 - **Warm cache:** up to 16 instances per child (least recently used), and an instance idle for 10 minutes is discarded.
 
 **Limits, enforced per request:**
-- **Time:** a wall-clock deadline of `backendTimeoutMs` from when the request starts running (queue time doesn't count). QuickJS's interrupt handler enforces it while code runs, top-level code on load included; the app enforces it while the backend awaits `env.DATA`. On timeout: 504, and the instance is discarded.
+- **Time:** a wall-clock deadline of `backendTimeoutMs` from when the request starts running (queue time doesn't count). QuickJS's interrupt handler enforces it while code runs, top-level code on load included; the app enforces it while the backend awaits `env.DATA`. On timeout: 504, and the instance is discarded. As a backstop the app kills a child that is still on a request 2 seconds after its deadline; that clock starts when the child picks the request up (it tells the app), not when the app sent it, because a child runs one request at a time and a request can wait behind another backend's loop.
 - **Memory:** an allocation past the limit throws "out of memory" inside the backend. The request answers 500 and the instance is discarded. **After every request**, an instance whose WebAssembly memory has grown past half of `backendMemoryMb` is discarded too, because WebAssembly memory never shrinks.
 - **Logs:** 100 lines per request, 8 KB per line, and 1 MB per artifact per minute. Past that, lines are dropped.
 - **Headers:** only `content-type`, `etag` and `last-modified` pass, and `Cache-Control` is always `no-store`, because an answer can hold one caller's data.

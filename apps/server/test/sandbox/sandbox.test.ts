@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import { hash, makePerson, publish } from "../publish-helper.ts";
 
 const POLL = `
 export default {
@@ -301,6 +301,33 @@ describe("the backend sandbox", () => {
     settings.limits.backendTimeoutMs = 10_000;
     await t.server.db.update(org).set({ settings });
   });
+
+  test("busy loops on a child can't get a waiting backend on it killed", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
+    settings.limits.backendTimeoutMs = 500;
+    await t.server.db.update(org).set({ settings });
+    // A child runs one request at a time, and an author can pick which child a backend lands on.
+    const onFirstChild = (make: (i: number) => string) => {
+      for (let i = 0; ; i++) if (Number.parseInt(hash(make(i)).slice(0, 8), 16) % 2 === 0) return make(i);
+    };
+    const looper = (seed: number) =>
+      onFirstChild((i) => `// loop ${seed}.${i}\nexport default { fetch() { while (true) {} } };`);
+    const victim = await deploy(
+      onFirstChild((i) => `// v${i}\nexport default { fetch() { return Response.json("alive"); } };`),
+    );
+    const loops = await Promise.all(Array.from({ length: 8 }, (_, i) => deploy(looper(i))));
+    expect((await victim.call("x")).status).toBe(200); // Warm.
+    const running = loops.map((loop) => loop.call("x"));
+    await Bun.sleep(150);
+    // It waits behind eight loops of half a second each, which is longer than the child's backstop.
+    const answer = await victim.call("x");
+    expect(answer.status).toBe(200);
+    expect(await Promise.all(running.map(async (r) => (await r).status))).toEqual(Array(8).fill(504));
+    settings.limits.backendTimeoutMs = 10_000;
+    await t.server.db.update(org).set({ settings });
+  }, 30_000);
 
   for (const [name, source] of [
     ["typed arrays", "const k = []; while (true) k.push(new Uint8Array(1 << 20));"],

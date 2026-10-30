@@ -116,6 +116,9 @@ async function load(hash, code, prelude, limits) {
 
 async function run(message) {
   const { id, hash, limits, request } = message;
+  // The parent's backstop clock starts here, not when it sent the message: this process does one thing
+  // at a time, so a request can wait behind another backend's loop without having done anything wrong.
+  process.send({ t: "started", id });
   const logs = [];
   const answer = (body) => process.send({ t: "done", id, logs, ...body });
   let instance = instances.get(hash);
