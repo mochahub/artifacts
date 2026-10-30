@@ -17,7 +17,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M8 Distribution | `m8-distribution` | `9356dac` | green |
 | M9 Micro apps I | `m9-micro-apps` | `0eb0aeb` | green |
 | M10 Micro apps II | `m10-backends` | `7708f14` | green |
-| M11 Live review | `m11-live` | see git log | see the last line of Verified |
+| M11 Live review | `m11-live` | `b4977b5` | green |
 
 ## Verified
 
