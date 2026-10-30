@@ -205,6 +205,13 @@ describe("publishing", () => {
     expect(await error(commit)).toBe("invalid");
   });
 
+  test("a backend module over the code limit is refused at commit, before it can be fetched per request", async () => {
+    const big = `export default { fetch() { return new Response("x"); } };//${"x".repeat(1024 * 1024)}`;
+    const response = await publish(t, owner.token, { slug: "bigbackend", backend: big });
+    expect(await error(response)).toBe("too_large");
+    expect((await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bigbackend"))).length).toBe(0);
+  });
+
   test("a bundle file is stored as an inert type, so /r/ can't serve a page or script on the viewer's origin", async () => {
     const page = file("evil.html", `<script src="x.js"></script>${Bun.randomUUIDv7()}`, "text/html");
     const script = file("x.js", `alert(1)//${Bun.randomUUIDv7()}`, "text/javascript");
