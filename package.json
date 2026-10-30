@@ -1,0 +1,26 @@
+{
+  "name": "artifacts",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "test": "bun scripts/test.ts",
+    "e2e": "bun scripts/e2e.ts",
+    "lint": "biome check . && tsc -b",
+    "format": "biome check --write .",
+    "build": "bun run --filter @artifacts/viewer build && bun run --filter @artifacts/server build",
+    "size": "bun run --filter @artifacts/viewer size",
+    "db:generate": "bun run --filter @artifacts/server db:generate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.4",
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

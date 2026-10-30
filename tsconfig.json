@@ -1,0 +1,4 @@
+{
+  "files": [],
+  "references": [{ "path": "packages/schema" }, { "path": "apps/server" }, { "path": "apps/viewer" }]
+}
