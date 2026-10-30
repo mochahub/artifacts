@@ -200,3 +200,63 @@ describe("install.sh", () => {
     server.stop(true);
   });
 });
+
+describe("install.sh, when something is off", () => {
+  const box = sandbox();
+  const site = join(box.home, "site");
+  const os = process.platform === "darwin" ? "darwin" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const name = `artifacts-${os}-${arch}`;
+  const body = "#!/bin/sh\necho installed\n";
+  const sum = createHash("sha256").update(body).digest("hex");
+  mkdirSync(join(site, "v9.9.9"), { recursive: true });
+  writeFileSync(join(site, "v9.9.9", name), body);
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (request) => new Response(Bun.file(join(site, new URL(request.url).pathname))),
+  });
+  afterAll(() => server.stop(true));
+  const script = join(import.meta.dir, "../../../scripts/install.sh");
+
+  async function install(env: Record<string, string> = {}) {
+    const child = Bun.spawn(["sh", script], {
+      env: {
+        ...box.env,
+        ARTIFACTS_RELEASES_URL: `http://127.0.0.1:${server.port}`,
+        ARTIFACTS_VERSION: "9.9.9",
+        ...env,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return { code: await child.exited, stderr: await new Response(child.stderr).text() };
+  }
+
+  test("a sums file with no line for this binary stops it, even if another name ends the same", async () => {
+    writeFileSync(join(site, "v9.9.9/SHA256SUMS"), `${sum}  evil-${name}\n`);
+    const result = await install();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("no checksum");
+  });
+
+  test("a version that isn't a number, or a site that isn't https, stops it", async () => {
+    writeFileSync(join(site, "v9.9.9/SHA256SUMS"), `${sum}  ${name}\n`);
+    const version = await install({ ARTIFACTS_VERSION: "../../evil" });
+    expect(version.code).toBe(1);
+    expect(version.stderr).toContain("isn't a version number");
+    const plain = await install({ ARTIFACTS_RELEASES_URL: "http://releases.example.com" });
+    expect(plain.code).toBe(1);
+    expect(plain.stderr).toContain("isn't https");
+  });
+
+  test("running it twice adds the PATH line once", async () => {
+    writeFileSync(join(site, "v9.9.9/SHA256SUMS"), `${sum}  ${name}\n`);
+    writeFileSync(join(box.home, ".zshrc"), "# mine\n");
+    expect((await install()).code).toBe(0);
+    expect((await install()).code).toBe(0);
+    const profile = readFileSync(join(box.home, ".zshrc"), "utf8");
+    expect(profile.split(".artifacts/bin").length - 1).toBe(1);
+    expect(profile).toStartWith("# mine\n");
+  });
+});
