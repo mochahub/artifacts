@@ -2,9 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DevicePollResult, DeviceStarted, Me, SessionRow } from "@artifacts/schema";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { RateLimits } from "../../src/auth/rate-limit.ts";
 import { sha256 } from "../../src/auth/secrets.ts";
 import { deviceCodes, org, people, resetLinks, sessions, tokens } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { claim, OWNER, signIn, startTestServer, type TestServer, testClock } from "../helpers.ts";
 
 const error = async (response: Response) =>
   ((await response.json()) as { error: { code: string } }).error.code;
@@ -59,6 +60,27 @@ describe("setup mode", () => {
 
   test("setup runs once", async () => {
     expect((await t.api("/api/setup", { method: "POST", json: setupBody })).status).toBe(409);
+  });
+
+  test("once set up, the token is never checked, so guesses learn nothing", async () => {
+    const wrong = await t.api("/api/setup", { method: "POST", json: { ...setupBody, setupToken: "no" } });
+    expect(wrong.status).toBe(409);
+  });
+});
+
+describe("setup mode guesses", () => {
+  let t: TestServer;
+  beforeAll(async () => {
+    t = await startTestServer();
+  });
+  afterAll(() => t.stop());
+
+  test("wrong tokens are limited to 20 per IP per hour", async () => {
+    const guess = () => t.api("/api/setup", { method: "POST", json: { ...setupBody, setupToken: "no" } });
+    for (let i = 0; i < 20; i++) expect((await guess()).status).toBe(403);
+    expect((await guess()).status).toBe(429);
+    t.clock.advance(3601_000);
+    expect((await guess()).status).toBe(403);
   });
 });
 
@@ -147,6 +169,32 @@ describe("signing in", () => {
     });
     expect(evil.status).toBe(403);
     expect((await t.api("/api/me", { cookie })).status).toBe(200);
+  });
+
+  test("CSRF: only a Bearer token skips the Origin check, not any Authorization header", async () => {
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    const raw = (headers: Record<string, string>) =>
+      fetch(`http://127.0.0.1:${t.server.ports.viewer}/api/auth/logout`, {
+        method: "POST",
+        headers: { Host: "viewer.test", Cookie: cookie, ...headers },
+      });
+    // The server would still read the cookie here, so the header can't be a way round the check.
+    expect(await error(await raw({ Authorization: "Basic eDp4" }))).toBe("csrf");
+    expect(await error(await raw({ Authorization: "bearer lowercase", Origin: "http://evil.test" }))).toBe(
+      "csrf",
+    );
+    expect((await t.api("/api/me", { cookie })).status).toBe(200);
+    // A real token needs no Origin: it carries no cookie, so it reaches the route (which wants a browser).
+    const bearer = await fetch(`http://127.0.0.1:${t.server.ports.viewer}/api/auth/reauth`, {
+      method: "POST",
+      headers: {
+        Host: "viewer.test",
+        Authorization: `Bearer ${owner.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ password: OWNER.password }),
+    });
+    expect(await error(bearer)).toBe("forbidden");
   });
 
   test("CSRF: a browser on another site can't sign someone in", async () => {
@@ -289,6 +337,47 @@ describe("rate limits", () => {
     }
     expect(statuses.filter((s) => s === 401)).toHaveLength(30);
     expect(statuses.at(-1)).toBe(429);
+  });
+});
+
+describe("rate limit memory and input bounds", () => {
+  test("random addresses can't pile up failures forever, or wipe everyone's limits", () => {
+    const clock = testClock();
+    const limits = new RateLimits(clock);
+    const failures = () => (limits as unknown as { accountFailures: Map<string, number[]> }).accountFailures;
+    const hits = () => (limits as unknown as { hits: Map<string, number[]> }).hits;
+    for (let i = 0; i < 50_000; i++) limits.passwordFailed(`guess${i}@example.com`);
+    clock.advance(3 * 3600_000);
+    limits.passwordFailed("one-more@example.com");
+    expect(failures().size).toBeLessThan(100);
+
+    // Keys that are all still live past the cap lose only the oldest ones, not every limit at once.
+    for (let i = 0; i < 50_001; i++) limits.hit(`ip:${i}`, 5, 3600_000);
+    expect(hits().size).toBeLessThanOrEqual(50_000);
+    expect(hits().size).toBeGreaterThan(40_000);
+    for (let i = 0; i < 50_001; i++) limits.passwordFailed(`live${i}@example.com`);
+    expect(failures().size).toBeLessThanOrEqual(50_000);
+    expect(failures().size).toBeGreaterThan(40_000);
+  });
+
+  test("an oversized password is refused without counting against the account", async () => {
+    const t = await startTestServer();
+    try {
+      await claim(t);
+      const attempt = (password: string) =>
+        t.api("/api/auth/password", { method: "POST", json: { email: OWNER.email, password } });
+      for (let i = 0; i < 8; i++) expect((await attempt("x".repeat(257))).status).toBe(401);
+      expect((await attempt(OWNER.password)).status).toBe(200);
+      const cookie = await signIn(t, OWNER.email, OWNER.password);
+      const reauth = await t.api("/api/auth/reauth", {
+        method: "POST",
+        cookie,
+        json: { password: "x".repeat(100_000) },
+      });
+      expect(reauth.status).toBe(401);
+    } finally {
+      await t.stop();
+    }
   });
 });
 
@@ -456,5 +545,65 @@ describe("recovery and reset", () => {
       statuses.push((await recover({ setupToken: "x", email: OWNER.email })).status);
     expect(statuses.slice(0, 5).every((status) => status === 403)).toBe(true);
     expect(statuses.at(-1)).toBe(429);
+  });
+});
+
+describe("reset links after a password is set", () => {
+  let t: TestServer;
+  beforeAll(async () => {
+    t = await startTestServer();
+    await claim(t);
+  });
+  afterAll(() => t.stop());
+
+  const recover = async () => {
+    const { resetUrl } = (await (
+      await t.api("/api/recover", { method: "POST", json: { setupToken: SETUP, email: OWNER.email } })
+    ).json()) as { resetUrl: string };
+    return (resetUrl.split("/reset/")[1] as string).trim();
+  };
+
+  test("using one link retires the person's other unused links", async () => {
+    const [first, second] = [await recover(), await recover()] as [string, string];
+    const reset = await t.api(`/api/reset/${first}`, {
+      method: "POST",
+      json: { password: "a freshly reset password" },
+    });
+    expect(reset.status).toBe(200);
+    expect((await t.api(`/api/reset/${second}`)).status).toBe(410);
+  });
+
+  test("so does changing the password while signed in", async () => {
+    const cookie = await signIn(t, OWNER.email, "a freshly reset password");
+    const pending = await recover();
+    const changed = await t.api("/api/me/password", {
+      method: "POST",
+      cookie,
+      json: { password: "yet another long password" },
+    });
+    expect(changed.status).toBe(200);
+    expect((await t.api(`/api/reset/${pending}`)).status).toBe(410);
+  });
+});
+
+describe("guessing device codes", () => {
+  let t: TestServer;
+  let cookie: string;
+  beforeAll(async () => {
+    t = await startTestServer();
+    await claim(t);
+    cookie = await signIn(t, OWNER.email, OWNER.password);
+  });
+  afterAll(() => t.stop());
+
+  test("a signed-in person gets 30 code lookups per 15 minutes, hits or misses", async () => {
+    const lookup = (code: string) => t.api(`/api/device/${code}`, { cookie });
+    for (let i = 0; i < 30; i++) expect((await lookup("BBBB-BBBB")).status).toBe(404);
+    expect((await lookup("BBBB-BBBB")).status).toBe(429);
+    const approve = await t.api("/api/device/BBBB-BBBB/approve", { method: "POST", cookie });
+    expect(approve.status).toBe(429);
+    t.clock.advance(15 * 60_000 + 1000);
+    cookie = await signIn(t, OWNER.email, OWNER.password);
+    expect((await lookup("BBBB-BBBB")).status).toBe(404);
   });
 });

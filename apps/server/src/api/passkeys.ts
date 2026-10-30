@@ -109,6 +109,8 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
   }
 
   routes.post("/api/auth/passkey/options", { public: true }, async (c) => {
+    // Every call writes a row for 5 minutes, and anyone can make one.
+    deps.limits.hit(`passkey-options:${deps.clientIp(c)}`, 60, 15 * 60_000);
     const { local } = await parseBody(c, PasskeyOptions);
     const options = await generateAuthenticationOptions({
       rpID: rpFor(c as ApiContext, local),

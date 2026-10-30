@@ -41,7 +41,9 @@ export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
     }
     if (path === "/api/health" || path === "/api/meta") return next();
 
-    if (c.req.method !== "GET" && c.req.method !== "HEAD" && !c.req.header("authorization")) {
+    // Only a Bearer token skips this, since it is the only header resolveCaller uses in place of cookies.
+    const bearer = c.req.header("authorization")?.startsWith("Bearer ");
+    if (c.req.method !== "GET" && c.req.method !== "HEAD" && !bearer) {
       const origin = c.req.header("origin");
       const cookies = c.req.header("cookie") ?? "";
       const hasCookie = cookies.includes(`${SESSION_COOKIE}=`) || cookies.includes(`${GUEST_COOKIE}=`);
