@@ -81,6 +81,32 @@ test("the bridge ignores other windows, and a frame can't name another artifact"
   expect(answered).toBe(false);
 });
 
+test("a frame can't climb out of its data with a key", async ({ page }, info) => {
+  const slug = slugFor(info.project.name);
+  await page.goto(`/demo/${slug}/poll`);
+  await expect(live(page).getByRole("heading", { name: "Which direction?" })).toBeVisible();
+  const reached: string[] = [];
+  page.on("request", (request) => {
+    if (/\/api\/(people|me)(\/|$|\?)/.test(new URL(request.url()).pathname)) reached.push(request.url());
+  });
+  const answer = await live(page)
+    .locator("body")
+    .evaluate(
+      () =>
+        new Promise((done) => {
+          addEventListener("message", (event) => {
+            if (event.data?.id === "climb") done(event.data);
+          });
+          parent.postMessage(
+            { artifacts: 1, id: "climb", op: { kind: "get", scope: "shared", key: "../../../../people" } },
+            "*",
+          );
+        }),
+    );
+  expect(answer).toMatchObject({ ok: false, error: { code: "invalid" } });
+  expect(reached).toEqual([]);
+});
+
 test("the poll with a backend: votes stay hidden, totals come back", async ({ page }, info) => {
   const slug = `poll-b-${info.project.name}`;
   publishFixture("micro-app-poll-backend", slug, token());

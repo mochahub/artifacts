@@ -8,7 +8,8 @@ import {
   watch,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { isDataKey } from "@artifacts/schema";
 // @ts-expect-error: plain JavaScript shared with the server
 import { startChild } from "../../../sandbox/src/host.js";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
@@ -25,6 +26,9 @@ const PERSON = {
   email: "you@localhost",
   role: "owner",
 };
+
+/** What the server lets a backend set; the rest never reaches the browser. */
+const SAFE_HEADERS = new Set(["content-type", "etag", "last-modified"]);
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -198,7 +202,15 @@ export async function devCommand(flags: { port: number }, out: Output) {
   const etagOf = (path: string) =>
     existsSync(path) ? String(Math.floor(statSync(path).mtimeMs * 1000)) : "";
 
+  /** A key names a place in the data folder, so a bundle someone else wrote can't leave it. */
+  const inData = (path: string) => {
+    const full = resolve(path);
+    if (!full.startsWith(resolve(dataDir) + sep)) throw new CliError("Keys stay in the data folder.");
+    return full;
+  };
+
   async function putData(request: Request, kind: string, scope: string, key: string) {
+    if (!isDataKey(key)) return fail(400, "invalid", "That isn't a valid key.");
     const path = join(dataDir, kind === "files" ? "files" : "", scope, key);
     const ifMatch = request.headers.get("if-match");
     if (ifMatch && etagOf(path) !== ifMatch) return fail(412, "precondition_failed", "Someone wrote first.");
@@ -290,7 +302,9 @@ export async function devCommand(flags: { port: number }, out: Output) {
       return dataRoute(request, kind, scope, decodeURIComponent(key)) ?? fail(405, "invalid", "No.");
     }
     if (path.startsWith("/__data/")) {
-      const file = join(dataDir, "files", path.slice("/__data/".length));
+      const name = decodeURIComponent(path.slice("/__data/".length));
+      if (!isDataKey(name)) return fail(404, "not_found", "Not found.");
+      const file = join(dataDir, "files", name);
       return existsSync(file) ? new Response(Bun.file(file)) : fail(404, "not_found", "Not found.");
     }
     if (path.startsWith("/api/")) return fail(404, "not_found", "That isn't available locally.");
@@ -337,14 +351,36 @@ export async function devCommand(flags: { port: number }, out: Output) {
         body: await request.text(),
       },
       onData: async (raw: string) => {
-        const op = JSON.parse(raw) as { op: string; key?: string; prefix?: string; value?: unknown };
-        const key = op.key && !/^(shared|me|files)\//.test(op.key) ? `shared/${op.key}` : op.key;
-        const file = join(dataDir, key ?? "");
-        if (op.op === "get")
-          return { value: existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null };
+        const op = JSON.parse(raw) as {
+          op: string;
+          key?: string;
+          prefix?: string;
+          value?: unknown;
+          ifMatch?: string;
+        };
+        const named = op.op === "list" ? op.prefix || "shared/" : (op.key ?? "");
+        if (!isDataKey(named)) return { error: { code: "invalid", message: "That isn't a valid key." } };
+        const key = /^(shared|me|files)\//.test(named) ? named : `shared/${named}`;
+        const file = inData(join(dataDir, key));
+        if (op.op === "list") {
+          const bare = !op.prefix || key !== named;
+          const stored = existsSync(dataDir) ? [...new Bun.Glob("**/*").scanSync(dataDir)] : [];
+          const keys = stored
+            .filter((name) => name.startsWith(key))
+            .map((name) => (bare ? name.slice("shared/".length) : name));
+          return { value: { keys, nextCursor: null } };
+        }
+        if (op.op === "get") {
+          if (!existsSync(file)) return { value: null };
+          return { value: { value: JSON.parse(readFileSync(file, "utf8")), etag: etagOf(file) } };
+        }
+        if (op.ifMatch && (op.ifMatch === "*" ? existsSync(file) : etagOf(file) !== op.ifMatch)) {
+          return { error: { code: "precondition_failed", message: "Someone wrote first." } };
+        }
         if (op.op === "put") {
           mkdirSync(dirname(file), { recursive: true });
           writeFileSync(file, JSON.stringify(op.value));
+          return { value: { etag: etagOf(file) } };
         }
         if (op.op === "delete") rmSync(file, { force: true });
         return { value: true };
@@ -352,9 +388,12 @@ export async function devCommand(flags: { port: number }, out: Output) {
     });
     for (const line of logs ?? []) out.say(`backend ${line.level}: ${line.message}`);
     if (!response) return new Response('{"error":"The sandbox stopped."}', { status: 502, headers: CORS });
+    const safe = (response.headers as [string, string][]).filter(([name]) =>
+      SAFE_HEADERS.has(name.toLowerCase()),
+    );
     return new Response(response.body, {
       status: response.status,
-      headers: { ...CORS, ...Object.fromEntries(response.headers) },
+      headers: { ...CORS, "Cache-Control": "no-store", ...Object.fromEntries(safe) },
     });
   }
 

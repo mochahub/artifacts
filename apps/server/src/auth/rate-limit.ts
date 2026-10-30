@@ -14,6 +14,7 @@ const limited = (retryAfterMs: number) =>
 export class RateLimits {
   private readonly hits = new Map<string, number[]>();
   private readonly accountFailures = new Map<string, number[]>();
+  private readonly budgets = new Map<string, { start: number; used: number }>();
 
   constructor(private readonly clock: Clock) {}
 
@@ -40,6 +41,17 @@ export class RateLimits {
     if (kept.length >= limit) throw limited((kept[0] as number) + windowMs - now);
     kept.push(now);
     this.hits.set(key, kept);
+  }
+
+  /** Takes `amount` from a budget that refills every `windowMs`; false when it would go over. */
+  spend(key: string, amount: number, limit: number, windowMs: number) {
+    const now = this.clock.now().getTime();
+    const budget = this.budgets.get(key);
+    const current = budget && now - budget.start < windowMs ? budget : { start: now, used: 0 };
+    this.budgets.set(key, current);
+    if (current.used + amount > limit) return false;
+    current.used += amount;
+    return true;
   }
 
   /** 5 failures per account per 15 minutes, then 1 attempt a minute, doubling to an hour (04). */

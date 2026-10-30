@@ -13,6 +13,8 @@ const MAX_LOG_LINES = 100;
 const MAX_LOG_BYTES = 8192;
 const MB = 1024 * 1024;
 const PAGE = 65536;
+const MAX_DATA_AT_ONCE = 8;
+const MAX_DATA_CALLS = 200;
 
 const instances = new Map();
 const calls = new Map();
@@ -56,17 +58,37 @@ async function load(hash, code, prelude, limits) {
   });
   const data = ctx.newFunction("data", (json) => {
     const deferred = ctx.newPromise();
-    const id = ++nextCall;
-    const run = instance.current;
-    calls.set(id, (answer) => {
-      calls.delete(id);
-      if (!ctx.alive) return;
+    const settle = (answer) => {
       const value = ctx.newString(answer);
       deferred.resolve(value);
       value.dispose();
+    };
+    const refuse = (code, message) => {
+      settle(JSON.stringify({ error: { code, message } }));
+      return deferred.handle;
+    };
+    // Bare work after a response has no request to belong to, so it never reaches the app.
+    const run = instance.current;
+    if (!run) return refuse("forbidden", "That request is over.");
+    if (++run.dataCalls > MAX_DATA_CALLS)
+      return refuse("rate_limited", "Too many data calls in one request.");
+    const op = ctx.getString(json);
+    if (op.length > run.maxDataOp) return refuse("too_large", "That's over the limit for saved data.");
+    const id = ++nextCall;
+    const send = () => {
+      run.dataActive += 1;
+      process.send({ t: "data", id: run.id, call: id, op });
+    };
+    calls.set(id, (answer) => {
+      calls.delete(id);
+      run.dataActive -= 1;
+      run.dataWaiting.shift()?.();
+      if (!ctx.alive) return;
+      settle(answer);
       rt.executePendingJobs();
     });
-    process.send({ t: "data", id: run?.id, call: id, op: ctx.getString(json) });
+    if (run.dataActive < MAX_DATA_AT_ONCE) send();
+    else run.dataWaiting.push(send);
     return deferred.handle;
   });
   ctx.setProp(host, "log", log);
@@ -77,12 +99,16 @@ async function load(hash, code, prelude, limits) {
   host.dispose();
 
   ctx.unwrapResult(ctx.evalCode(prelude, "prelude.js")).dispose();
+  // Top-level code gets the same clock as a request, or a loop there would hold this whole process.
+  rt.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + limits.timeoutMs));
   const backend = ctx.unwrapResult(ctx.evalCode(code, "backend.js", { type: "module" }));
   instance.backend = backend;
   instance.handles.push(backend);
   while (instances.size >= MAX_INSTANCES) {
-    const oldest = [...instances.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-    discard(oldest[0]);
+    // Never one that's running: the limit can pass 16 for a moment instead.
+    const idle = [...instances.entries()].filter(([, entry]) => !entry.current);
+    if (idle.length === 0) break;
+    discard(idle.sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0][0]);
   }
   instances.set(hash, instance);
   return instance;
@@ -110,14 +136,23 @@ async function run(message) {
   try {
     instance ??= await load(hash, message.code, message.prelude, limits);
   } catch (error) {
-    return fail(500, "load_failed", `The backend failed to load: ${String(error?.message ?? error)}`);
+    const text = `The backend failed to load: ${String(error?.message ?? error)}`;
+    return /interrupted/.test(text) ? fail(504, "timeout", text) : fail(500, "load_failed", text);
   }
   // After loading: creating an instance isn't the backend's time.
   const started = Date.now();
   const deadline = started + limits.timeoutMs;
   const { ctx, rt, backend } = instance;
   instance.lastUsed = started;
-  instance.current = { id, logs };
+  const current = {
+    id,
+    logs,
+    dataCalls: 0,
+    dataActive: 0,
+    dataWaiting: [],
+    maxDataOp: limits.dataOpBytes ?? Number.POSITIVE_INFINITY,
+  };
+  instance.current = current;
   rt.setInterruptHandler(shouldInterruptAfterDeadline(deadline));
 
   let result;
@@ -159,10 +194,14 @@ async function run(message) {
     const text = String(error?.message ?? error);
     return fail(/interrupted/.test(text) ? 504 : 500, "failed", text);
   } finally {
-    if (instance) instance.current = null;
+    instance.current = null;
   }
-  // WebAssembly memory never shrinks, so an instance that has grown is replaced (08).
-  if (instance.mod.getWasmMemory().buffer.byteLength > (limits.memoryMb * MB) / 2) discard(hash);
+  // A backend that answered with calls still out would carry on under the next caller, so it's replaced.
+  const outstanding = current.dataActive + current.dataWaiting.length > 0;
+  current.dataWaiting.length = 0;
+  // WebAssembly memory never shrinks, so an instance that has grown is replaced too (08).
+  if (outstanding || instance.mod.getWasmMemory().buffer.byteLength > (limits.memoryMb * MB) / 2)
+    discard(hash);
   answer({ response: result });
 }
 

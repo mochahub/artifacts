@@ -4,8 +4,16 @@ import { z } from "zod";
 const Scope = z.enum(["shared", "me"]);
 const Json: z.ZodType<unknown> = z.json();
 
+/** 02: 1–200 characters of A-Za-z0-9._/-, no leading /, and no "." or ".." segment. */
+export const isDataKey = (key: string) =>
+  /^[A-Za-z0-9._/-]{1,200}$/.test(key) &&
+  !key.startsWith("/") &&
+  !key.split("/").some((part) => part === "." || part === "..");
+// The viewer builds URLs from these with its own session, so a frame's key can't be allowed to climb out.
+const Key = z.string().refine(isDataKey);
+
 export const BridgeOp = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("get"), scope: Scope, key: z.string() }),
+  z.object({ kind: z.literal("get"), scope: Scope, key: Key }),
   z.object({
     kind: z.literal("list"),
     scope: Scope,
@@ -15,15 +23,15 @@ export const BridgeOp = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("put"),
     scope: Scope,
-    key: z.string(),
+    key: Key,
     value: Json,
     ifMatch: z.string().optional(), // "*" means only if new
   }),
-  z.object({ kind: z.literal("delete"), scope: Scope, key: z.string(), ifMatch: z.string().optional() }),
-  z.object({ kind: z.literal("file.put"), scope: Scope, name: z.string(), blob: z.instanceof(Blob) }),
-  z.object({ kind: z.literal("file.url"), scope: Scope, name: z.string() }),
+  z.object({ kind: z.literal("delete"), scope: Scope, key: Key, ifMatch: z.string().optional() }),
+  z.object({ kind: z.literal("file.put"), scope: Scope, name: Key, blob: z.instanceof(Blob) }),
+  z.object({ kind: z.literal("file.url"), scope: Scope, name: Key }),
   z.object({ kind: z.literal("file.list"), scope: Scope }),
-  z.object({ kind: z.literal("file.delete"), scope: Scope, name: z.string() }),
+  z.object({ kind: z.literal("file.delete"), scope: Scope, name: Key }),
   z.object({ kind: z.literal("whoami") }),
 ]);
 export type BridgeOp = z.infer<typeof BridgeOp>;

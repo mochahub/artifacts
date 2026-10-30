@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { isDataKey } from "@artifacts/schema";
 import { and, eq, sql } from "drizzle-orm";
 import type { Deps } from "../api/deps.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -11,11 +12,8 @@ type Limits = OrgRow["settings"]["limits"];
 export type Scope = "shared" | "me";
 type UsageScope = Scope | "files";
 
-const KEY = /^[A-Za-z0-9._/-]{1,200}$/;
-
-/** 02: 1–200 characters of A-Za-z0-9._/-, no leading /, no "..". */
 export function checkKey(key: string): string {
-  if (!KEY.test(key) || key.startsWith("/") || key.split("/").includes("..")) {
+  if (!isDataKey(key)) {
     throw new ApiError("invalid", "Keys are up to 200 characters of letters, digits and ._/-");
   }
   return key;
@@ -173,17 +171,23 @@ export async function putFile(
   });
 }
 
-/** Only these open in place; anything else downloads, so an uploaded page can't run as a page (08). */
-export const inlineType = (type: string) => /^(image|audio|video)\//.test(type) || type === "application/pdf";
+const INLINE = /^(image\/(png|jpeg|gif|webp|avif)|(audio|video)\/[a-z0-9.+-]+|application\/pdf)$/;
+
+/**
+ * The type to open a file in place with, or null to download it, so an uploaded page can't run as a
+ * page (08). A list of what's safe: SVG is an image that can carry script.
+ */
+export const inlineType = (type: string) => {
+  const essence = (type.split(";")[0] as string).trim().toLowerCase();
+  return INLINE.test(essence) ? essence : null;
+};
 
 export async function fileUrl(deps: Deps, objectKey: string) {
   const head = await deps.bucket.head(objectKey);
   if (!head) throw new ApiError("not_found", "Not found.");
-  const type = head.contentType ?? "application/octet-stream";
-  // SVG is an image type that can carry script, so it only ever downloads.
-  const inline = inlineType(type) && type !== "image/svg+xml";
+  const inline = inlineType(head.contentType ?? "");
   return deps.bucket.presignGet(objectKey, {
-    responseContentType: inline ? type : "application/octet-stream",
+    responseContentType: inline ?? "application/octet-stream",
     responseContentDisposition: inline ? undefined : "attachment",
   });
 }

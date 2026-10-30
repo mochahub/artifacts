@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { copyFixture, sandbox, start } from "./sandbox.ts";
 
@@ -12,6 +12,23 @@ describe("artifacts dev", () => {
   let child: ReturnType<typeof start>;
 
   beforeAll(async () => {
+    // `dev` serves the built viewer, which a fresh checkout hasn't built when tests run first.
+    if (!existsSync(join(import.meta.dir, "../../../apps/viewer/dist/index.html"))) {
+      const built = Bun.spawnSync(["bun", "run", "--filter", "@artifacts/viewer", "build"]);
+      expect(built.success).toBe(true);
+    }
+    const backend = join(dir, "api/index.js");
+    writeFileSync(
+      backend,
+      readFileSync(backend, "utf8").replace(
+        "const who = caller(request);",
+        `if (request.url.endsWith("/escape")) {
+      const code = await env.DATA.put("../../escaped.json", 1).catch((error) => error.code);
+      return Response.json({ code });
+    }
+    const who = caller(request);`,
+      ),
+    );
     child = start(["dev", "--port", String(port)], box.env, dir);
     child.stdin.end();
     for (let i = 0; i < 240; i++) {
@@ -20,7 +37,7 @@ describe("artifacts dev", () => {
       await Bun.sleep(250);
     }
     throw new Error("dev never started");
-  }, 90_000);
+  }, 180_000);
   afterAll(() => {
     child.kill();
   });
@@ -44,6 +61,18 @@ describe("artifacts dev", () => {
     expect(await vote.json()).toMatchObject({ totals: { a: 0, b: 1 }, mine: "b", name: "You" });
     const stored = JSON.parse(readFileSync(join(dir, ".artifacts/data/shared/votes"), "utf8"));
     expect(stored.by.local).toBe("b");
+  });
+
+  test("a backend's keys and the local store can't leave the data folder", async () => {
+    const up = await fetch(`${content}/v1/api/escape`, { method: "POST", body: "{}" });
+    expect(await up.json()).toEqual({ code: "invalid" });
+    const put = await fetch(
+      `${viewer}/api/artifacts/00000000-0000-7000-8000-00000000d0d0/data/me/%2e%2e%2f%2e%2e%2fescaped`,
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: '{"value":1}' },
+    );
+    expect(put.status).toBe(400);
+    expect(existsSync(join(dir, "escaped.json"))).toBe(false);
+    expect(existsSync(join(dir, ".artifacts/escaped"))).toBe(false);
   });
 
   test("the built-in store works locally, with conditional writes", async () => {

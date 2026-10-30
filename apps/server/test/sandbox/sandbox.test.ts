@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { artifacts, people } from "../../src/db/schema.ts";
+import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { makePerson, publish } from "../publish-helper.ts";
 
@@ -119,6 +119,132 @@ describe("the backend sandbox", () => {
     expect(body).toEqual({ mark: "undefined", own: null, up: "invalid" });
   });
 
+  test("two artifacts with the same code share no instance", async () => {
+    const code = `let seen = null;
+      export default { async fetch(r) { const was = seen; seen = await r.text(); return Response.json(was); } };`;
+    const a = await deploy(code);
+    const b = await deploy(code);
+    expect((await a.call("x", { method: "POST", body: "secret" })).status).toBe(200);
+    expect(await (await b.call("x", { method: "POST", body: "other" })).json()).toBeNull();
+    expect(await (await a.call("x", { method: "POST", body: "again" })).json()).toBe("secret");
+  });
+
+  test("work left running after a response can't act for the next caller", async () => {
+    const { call, id } = await deploy(`export default { async fetch(r, env) {
+      if (r.url.endsWith("/float")) {
+        env.DATA.get("a").then(() => env.DATA.get("b")).then(() => env.DATA.put("floated", 1));
+        return Response.json("left");
+      }
+      return Response.json("next");
+    } };`);
+    expect(await (await call("float")).json()).toBe("left");
+    expect(await (await call("other")).json()).toBe("next");
+    await Bun.sleep(150);
+    expect(await t.server.bucket.get(`data/${id}/shared/floated`)).toBeNull();
+  });
+
+  test("env.DATA: calls per request and writes per second are capped", async () => {
+    const { call } = await deploy(`export default { async fetch(r, env) {
+      const count = async (work) => {
+        const results = await Promise.all(work.map((run) => run().then(() => "ok", (e) => e.code)));
+        return results.reduce((all, code) => ({ ...all, [code]: (all[code] ?? 0) + 1 }), {});
+      };
+      const many = (n, run) => Array.from({ length: n }, (_, i) => () => run(i));
+      if (r.url.endsWith("/reads")) return Response.json(await count(many(1000, () => env.DATA.get("x"))));
+      return Response.json(await count(many(50, (i) => env.DATA.put("k" + i, i))));
+    } };`);
+    expect(await (await call("reads")).json()).toEqual({ ok: 200, rate_limited: 800 });
+    const writes = (await (await call("writes")).json()) as { ok: number; rate_limited: number };
+    expect(writes).toEqual({ ok: 10, rate_limited: 40 });
+  });
+
+  test("env.DATA: etags, only-if-new, listing every scope, and bad keys", async () => {
+    const { call } = await deploy(`export default { async fetch(r, env) {
+      const code = (p) => p.then(() => "ok", (e) => e.code);
+      const { etag } = await env.DATA.put("thing", 1);
+      const read = await env.DATA.getWithEtag("thing");
+      await env.DATA.put("me/abc/own", 1);
+      return Response.json({
+        same: read.etag === etag,
+        value: await env.DATA.get("thing"),
+        missing: await env.DATA.get("nothing"),
+        stale: await code(env.DATA.put("thing", 2, { ifMatch: "stale" })),
+        fresh: await code(env.DATA.put("thing", 3, { ifMatch: etag })),
+        exists: await code(env.DATA.put("thing", 4, { ifMatch: "*" })),
+        isNew: await code(env.DATA.put("new", 4, { ifMatch: "*" })),
+        shared: (await env.DATA.list()).keys,
+        me: (await env.DATA.list("me/")).keys,
+        climb: await code(env.DATA.get("../other/shared/votes")),
+      });
+    } };`);
+    expect(await (await call("x")).json()).toEqual({
+      same: true,
+      value: 1,
+      missing: null,
+      stale: "precondition_failed",
+      fresh: "ok",
+      exists: "precondition_failed",
+      isNew: "ok",
+      shared: ["new", "thing"],
+      me: ["me/abc/own"],
+      climb: "invalid",
+    });
+  });
+
+  test("the 17th backend on a child leaves a running one alone", async () => {
+    const running = await deploy(`export default { async fetch(r, env) {
+      for (let i = 0; i < 40; i++) await env.DATA.get("x");
+      return Response.json("finished");
+    } };`);
+    const first = running.call("x");
+    for (let i = 0; i < 18; i++) {
+      await (await deploy(`export default { fetch() { return Response.json(${i}); } };`)).call("x");
+    }
+    expect((await first).status).toBe(200);
+  });
+
+  test("logs: NUL bytes and long lines don't fail a request, and each artifact has a budget", async () => {
+    const { call, id } = await deploy(`export default { fetch() {
+      for (let i = 0; i < 100; i++) console.log("\\0" + "é".repeat(8000));
+      return Response.json("ok");
+    } };`);
+    for (let i = 0; i < 4; i++) expect((await call("x")).status).toBe(200);
+    const rows = await t.server.db.select().from(backendLogs).where(eq(backendLogs.artifactId, id));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.reduce((sum, row) => sum + Buffer.byteLength(row.message), 0)).toBeLessThanOrEqual(
+      1024 * 1024,
+    );
+    expect(rows.every((row) => Buffer.byteLength(row.message) <= 8192)).toBe(true);
+  });
+
+  test("a chunked body can't pass the size limit, and answers aren't cached", async () => {
+    const { call } = await deploy(
+      `export default { fetch() { return new Response("x", { headers: { "cache-control": "public, max-age=999" } }); } };`,
+    );
+    const big = new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < 3; i++) controller.enqueue(new Uint8Array(1024 * 1024));
+        controller.close();
+      },
+    });
+    expect((await call("x", { method: "POST", body: big })).status).toBe(413);
+    expect((await call("x")).headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("a loop in top-level code times out, and doesn't hold other backends", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
+    settings.limits.backendTimeoutMs = 700;
+    await t.server.db.update(org).set({ settings });
+    const stuck = await deploy(`while (true) {} export default { fetch() {} };`);
+    const started = performance.now();
+    expect((await stuck.call("x")).status).toBe(504);
+    expect(performance.now() - started).toBeLessThan(1900);
+    settings.limits.backendTimeoutMs = 10_000;
+    await t.server.db.update(org).set({ settings });
+  });
+
   test("a stuck backend times out alone, and others keep answering", async () => {
     const [row] = await t.server.db.select().from((await import("../../src/db/schema.ts")).org);
     const { org } = await import("../../src/db/schema.ts");
@@ -144,7 +270,7 @@ describe("the backend sandbox", () => {
     ["the heap", "const k = []; while (true) k.push({ s: k.length });"],
     ["recursion", "const f = (n) => f(n + 1) + 1; f(0);"],
   ] as const) {
-    test(`a flood of ${name} fails that request and nothing else`, async () => {
+    test(`a flood of $namefails that request and nothing else`, async () => {
       const { call } = await deploy(`export default { fetch() { ${source} } };`);
       expect((await call("x")).status).toBe(500);
       const next = await deploy(`export default { fetch() { return Response.json("fine"); } };`);

@@ -158,6 +158,21 @@ describe("the data store", () => {
     const page = await fetch(html.headers.get("location") as string);
     expect(page.headers.get("content-disposition")).toBe("attachment");
     expect(page.headers.get("content-type")).not.toContain("html");
+    // A type with parameters or a list in it can't slip past the check, in any case.
+    for (const [name, type] of [
+      ["y.svg", "image/SVG+xml; charset=utf-8"],
+      ["z.png", "image/png, text/html"],
+    ] as const) {
+      expect((await up(name, "<svg/>", type)).status).toBe(200);
+      const url = await t.api(`/api/artifacts/${id}/files/shared/${name}`, {
+        bearer: token,
+        redirect: "manual",
+      });
+      expect((await fetch(url.headers.get("location") as string)).headers.get("content-disposition")).toBe(
+        "attachment",
+      );
+      await t.api(`/api/artifacts/${id}/files/shared/${name}`, { method: "DELETE", bearer: token });
+    }
     const svg = await t.api(`/api/artifacts/${id}/files/shared/x.svg`, { bearer: token, redirect: "manual" });
     expect((await fetch(svg.headers.get("location") as string)).headers.get("content-disposition")).toBe(
       "attachment",

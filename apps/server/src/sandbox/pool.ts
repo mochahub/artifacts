@@ -5,7 +5,7 @@ import { startChild } from "@artifacts/sandbox";
 import type { Deps } from "../api/deps.ts";
 import { ApiError } from "../http/errors.ts";
 
-type Limits = { timeoutMs: number; memoryMb: number };
+type Limits = { timeoutMs: number; memoryMb: number; dataOpBytes: number };
 export type SandboxRequest = { url: string; method: string; headers: Record<string, string>; body: string };
 export type SandboxResponse = { status: number; headers: [string, string][]; body: string };
 type Log = { level: string; message: string };
@@ -13,6 +13,7 @@ type Child = ReturnType<typeof startChild>;
 
 const WAIT_PER_BACKEND = 4;
 const WAIT_PER_CHILD = 32;
+const noop = () => {};
 
 /** Beside server.js in the image, in packages/sandbox in the repo. */
 function sandboxFiles() {
@@ -26,8 +27,9 @@ function sandboxFiles() {
 }
 
 /**
- * Starts and supervises the sandbox processes (08). Each backend hash is pinned to one child, and its
- * requests run one at a time. The app holds the scope of every request; the child never sees it.
+ * Starts and supervises the sandbox processes (08). Each backend is pinned to one child by its hash, and
+ * its requests run one at a time. An instance belongs to one artifact and hash, so two artifacts with the
+ * same code share nothing. The app holds the scope of every request; the child never sees it.
  */
 export class SandboxPool {
   private children: (Child | null)[];
@@ -66,36 +68,37 @@ export class SandboxPool {
   }
 
   async run(options: {
+    artifactId: string;
     hash: string;
     code: () => string;
     limits: Limits;
     request: SandboxRequest;
     onData(op: unknown): Promise<unknown>;
   }): Promise<{ response: SandboxResponse; logs: Log[] }> {
-    const { hash } = options;
-    const index = this.indexFor(hash);
-    const backendWaiting = this.waiting.get(hash) ?? 0;
+    const key = `${options.artifactId}:${options.hash}`;
+    const index = this.indexFor(options.hash);
+    const backendWaiting = this.waiting.get(key) ?? 0;
     const childWaiting = this.perChild.get(index) ?? 0;
     if (backendWaiting >= WAIT_PER_BACKEND || childWaiting >= WAIT_PER_CHILD) {
       throw new ApiError("busy", "This backend is busy. Try again.");
     }
-    this.waiting.set(hash, backendWaiting + 1);
+    this.waiting.set(key, backendWaiting + 1);
     this.perChild.set(index, childWaiting + 1);
 
     // One at a time per backend. Queue time doesn't count against the deadline (08).
-    const previous = this.queues.get(hash) ?? Promise.resolve();
-    const work = previous
-      .catch(() => {})
-      .then(async () => {
-        const child = await this.child(index);
-        const id = ++this.nextId;
-        // The child enforces the deadline. This is the backstop if it can't, say a hang in the engine.
-        const backstop = setTimeout(() => child.kill(), options.limits.timeoutMs + 2000);
-        const result = await child.run({ ...options, id });
-        clearTimeout(backstop);
-        return result;
-      });
-    this.queues.set(hash, work);
+    const previous = this.queues.get(key) ?? Promise.resolve();
+    const work = previous.then(async () => {
+      const child = await this.child(index);
+      const id = ++this.nextId;
+      // The child enforces the deadline. This is the backstop if it can't, say a hang in the engine.
+      const backstop = setTimeout(() => child.kill(), options.limits.timeoutMs + 2000);
+      const result = await child.run({ ...options, hash: key, id });
+      clearTimeout(backstop);
+      return result;
+    });
+    // The queue holds only that it's over, never the result, which may be megabytes.
+    const tail = work.then(noop, noop);
+    this.queues.set(key, tail);
     try {
       const result = (await work) as { response?: SandboxResponse; logs: Log[]; crashed?: boolean };
       if (result.crashed || !result.response) {
@@ -106,7 +109,10 @@ export class SandboxPool {
       }
       return { response: result.response, logs: result.logs };
     } finally {
-      this.waiting.set(hash, (this.waiting.get(hash) ?? 1) - 1);
+      const left = (this.waiting.get(key) ?? 1) - 1;
+      if (left > 0) this.waiting.set(key, left);
+      else this.waiting.delete(key);
+      if (this.queues.get(key) === tail) this.queues.delete(key);
       this.perChild.set(index, (this.perChild.get(index) ?? 1) - 1);
     }
   }

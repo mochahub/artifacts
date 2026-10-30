@@ -98,7 +98,13 @@ export function startBridge({ iframe, artifactId, canWrite, onUse }: Options) {
     if (event.source !== iframe.contentWindow || event.data?.artifacts !== 1) return;
     const target = event.source as Window;
     const parsed = BridgeRequest.safeParse(event.data);
-    if (!parsed.success) return;
+    if (!parsed.success) {
+      // Answered, so a bad key fails in the frame instead of waiting forever.
+      const error = { code: "invalid", message: "That isn't a valid request." };
+      if (typeof event.data.id === "string")
+        target.postMessage({ artifacts: 1, id: event.data.id, ok: false, error }, "*");
+      return;
+    }
     const { id, op } = parsed.data;
     const reply = (body: object) => target.postMessage({ artifacts: 1, id, ...body }, "*");
     if (inFlight >= MAX_IN_FLIGHT) {
