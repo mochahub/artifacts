@@ -109,7 +109,7 @@ export const InvitePreview = z.object({
   email: z.string(),
   artifact: z.object({ title: z.string() }).optional(),
 });
-export const AcceptInvite = z.object({ name: z.string().min(1), password: Password.optional() });
+export const AcceptInvite = z.object({ name: z.string().trim().min(1).max(100), password: Password.optional() });
 export const ResetPreview = z.object({ email: z.string() });
 export const ResetPassword = ChangePassword;
 
@@ -137,7 +137,8 @@ export const DeviceDetails = z.object({
 });
 
 // Guests
-export const GuestName = z.object({ name: z.string().min(1).max(60) });
+// Trimmed, so a name of spaces is no name: it would show as a blank author on every comment.
+export const GuestName = z.object({ name: z.string().trim().min(1).max(60) });
 
 // Organization and people
 export const INVITE_ROLES = ["admin", "member", "reviewer"] as const;
@@ -439,7 +440,10 @@ export const Anchor = z.discriminatedUnion("type", [
 ]);
 export type Anchor = z.infer<typeof Anchor>;
 
-const Body = z.string().min(1).max(10_000);
+const Body = z
+  .string()
+  .max(10_000)
+  .refine((value) => value.trim().length > 0, "write something");
 const CommentAuthor = z.object({ name: z.string(), kind: z.enum(["person", "guest", "agent"]) });
 
 export const Comment = z.object({
