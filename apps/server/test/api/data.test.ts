@@ -163,6 +163,7 @@ describe("the data store", () => {
       ["y.svg", "image/SVG+xml; charset=utf-8"],
       ["z.png", "image/png, text/html"],
     ] as const) {
+      t.clock.advance(1100); // Deleting counts against writesPerSecond, like every other write.
       expect((await up(name, "<svg/>", type)).status).toBe(200);
       const url = await t.api(`/api/artifacts/${id}/files/shared/${name}`, {
         bearer: token,
@@ -187,6 +188,7 @@ describe("the data store", () => {
       files: { name: string }[];
     };
     expect(list.files.map((f) => f.name).sort()).toEqual(["a.png", "page.html", "x.svg"]);
+    t.clock.advance(1100);
     expect(
       (await t.api(`/api/artifacts/${id}/files/shared/a.png`, { method: "DELETE", bearer: token })).status,
     ).toBe(200);
@@ -353,5 +355,23 @@ describe("limits, with an org that's lowered them", () => {
       .catch(() => null);
     expect(value?.status ?? 413).toBe(413);
     expect(json.taken()).toBeLessThan(4 * 1024 * 1024);
+  });
+
+  test("deleting files counts against the write limit like every other write", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: Record<string, number> };
+    settings.limits.writesPerSecond = 2;
+    await t.server.db.update(org).set({ settings });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      statuses.push(
+        (await t.api(`/api/artifacts/${id}/files/shared/nothing`, { method: "DELETE", bearer: token }))
+          .status,
+      );
+    }
+    expect(statuses).toContain(429);
+    settings.limits.writesPerSecond = 100;
+    await t.server.db.update(org).set({ settings });
   });
 });

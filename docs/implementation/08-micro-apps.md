@@ -104,7 +104,7 @@ Conditional writes are required of the bucket. Railway's bucket and SeaweedFS bo
 | `backendRequestsPerMinute` | 120 per caller per artifact |
 
 **Files:**
-- **Uploads:** the app streams the body to `PutObject` with the declared `Content-Type`. It never reads more than `fileBytes` of a body, whether or not the request declares a length, and the same goes for a JSON value (`dataValueBytes` plus a little for the envelope).
+- **Uploads:** the app streams the body to `PutObject` with the declared `Content-Type`. It never reads more than `fileBytes` of a body, whether or not the request declares a length, and the same goes for a JSON value (`dataValueBytes` plus a little for the envelope). File deletes count against `writesPerSecond` like other writes.
 - **Downloads:** presigned GET with `response-content-type`. Types other than `image/*`, `audio/*`, `video/*` and `application/pdf` are also given `response-content-disposition=attachment`.
 
 **Export and clear:**
