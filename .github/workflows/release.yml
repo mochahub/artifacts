@@ -263,7 +263,8 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           if [ "$PUBLISH" != true ]; then
-            bun publish --dry-run --access public
+            # bun publish --dry-run still wants a login.
+            bun pm pack --destination "$RUNNER_TEMP"
           elif [ -z "$NPM_CONFIG_TOKEN" ]; then
             echo "::notice::Skipped npm: the repo has no NPM_TOKEN secret."
           elif [ "$(npm view "@artifacts/cli@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
