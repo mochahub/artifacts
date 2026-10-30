@@ -15,7 +15,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M6 People and sharing | `m6-people` | `d79e2a1` | green |
 | M7 Lifecycle | `m7-lifecycle` | `7c59d9e` | green |
 | M8 Distribution | `m8-distribution` | `9356dac` | green |
-| M9 Micro apps I | `m9-micro-apps` | in progress | |
+| M9 Micro apps I | `m9-micro-apps` | see git log | see below |
 | M10–M11 | not started | | |
 
 ## Verified
