@@ -37,11 +37,18 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         .orderBy(desc(versions.n)),
       db.select().from(decisions).where(eq(decisions.artifactId, id)).orderBy(desc(decisions.createdAt)),
     ]);
+    // Each version is compared with the one before it, so each is read once, not twice.
+    const read = new Map<string, ReturnType<typeof hashes>>();
+    const once = (versionId: string) => {
+      const known = read.get(versionId) ?? hashes(versionId);
+      read.set(versionId, known);
+      return known;
+    };
     const counts = await Promise.all(
       rows.map(async ({ version }, index) => {
         const previous = rows[index + 1]?.version;
         if (!previous) return { frames: 0, blocks: 0 };
-        const [now, then] = await Promise.all([hashes(version.id), hashes(previous.id)]);
+        const [now, then] = await Promise.all([once(version.id), once(previous.id)]);
         const map = (list: { key: string; hash: string }[]) => new Map(list.map((e) => [e.key, e.hash]));
         const f = (list: typeof now.frameRows) =>
           map(list.map((e) => ({ key: `${e.pageKey}/${e.frameKey}`, hash: e.contentHash })));
