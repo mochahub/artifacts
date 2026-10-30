@@ -66,6 +66,7 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "expires_at",
     "revoked_at",
   ],
+  blobs: ["org_id", "hash", "size", "verified_at"],
   pages: ["id", "org_id", "version_id", "page_key", "kind", "title", "group", "position", "meta"],
   blocks: ["id", "org_id", "version_id", "page_key", "block_key", "content_hash", "text"],
   comments: [

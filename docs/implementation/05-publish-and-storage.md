@@ -76,7 +76,7 @@ Pipeline: unified, then `remark-parse`, `remark-gfm` and `remark-directive`. Cus
 - **figures:** an image followed by an italic paragraph becomes `figure` with `figcaption`
 - **verdict badges:** `{Verified}`, `{Unverified}`
 - **`::frame{ref="mocks/onboarding/welcome"}`:** resolves to the frame's render hash in this version
-- **`::chart{src="charts/x.json"}`:** rendered to SVG in WebKit at publish
+- **`::chart{src="charts/x.json"}`:** `{ "type": "bar"|"line", "labels": [...], "series": [{ "name", "values": [...] }] }` drawn to SVG by the CLI at publish
 - **Mermaid code blocks:** rendered to SVG in WebKit at publish
 
 It then runs `remark-rehype`, `rehype-slug` and `rehype-sanitize`. Sanitizing uses an allowlist (no `script`, `style`, `iframe`, event attributes or `javascript:` URLs); **raw HTML in Markdown is dropped**.
@@ -88,7 +88,7 @@ It then runs `remark-rehype`, `rehype-slug` and `rehype-sanitize`. Sanitizing us
 - Each block's `content_hash` is the SHA-256 of its normalized text (whitespace collapsed).
 - `blocks.text` stores the plain text.
 
-**The server re-sanitizes at commit.** The CLI's output can't be trusted (any token with `publish` could upload anything), and article HTML is inserted into the viewer's own page. So `commit` re-runs `rehype-sanitize` with the same allowlist over every article's HTML blob, including inline SVG from Mermaid and charts (no `script`, `foreignObject`, `style` with `url()`, or event attributes). It stores the result as a new blob and records that hash in `pages.meta.htmlHash`. The viewer only ever loads that hash.
+**The server re-sanitizes at commit.** The CLI's output can't be trusted (any token with `publish` could upload anything), and article HTML is inserted into the viewer's own page. So `commit` re-runs `rehype-sanitize` with the same allowlist (`@artifacts/schema/sanitize`) over every article's HTML blob, including inline SVG from Mermaid and charts (no `script`, `foreignObject`, `style` elements or attributes, or event attributes). Mermaid's styles are copied onto presentation attributes in the render helper, because a `<style>` in an article would apply to the whole viewer page. It stores the result as a new blob and records that hash in `pages.meta.htmlHash`. The viewer only ever loads that hash.
 
 Images referenced by articles are bundle files; the viewer loads them through `GET /api/artifacts/:id/r/:hash`. The CLI rewrites `src` to `artifacts:blob/<hash>` and the viewer maps that.
 
@@ -98,6 +98,7 @@ Images referenced by articles are bundle files; the viewer loads them through `G
 2. **Hash.** SHA-256 every bundle file and render.
 3. **Prepare.** `POST /api/publish/prepare` with all `{ path, sha256, size, type }`. The response lists only missing hashes, each with a presigned PUT.
 4. **Upload.** Upload missing blobs with 6 parallel PUTs, sending `Content-Type` and `Cache-Control: public, max-age=31536000, immutable` as signed headers. Retry 3 times with backoff.
+   Each PUT is signed with `If-None-Match: *`, so it can only create an object, never replace one. A 412 means the object already exists; the upload moves on, and commit decides whether its content is right.
 5. **Commit.** `POST /api/publish/commit` with files, pages, frames, blocks, message, `--name`, `--note` and the detected agent. The server re-anchors threads and returns the summary.
 6. **Report.** Print the result (format in [07-cli-and-skill.md](07-cli-and-skill.md#publish)). With `--json`, print the `PublishResult` as is.
 
@@ -140,7 +141,8 @@ Article threads have no crop; their quote is the context.
 - **Library:** `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`, path-style, created with `requestChecksumCalculation: "WHEN_REQUIRED"` and `responseChecksumValidation: "WHEN_REQUIRED"`. The SDK's default puts a checksum of an empty body into presigned PUT URLs, which some S3 servers reject (spike S3).
 - **Endpoint:** `S3_ENDPOINT` (Railway's bucket endpoint, or SeaweedFS's).
 - **GET URLs:** signed with the time rounded down to the UTC day and an expiry of 24 hours plus a margin, so URLs are stable within a day (03).
-- **PUT URLs:** signed per request, valid 15 minutes, with `Content-Type`, `Content-Length` and `Cache-Control` signed.
+- **PUT URLs:** signed per request, valid 15 minutes, with `Content-Type`, `Content-Length`, `Cache-Control` and `If-None-Match: *` signed.
+- **Verifying content:** the `blobs` table (02) lists hashes the server has checked. `prepare` calls a hash missing unless it has a row. `commit` downloads every referenced hash without a row, hashes it, and adds the row; a mismatch deletes the object and answers 400 `invalid`. Reading from the bucket is free, and each blob is only read once.
 
 ## Clean-up
 
@@ -151,6 +153,7 @@ A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_adviso
    - Insert one `tombstones` row and one `purged` activity row.
    - Delete the `crops/<thread id>.webp` objects and every object under `data/<artifact id>/`.
 2. **Collect garbage.**
+   - **`blobs` rows** are deleted with their objects.
    - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders` and `pages.meta.htmlHash` of non-purged versions.
    - **Sweep:** list `blobs/` (paginated `ListObjectsV2`) and delete objects not in the set whose `LastModified` is more than 24 hours old. The age check protects uploads from a publish that hasn't committed yet.
    - **Log:** record counts and bytes freed.

@@ -193,6 +193,8 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `published_at` | timestamptz | |
 | `deleted_at`, `deleted_by`, `purge_after` | | Removing one version (SPEC §5.5). The latest and the only version can't be removed. |
 
+**`blobs`**: bucket objects the server has hashed itself. PK `(org_id, hash)`, `size` bigint, `verified_at`. Files are shared by hash across artifacts, so "the bucket has this key" isn't proof of its content: anyone with a presigned PUT could have stored something else there. A hash counts as already stored only with a row here; commit downloads and hashes anything without one (05).
+
 **`pages`**: `id`, `org_id`, `version_id`, `page_key` text (manifest page `id`), `kind` `page_kind`, `title`, `group` text null, `position` int, `meta` jsonb (article: `{ readingMinutes, htmlHash, outline: [{ id, title, level }] }`; canvas: `{ boards: [{ key, title, subtitle, x, y, w, h }] }`). Unique `(version_id, page_key)`.
 
 **`frames`**: canvas frames, one row per frame per version.

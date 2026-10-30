@@ -18,6 +18,8 @@ export type Guard =
       resource?: (c: ApiContext) => Promise<Resource>;
       /** Needs a sign-in within the last 10 minutes (04). */
       recentAuth?: boolean;
+      /** The check depends on the body, so the handler calls requireCan itself. */
+      inHandler?: boolean;
     };
 
 export type RouteInfo = { method: string; path: string; guard: Guard };
@@ -53,7 +55,7 @@ export class Routes {
   ) {
     this.list.push({ method: method.toUpperCase(), path, guard });
     const guarded: Handler<ApiVars> = async (c, next) => {
-      if ("action" in guard) {
+      if ("action" in guard && !guard.inHandler) {
         const resource: Resource = guard.resource ? await guard.resource(c) : { type: "org" };
         const caller = c.get("caller");
         if (guard.recentAuth && caller.kind === "person" && !caller.recentAuth) {

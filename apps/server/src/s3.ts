@@ -190,14 +190,23 @@ export class Bucket {
         ContentType: options.contentType,
         ContentLength: options.contentLength,
         CacheControl: options.cacheControl,
+        IfNoneMatch: "*",
       }),
       {
         expiresIn: PUT_EXPIRY_SECONDS,
         signingDate: this.clock.now(),
-        signableHeaders: new Set(["content-type", "content-length", "cache-control"]),
+        signableHeaders: new Set(["content-type", "content-length", "cache-control", "if-none-match"]),
+        unhoistableHeaders: new Set(["if-none-match"]),
       },
     );
-    return { url, headers: { "Content-Type": options.contentType, "Cache-Control": options.cacheControl } };
+    return {
+      url,
+      headers: {
+        "Content-Type": options.contentType,
+        "Cache-Control": options.cacheControl,
+        "If-None-Match": "*",
+      },
+    };
   }
 
   private async conditional<T>(write: () => Promise<T>, ifMatch: boolean): Promise<T> {

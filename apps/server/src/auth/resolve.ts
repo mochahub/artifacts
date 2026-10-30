@@ -83,18 +83,22 @@ async function bySession(c: Context, deps: Deps, org: OrgRow, secret: string): P
 }
 
 async function byGuest(deps: Deps, org: OrgRow, secret: string): Promise<Caller | null> {
-  const now = deps.clock.now();
   const [guest] = await deps.db
     .select()
     .from(guests)
     .where(and(eq(guests.orgId, org.id), eq(guests.tokenHash, sha256(secret))))
     .limit(1);
-  if (!guest) return null;
+  return guest ? guestCaller(deps, guest.id) : null;
+}
+
+/** A guest's current links. The content port calls this too, to re-check an open frame (04). */
+export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> {
+  const now = deps.clock.now();
   const rows = await deps.db
     .select({ row: guestLinks, link: shareLinks })
     .from(guestLinks)
     .innerJoin(shareLinks, eq(shareLinks.id, guestLinks.shareLinkId))
-    .where(eq(guestLinks.guestId, guest.id));
+    .where(eq(guestLinks.guestId, guestId));
   const links: GuestLink[] = rows.map(({ row, link }) => ({
     artifactId: link.artifactId,
     shareLinkId: link.id,
@@ -103,7 +107,7 @@ async function byGuest(deps: Deps, org: OrgRow, secret: string): Promise<Caller 
     // Checked on every request, so revoking a link ends access at once (02).
     active: !link.revokedAt && (!link.expiresAt || link.expiresAt > now) && row.expiresAt > now,
   }));
-  return { kind: "guest", guestId: guest.id, links };
+  return { kind: "guest", guestId, links };
 }
 
 /** Bearer token, then session cookie, then guest cookie (04, "Callers"). */

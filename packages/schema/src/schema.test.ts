@@ -9,6 +9,7 @@ import {
   PublishResult,
   Slug,
 } from "./index.ts";
+import { sanitizeArticle } from "./sanitize.ts";
 
 const spec = {
   project: "camerabuddy",
@@ -121,5 +122,43 @@ describe("api", () => {
       reused: 214,
     };
     expect(PublishResult.safeParse(example).success).toBe(true);
+  });
+});
+
+describe("the article allowlist", () => {
+  test("drops scripts, styles, event attributes and hostile URLs", () => {
+    const clean = sanitizeArticle(`<p data-block="a" onclick="x()">Hi<script>alert(1)</script></p>
+      <style>body{display:none}</style><iframe src="https://evil.test"></iframe>
+      <a href="javascript:alert(1)">link</a><img src="https://evil.test/x.png"><img src="artifacts:blob/abc">
+      <svg onload="x()" viewBox="0 0 1 1"><foreignObject><div>x</div></foreignObject><path d="M0 0" style="fill:url(https://evil.test)"/></svg>`);
+    expect(clean).toContain('data-block="a"');
+    expect(clean).toContain("artifacts:blob/abc");
+    for (const bad of [
+      "script",
+      "style",
+      "iframe",
+      "onclick",
+      "onload",
+      "javascript:",
+      "evil.test",
+      "foreignObject",
+    ]) {
+      expect(clean.toLowerCase()).not.toContain(bad.toLowerCase());
+    }
+  });
+
+  test("keeps SVG drawing and internal marker references, not external ones", () => {
+    const clean = sanitizeArticle(
+      '<svg viewBox="0 0 10 10"><path d="M0 0L1 1" fill="#fff" marker-end="url(#arrow)"/><path d="M0 0" marker-end="url(https://evil.test/#a)"/></svg>',
+    );
+    expect(clean).toContain('marker-end="url(#arrow)"');
+    expect(clean).not.toContain("evil.test");
+  });
+
+  test("is stable: sanitizing twice changes nothing", () => {
+    const once = sanitizeArticle(
+      '<h2 id="a" data-block="a">T</h2><table><tr><td align="left">x</td></tr></table>',
+    );
+    expect(sanitizeArticle(once)).toBe(once);
   });
 });
