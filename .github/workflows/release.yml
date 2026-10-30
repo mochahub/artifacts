@@ -142,7 +142,8 @@ jobs:
           cli=dist/release/artifacts-linux-x64
           "$cli" setup --docker --dir "$RUNNER_TEMP/srv" --org Release --name Release --email release@example.com --no-skill </dev/null
           "$cli" whoami
-          "$cli" doctor
+          # doctor also wants the skill and WebKit, which a build machine doesn't have.
+          "$cli" doctor | tee /dev/stderr | grep -F "runs ${{ needs.prepare.outputs.version }}"
       - uses: docker/login-action@v3
         if: needs.prepare.outputs.publish == 'true'
         with:
