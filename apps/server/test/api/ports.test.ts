@@ -162,6 +162,11 @@ describe("the three ports", () => {
       expect((await internal("/internal/jobs/nonsense", auth)).status).toBe(404);
     });
 
+    test("refuses a body bigger than a kilobyte before reading it", async () => {
+      const response = await internal("/internal/jobs/gc", { ...auth, body: "x".repeat(4096) });
+      expect(response.status).toBe(413);
+    });
+
     test("doesn't serve the API", async () => {
       expect((await internal("/api/health")).status).toBe(404);
     });
