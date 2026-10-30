@@ -41,5 +41,5 @@ export async function unfurl(c: Context, deps: Deps, html: string) {
       );
     }
   }
-  return html.replace("</head>", `${tags.join("")}</head>`);
+  return html.replace("</head>", () => `${tags.join("")}</head>`);
 }

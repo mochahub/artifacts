@@ -1470,6 +1470,10 @@
   color: var(--tx2);
   margin-bottom: 6px;
 }
+.diff .note {
+  margin: 2px 0 0;
+  color: var(--agent-word);
+}
 .diff img {
   display: block;
   width: 100%;

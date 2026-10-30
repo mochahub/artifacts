@@ -7,20 +7,19 @@ import { unfurl } from "./unfurl.ts";
 
 /** Response headers from 04, "CSRF, hosts and headers". */
 export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
-  const csp = (connect: string) =>
-    [
-      "default-src 'self'",
-      ...(env.contentUrl ? [`frame-src ${env.contentUrl}`] : []),
-      `img-src 'self' data: blob: ${bucket}`,
-      `connect-src ${connect}`,
-      "style-src 'self' 'unsafe-inline'",
-      "base-uri 'none'",
-      "frame-ancestors 'none'",
-    ].join("; ");
+  const csp = [
+    "default-src 'self'",
+    ...(env.contentUrl ? [`frame-src ${env.contentUrl}`] : []),
+    `img-src 'self' data: blob: ${bucket}`,
+    `media-src 'self' ${bucket}`,
+    "connect-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
   return async (c, next) => {
     await next();
-    // Only the service worker fetches from the bucket: renders redirect there, and it caches them.
-    c.header("Content-Security-Policy", csp(c.req.path === "/sw.js" ? `'self' ${bucket}` : "'self'"));
+    c.header("Content-Security-Policy", csp);
     c.header("Strict-Transport-Security", "max-age=31536000");
     c.header("X-Frame-Options", "DENY");
     c.header("Referrer-Policy", "same-origin");

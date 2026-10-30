@@ -40,6 +40,17 @@ export function fileRoutes(routes: Routes, deps: Deps) {
       )
       .limit(1);
     if (!found) throw new ApiError("not_found", "Not found.");
+    // The service worker can't read a bucket's answer without CORS, so it asks for the bytes (06).
+    if (c.req.query("via") === "app") {
+      const object = await bucket.get(blobKey(hash));
+      if (!object) throw new ApiError("not_found", "Not found.");
+      return new Response(object.body, {
+        headers: {
+          "Content-Type": object.contentType ?? "application/octet-stream",
+          "Cache-Control": "private, max-age=86400",
+        },
+      });
+    }
     return c.redirect(await bucket.presignGet(blobKey(hash)), 302);
   });
 

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
+import { callerKey } from "../data/store.ts";
 import {
   activity,
   artifacts,
@@ -38,6 +39,14 @@ const LOCK = (id: string) => sql`select pg_advisory_xact_lock(hashtextextended($
 const regionCache = new Map<string, Region[]>();
 const MAX_CACHED_REGIONS = 2000;
 const MAX_FRAMES_DIFFED = 40;
+const COMPARES_PER_MINUTE = 30;
+/** Each diff holds two renders in memory, so only a couple run at once, whoever's asking. */
+let diffing: Promise<unknown> = Promise.resolve();
+const oneAtATime = <T>(work: () => Promise<T>) => {
+  const run = diffing.then(work, work);
+  diffing = run.catch(() => {});
+  return run;
+};
 
 /** Per changed frame: the two @2x renders, and where they differ (03). */
 async function changedRegions(
@@ -45,20 +54,27 @@ async function changedRegions(
   keys: string[],
   before: (typeof frames.$inferSelect)[],
   after: (typeof frames.$inferSelect)[],
+  who: string,
 ) {
   const rendersOf = (rows: typeof before, key: string) =>
     rows.find((row) => `${row.pageKey}/${row.frameKey}` === key)?.renders as { "2x": string } | undefined;
   const result: Record<string, { before: string; after: string; regions: Region[] }> = {};
+  let counted = false;
   for (const key of keys.slice(0, MAX_FRAMES_DIFFED)) {
     const a = rendersOf(before, key)?.["2x"];
     const b = rendersOf(after, key)?.["2x"];
     if (!a || !b) continue;
     let regions = regionCache.get(`${a}:${b}`);
     if (!regions) {
-      const [first, second] = await Promise.all([deps.bucket.get(blobKey(a)), deps.bucket.get(blobKey(b))]);
-      if (!first || !second) continue;
-      // A render the image library can't read still counts as changed: it just has no boxes.
-      regions = await diffRegions(first.body, second.body).catch(() => [] as Region[]);
+      if (!counted) deps.limits.hit(`compare:${who}`, COMPARES_PER_MINUTE, 60_000);
+      counted = true;
+      regions = await oneAtATime(async () => {
+        const [first, second] = await Promise.all([deps.bucket.get(blobKey(a)), deps.bucket.get(blobKey(b))]);
+        if (!first || !second) return null;
+        // A render the image library can't read still counts as changed: it just has no boxes.
+        return diffRegions(first.body, second.body).catch(() => [] as Region[]);
+      }).then((value) => value ?? undefined);
+      if (!regions) continue;
       if (regionCache.size >= MAX_CACHED_REGIONS) regionCache.clear();
       regionCache.set(`${a}:${b}`, regions);
     }
@@ -71,13 +87,13 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
   const artifact = artifactParam(deps);
 
-  const record = (
+  const record = async (
     c: ApiContext,
     row: { id: string; projectId: string },
     kind: typeof activity.$inferInsert.kind,
     payload: Record<string, unknown> = {},
-  ) =>
-    db.insert(activity).values({
+  ) => {
+    await db.insert(activity).values({
       id: Bun.randomUUIDv7(),
       orgId: c.get("org").id,
       artifactId: row.id,
@@ -89,6 +105,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       payload,
       createdAt: clock.now(),
     });
+    void deps.events.emit(row.id, "version");
+  };
 
   const setArchived = (archived: boolean) => async (c: ApiContext) => {
     const resource = await artifact(c);
@@ -438,7 +456,13 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
     return etagJson(c, {
       frames: {
         ...frameChanges,
-        regions: await changedRegions(deps, frameChanges.changed, from.frameRows, to.frameRows),
+        regions: await changedRegions(
+          deps,
+          frameChanges.changed,
+          from.frameRows,
+          to.frameRows,
+          callerKey(c.get("caller")) ?? deps.clientIp(c),
+        ),
       },
       blocks: changes(blockMap(from.blockRows), blockMap(to.blockRows)),
       notes: to.row.notes,

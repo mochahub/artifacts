@@ -5,18 +5,23 @@ export type Region = { x: number; y: number; w: number; h: number };
 const WIDTH = 320;
 const CELL = 8;
 const MAX_REGIONS = 12;
+const MAX_PIXELS = 40_000_000;
 /** Per channel, out of 255: smaller differences are compression, not a change. */
 const THRESHOLD = 24;
 
 /** Cells that differ, grouped with any cell within two cells of them, as 0–1 boxes (03). */
 export async function diffRegions(before: Uint8Array, after: Uint8Array): Promise<Region[]> {
-  const size = await sharp(before).metadata();
-  const other = await sharp(after).metadata();
+  const size = await sharp(before, { limitInputPixels: MAX_PIXELS }).metadata();
+  const other = await sharp(after, { limitInputPixels: MAX_PIXELS }).metadata();
   const ratio = (a: typeof size) => (a.height ?? 1) / (a.width ?? 1);
   if (Math.abs(ratio(size) - ratio(other)) > 0.01) return [{ x: 0, y: 0, w: 1, h: 1 }];
   const height = Math.max(CELL, Math.round(WIDTH * ratio(size)));
   const pixels = (image: Uint8Array) =>
-    sharp(image).resize(WIDTH, height, { fit: "fill" }).removeAlpha().raw().toBuffer();
+    sharp(image, { limitInputPixels: MAX_PIXELS })
+      .resize(WIDTH, height, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer();
   const [a, b] = await Promise.all([pixels(before), pixels(after)]);
 
   const cols = Math.ceil(WIDTH / CELL);

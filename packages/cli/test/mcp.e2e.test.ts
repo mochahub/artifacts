@@ -1,7 +1,36 @@
 import { describe, expect, test } from "bun:test";
+import { toolCommand } from "../src/commands/mcp.ts";
 import { sandbox, start } from "./sandbox.ts";
 
 describe("artifacts mcp", () => {
+  test("a tool's arguments can't become flags", () => {
+    expect(toolCommand("artifacts_status", { artifact: "a/b" })).toEqual(["--json", "status", "a/b"]);
+    expect(() => toolCommand("artifacts_status", { artifact: "--server=https://evil.test" })).toThrow();
+    expect(() => toolCommand("artifacts_comments", { artifact: "-x" })).toThrow();
+    expect(toolCommand("artifacts_reply", { n: 3, message: "--fixed" })).toEqual([
+      "--json",
+      "reply",
+      "--",
+      "3",
+      "--fixed",
+    ]);
+    expect(toolCommand("artifacts_reply", { n: 3, message: "- done", fixed: true })).toEqual([
+      "--json",
+      "reply",
+      "--fixed",
+      "--",
+      "3",
+      "- done",
+    ]);
+    expect(() => toolCommand("artifacts_reply", { n: "--server=x", message: "m" })).toThrow();
+    expect(() => toolCommand("artifacts_reply", { n: 1 })).toThrow();
+    expect(toolCommand("artifacts_publish", { message: "-1 bug" })).toEqual([
+      "--json",
+      "publish",
+      "--message=-1 bug",
+    ]);
+  });
+
   test("speaks MCP on stdio and turns tool calls into commands", async () => {
     const box = sandbox();
     const child = start(["mcp"], box.env);
@@ -17,6 +46,8 @@ describe("artifacts mcp", () => {
     });
     send({ id: 4, method: "tools/call", params: { name: "nope" } });
     send({ id: 5, method: "nope" });
+    child.stdin.write("null\n");
+    send({ id: 6, method: "ping" });
     child.stdin.end();
     const lines = (await new Response(child.stdout).text())
       .trim()
@@ -28,6 +59,6 @@ describe("artifacts mcp", () => {
     expect(by(3).result.isError).toBe(true);
     expect(by(4).error.code).toBe(-32602);
     expect(by(5).error.code).toBe(-32601);
-    expect(lines).toHaveLength(4 + 1);
+    expect(by(6).result).toEqual({});
   }, 30_000);
 });

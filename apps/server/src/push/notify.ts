@@ -1,5 +1,5 @@
 import { PushSubscribe } from "@artifacts/schema";
-import { and, eq, gt, inArray, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import { findArtifact, type LoadedArtifact } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
@@ -14,12 +14,14 @@ import {
   people,
   projects,
   pushSubscriptions,
+  sessions,
   threads,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { encryptPayload, generateVapid, vapidHeader } from "./webpush.ts";
 
 const DAY = 24 * 3600_000;
+const DIGEST_GAP = 20 * 3600_000;
 const TIMEOUT_MS = 10_000;
 const MAX_SUBSCRIPTIONS_PER_PERSON = 10;
 
@@ -99,15 +101,20 @@ async function send(
   }
 }
 
+/** Devices someone is still signed in on: a session that ended can't be told anything. */
+const devices = (deps: Deps, where?: SQL) =>
+  deps.db
+    .select({ subscription: pushSubscriptions, person: people })
+    .from(pushSubscriptions)
+    .innerJoin(people, eq(people.id, pushSubscriptions.personId))
+    .innerJoin(sessions, eq(sessions.id, pushSubscriptions.sessionId))
+    .where(and(where, isNull(people.removedAt), gt(sessions.expiresAt, deps.clock.now())));
+
 /** Sends to everyone listed who has a device and can still see the artifact. Never throws. */
 async function deliver(deps: Deps, resource: LoadedArtifact, personIds: string[], message: Message) {
   try {
     if (personIds.length === 0) return;
-    const rows = await deps.db
-      .select({ subscription: pushSubscriptions, person: people })
-      .from(pushSubscriptions)
-      .innerJoin(people, eq(people.id, pushSubscriptions.personId))
-      .where(and(inArray(pushSubscriptions.personId, personIds), isNull(people.removedAt)));
+    const rows = await devices(deps, inArray(pushSubscriptions.personId, personIds));
     const keys = rows.length > 0 ? await vapidKeys(deps) : null;
     await Promise.all(
       rows
@@ -122,8 +129,6 @@ async function deliver(deps: Deps, resource: LoadedArtifact, personIds: string[]
     deps.log.warn("couldn't send pushes", { error: String(error) });
   }
 }
-
-const artifactUrl = (deps: Deps, project: string, slug: string) => `${deps.env.publicUrl}/${project}/${slug}`;
 
 /** An agent's new version goes to the publisher and everyone who has commented (SPEC §7.6). */
 export async function notifyPublished(
@@ -149,7 +154,8 @@ export async function notifyPublished(
     {
       title: `${options.agent} published v${options.version}`,
       body: options.title,
-      url: artifactUrl(deps, options.project, options.slug),
+      // A path, so an app installed on any of the server's domains stays on that domain.
+      url: `/${options.project}/${options.slug}`,
       tag: `artifact-${artifactId}`,
     },
   );
@@ -162,7 +168,7 @@ export async function notifyPublished(
 export async function notifyReply(
   deps: Deps,
   orgId: string,
-  thread: { id: string; n: number; artifactId: string; authorPersonId: string | null },
+  thread: { id: string; n: number; pageKey: string; artifactId: string; authorPersonId: string | null },
   reply: { authorName: string; body: string; actor: string | null },
 ) {
   const resource = await findArtifact(deps, orgId, thread.artifactId);
@@ -186,7 +192,7 @@ export async function notifyReply(
     {
       title: `${reply.authorName} replied`,
       body: reply.body.slice(0, 160),
-      url: `${artifactUrl(deps, path.project, path.slug)}?c=${thread.n}`,
+      url: `/${path.project}/${path.slug}/${thread.pageKey}?c=${thread.n}`,
       tag: `thread-${thread.id}`,
     },
   );
@@ -197,12 +203,20 @@ export async function sendDigest(deps: Deps) {
   const current = await findOrg(deps.db);
   if (!current) return;
   const since = new Date(deps.clock.now().getTime() - DAY);
-  const subscribers = await deps.db
-    .selectDistinct({ person: people })
-    .from(pushSubscriptions)
-    .innerJoin(people, eq(people.id, pushSubscriptions.personId))
-    .where(isNull(people.removedAt));
-  if (subscribers.length === 0) return;
+  // A claim, so a restart or a second replica doesn't send it twice.
+  const claimed = await deps.db
+    .update(org)
+    .set({ lastDigestAt: deps.clock.now() })
+    .where(
+      and(
+        eq(org.id, current.id),
+        or(isNull(org.lastDigestAt), lt(org.lastDigestAt, new Date(deps.clock.now().getTime() - DIGEST_GAP))),
+      ),
+    )
+    .returning({ id: org.id });
+  if (claimed.length === 0) return;
+  const rows = await devices(deps);
+  if (rows.length === 0) return;
   const recent = await deps.db
     .select()
     .from(activity)
@@ -214,29 +228,28 @@ export async function sendDigest(deps: Deps) {
     }
   }
   const keys = await vapidKeys(deps);
-  for (const { person } of subscribers) {
+  const people_ = new Map(rows.map((row) => [row.person.id, row.person]));
+  for (const person of people_.values()) {
     const caller = asCaller(person);
     const count = recent.filter((row) => {
       const resource = row.artifactId ? resources.get(row.artifactId) : null;
       return resource && row.actorPersonId !== person.id && seesArtifact(caller, resource);
     }).length;
     if (count === 0) continue;
-    const devices = await deps.db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.personId, person.id));
     const message = {
       title: "Today in Artifacts",
       body: count === 1 ? "1 update since yesterday" : `${count} updates since yesterday`,
-      url: `${deps.env.publicUrl}/activity`,
+      url: "/activity",
       tag: "digest",
     };
     await Promise.all(
-      devices.map((row) =>
-        send(deps, keys, row, message).catch((error) =>
-          deps.log.warn("couldn't send a push", { error: String(error) }),
+      rows
+        .filter((row) => row.person.id === person.id)
+        .map(({ subscription }) =>
+          send(deps, keys, subscription, message).catch((error) =>
+            deps.log.warn("couldn't send a push", { error: String(error) }),
+          ),
         ),
-      ),
     );
   }
 }
@@ -254,6 +267,7 @@ export function pushRoutes(routes: Routes, deps: Deps) {
 
   routes.post("/api/push/subscribe", { action: "account.manage" }, async (c) => {
     const me = person(c as ApiContext);
+    const session = (c.get("caller") as { sessionId: string }).sessionId;
     const body = await parseBody(c, PushSubscribe);
     if (!allowed(deps, body.endpoint)) throw new ApiError("invalid", "That isn't a push service.");
     const existing = await deps.db
@@ -269,13 +283,14 @@ export function pushRoutes(routes: Routes, deps: Deps) {
         id: Bun.randomUUIDv7(),
         orgId: c.get("org").id,
         personId: me.id,
+        sessionId: session,
         endpoint: body.endpoint,
         keys: body.keys,
         createdAt: deps.clock.now(),
       })
       .onConflictDoUpdate({
         target: pushSubscriptions.endpoint,
-        set: { personId: me.id, keys: body.keys },
+        set: { personId: me.id, sessionId: session, keys: body.keys },
       });
     return c.json({ ok: true });
   });

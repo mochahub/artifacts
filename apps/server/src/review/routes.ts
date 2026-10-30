@@ -351,11 +351,11 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
         author.agent,
       );
       void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
-      void notifyReply(deps, c.get("org").id, thread, {
+      notifyReply(deps, c.get("org").id, thread, {
         authorName: author.agent ?? (comment as CommentRow).authorName,
         body: (comment as CommentRow).body,
         actor: author.agent ? null : (comment as CommentRow).authorPersonId,
-      });
+      }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
       return c.json(commentView(comment as CommentRow));
     },
   );
@@ -423,13 +423,14 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
 
   routes.patch("/api/comments/:id", { action: "artifact.comment", inHandler: true }, async (c) => {
     if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const { row } = await ownComment(c as ApiContext);
+    const { row, thread } = await ownComment(c as ApiContext);
     const { body } = await parseBody(c, EditComment);
     const [updated] = await db
       .update(comments)
       .set({ body, editedAt: clock.now() })
       .where(eq(comments.id, row.id))
       .returning();
+    void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
     return c.json(commentView(updated as CommentRow));
   });
 
@@ -447,6 +448,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     } else {
       await db.delete(comments).where(eq(comments.id, row.id));
     }
+    void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
     return c.json({ ok: true });
   });
 
