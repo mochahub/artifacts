@@ -185,7 +185,12 @@ describe("publishing", () => {
         bearer: owner.token,
         json: { project: "camerabuddy", slug: "types", title: "Types", files: files(type) },
       });
-    for (const bad of ["text/plain\r\nSet-Cookie: a=b", "html", "text/html\u0000", `text/${"x".repeat(300)}`]) {
+    for (const bad of [
+      "text/plain\r\nSet-Cookie: a=b",
+      "html",
+      "text/html\u0000",
+      `text/${"x".repeat(300)}`,
+    ]) {
       expect(await error(await prepare(bad))).toBe("invalid");
     }
     const ok = await prepare("text/html; charset=utf-8");
@@ -213,7 +218,10 @@ describe("publishing", () => {
     });
     const { uploadId } = PublishPrepared.parse(await prepared.json());
     const files = Object.fromEntries(
-      Array.from({ length: 20_001 }, (_, i) => [`f${i}.txt`, { hash: hash(`f${i}`), size: 1, type: "text/plain" }]),
+      Array.from({ length: 20_001 }, (_, i) => [
+        `f${i}.txt`,
+        { hash: hash(`f${i}`), size: 1, type: "text/plain" },
+      ]),
     );
     const commit = await t.api("/api/publish/commit", {
       method: "POST",
@@ -249,13 +257,19 @@ describe("publishing", () => {
     const big = `export default { fetch() { return new Response("x"); } };//${"x".repeat(1024 * 1024)}`;
     const response = await publish(t, owner.token, { slug: "bigbackend", backend: big });
     expect(await error(response)).toBe("too_large");
-    expect((await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bigbackend"))).length).toBe(0);
+    expect((await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bigbackend"))).length).toBe(
+      0,
+    );
   });
 
   test("a bundle file is stored as an inert type, so /r/ can't serve a page or script on the viewer's origin", async () => {
     const page = file("evil.html", `<script src="x.js"></script>${Bun.randomUUIDv7()}`, "text/html");
     const script = file("x.js", `alert(1)//${Bun.randomUUIDv7()}`, "text/javascript");
-    const vector = file("v.svg", `<svg xmlns="http://www.w3.org/2000/svg"/>${Bun.randomUUIDv7()}`, "image/svg+xml");
+    const vector = file(
+      "v.svg",
+      `<svg xmlns="http://www.w3.org/2000/svg"/>${Bun.randomUUIDv7()}`,
+      "image/svg+xml",
+    );
     const photo = file("p.png", `png-${Bun.randomUUIDv7()}`, "image/png");
     const extra = [page, script, vector, photo];
 

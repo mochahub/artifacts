@@ -288,7 +288,13 @@ describe("the backend sandbox", () => {
     } };`);
     // "=" inside a value, a lone "%", empty parts, and "+" and escapes together.
     const response = await call("x?token=abc==&bad=100%&&a=1&a=2&good=a%2Bb+c");
-    expect(await response.json()).toEqual({ token: "abc==", bad: "100%", good: "a+b c", all: ["1", "2"], n: 5 });
+    expect(await response.json()).toEqual({
+      token: "abc==",
+      bad: "100%",
+      good: "a+b c",
+      all: ["1", "2"],
+      n: 5,
+    });
   });
 
   test("an answer the browser can't be sent is a 502, not an unhandled error", async () => {

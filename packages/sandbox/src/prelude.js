@@ -51,15 +51,13 @@
       // As the URL standard has it: split at the first "=" only, skip empty parts, and leave a stray
       // "%" as it is. A backend that reads a token or a signature from the query must see what was sent.
       const decode = (text) =>
-        text
-          .replace(/\+/g, " ")
-          .replace(/(%[0-9a-f]{2})+/gi, (run) => {
-            try {
-              return decodeURIComponent(run);
-            } catch {
-              return run;
-            }
-          });
+        text.replace(/\+/g, " ").replace(/(%[0-9a-f]{2})+/gi, (run) => {
+          try {
+            return decodeURIComponent(run);
+          } catch {
+            return run;
+          }
+        });
       const text = String(init).replace(/^\?/, "");
       for (const part of text.split("&")) {
         if (part === "") continue;
