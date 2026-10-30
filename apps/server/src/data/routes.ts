@@ -186,6 +186,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.write", resource: artifact },
     async (c) => {
       const name = checkKey(c.req.param("name") as string);
+      limited(c as ApiContext);
       await deleteValue(deps, {
         orgId: c.get("org").id,
         artifactId: c.req.param("id") as string,
