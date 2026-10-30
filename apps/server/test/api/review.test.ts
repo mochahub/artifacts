@@ -79,6 +79,23 @@ describe("the review API", () => {
     expect((await thread({ anchor: { type: "frame", frameKey: "live-view", x: 2, y: 0 } })).status).toBe(400);
   });
 
+  test("a quote, a page key and a decision's note have a size limit", async () => {
+    const quote = (exact: string, prefix = "", suffix = "") => ({
+      type: "text",
+      blockKey: "intro/p1",
+      quote: { exact, prefix, suffix },
+    });
+    expect((await thread({ pageKey: "plan", anchor: quote("x".repeat(10_001)) })).status).toBe(400);
+    expect((await thread({ pageKey: "plan", anchor: quote("Hello", "x".repeat(501)) })).status).toBe(400);
+    expect((await thread({ pageKey: "p".repeat(501), anchor: null })).status).toBe(400);
+    const decide = await t.api(`/api/artifacts/${id}/decisions`, {
+      method: "POST",
+      cookie,
+      json: { version: 1, kind: "approved", note: "n".repeat(10_001) },
+    });
+    expect(decide.status).toBe(400);
+  });
+
   test("a version number the database can't hold is a 400, not a 500", async () => {
     const huge = 99_999_999_999;
     expect((await thread({ version: huge })).status).toBe(400);
