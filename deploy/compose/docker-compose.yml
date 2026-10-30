@@ -1,4 +1,11 @@
 # Written by `artifacts setup --docker`, with secrets in .env beside it. Put a reverse proxy in front for HTTPS (README).
+# The ports are published on BIND_ADDRESS (127.0.0.1 unless .env says otherwise), for a reverse proxy on this machine.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   artifacts:
     image: ${ARTIFACTS_IMAGE}
@@ -22,9 +29,22 @@ services:
       SETUP_TOKEN: ${SETUP_TOKEN}
       SESSION_SECRET: ${SESSION_SECRET}
       OPS_SECRET: ${OPS_SECRET}
+    # 8082, the operators' port, is deliberately not published.
     ports:
-      - "${VIEWER_PORT}:8080"
-      - "${LIVE_PORT}:8081"
+      - "${BIND_ADDRESS:-127.0.0.1}:${VIEWER_PORT}:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${LIVE_PORT}:8081"
+    # The server runs as a non-root user and writes nothing to disk.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 1024
+    logging: *logging
 
   postgres:
     image: postgres:17
@@ -37,25 +57,67 @@ services:
       - postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U artifacts -d artifacts"]
-      interval: 2s
+      interval: 5s
       timeout: 3s
       retries: 30
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    # What the image's entrypoint needs to own the data folder and drop to the postgres user.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    logging: *logging
 
   seaweedfs:
     image: chrislusf/seaweedfs:4.50
     restart: unless-stopped
+    # weed ignores SIGTERM as PID 1, so a stop waited ten seconds and then killed it mid-write.
+    init: true
+    # The key pair comes from .env as weed's AWS_* variables, so no file holds it. Without them weed's S3 is open to
+    # anyone, which is why ${...:?} refuses to start rather than fall back to nothing.
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID must be set in .env}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY must be set in .env}
     # Explicit limits: left alone, weed derives the volume count from free disk and small disks get none (09).
-    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=1024 -volume.max=100
+    command: server -dir=/data -s3 -s3.port=8333 -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=1024 -volume.max=100
+    # The S3 port is the only one published: presigned URLs go straight to it (S3_PUBLIC_ENDPOINT).
     ports:
-      - "${S3_PORT}:8333"
+      - "${BIND_ADDRESS:-127.0.0.1}:${S3_PORT}:8333"
     volumes:
       - seaweedfs:/data
-      - ./s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/status || nc -z 127.0.0.1 8333"]
-      interval: 2s
+      interval: 5s
       timeout: 3s
       retries: 60
+    read_only: true
+    tmpfs:
+      - /tmp
+    # The entrypoint takes ownership of /data, then drops to the seaweed user.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 1024
+    logging: *logging
 
 volumes:
   postgres:
