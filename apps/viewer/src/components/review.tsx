@@ -158,6 +158,7 @@ export function ThreadSheet({
   threads: Remote<Thread[]>;
   onClose(): void;
 }) {
+  useKeyboardInset();
   const reply = useSignal("");
   const error = useSignal<string | null>(null);
   const canAct = artifact.permissions.comment;
