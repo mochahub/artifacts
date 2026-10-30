@@ -3,8 +3,10 @@ import { authRoutes } from "./auth.ts";
 import type { Deps } from "./deps.ts";
 import { deviceRoutes } from "./device.ts";
 import { fileRoutes } from "./files.ts";
+import { listRoutes } from "./lists.ts";
 import type { Routes } from "./routes.ts";
 import { setupRoutes } from "./setup.ts";
+import { versionRoutes } from "./versions.ts";
 
 /** Every /api route on the viewer port. */
 export function mountApi(routes: Routes, deps: Deps) {
@@ -12,5 +14,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   authRoutes(routes, deps);
   deviceRoutes(routes, deps);
   publishRoutes(routes, deps);
+  listRoutes(routes, deps);
+  versionRoutes(routes, deps);
   fileRoutes(routes, deps);
 }

@@ -150,7 +150,7 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 ## The canvas engine (`apps/viewer/src/canvas/`)
 
 - **World and transform:**
-  - **World:** boards laid out left to right with 80 px gaps (canvas `pages.meta.boards` and frame `x, y, w, h`).
+  - **World:** boards laid out left to right with 80 px gaps (canvas `pages.meta.boards` and frame `x, y, w, h`). On a tall screen the viewer wraps them into two columns, as board 02 draws it. Anchors are per frame, so this only moves them on screen.
   - **One transformed layer:** a single container with `transform: translate(x,y) scale(s)`. Frames are absolutely positioned `<img>` elements.
 - **Level of detail, picked per frame from its on-screen size:**
   - under 120 CSS px wide: `thumb`

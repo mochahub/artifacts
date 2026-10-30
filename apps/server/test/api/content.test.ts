@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { artifacts, people, versions } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { publish } from "./publish.test.ts";
+import { publish } from "../publish-helper.ts";
 
 describe("the content host", () => {
   let t: TestServer;

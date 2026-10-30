@@ -2,7 +2,6 @@ import { readFileSync, statSync } from "node:fs";
 import type { Manifest } from "@artifacts/schema";
 import { Parser } from "htmlparser2";
 import { crawl, typeOf } from "../bundle/crawl.ts";
-import type { Problem } from "../bundle/manifest.ts";
 
 const MB = 1024 * 1024;
 

@@ -1,30 +1,49 @@
-import { useEffect } from "preact/hooks";
-import { useLocation } from "preact-iso";
-import { post } from "../api.ts";
-import { me, meta } from "../session.ts";
+import type { Home as HomeData } from "@artifacts/schema";
+import { FileText } from "lucide-preact";
+import { ReviewCard } from "../components/cards.tsx";
+import { Shell } from "../components/shell.tsx";
+import { usePoll } from "../poll.ts";
+import { me } from "../session.ts";
+import { SignedIn } from "./guard.tsx";
 
-/** A placeholder until the real Review home in M4. */
-export function Home() {
-  const { route } = useLocation();
-  useEffect(() => {
-    if (!me.value) route("/sign-in", true);
-  }, [route]);
-  if (!me.value) return null;
+function Review() {
+  const { data } = usePoll<HomeData>("/api/home", 60_000);
+  const home = data.value;
   return (
-    <main class="screen">
-      <h1 class="h1">{meta.value?.orgName}</h1>
-      <p class="sub">Signed in as {me.value.name}.</p>
-      <button
-        type="button"
-        class="btn soft"
-        onClick={async () => {
-          await post("/api/auth/logout");
-          me.value = null;
-          route("/sign-in", true);
-        }}
-      >
-        Sign out
-      </button>
-    </main>
+    <Shell>
+      <div class="top">
+        <h1 class="h1 l">Review</h1>
+        <a class="av you" href="/settings" aria-label="Settings">
+          {me.value?.name[0]}
+        </a>
+      </div>
+      {home && home.waiting.length > 0 && <span class="gh">Waiting on you</span>}
+      {home?.waiting.map((card) => (
+        <ReviewCard card={card} key={card.id} />
+      ))}
+      {home && home.waiting.length === 0 && <div class="empty">Nothing is waiting on you.</div>}
+      {home && home.recent.length > 0 && <span class="gh">Recently viewed</span>}
+      {home && home.recent.length > 0 && (
+        <div class="group">
+          {home.recent.map((card) => (
+            <a class="li" href={`/${card.project}/${card.slug}`} key={card.id}>
+              <span class="kind">
+                <FileText />
+              </span>
+              <div class="grow">
+                <div class="tt">{card.title}</div>
+                <div class="ss">{card.project}</div>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </Shell>
   );
 }
+
+export const Home = () => (
+  <SignedIn>
+    <Review />
+  </SignedIn>
+);
