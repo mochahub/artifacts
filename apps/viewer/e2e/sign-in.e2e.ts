@@ -45,7 +45,7 @@ test("approve the CLI by typing its code", async ({ page, request }, info) => {
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   await page.getByLabel("Email").fill(OWNER.email);
   await page.getByLabel("Password").fill(OWNER.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(/\/device$/);
 
   await page.getByLabel("Code").fill(userCode.toLowerCase());

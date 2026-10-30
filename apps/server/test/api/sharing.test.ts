@@ -157,6 +157,7 @@ describe("sharing", () => {
       sharedBy: "Zahin",
       artifact: { title: "Roadmap" },
     });
+    expect((await t.api(`/api/s/${secretOf(url)}/cover`, { redirect: "manual" })).status).toBe(302);
     const cookie = await guestOn(url);
     expect(cookie).toContain("art_guest=");
     expect(

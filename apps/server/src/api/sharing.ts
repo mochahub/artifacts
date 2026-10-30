@@ -262,6 +262,22 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     });
   });
 
+  routes.get("/api/s/:token/cover", { public: true }, async (c) => {
+    const { artifact: row } = await liveLink(c as ApiContext);
+    const [first] = await db
+      .select({ renders: frames.renders })
+      .from(frames)
+      .innerJoin(versions, eq(versions.id, frames.versionId))
+      .where(and(eq(versions.artifactId, row.id), eq(versions.n, row.latestVersion)))
+      .orderBy(asc(frames.y), asc(frames.x))
+      .limit(1);
+    if (!first) throw new ApiError("not_found", "Not found.");
+    return c.redirect(
+      await deps.bucket.presignGet(`blobs/${(first.renders as { "2x": string })["2x"]}`),
+      302,
+    );
+  });
+
   routes.post("/api/s/:token/guest", { public: true }, async (c) => {
     limits.hit(`guest:${deps.clientIp(c)}`, 20, 3600_000);
     const { link } = await liveLink(c as ApiContext);

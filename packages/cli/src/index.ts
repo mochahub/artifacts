@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
 import { doctor } from "./commands/doctor.ts";
+import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
 import { commentsCommand, replyCommand, statusCommand } from "./commands/review.ts";
 import { setup } from "./commands/setup.ts";
 import { initCommand, lintCommand, openCommand, publishCommand, renderCommand } from "./commands/write.ts";
@@ -26,6 +27,10 @@ const USAGE = `artifacts ${VERSION}
   artifacts comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]
   artifacts reply <n> "<text>" [--fixed]
   artifacts skill install [--claude] [--codex]
+  artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
+  artifacts visibility org|me
+  artifacts share --link [--comment] [--expires 1d|7d|30d]
+  artifacts share --invite <email> [--comment|--publish]
 
 Every command takes --json and --server <url|name>.`;
 
@@ -50,6 +55,12 @@ const OPTIONS = {
   open: { type: "boolean" },
   fixed: { type: "boolean" },
   all: { type: "boolean" },
+  role: { type: "string" },
+  link: { type: "boolean" },
+  invite: { type: "string" },
+  comment: { type: "boolean" },
+  publish: { type: "boolean" },
+  expires: { type: "string" },
   claude: { type: "boolean" },
   codex: { type: "boolean" },
   "no-skill": { type: "boolean" },
@@ -129,6 +140,23 @@ async function main(argv: string[]) {
       const dirs = installSkill({ claude: values.claude, codex: values.codex }, out);
       return out.result({ installed: dirs }, () => {});
     }
+    case "org":
+      return orgCommand(first, positionals[2], { role: values.role, server: values.server }, out);
+    case "visibility":
+      return visibilityCommand(first, positionals[2], values.server, out);
+    case "share":
+      return shareCommand(
+        first,
+        {
+          link: values.link,
+          invite: values.invite,
+          comment: values.comment,
+          publish: values.publish,
+          expires: values.expires,
+          server: values.server,
+        },
+        out,
+      );
     case "init":
       return initCommand({ project: values.project, slug: values.slug, kind: values.kind }, out);
     case "lint":

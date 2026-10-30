@@ -115,7 +115,7 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 3. **Home on desktop:** a left rail with Review, Activity and projects; ⌘K search; a "waiting on you" card grid; recently viewed as a table; an Activity column.
 
 ### 05 · Share, decide, get notified
-1. **Share:** link permission (Nothing / View / View and comment), expiry, "Copy link"; people with access; the preview card is the cover frame.
+1. **Share:** link permission (View / View and comment), expiry, "Copy link"; live links, each revoked by its own row (links are stored hashed, so one can't be shown again); people with access.
 2. **A guest arrives:** the cover; "Zahin shared this with you"; title, description, a "Your name" field, then "Start reviewing".
 3. **Decide:** Approve or Request changes, a note field, the open comments that will go with it, and "Request changes". Fine print: "Claude sees this the next time it runs `artifacts status`".
 4. **Notifications** (Phase 2): an iOS lock-screen example.

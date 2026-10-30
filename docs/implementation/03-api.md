@@ -107,6 +107,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | Method, path | Auth | Notes |
 |---|---|---|
 | `GET /api/s/:token` | none | `{ artifact: { id, project, slug, title, cover }, permission, needsName: bool, sharedBy }`; 410 if revoked or expired. |
+| `GET /api/s/:token/cover` | none | 302 to the cover render, for the landing page, before the guest has a session. |
 | `POST /api/s/:token/guest` | none | `{ name }` (1–60 chars) → sets `art_guest` if absent, creates `guest_links` row; `{ guest: { id, name } }` |
 
 ## Organization and people (admins)

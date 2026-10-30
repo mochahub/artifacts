@@ -1013,6 +1013,10 @@
   color: var(--tx);
   font: var(--read-size, 19px) / 1.55 var(--read-font, var(--serif));
 }
+.article {
+  /* Margin tabs sit in the gutter; on a phone they must never make the page scroll sideways. */
+  overflow-x: clip;
+}
 .article h1 {
   font: 700 34px / 1.14 var(--serif);
   letter-spacing: -0.01em;
