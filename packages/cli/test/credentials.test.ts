@@ -9,7 +9,10 @@ function recorder() {
     hostname: "127.0.0.1",
     fetch(request) {
       seen.push({ path: new URL(request.url).pathname, authorization: request.headers.get("authorization") });
-      return Response.json({ error: { code: "unauthenticated", message: "No.", details: {} } }, { status: 401 });
+      return Response.json(
+        { error: { code: "unauthenticated", message: "No.", details: {} } },
+        { status: 401 },
+      );
     },
   });
   return { seen, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };

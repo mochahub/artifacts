@@ -77,7 +77,9 @@ describe("artifacts dev", () => {
     expect((await fetch(`${origin}/v1/boards/main.html`)).status).toBe(404);
     // A name that someone's DNS pointed here (rebinding) has the right port but the wrong Host.
     expect((await fetch(`${viewer}/api/meta`, { headers: { Host: "evil.example.com" } })).status).toBe(403);
-    expect((await fetch(`${content}/v1/api/votes`, { headers: { Host: "evil.example.com" } })).status).toBe(403);
+    expect((await fetch(`${content}/v1/api/votes`, { headers: { Host: "evil.example.com" } })).status).toBe(
+      403,
+    );
     expect((await fetch(`${viewer}/api/meta`)).status).toBe(200);
   });
 

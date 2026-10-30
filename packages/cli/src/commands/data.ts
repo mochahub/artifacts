@@ -59,7 +59,8 @@ export async function dataCommand(
       });
     }
     case "get": {
-      if (!key) throw new UsageError("Usage: artifacts data get <key> [--scope shared|me]");      const { value } = await client.get<{ value: unknown }>(`${base}/data/${scope}/${key}`);
+      if (!key) throw new UsageError("Usage: artifacts data get <key> [--scope shared|me]");
+      const { value } = await client.get<{ value: unknown }>(`${base}/data/${scope}/${key}`);
       return out.result(value, () => out.say(JSON.stringify(value, null, 2)));
     }
     case "export": {

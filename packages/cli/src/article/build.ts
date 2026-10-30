@@ -155,7 +155,8 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
             .split(sep)
             .join("/");
           try {
-            if (input.blobHash(path)) svg = chartSvg(JSON.parse(readFileSync(join(input.root, path), "utf8")));
+            if (input.blobHash(path))
+              svg = chartSvg(JSON.parse(readFileSync(join(input.root, path), "utf8")));
           } catch {
             // A chart file that isn't the shape ::chart wants is reported below, not a crash.
           }

@@ -38,7 +38,9 @@ for (const path of ["/..%2F${name}-x%2Fsecret.txt", "/link.txt", "/inside.txt"])
     );
     const result = await cli(["render", "--json"], box.env, dir);
     expect(result.code).toBe(0);
-    const failed = (JSON.parse(result.stdout).problems as { message: string }[]).map((p) => p.message).join("\n");
+    const failed = (JSON.parse(result.stdout).problems as { message: string }[])
+      .map((p) => p.message)
+      .join("\n");
     expect(failed).toContain("secret.txt");
     expect(failed).toContain("link.txt");
     expect(failed).not.toContain("inside.txt");

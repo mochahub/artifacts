@@ -11,7 +11,13 @@ function serverWithVerificationUrl(verificationUrl: string) {
     fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === "/api/device/start") {
-        return Response.json({ deviceCode: "d", userCode: "ABCD-EFGH", verificationUrl, interval: 0, expiresIn: 5 });
+        return Response.json({
+          deviceCode: "d",
+          userCode: "ABCD-EFGH",
+          verificationUrl,
+          interval: 0,
+          expiresIn: 5,
+        });
       }
       return Response.json({ status: "denied" });
     },
