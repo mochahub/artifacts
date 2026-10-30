@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Slug, Visibility } from "./manifest.ts";
+import { Key, Slug, Visibility } from "./manifest.ts";
 
 /** Request and response shapes for the HTTP API. 03-api.md owns the names; 02 owns the enums. */
 
@@ -304,15 +304,67 @@ export const PublishPrepare = z.object({
   slug: Slug,
   title: z.string().min(1).max(120),
   visibility: Visibility.optional(),
-  files: z.array(
-    z.object({ path: z.string(), sha256: Sha256, size: z.number().int().nonnegative(), type: z.string() }),
-  ),
+  files: z
+    .array(
+      z.object({ path: z.string(), sha256: Sha256, size: z.number().int().nonnegative(), type: z.string() }),
+    )
+    .max(20_000),
 });
 export const PublishPrepared = z.object({
   uploadId: z.string(),
   artifactId: Id,
   missing: z.array(z.object({ sha256: Sha256, url: z.string(), headers: z.record(z.string(), z.string()) })),
 });
+export const BoardRecord = z.object({
+  key: z.string(),
+  title: z.string(),
+  subtitle: z.string().optional(),
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+});
+export const OutlineEntry = z.object({ id: z.string(), title: z.string(), level: z.number().int() });
+export const PageRecord = z.object({
+  key: Key,
+  kind: PageKind,
+  title: z.string().nullable(),
+  group: z.string().nullable(),
+  position: z.number().int(),
+  meta: z.object({
+    readingMinutes: z.number().optional(),
+    htmlHash: Sha256.optional(),
+    outline: z.array(OutlineEntry).optional(),
+    boards: z.array(BoardRecord).optional(),
+    device: z.string().optional(),
+    livePath: z.string().optional(),
+    items: z.array(z.object({ hash: Sha256, caption: z.string().optional() })).optional(),
+  }),
+});
+export type PageRecord = z.infer<typeof PageRecord>;
+export const FrameRecord = z.object({
+  pageKey: z.string(),
+  boardKey: z.string(),
+  frameKey: z.string(),
+  title: z.string().nullable(),
+  device: z.string().nullable(),
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  contentHash: Sha256,
+  renders: z.object({ "1x": Sha256, "2x": Sha256, "3x": Sha256, thumb: Sha256 }),
+  livePath: z.string().nullable(),
+});
+export type FrameRecord = z.infer<typeof FrameRecord>;
+export const BlockRecord = z.object({
+  pageKey: z.string(),
+  blockKey: z.string(),
+  contentHash: Sha256,
+  text: z.string(),
+});
+export type BlockRecord = z.infer<typeof BlockRecord>;
+
 export const PublishCommit = z.object({
   uploadId: z.string(),
   message: z.string().nullable().optional(),
@@ -321,9 +373,9 @@ export const PublishCommit = z.object({
   agent: z.string().nullable().optional(),
   files: z.record(z.string(), FileRef),
   backendHash: Sha256.nullable().optional(),
-  pages: z.array(z.unknown()),
-  frames: z.array(z.unknown()),
-  blocks: z.array(z.unknown()),
+  pages: z.array(PageRecord),
+  frames: z.array(FrameRecord),
+  blocks: z.array(BlockRecord),
 });
 const ChangeSet = z.object({
   added: z.array(z.string()).optional(),

@@ -1,3 +1,4 @@
+import type { OrgSettings } from "@artifacts/schema";
 import { asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -10,10 +11,10 @@ export function connect(url: string) {
   return { db: drizzle({ client, schema }), close: () => client.end({ timeout: 5 }) };
 }
 
-export type OrgRow = typeof schema.org.$inferSelect;
+export type OrgRow = Omit<typeof schema.org.$inferSelect, "settings"> & { settings: OrgSettings };
 
 /** The deployment's one organization; null means setup mode (04). */
 export async function findOrg(db: Db): Promise<OrgRow | null> {
   const [row] = await db.select().from(schema.org).orderBy(asc(schema.org.id)).limit(1);
-  return row ?? null;
+  return (row as OrgRow | undefined) ?? null;
 }

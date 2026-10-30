@@ -111,7 +111,7 @@ export async function startServer(env: Env, options: StartOptions) {
 
   const servers = [
     Bun.serve({ port: env.port, fetch: viewer.fetch }),
-    Bun.serve({ port: env.contentPort, fetch: createContentApp(env, log).fetch }),
+    Bun.serve({ port: env.contentPort, fetch: createContentApp(deps).fetch }),
     Bun.serve({ port: env.internalPort, fetch: createInternalApp(env, log).fetch }),
   ] as const;
   const [viewerServer, contentServer, internalServer] = servers;

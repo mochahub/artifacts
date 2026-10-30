@@ -348,6 +348,19 @@ export const tokens = pgTable("tokens", {
 
 // Versions and content
 
+export const blobs = pgTable(
+  "blobs",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    hash: text("hash").notNull(),
+    size: bigint("size", { mode: "number" }).notNull(),
+    verifiedAt: time("verified_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.hash] })],
+);
+
 export const versions = pgTable(
   "versions",
   {
