@@ -60,6 +60,27 @@ describe("setup mode", () => {
   test("setup runs once", async () => {
     expect((await t.api("/api/setup", { method: "POST", json: setupBody })).status).toBe(409);
   });
+
+  test("once set up, the token is never checked, so guesses learn nothing", async () => {
+    const wrong = await t.api("/api/setup", { method: "POST", json: { ...setupBody, setupToken: "no" } });
+    expect(wrong.status).toBe(409);
+  });
+});
+
+describe("setup mode guesses", () => {
+  let t: TestServer;
+  beforeAll(async () => {
+    t = await startTestServer();
+  });
+  afterAll(() => t.stop());
+
+  test("wrong tokens are limited to 20 per IP per hour", async () => {
+    const guess = () => t.api("/api/setup", { method: "POST", json: { ...setupBody, setupToken: "no" } });
+    for (let i = 0; i < 20; i++) expect((await guess()).status).toBe(403);
+    expect((await guess()).status).toBe(429);
+    t.clock.advance(3601_000);
+    expect((await guess()).status).toBe(403);
+  });
 });
 
 describe("signing in", () => {

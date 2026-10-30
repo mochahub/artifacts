@@ -16,10 +16,12 @@ export function setupRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock } = deps;
 
   routes.post("/api/setup", { public: true }, async (c) => {
+    // Checked first, so once there's an owner nobody can test guesses at the token here (it still opens /api/recover).
+    if (await findOrg(db)) throw new ApiError("conflict", "This deployment is already set up.");
+    deps.limits.hit(`setup:${deps.clientIp(c)}`, 20, HOUR);
     const body = await parseBody(c, SetupRequest);
     if (!safeEqual(body.setupToken, env.setupToken))
       throw new ApiError("forbidden", "That setup token is wrong.");
-    if (await findOrg(db)) throw new ApiError("conflict", "This deployment is already set up.");
 
     const hash = await Bun.password.hash(body.password, { algorithm: "argon2id" });
     const homeDomain = (c.req.header("host") ?? "").split(":")[0]?.toLowerCase() ?? "";
