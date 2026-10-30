@@ -10,9 +10,9 @@ import type { Deps } from "./deps.ts";
 import { parseBody, type Routes } from "./routes.ts";
 
 const CONTENT_TOKEN_MS = 2 * 3600_000;
-const IMAGE = /^image\/(webp|png|jpeg|gif|avif|svg\+xml)$/;
+const IMAGE = /^image\//;
 /** A picture bigger than this goes by the redirect, rather than through the app's memory. */
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
 
 export function fileRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock, bucket } = deps;

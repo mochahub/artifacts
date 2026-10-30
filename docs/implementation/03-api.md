@@ -36,7 +36,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 
 | HTTP | `code` | When |
 |---|---|---|
-| 400 | `invalid` | Body fails validation; `details` has zod issues |
+| 400 | `invalid` | Body fails validation; `details` has zod issues. Also a number or text Postgres refuses (a version past 2,147,483,647, a NUL byte), with empty `details`. |
 | 401 | `unauthenticated` | No valid caller |
 | 401 | `recent_auth_required` | The action needs a sign-in within 10 minutes; the viewer re-prompts |
 | 403 | `forbidden` | Caller can't do this |
@@ -182,7 +182,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 | Method, path | Action | Notes |
 |---|---|---|
-| `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. With `?via=app` (the service worker, 06) a picture of a safe image type up to 20 MB comes through the app instead, as an `attachment` with `nosniff`, never as a page; anything else still gets the 302. |
+| `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. With `?via=app` (the service worker, 06) an `image/*` file up to 64 MB comes through the app instead, as an `attachment` with `nosniff`, never as a page; anything else still gets the 302. |
 | `GET /api/artifacts/:id/v/:n/article/:pageKey` | `artifact.read` | The article's HTML as re-sanitized by the server at commit ([05](05-publish-and-storage.md#building-articles-cli)), fetched as text and never navigated to. Served as `Content-Type: text/plain; charset=utf-8` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so a browser opening the URL directly can never render it on the viewer's origin. |
 | `GET /api/threads/:id/crop` | `artifact.read` | 302 to the crop. |
 
