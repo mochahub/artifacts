@@ -99,6 +99,16 @@ function optionAfter(flag: string) {
   return index > 0 ? process.argv[index + 1] : undefined;
 }
 
+/** A port number. The content host and the bucket sit above it (+1, +253), so it must leave room. */
+function portOption(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65000) {
+    throw new UsageError(`--port wants a number from 1 to 65000, not "${value}".`);
+  }
+  return port;
+}
+
 /** `upgrade --server` is a flag, unlike `--server <url>` everywhere else. */
 const optionFlag = (flag: string) => process.argv.includes(flag);
 const serverValue = () => undefined;
@@ -137,7 +147,7 @@ async function main(argv: string[]) {
           docker: values.docker,
           dir: values.dir,
           image: values.image,
-          port: values.port ? Number(values.port) : undefined,
+          port: portOption(values.port),
           org: values.org,
           name: values.name,
           email: values.email,
@@ -186,7 +196,7 @@ async function main(argv: string[]) {
     case "mcp":
       return mcpCommand();
     case "dev":
-      return devCommand({ port: values.port ? Number(values.port) : 4321 }, out);
+      return devCommand({ port: portOption(values.port) ?? 4321 }, out);
     case "versions":
       return versionsCommand(first, positionals.slice(2), { server: values.server }, out);
     case "diff":
