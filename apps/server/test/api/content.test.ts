@@ -2,15 +2,17 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { artifacts, people, versions } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { publish } from "../publish-helper.ts";
+import { file, publish } from "../publish-helper.ts";
 
 describe("the content host", () => {
   let t: TestServer;
   let cookie: string;
+  let ownerToken: string;
   let id: string;
   beforeAll(async () => {
     t = await startTestServer();
     const owner = await claim(t);
+    ownerToken = owner.token;
     await publish(t, owner.token);
     cookie = await signIn(t, OWNER.email, OWNER.password);
     id = (await t.server.db.select().from(artifacts))[0]?.id as string;
@@ -60,6 +62,33 @@ describe("the content host", () => {
     const tail = await fetch(url, { headers: { ...headers, Range: "bytes=-2" } });
     expect(await tail.text()).toBe(full.slice(-2));
     expect((await fetch(url, { headers: { ...headers, Range: "bytes=999999-" } })).status).toBe(416);
+  });
+
+  test("a big file is read from the bucket in pieces, never whole", async () => {
+    const piece = 8 * 1024 * 1024;
+    const body = `${"0123456789abcdef".repeat(piece / 16 + 1000)}`; // A little over 8 MB.
+    const movie = file("clip.bin", body, "video/mp4");
+    expect((await publish(t, ownerToken, { slug: "big", extra: [movie] })).status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "big"));
+    const minted = await t.api(`/api/artifacts/${row?.id}/content-token`, {
+      method: "POST",
+      cookie,
+      json: { version: 1 },
+    });
+    const { base } = (await minted.json()) as { base: string };
+    const url = `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}clip.bin`;
+    const headers = { Host: "content.test", "Sec-Fetch-Dest": "video" };
+
+    // "From here to the end" is what browsers ask first; the answer may be shorter than the file.
+    const open = await fetch(url, { headers: { ...headers, Range: "bytes=0-" } });
+    expect(open.status).toBe(206);
+    expect(open.headers.get("content-range")).toBe(`bytes 0-${piece - 1}/${body.length}`);
+    expect((await open.arrayBuffer()).byteLength).toBe(piece);
+
+    const tail = await fetch(url, { headers: { ...headers, Range: `bytes=${body.length - 5}-` } });
+    expect(tail.status).toBe(206);
+    expect(await tail.text()).toBe(body.slice(-5));
+    expect((await fetch(url, { headers: { ...headers, Range: `bytes=${body.length}-` } })).status).toBe(416);
   });
 
   test("refuses a top-level page, and a request with no Sec-Fetch-Dest", async () => {

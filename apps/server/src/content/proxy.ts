@@ -12,11 +12,12 @@ import {
   listKeys,
   pseudonym,
   putValue,
+  readLimited,
 } from "../data/store.ts";
 import { findOrg } from "../db/index.ts";
 import { backendLogs, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
-import { blobKey } from "../publish/blobs.ts";
+import { blobKey, knownBlobs } from "../publish/blobs.ts";
 import { PreconditionFailed } from "../s3.ts";
 import type { SandboxPool } from "../sandbox/pool.ts";
 import type { ContentPayload } from "./token.ts";
@@ -118,18 +119,6 @@ const orgOf = async (deps: Deps) => {
   return org;
 };
 
-/** Reads a body with no Content-Length without taking more of it than the limit. */
-async function readBody(c: Context, limit: number) {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of (c.req.raw.body ?? []) as AsyncIterable<Uint8Array>) {
-    size += chunk.length;
-    if (size > limit) throw new ApiError("too_large", "That request is too big.", { limit });
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString();
-}
-
 /** One line for backend_logs: no NUL, which Postgres refuses, and capped in bytes. */
 const logLine = (message: string) =>
   Buffer.from(message.replaceAll("\0", "")).subarray(0, MAX_LOG_LINE).toString();
@@ -158,18 +147,16 @@ export async function runBackend(
   const key = callerKey(caller) ?? "nobody";
   deps.limits.hit(`backend:${payload.a}:${key}`, limits.backendRequestsPerMinute, MINUTE);
 
-  const declared = Number(c.req.header("content-length") ?? 0);
-  if (declared > limits.backendRequestBytes) {
-    throw new ApiError("too_large", "That request is too big.", { limit: limits.backendRequestBytes });
-  }
-  const body = await readBody(c, limits.backendRequestBytes);
+  const body = Buffer.from(await readLimited(c.req.raw, limits.backendRequestBytes)).toString();
 
+  // The size was proved at publish. Looking it up first keeps a limit lowered since then from loading a huge file.
+  const size = (await knownBlobs(deps, org.id, [hash])).get(hash);
+  if (size === undefined || size > limits.backendCodeBytes) {
+    throw new ApiError("too_large", "This backend is too big.", { limit: limits.backendCodeBytes });
+  }
   const object = await deps.bucket.get(blobKey(hash));
   if (!object) throw new ApiError("not_found", "This version has no backend.");
   const code = new TextDecoder().decode(object.body);
-  if (Buffer.byteLength(code) > limits.backendCodeBytes) {
-    throw new ApiError("too_large", "This backend is too big.", { limit: limits.backendCodeBytes });
-  }
 
   // Everything about who may do what stays here, in the app, for the length of this request.
   const canComment = can(caller, "artifact.comment", artifact);
@@ -240,17 +227,25 @@ export async function runBackend(
       .catch((error) => deps.log.warn(`couldn't save backend logs: ${error}`));
   }
 
-  if (Buffer.byteLength(response.body) > limits.backendResponseBytes) {
-    return new Response('{"error":"The response is too big."}', {
+  const refused = (message: string) =>
+    new Response(JSON.stringify({ error: message }), {
       status: 502,
       headers: { ...CORS, "Content-Type": "application/json" },
     });
+  // The answer is whatever the backend's own code made of it, so no part of it can be assumed valid.
+  try {
+    if (typeof response.body !== "string") throw new TypeError("The body isn't text.");
+    if (Buffer.byteLength(response.body) > limits.backendResponseBytes) {
+      return refused("The response is too big.");
+    }
+    // A caller's own answer, so nothing between here and them may keep it.
+    const headers = new Headers({ ...CORS, "Cache-Control": "no-store" });
+    for (const [name, value] of response.headers)
+      if (SAFE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
+    return new Response(response.body, { status: response.status, headers });
+  } catch {
+    return refused("The backend gave an answer that can't be sent.");
   }
-  // A caller's own answer, so nothing between here and them may keep it.
-  const headers = new Headers({ ...CORS, "Cache-Control": "no-store" });
-  for (const [name, value] of response.headers)
-    if (SAFE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
-  return new Response(response.body, { status: response.status, headers });
 }
 
 export const expireLogs = (deps: Deps) =>

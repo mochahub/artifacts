@@ -39,6 +39,14 @@ describe("Bucket against SeaweedFS", () => {
     expect(await bucket.head(k)).toBeNull();
   });
 
+  test("getRange reads part of an object, both ends included", async () => {
+    const k = key("range.bin");
+    await bucket.put(k, "0123456789");
+    expect(new TextDecoder().decode((await bucket.getRange(k, 2, 5)) as Uint8Array)).toBe("2345");
+    expect(new TextDecoder().decode((await bucket.getRange(k, 8, 99)) as Uint8Array)).toBe("89");
+    expect(await bucket.getRange(key("none"), 0, 1)).toBeNull();
+  });
+
   test("list pages through a prefix", async () => {
     const prefix = `${crypto.randomUUID()}/`;
     await Promise.all(["a", "b", "c"].map((name) => bucket.put(prefix + name, name)));

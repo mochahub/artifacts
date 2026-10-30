@@ -109,6 +109,42 @@ describe("the data store", () => {
     expect(list.keys.map((entry) => entry.key)).toEqual(["todos/1"]);
   });
 
+  test("no spelling of a dot segment, nor a look-alike dot, gets past the key checks", async () => {
+    await fresh();
+    const climbs = [
+      "..%2Fx",
+      "%2e%2e%2fx",
+      "%2E%2E%2Fx",
+      "a%2F..%2Fx",
+      "a%2F%2E%2E",
+      "a%2F.%2Fx",
+      "%2Fabs",
+      "a%5C..%5Cx", // A backslash.
+      "%EF%BC%8E%EF%BC%8E%2Fx", // U+FF0E, a full-width full stop.
+      "%E2%80%A4%E2%80%A4%2Fx", // U+2024, a one-dot leader.
+      "%E2%80%A5%2Fx", // U+2025, a two-dot leader.
+      "a%00b",
+      "%C0%AE%C0%AE%2Fx", // An overlong dot.
+    ];
+    for (const key of climbs) {
+      for (const scope of ["shared", "me"]) {
+        expect([key, (await put(scope, key, 1)).status]).toEqual([key, 400]);
+        expect([key, (await get(scope, key)).status]).toEqual([key, 400]);
+        const files = await t.api(`/api/artifacts/${id}/files/${scope}/${key}`, {
+          method: "PUT",
+          bearer: token,
+          body: "x",
+        });
+        expect([key, files.status]).toEqual([key, 400]);
+      }
+      const list = await t.api(`/api/artifacts/${id}/data/shared?prefix=${key}`, { bearer: token });
+      expect([key, list.status]).toEqual([key, 400]);
+    }
+    // And nothing was written beside the scopes.
+    const stray = (await t.server.bucket.list(`data/${id}/`)).objects.map((object) => object.key);
+    expect(stray).toEqual([]);
+  });
+
   test("limits: value size, key count, bytes per scope, and writes per second", async () => {
     await fresh();
     expect((await put("shared", "big", "x".repeat(70_000))).status).toBe(413);
@@ -163,6 +199,7 @@ describe("the data store", () => {
       ["y.svg", "image/SVG+xml; charset=utf-8"],
       ["z.png", "image/png, text/html"],
     ] as const) {
+      t.clock.advance(1100); // Deleting counts against writesPerSecond, like every other write.
       expect((await up(name, "<svg/>", type)).status).toBe(200);
       const url = await t.api(`/api/artifacts/${id}/files/shared/${name}`, {
         bearer: token,
@@ -187,6 +224,7 @@ describe("the data store", () => {
       files: { name: string }[];
     };
     expect(list.files.map((f) => f.name).sort()).toEqual(["a.png", "page.html", "x.svg"]);
+    t.clock.advance(1100);
     expect(
       (await t.api(`/api/artifacts/${id}/files/shared/a.png`, { method: "DELETE", bearer: token })).status,
     ).toBe(200);
@@ -313,5 +351,63 @@ describe("limits, with an org that's lowered them", () => {
       headers: { "Content-Type": "text/plain" },
     });
     expect(big.status).toBe(413);
+  });
+
+  /** A body that never declares a length and never ends; `taken()` is how much the server pulled from it. */
+  const endless = () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 64 * 1024;
+        controller.enqueue(new Uint8Array(64 * 1024));
+      },
+    });
+    return { body, taken: () => pulled };
+  };
+
+  test("a body with no length is cut off at the limit, not read to the end", async () => {
+    const file = endless();
+    const upload = await t
+      .api(`/api/artifacts/${id}/files/shared/chunked`, {
+        method: "PUT",
+        bearer: token,
+        body: file.body,
+        headers: { "Content-Type": "text/plain" },
+        duplex: "half",
+      })
+      .catch(() => null);
+    expect(upload?.status ?? 413).toBe(413);
+    expect(file.taken()).toBeLessThan(4 * 1024 * 1024);
+
+    const json = endless();
+    const value = await t
+      .api(`/api/artifacts/${id}/data/shared/chunked`, {
+        method: "PUT",
+        bearer: token,
+        body: json.body,
+        headers: { "Content-Type": "application/json" },
+        duplex: "half",
+      })
+      .catch(() => null);
+    expect(value?.status ?? 413).toBe(413);
+    expect(json.taken()).toBeLessThan(4 * 1024 * 1024);
+  });
+
+  test("deleting files counts against the write limit like every other write", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: Record<string, number> };
+    settings.limits.writesPerSecond = 2;
+    await t.server.db.update(org).set({ settings });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      statuses.push(
+        (await t.api(`/api/artifacts/${id}/files/shared/nothing`, { method: "DELETE", bearer: token }))
+          .status,
+      );
+    }
+    expect(statuses).toContain(429);
+    settings.limits.writesPerSecond = 100;
+    await t.server.db.update(org).set({ settings });
   });
 });
