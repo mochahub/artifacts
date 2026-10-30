@@ -11,6 +11,7 @@ import {
   Share,
 } from "lucide-preact";
 import { useRoute } from "preact-iso";
+import { isMissing } from "../api.ts";
 import { AgentMark, StatusWord } from "../components/cards.tsx";
 import { ArchivedBanner, ArtifactMenu } from "../components/manage.tsx";
 import { DecideSheet } from "../components/review.tsx";
@@ -39,7 +40,7 @@ function Detail() {
 
   if (error.value?.status === 410) return <Deleted at={error.value.details.deletedAt as string} />;
   if (error.value?.status === 401) return null;
-  if (error.value) return <NotFound />;
+  if (isMissing(error.value)) return <NotFound />;
   const artifact = data.value;
   if (!artifact) return null;
   const base = `/${artifact.project}/${artifact.slug}`;

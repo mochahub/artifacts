@@ -14,7 +14,7 @@ beforeEach(() => {
   globalThis.addEventListener = ((type: string, fn: Listener) => {
     if (type === "message") listeners.push(fn);
   }) as typeof addEventListener;
-  globalThis.removeEventListener = ((type: string, fn: Listener) => {
+  globalThis.removeEventListener = ((_type: string, fn: Listener) => {
     listeners = listeners.filter((entry) => entry !== fn);
   }) as typeof removeEventListener;
   globalThis.fetch = (async (url: string) => {
@@ -75,7 +75,11 @@ describe("the bridge's sender check", () => {
 
   test("ignores a message with no source when the iframe has no window", async () => {
     start(null);
-    await deliver(null, { artifacts: 1, id: "x", op: { kind: "put", scope: "shared", key: "votes", value: 1 } });
+    await deliver(null, {
+      artifacts: 1,
+      id: "x",
+      op: { kind: "put", scope: "shared", key: "votes", value: 1 },
+    });
     expect(fetched).toEqual([]);
   });
 
@@ -91,7 +95,11 @@ describe("the bridge's sender check", () => {
   test("a key that climbs out is answered as invalid and never fetched", async () => {
     const frame = windowSpy();
     start(frame);
-    await deliver(frame, { artifacts: 1, id: "k", op: { kind: "get", scope: "shared", key: "../../people" } });
+    await deliver(frame, {
+      artifacts: 1,
+      id: "k",
+      op: { kind: "get", scope: "shared", key: "../../people" },
+    });
     expect(frame.sent[0]?.message).toMatchObject({ id: "k", ok: false, error: { code: "invalid" } });
     expect(fetched).toEqual([]);
   });

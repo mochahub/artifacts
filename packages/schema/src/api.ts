@@ -109,7 +109,10 @@ export const InvitePreview = z.object({
   email: z.string(),
   artifact: z.object({ title: z.string() }).optional(),
 });
-export const AcceptInvite = z.object({ name: z.string().trim().min(1).max(100), password: Password.optional() });
+export const AcceptInvite = z.object({
+  name: z.string().trim().min(1).max(100),
+  password: Password.optional(),
+});
 export const ResetPreview = z.object({ email: z.string() });
 export const ResetPassword = ChangePassword;
 

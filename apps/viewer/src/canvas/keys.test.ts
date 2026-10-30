@@ -20,7 +20,8 @@ describe("canvas keys", () => {
   });
 
   test.each(["metaKey", "ctrlKey", "altKey"])("leave %s shortcuts to the browser", (modifier) => {
-    for (const key of ["0", "1", "n", "p"]) expect(canvasCommand(press(key, { [modifier]: true }))).toBeNull();
+    for (const key of ["0", "1", "n", "p"])
+      expect(canvasCommand(press(key, { [modifier]: true }))).toBeNull();
   });
 
   test.each([
