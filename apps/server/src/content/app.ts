@@ -16,6 +16,8 @@ import { type ContentPayload, verifyContentToken } from "./token.ts";
 
 const RECHECK_MS = 5000;
 const CACHE_BYTES = 64 * 1024 * 1024;
+/** A file bigger than this is only ever read from the bucket a piece at a time, when asked for a range. */
+const PIECE_BYTES = 8 * 1024 * 1024;
 /** Spike S8: what browsers send for iframes, sub-resources and media. `document` never passes. */
 const ALLOWED_DEST = new Set([
   "iframe",
@@ -144,27 +146,38 @@ export function createContentApp(deps: Deps) {
       .from(versions)
       .where(and(eq(versions.artifactId, payload.a), eq(versions.n, version)))
       .limit(1);
-    const files = row?.files as Record<string, { hash: string; type: string }> | undefined;
+    const files = row?.files as Record<string, { hash: string; type: string; size: number }> | undefined;
     const file = files && Object.hasOwn(files, path) ? files[path] : undefined;
     if (!file) throw new ApiError("not_found", "Not found.");
 
-    let body = blobs.get(file.hash);
-    if (!body) {
-      const object = await bucket.get(blobKey(file.hash));
-      if (!object) throw new ApiError("not_found", "Not found.");
-      body = object.body;
-      blobs.set(file.hash, body);
-    }
     // Safari asks for byte ranges on audio and video, and won't play without them.
     const range = /^bytes=(\d*)-(\d*)$/.exec(c.req.header("range") ?? "");
-    if (range && (range[1] || range[2])) {
-      const size = body.length;
+    const ranged = range !== null && (range[1] !== "" || range[2] !== "");
+    // The size was proved when the version was published, so a big file needn't be loaded to know it.
+    const pieces = ranged && file.size > PIECE_BYTES;
+
+    let body: Uint8Array | undefined;
+    if (!pieces) {
+      body = blobs.get(file.hash);
+      if (!body) {
+        const object = await bucket.get(blobKey(file.hash));
+        if (!object) throw new ApiError("not_found", "Not found.");
+        body = object.body;
+        blobs.set(file.hash, body);
+      }
+    }
+    if (range && ranged) {
+      const size = body?.length ?? file.size;
       const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
-      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      let end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      // "From here to the end" gets one piece, and the browser asks again for the next.
+      if (pieces) end = Math.min(end, start + PIECE_BYTES - 1);
       if (start >= size || start > end) {
         return c.body(null, 416, { "Content-Range": `bytes */${size}` });
       }
-      return c.body(body.slice(start, end + 1) as Uint8Array<ArrayBuffer>, 206, {
+      const part = body ? body.slice(start, end + 1) : await bucket.getRange(blobKey(file.hash), start, end);
+      if (!part) throw new ApiError("not_found", "Not found.");
+      return c.body(part as Uint8Array<ArrayBuffer>, 206, {
         "Content-Type": file.type,
         "Content-Range": `bytes ${start}-${end}/${size}`,
         "Accept-Ranges": "bytes",
