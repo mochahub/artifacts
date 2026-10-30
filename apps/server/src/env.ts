@@ -36,7 +36,7 @@ const Schema = z.object({
   CONTENT_PORT: Port(8081),
   INTERNAL_PORT: Port(8082),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  GITHUB_RELEASES_REPO: z.string().optional(),
+  GITHUB_RELEASES_REPO: z.string().default("mochahub/artifacts"),
 });
 
 export type Env = {
@@ -131,7 +131,7 @@ export function parseEnv(raw: Record<string, string | undefined>): { env: Env; w
       contentPort: v.CONTENT_PORT,
       internalPort: v.INTERNAL_PORT,
       logLevel: v.LOG_LEVEL,
-      githubReleasesRepo: v.GITHUB_RELEASES_REPO ?? null,
+      githubReleasesRepo: v.GITHUB_RELEASES_REPO === "none" ? null : v.GITHUB_RELEASES_REPO,
     },
   };
 }

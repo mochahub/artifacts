@@ -98,39 +98,40 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 40. **M11, limits nobody asked for:** 10 streams per caller, 5 minutes per stream, 60 searches and 30 compares with new diffs a minute, 10 devices per person.
 41. **M11, compare diffs at most 40 frames** per pair; more changed frames are still listed, without pictures.
 42. **M11, the install sheet has no "Show me where" button** from board 05, screen 6: there's nothing yet for it to show. And the data events aren't passed on to frames, so a frame doesn't update live; it reloads what it needs.
-43. **M11, `GITHUB_RELEASES_REPO` has no default,** and the notice can't work while the repo is private.
+43. **`GITHUB_RELEASES_REPO` defaults to `mochahub/artifacts`,** so the notice needs no setup; `none` turns it off, and it stays silent while the repo is private. To change: the default in `apps/server/src/env.ts`.
+44. **Releases are automatic.** Green CI on `main` releases the next patch, unless only docs or workflows changed. The version comes from the latest tag and is stamped at build time, so there are no version commits and `package.json` stays at the version of the first release. To choose a version, raise it in `packages/cli/package.json`, or run the workflow by hand. To go back to deliberate releases: remove `workflow_run` from `release.yml`.
+45. **A release tries itself first:** the new binary runs `setup --docker` against the new image, and nothing is published if that fails. A failure after the image is pushed is safe to re-run.
 
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.
 
 **Before anyone can install it**
-1. **Merge:** the branches are stacked, `m1-foundations` through `m11-live`. Merge `m11-live` into `main`. No pull requests were opened.
-2. **npm scope:** check `@artifacts/cli` is free on npm, or pick another name in `packages/cli/package.json`.
-3. **Release:** push a tag, which runs `.github/workflows/release.yml` to publish the image to `ghcr.io/mochahub/artifacts`, the binaries and `install.sh`. Check the image is public: `docker pull ghcr.io/mochahub/artifacts:<version>` signed out. If the repo stays private, `install.sh` and the upgrade check can't reach releases.
-4. **`GITHUB_RELEASES_REPO`:** set it in the compose file and the template once releases are public.
+1. **Merge, which is also the first release:** `git push origin m11-live:main` (a fast-forward; the branches are stacked and no pull requests were opened). When CI passes, `release.yml` publishes 0.1.0: the image to `ghcr.io/mochahub/artifacts`, the binaries and `install.sh`. From then on every merge that changes what ships releases the next patch. For a minor or major: `gh workflow run release.yml -f bump=minor`.
+2. **Go public, when you want strangers to install it:** `gh repo edit mochahub/artifacts --visibility public --accept-visibility-change-consequences`, then set the `artifacts` package to public in its GitHub settings. While the repo is private, `install.sh` and the upgrade check can't reach releases, and each release warns if the image needs a sign-in.
+3. **npm, optional:** `bun add -g` won't work until this is done, and the installer doesn't need it. Make sure you control the `@artifacts` scope (the package name is free, the scope's owner wasn't checked) or rename in `packages/cli/package.json`, then `gh secret set NPM_TOKEN`. The next release publishes; until then the step skips.
 
 **Railway (it creates billable resources)**
-5. **S1 templates:** `railway templates create` per `deploy/railway/README.md`, then `railway deploy --template`. Check that one service gets two generated domains, what a bucket's variables are called, and that `${{secret()}}` works. The Railway path has only passed against a fake `railway`.
-6. **Phase 1 acceptance 2:** on a machine with only the CLI, `export ARTIFACTS_RAILWAY_TEMPLATE=<code>`, then `artifacts setup`. Time it: the target is under 10 minutes.
-7. **Bill and memory:** after a few days, compare the real bill and app memory with SPEC §7.5 and update its table. [load-notes.md](load-notes.md) has the local numbers.
-8. **Phase 2 acceptance 4:** have someone outside deploy the template and publish, within 15 minutes.
+4. **S1 templates:** `railway templates create` per `deploy/railway/README.md`, then `railway deploy --template`. Check that one service gets two generated domains, what a bucket's variables are called, and that `${{secret()}}` works. The Railway path has only passed against a fake `railway`.
+5. **Phase 1 acceptance 2:** on a machine with only the CLI, `export ARTIFACTS_RAILWAY_TEMPLATE=<code>`, then `artifacts setup`. Time it: the target is under 10 minutes.
+6. **Bill and memory:** after a few days, compare the real bill and app memory with SPEC §7.5 and update its table. [load-notes.md](load-notes.md) has the local numbers.
+7. **Phase 2 acceptance 4:** have someone outside deploy the template and publish, within 15 minutes.
 
 **On a real iPhone, over 5G**
-9. **Phase 1 acceptance 1:** publish `fixtures/camerabuddy-roadmap` and review it in Safari, including the comment sheet over the real keyboard and Safari's bottom bar. Then, in a fresh agent session, using only the skill: comment, fix, republish, reply.
-10. **The look:** compare with `docs/mocks/boards/` and the forbidden patterns (06). Screens are in `docs/mocks/shots/`.
-11. **Safari and presigned GETs:** open an artifact, reload, and check in Web Inspector that images come from cache on the same day.
-12. **The Share path:** check "Tap More, then Share" against where Share sits in Safari's ⋯ menu (board 05 screen 6, `apps/viewer/src/components/install.tsx`).
-13. **Passkeys:** add one on the home domain, sign in on a second domain (Related Origin Requests), and try the "Sign in on the home domain" fallback. Repeat in desktop Chrome (S2).
-14. **Phase 2 acceptance 1:** add the site to the Home Screen, open it, allow alerts after a comment. Leave a comment from a second device and watch it arrive live. Have an agent reply with the app closed: a push should arrive, and tapping it should open that comment. This is the first time Web Push meets Apple's service.
-15. **Offline:** in the installed app, open an artifact, turn on Airplane Mode, reopen it.
-16. **Real media:** publish a gallery with a video and play it in Safari; it depends on the bucket answering Range requests.
+8. **Phase 1 acceptance 1:** publish `fixtures/camerabuddy-roadmap` and review it in Safari, including the comment sheet over the real keyboard and Safari's bottom bar. Then, in a fresh agent session, using only the skill: comment, fix, republish, reply.
+9. **The look:** compare with `docs/mocks/boards/` and the forbidden patterns (06). Screens are in `docs/mocks/shots/`.
+10. **Safari and presigned GETs:** open an artifact, reload, and check in Web Inspector that images come from cache on the same day.
+11. **The Share path:** check "Tap More, then Share" against where Share sits in Safari's ⋯ menu (board 05 screen 6, `apps/viewer/src/components/install.tsx`).
+12. **Passkeys:** add one on the home domain, sign in on a second domain (Related Origin Requests), and try the "Sign in on the home domain" fallback. Repeat in desktop Chrome (S2).
+13. **Phase 2 acceptance 1:** add the site to the Home Screen, open it, allow alerts after a comment. Leave a comment from a second device and watch it arrive live. Have an agent reply with the app closed: a push should arrive, and tapping it should open that comment. This is the first time Web Push meets Apple's service.
+14. **Offline:** in the installed app, open an artifact, turn on Airplane Mode, reopen it.
+15. **Real media:** publish a gallery with a video and play it in Safari; it depends on the bucket answering Range requests.
 
 **Other**
-17. **Phase 1 acceptance 3 and 4 by hand:** invite a teammate, and comment through a share link from outside. Both pass in tests.
-18. **Link previews:** paste a share link into iMessage and Slack.
-19. **Windows:** the CLI, including credentials, is untested.
-20. **MCP:** add `artifacts mcp` to a real client. It's tested against the protocol, not a client.
+16. **Phase 1 acceptance 3 and 4 by hand:** invite a teammate, and comment through a share link from outside. Both pass in tests.
+17. **Link previews:** paste a share link into iMessage and Slack.
+18. **Windows:** the CLI, including credentials, is untested.
+19. **MCP:** add `artifacts mcp` to a real client. It's tested against the protocol, not a client.
 
 ## Known gaps
 

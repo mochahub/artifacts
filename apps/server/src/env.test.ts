@@ -16,6 +16,14 @@ const valid = {
 };
 
 describe("parseEnv", () => {
+  test("the release notice is on unless it's turned off", () => {
+    expect(parseEnv(valid).env.githubReleasesRepo).toBe("mochahub/artifacts");
+    expect(parseEnv({ ...valid, GITHUB_RELEASES_REPO: "" }).env.githubReleasesRepo).toBe(
+      "mochahub/artifacts",
+    );
+    expect(parseEnv({ ...valid, GITHUB_RELEASES_REPO: "none" }).env.githubReleasesRepo).toBeNull();
+  });
+
   test("applies the defaults in 09", () => {
     const { env, warnings } = parseEnv(valid);
     expect(env.port).toBe(8080);
