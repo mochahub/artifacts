@@ -153,18 +153,18 @@ describe("publishing", () => {
   });
 
   test("content that doesn't match its hash is refused and deleted, so nobody can reuse it", async () => {
-    const victim = file("victim.html", "the real content");
+    const victim = file("victim.html", `the real content ${Bun.randomUUIDv7()}`);
     const tampered = await publish(t, owner.token, { slug: "bad", extra: [victim], tamper: victim.sha256 });
     expect(await error(tampered)).toBe("invalid");
     expect(await t.server.bucket.get(`blobs/${victim.sha256}`)).toBeNull();
     const honest = await publish(t, owner.token, { slug: "good", extra: [victim] });
     expect(honest.status).toBe(200);
     const object = await t.server.bucket.get(`blobs/${victim.sha256}`);
-    expect(new TextDecoder().decode(object?.body)).toBe("the real content");
+    expect(new TextDecoder().decode(object?.body)).toBe(victim.body);
   });
 
   test("a presigned PUT can't replace an object", async () => {
-    const body = "only once";
+    const body = `only once ${Bun.randomUUIDv7()}`;
     const one = file("x.bin", body, "application/octet-stream");
     const prepared = PublishPrepared.parse(
       await (
