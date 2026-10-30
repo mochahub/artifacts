@@ -48,6 +48,20 @@ describe("the content host", () => {
     expect(csp).not.toContain("allow-same-origin");
   });
 
+  test("answers byte ranges, which Safari needs for media", async () => {
+    const base = await mint();
+    const url = `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}index.html`;
+    const headers = { Host: "content.test", "Sec-Fetch-Dest": "video" };
+    const full = await (await fetch(url, { headers })).text();
+    const part = await fetch(url, { headers: { ...headers, Range: "bytes=0-3" } });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe(`bytes 0-3/${full.length}`);
+    expect(await part.text()).toBe(full.slice(0, 4));
+    const tail = await fetch(url, { headers: { ...headers, Range: "bytes=-2" } });
+    expect(await tail.text()).toBe(full.slice(-2));
+    expect((await fetch(url, { headers: { ...headers, Range: "bytes=999999-" } })).status).toBe(416);
+  });
+
   test("refuses a top-level page, and a request with no Sec-Fetch-Dest", async () => {
     const base = await mint();
     expect((await get(base, "index.html", "document")).status).toBe(403);

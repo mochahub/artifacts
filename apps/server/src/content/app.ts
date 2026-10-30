@@ -154,8 +154,25 @@ export function createContentApp(deps: Deps) {
       body = object.body;
       blobs.set(file.hash, body);
     }
+    // Safari asks for byte ranges on audio and video, and won't play without them.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(c.req.header("range") ?? "");
+    if (range && (range[1] || range[2])) {
+      const size = body.length;
+      const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      if (start >= size || start > end) {
+        return c.body(null, 416, { "Content-Range": `bytes */${size}` });
+      }
+      return c.body(body.slice(start, end + 1) as Uint8Array<ArrayBuffer>, 206, {
+        "Content-Type": file.type,
+        "Content-Range": `bytes ${start}-${end}/${size}`,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+      });
+    }
     return c.body(body as Uint8Array<ArrayBuffer>, 200, {
       "Content-Type": file.type,
+      "Accept-Ranges": "bytes",
       // No caching: a frame must not keep reading files after its access ends (04).
       "Cache-Control": "no-store",
     });

@@ -572,6 +572,25 @@ export const guestViews = pgTable(
   (t) => [primaryKey({ columns: [t.guestId, t.artifactId] })],
 );
 
+// Micro apps
+
+export const artifactUsage = pgTable(
+  "artifact_usage",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    scope: text("scope").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    keys: integer("keys").notNull().default(0),
+    bytes: bigint("bytes", { mode: "number" }).notNull().default(0),
+    updatedAt: time("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.artifactId, t.scope] })],
+);
+
 // Activity and lifecycle
 
 export const activity = pgTable(

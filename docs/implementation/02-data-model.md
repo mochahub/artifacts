@@ -256,6 +256,8 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 **`releases`**: none. The app learns the latest release from GitHub Releases (cached 6 hours) for the admin "new version" notice.
 
+**`artifact_usage`** ships with M9; `backend_logs` with M10 and `push_subscriptions` with M11.
+
 ## Derived state, not stored
 
 - **Status of an artifact for a person** (SPEC §5.1): computed per request.

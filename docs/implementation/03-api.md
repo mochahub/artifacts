@@ -243,7 +243,7 @@ The viewer calls these on behalf of a live frame (protocol in [08-micro-apps.md]
 | `DELETE /api/artifacts/:id/data/:scope/:key` | `data.write` | Optional `If-Match`. |
 | `GET /api/artifacts/:id/files/:scope` | `data.read` | List. |
 | `PUT /api/artifacts/:id/files/:scope/:name` | `data.write` | Raw body with `Content-Type`; 10 MB default limit → `{ name, etag, size }` |
-| `GET /api/artifacts/:id/files/:scope/:name` | `data.read` | 302 to a presigned GET with `response-content-type` and, for non-media types, `response-content-disposition=attachment`. |
+| `GET /api/artifacts/:id/files/:scope/:name` | `data.read` | 302 to a presigned GET with `response-content-type` and, for non-media types, `response-content-disposition=attachment`. SVG always downloads, because it can carry script. With `Accept: application/json`, `{ url }` instead, for the bridge. |
 | `DELETE /api/artifacts/:id/files/:scope/:name` | `data.write` | |
 | `GET /api/artifacts/:id/data-export` | `data.export` (publisher, admins) | `{ shared: {…}, me: { "<id>": { name, data: {…} } }, files: [{ scope, owner, name, url }] }` |
 | `POST /api/artifacts/:id/data-clear` | `data.export` | `{ scope?: "shared"\|"me" }` |

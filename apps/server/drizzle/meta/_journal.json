@@ -43,6 +43,13 @@
       "when": 1793371943649,
       "tag": "0005_opposite_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793372912497,
+      "tag": "0006_noisy_diamondback",
+      "breakpoints": true
     }
   ]
 }

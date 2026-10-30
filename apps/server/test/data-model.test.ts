@@ -10,7 +10,7 @@ import { createDatabase } from "./helpers.ts";
 
 /** Reads 02-data-model.md itself, so the code and the contract can't drift apart unnoticed. */
 const doc = await Bun.file(join(import.meta.dir, "../../../docs/implementation/02-data-model.md")).text();
-const phase2 = new Set(["backend_logs", "artifact_usage", "push_subscriptions"]);
+const phase2 = new Set(["backend_logs", "push_subscriptions"]);
 
 const ticks = (text: string) => [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1] as string);
 
@@ -189,7 +189,7 @@ describe("the database matches 02-data-model.md", () => {
       where contype = 'f' and confrelid = 'org'::regclass
         and conkey = array[(select attnum from pg_attribute where attrelid = conrelid and attname = 'org_id')]`;
     const names = (rows: postgres.Row[]) => rows.map((row) => row.table_name as string).sort();
-    expect(tables).toHaveLength(27);
+    expect(tables).toHaveLength(28);
     expect(names(columns)).toEqual(names(tables));
     expect(names(references)).toEqual(names(tables));
   });
