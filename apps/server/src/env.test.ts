@@ -85,6 +85,20 @@ describe("parseEnv", () => {
     expect(warnings[0]).toContain("same site");
   });
 
+  test("warns about plain http away from localhost, and about a reused OPS_SECRET", () => {
+    const plain = parseEnv({ ...valid, PUBLIC_URL: "http://art.example.org", CONTENT_URL: "" });
+    expect(plain.warnings.join()).toContain("plain http");
+    const local = parseEnv({ ...valid, PUBLIC_URL: "http://localhost:8080", CONTENT_URL: "" });
+    expect(local.warnings).toEqual([]);
+    const reused = parseEnv({ ...valid, OPS_SECRET: valid.SESSION_SECRET });
+    expect(reused.warnings.join()).toContain("OPS_SECRET");
+  });
+
+  test("refuses two ports that are the same", () => {
+    expect(() => parseEnv({ ...valid, INTERNAL_PORT: "8080" })).toThrow(/must all be different/);
+    expect(() => parseEnv({ ...valid, PORT: "0", CONTENT_PORT: "0" })).not.toThrow();
+  });
+
   test("doesn't warn for two generated Railway domains: up.railway.app is a public suffix", () => {
     expect(parseEnv(valid).warnings).toEqual([]);
   });

@@ -9,7 +9,8 @@ import {
 } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { artifacts, decisions, people, threads } from "../../src/db/schema.ts";
+import { sha256 } from "../../src/auth/secrets.ts";
+import { artifacts, decisions, people, threads, tokens, views } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { makePerson, publish } from "../publish-helper.ts";
 
@@ -156,6 +157,19 @@ describe("lists and artifacts", () => {
     expect(etag).toBeTruthy();
     const again = await t.api(`/api/artifacts/${id}`, { bearer: token, headers: { "If-None-Match": etag } });
     expect(again.status).toBe(304);
+    // A proxy that compresses turns it weak, and a browser may send several.
+    for (const header of [`W/${etag}`, `"other", ${etag}`, `W/"other", W/${etag}`, "*"]) {
+      const match = await t.api(`/api/artifacts/${id}`, {
+        bearer: token,
+        headers: { "If-None-Match": header },
+      });
+      expect(match.status).toBe(304);
+    }
+    const other = await t.api(`/api/artifacts/${id}`, {
+      bearer: token,
+      headers: { "If-None-Match": '"other"' },
+    });
+    expect(other.status).toBe(200);
   });
 
   test("a deleted artifact: 410 for those who could see it, 404 for everyone else", async () => {
@@ -200,5 +214,41 @@ describe("lists and artifacts", () => {
     expect((await t.api(`/api/artifacts/${id}/seen`, { method: "POST", json: { version: 1 } })).status).toBe(
       401,
     );
+  });
+
+  test("seen keeps only real pages and small positions, and can't mark a future version", async () => {
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    const seen = (json: unknown) => t.api(`/api/artifacts/${id}/seen`, { method: "POST", cookie, json });
+    expect((await seen({ version: 99_999_999_999, pageKey: "made-up", position: { y: 1 } })).status).toBe(
+      200,
+    );
+    expect((await seen({ version: 1, pageKey: "plan", position: { blob: "x".repeat(5000) } })).status).toBe(
+      200,
+    );
+    expect((await seen({ version: 1, pageKey: "mocks", position: { y: 2 } })).status).toBe(200);
+    const [row] = await t.server.db.select().from(views).where(eq(views.personId, personId));
+    expect(row?.positions).toEqual({ plan: { blockKey: "x" }, mocks: { y: 2 } });
+    const [art] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
+    expect(row?.lastSeenVersion).toBeLessThanOrEqual(art?.latestVersion as number);
+  });
+
+  test("one org token's searches don't use up another's", async () => {
+    const make = async (secret: string) => {
+      await t.server.db.insert(tokens).values({
+        id: Bun.randomUUIDv7(),
+        orgId,
+        kind: "org",
+        name: secret,
+        tokenHash: sha256(secret),
+        scopes: ["read"],
+        createdBy: personId,
+      });
+      return secret;
+    };
+    const busy = await make("art_org_busy_token");
+    const quiet = await make("art_org_quiet_token");
+    for (let i = 0; i < 60; i++) await get("/api/search?q=roadmap", busy);
+    expect((await get("/api/search?q=roadmap", busy)).status).toBe(429);
+    expect((await get("/api/search?q=roadmap", quiet)).status).toBe(200);
   });
 });

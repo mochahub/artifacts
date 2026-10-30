@@ -15,13 +15,21 @@ export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
     "connect-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
     "frame-ancestors 'none'",
   ].join("; ");
   return async (c, next) => {
     await next();
+    // An answer from the API is for one caller (or a redirect holding a signed address), so a cache in
+    // between must not keep it, unless the route says how it may be kept.
+    if (c.req.path.startsWith("/api/") && !c.res.headers.has("Cache-Control")) {
+      c.header("Cache-Control", "no-store");
+    }
     c.header("Content-Security-Policy", csp);
     c.header("Strict-Transport-Security", "max-age=31536000");
     c.header("X-Frame-Options", "DENY");
+    c.header("Cross-Origin-Opener-Policy", "same-origin");
     c.header("Referrer-Policy", "same-origin");
     c.header("X-Content-Type-Options", "nosniff");
   };
@@ -56,6 +64,8 @@ export function serveViewer(dir: string | null, deps: Deps) {
     } catch {
       throw new ApiError("not_found", "Not found.");
     }
+    // A NUL byte makes the file system call throw, and no file has one in its name.
+    if (path.includes("\0")) throw new ApiError("not_found", "Not found.");
     const target = resolve(root, `.${path}`);
     const immutable = path.startsWith("/assets/");
     if (target.startsWith(root + sep) && (await Bun.file(target).exists())) {

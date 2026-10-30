@@ -7,6 +7,8 @@ export function etagJson(c: Context, body: unknown) {
   const etag = `"${createHash("sha256").update(text).digest("base64url").slice(0, 22)}"`;
   c.header("ETag", etag);
   c.header("Cache-Control", "private, no-cache");
-  if (c.req.header("if-none-match") === etag) return c.body(null, 304);
+  // It may be a list, and a proxy that compresses the answer turns the tag weak (W/).
+  const sent = (c.req.header("if-none-match") ?? "").split(",").map((tag) => tag.trim().replace(/^W\//, ""));
+  if (sent.includes(etag) || sent.includes("*")) return c.body(null, 304);
   return c.body(text, 200, { "Content-Type": "application/json; charset=utf-8" });
 }

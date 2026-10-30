@@ -1,6 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { sha256 } from "../../src/auth/secrets.ts";
+import { artifacts, tokens } from "../../src/db/schema.ts";
+import { isPushEndpoint } from "../../src/push/notify.ts";
 import { Events } from "../../src/realtime/events.ts";
-import { createDatabase } from "../helpers.ts";
+import { claim, createDatabase, OWNER, signIn, startTestServer } from "../helpers.ts";
+import { publish } from "../publish-helper.ts";
 
 /** A TCP proxy to Postgres that can be cut, for an outage long enough that the driver gives up. */
 function proxy(target: URL) {
@@ -94,4 +98,89 @@ describe("the event listener", () => {
     for (let i = 0; i < 40 && heard.length === 1; i++) await Bun.sleep(25);
     expect(heard).toEqual(["thread", "version"]);
   }, 15_000);
+});
+
+describe("push endpoints", () => {
+  test("only the real push services over https, never a private address", () => {
+    for (const good of [
+      "https://fcm.googleapis.com/fcm/send/abc",
+      "https://web.push.apple.com/abc",
+      "https://updates.push.services.mozilla.com/wpush/v2/abc",
+      "https://par02p.notify.windows.com/?token=abc",
+    ]) {
+      expect(isPushEndpoint(good)).toBe(true);
+    }
+    for (const bad of [
+      "http://fcm.googleapis.com/fcm/send/abc",
+      "https://fcm.googleapis.com:8443/x",
+      "https://fcm.googleapis.com.evil.test/x",
+      "https://evilfcm.googleapis.com/x",
+      "https://fcm.googleapis.com@127.0.0.1/x",
+      "https://127.0.0.1/x",
+      "https://[::1]/x",
+      "https://localhost/x",
+      "https://10.0.0.5/x",
+      "https://169.254.169.254/latest/meta-data",
+      "https://metadata.google.internal/x",
+      "https://web.push.apple.com.internal/x",
+      "ftp://fcm.googleapis.com/x",
+    ]) {
+      expect(isPushEndpoint(bad)).toBe(false);
+    }
+  });
+});
+
+describe("live streams", () => {
+  test("a push subscription needs a browser's real keys", async () => {
+    const t = await startTestServer();
+    try {
+      await claim(t);
+      const cookie = await signIn(t, OWNER.email, OWNER.password);
+      const subscribe = (keys: { p256dh: string; auth: string }) =>
+        t.api("/api/push/subscribe", {
+          method: "POST",
+          cookie,
+          json: { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys },
+        });
+      expect((await subscribe({ p256dh: "AAAA", auth: "AAAA" })).status).toBe(400);
+      const point = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url");
+      expect(
+        (await subscribe({ p256dh: point, auth: Buffer.alloc(16, 2).toString("base64url") })).status,
+      ).toBe(200);
+    } finally {
+      await t.stop();
+    }
+  });
+
+  test("an org token's ten streams are its own, not every org token's", async () => {
+    const t = await startTestServer();
+    try {
+      const { token, person } = await claim(t);
+      await publish(t, token, { slug: "live" });
+      const [row] = await t.server.db.select().from(artifacts);
+      const orgToken = async (secret: string) => {
+        await t.server.db.insert(tokens).values({
+          id: Bun.randomUUIDv7(),
+          orgId: row?.orgId as string,
+          kind: "org",
+          name: secret,
+          tokenHash: sha256(secret),
+          scopes: ["read"],
+          createdBy: person.id,
+        });
+        return secret;
+      };
+      const first = await orgToken("art_org_first_token");
+      const second = await orgToken("art_org_second_token");
+      const open = (bearer: string) => t.api(`/api/events?artifact=${row?.id}`, { bearer });
+      const held = await Promise.all(Array.from({ length: 10 }, () => open(first)));
+      expect(held.map((response) => response.status)).toEqual(new Array(10).fill(200));
+      expect((await open(first)).status).toBe(429);
+      const other = await open(second);
+      expect(other.status).toBe(200);
+      await Promise.all([other, ...held].map((response) => response.body?.cancel()));
+    } finally {
+      await t.stop();
+    }
+  });
 });
