@@ -171,6 +171,7 @@ The expected result is computed from a second, deliberately simple table in the 
   - `Cross-Origin-Opener-Policy: same-origin`
   - `Referrer-Policy: same-origin`
   - `X-Content-Type-Options: nosniff`
+  - `Cache-Control: no-store` on any `/api/` answer whose route set none
 - **The live preview iframe:** `sandbox="allow-scripts"` (never `allow-same-origin`), `allow="fullscreen"`, `referrerpolicy="no-referrer"`.
 
 ## Rate limits (in memory, per process)

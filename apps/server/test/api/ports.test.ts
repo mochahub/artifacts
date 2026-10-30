@@ -88,6 +88,11 @@ describe("the three ports", () => {
       }
     });
 
+    test("API answers aren't cacheable unless the route says so", async () => {
+      expect((await viewer("/api/meta")).headers.get("cache-control")).toBe("no-store");
+      expect((await viewer("/api/nope")).headers.get("cache-control")).toBe("no-store");
+    });
+
     test("in setup mode an unknown API path is a JSON 503, not the viewer (04)", async () => {
       const response = await viewer("/api/nope");
       expect(response.status).toBe(503);
