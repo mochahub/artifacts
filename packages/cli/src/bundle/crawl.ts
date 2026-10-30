@@ -136,7 +136,10 @@ export function jsRefs(js: string): string[] {
     const [imports] = parseModule(js);
     for (const entry of imports) if (entry.n) refs.push(entry.n);
   } catch {}
-  for (const match of js.matchAll(/\bfetch\(\s*(['"`])([^'"`$]+)\1/g)) refs.push(match[2] as string);
+  for (const match of js.matchAll(/\bfetch\(\s*(['"`])([^'"`$]+)\1/g)) {
+    // `api/…` is the artifact's backend, not a file in the bundle (05).
+    if (!/^(\.\/)?api\//.test(match[2] as string)) refs.push(match[2] as string);
+  }
   return refs;
 }
 

@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Poll with a backend</title>
+    <style>
+      body { margin: 0; padding: 24px; font: 17px system-ui; }
+      button { display: block; width: 100%; min-height: 50px; margin-top: 12px; font: 600 17px system-ui; }
+    </style>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <h1>Which direction?</h1>
+    <p id="mine">Pick one</p>
+    <button id="vote-a">A, <span id="count-a">0</span></button>
+    <button id="vote-b">B, <span id="count-b">0</span></button>
+  </body>
+</html>

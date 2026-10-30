@@ -1,11 +1,17 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+// @ts-expect-error: embedded as text
+import child from "../../../sandbox/src/child.js" with { type: "text" };
+// @ts-expect-error: embedded as text
+import host from "../../../sandbox/src/host.js" with { type: "text" };
+// @ts-expect-error: embedded as text
+import prelude from "../../../sandbox/src/prelude.js" with { type: "text" };
 import { home } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
 // @ts-expect-error: embedded as text
 import helper from "./helper.mjs" with { type: "text" };
 
-const PACKAGES = ["playwright-core@1.64.1", "sharp@0.35.5", "mermaid@12.2.0"];
+const PACKAGES = ["playwright-core@1.64.1", "sharp@0.35.5", "mermaid@12.2.0", "quickjs-emscripten@0.32.0"];
 
 export const helperDir = () => process.env.ARTIFACTS_HELPER_DIR ?? join(home(), ".artifacts/playwright");
 
@@ -24,7 +30,11 @@ export function ensureHelper(out: Output): string {
   const dir = helperDir();
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "render.mjs"), helper);
-  if (existsSync(join(dir, ".installed"))) return dir;
+  writeFileSync(join(dir, "sandbox-child.js"), child);
+  writeFileSync(join(dir, "sandbox-prelude.js"), prelude);
+  writeFileSync(join(dir, "sandbox-host.js"), host);
+  const marker = join(dir, ".installed");
+  if (existsSync(marker) && readFileSync(marker, "utf8") === PACKAGES.join("\n")) return dir;
 
   out.say("First render: installing WebKit and the image tools. This takes a minute.");
   if (!existsSync(join(dir, "package.json"))) writeFileSync(join(dir, "package.json"), '{"private":true}\n');

@@ -4,6 +4,31 @@ import { resolveArtifact } from "./review.ts";
 
 type ListPage = { keys: { key: string; size: number; updatedAt: string }[]; nextCursor: string | null };
 
+type LogLine = { id: string; version: number; level: string; message: string; createdAt: string };
+
+/** `artifacts logs` (07): the last 24 hours, and then whatever arrives. */
+export async function logsCommand(
+  flags: { follow?: boolean; version?: string; server?: string },
+  out: Output,
+) {
+  const client = await signedIn(flags.server);
+  const artifact = await resolveArtifact(client, undefined);
+  const query = flags.version ? `version=${flags.version}&` : "";
+  let after = "";
+  for (;;) {
+    const lines = await client.get<LogLine[]>(`/api/artifacts/${artifact.id}/logs?${query}after=${after}`);
+    if (!flags.follow) return out.result(lines, () => print(lines, out));
+    print(lines, out);
+    after = lines.at(-1)?.id ?? after;
+    await Bun.sleep(2000);
+  }
+}
+
+const print = (lines: LogLine[], out: Output) => {
+  for (const line of lines)
+    out.say(`${line.createdAt.slice(11, 19)} v${line.version} ${line.level}  ${line.message}`);
+};
+
 export async function dataCommand(
   sub: string | undefined,
   key: string | undefined,

@@ -9,10 +9,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
+// @ts-expect-error: plain JavaScript shared with the server
+import { startChild } from "../../../sandbox/src/host.js";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
 import { viewerAssets } from "../dev/assets.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output } from "../output.ts";
+import { ensureHelper } from "../render/install.ts";
 import { type RenderResult, render } from "../render/render.ts";
 
 const ID = "00000000-0000-7000-8000-00000000d0d0";
@@ -23,6 +26,11 @@ const PERSON = {
   role: "owner",
 };
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type",
+};
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const fail = (status: number, code: string, message: string) =>
   json({ error: { code, message, details: {} } }, status);
@@ -291,8 +299,69 @@ export async function devCommand(flags: { port: number }, out: Output) {
     return new Response(asset.body, { headers: { "Content-Type": asset.type } });
   }
 
+  /** The same sandbox as the server, with env.DATA on .artifacts/data (08). */
+  let sandbox: ReturnType<typeof startChild> | null = null;
+  let requests = 0;
+  async function backend(request: Request, path: string) {
+    const source = built?.files.get("__backend.js");
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    if (!source) return new Response("No backend", { status: 404, headers: CORS });
+    const dir = ensureHelper(out);
+    sandbox ??= startChild({
+      childPath: join(dir, "sandbox-child.js"),
+      prelude: readFileSync(join(dir, "sandbox-prelude.js"), "utf8"),
+      onExit: () => {
+        sandbox = null;
+      },
+    });
+    await sandbox.up;
+    const code = readFileSync(source.source, "utf8");
+    const { response, logs } = await sandbox.run({
+      id: ++requests,
+      hash: source.hash,
+      code: () => code,
+      limits: { timeoutMs: 10_000, memoryMb: 64 },
+      request: {
+        url: `https://backend.invalid/api/${path}`,
+        method: request.method,
+        headers: {
+          "content-type": request.headers.get("content-type") ?? "",
+          "x-caller": JSON.stringify({
+            id: "local",
+            name: "You",
+            kind: "owner",
+            canComment: true,
+            isPublisher: true,
+          }),
+        },
+        body: await request.text(),
+      },
+      onData: async (raw: string) => {
+        const op = JSON.parse(raw) as { op: string; key?: string; prefix?: string; value?: unknown };
+        const key = op.key && !/^(shared|me|files)\//.test(op.key) ? `shared/${op.key}` : op.key;
+        const file = join(dataDir, key ?? "");
+        if (op.op === "get")
+          return { value: existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null };
+        if (op.op === "put") {
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(file, JSON.stringify(op.value));
+        }
+        if (op.op === "delete") rmSync(file, { force: true });
+        return { value: true };
+      },
+    });
+    for (const line of logs ?? []) out.say(`backend ${line.level}: ${line.message}`);
+    if (!response) return new Response('{"error":"The sandbox stopped."}', { status: 502, headers: CORS });
+    return new Response(response.body, {
+      status: response.status,
+      headers: { ...CORS, ...Object.fromEntries(response.headers) },
+    });
+  }
+
   /** Bundle files, under the same CSP the content host uses, so what works here works published. */
   function content(request: Request) {
+    const api = /^\/v\d+\/api\/(.*)$/.exec(new URL(request.url).pathname);
+    if (api) return backend(request, api[1] as string);
     const match = /^\/v\d+\/(.*)$/.exec(new URL(request.url).pathname);
     const file = match ? built?.files.get(decodeURIComponent(match[1] as string)) : undefined;
     if (!file) return new Response("Not found", { status: 404 });

@@ -15,8 +15,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M6 People and sharing | `m6-people` | `d79e2a1` | green |
 | M7 Lifecycle | `m7-lifecycle` | `7c59d9e` | green |
 | M8 Distribution | `m8-distribution` | `9356dac` | green |
-| M9 Micro apps I | `m9-micro-apps` | see git log | see below |
-| M10–M11 | not started | | |
+| M9 Micro apps I | `m9-micro-apps` | `0eb0aeb` | green |
+| M10 Micro apps II | `m10-backends` | see git log | see below |
+| M11 | not started | | |
 
 ## Verified
 
@@ -36,6 +37,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 - **M8 (2026-10-30):** the release dry run built the image (with sharp loading and encoding inside it) and all five CLI binaries, with `SHA256SUMS`. The compiled macOS binary renders in WebKit via `BUN_BE_BUN`. **Clean machine (`scripts/clean-install-test.sh`):** a bare Debian trixie container with its own Docker daemon, a non-root user, no Bun or Node: `install.sh` verified the checksum and installed, then `artifacts setup --docker` claimed a working server, and `whoami` and `doctor` passed. The Railway path passes against a fake `railway` binary only; **it has not run on Railway.**
 
 - **M7–M8 independent review (subagent, 2026-10-30):** 12 findings plus 4 small ones, all fixed. It also removed `oven/bun:1.4.2` and `seaweedfs:4.50` from the local Docker cache; they re-pull when needed.
+
+- **M9 (2026-10-30):** `spikes/s8-csp-sandbox.ts` in WebKit: the CSP's `sandbox allow-scripts` with module scripts, fonts, relative `fetch`, preflighted `api/`, `audio`, `video` and `track`, `frame-ancestors`, and an opaque origin at the top level all pass. The data API has tests for conditional writes, racing writers, separate `me` data, keys, limits, files, export, clear, archived and guests. WebKit e2e: the poll works with no backend, two people's `me` stay apart, Try it and Done, and a second window can't use the bridge.
+- **M10 (2026-10-30):** the four design checks in `spikes/s10/`. 24 sandbox tests: isolation, no globals, timeouts, floods and recursion, teardown in flight, a dead child, empty environment, read-only for viewers and archived, old versions run their own code, log and size caps, rate limit, queue limit. A real backend ran **inside the Docker image**, via `setup --docker`, publish, a vote and `artifacts logs`. `artifacts dev` serves the real viewer and a backend with no server.
 
 ## Decisions to review
 
@@ -73,6 +77,11 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 26. **M8, no Windows installer,** only the binary in the release, because Windows is untested.
 27. **M8, `ARTIFACTS_RAILWAY_HTTP`** exists only so tests can reach a fake server over http.
 
+28. **M10, the Web APIs live in the sandbox, not in each backend.** 08 had them bundled per backend. A prelude means smaller backends and one copy to fix. Agents see the same globals.
+29. **M10, `env.DATA` covers `get`, `put`, `delete` and `list`, not files yet.** SPEC says "the same calls as the built-in store". Files through a backend need binary over IPC, and no fixture needs it. To add: the `files.*` cases in `applyData` and the prelude.
+30. **M10, backend bodies are text.** Binary request and response bodies aren't supported, for the same reason.
+31. **M9, `artifacts dev` is read-only for review.** Comments need a server. It runs pages, live frames, the data store and backends.
+
 ## Needs you
 
 Gathered as each milestone is reached. So far, from the brief:
@@ -84,6 +93,7 @@ Gathered as each milestone is reached. So far, from the brief:
 
 ## Known gaps
 
+- **Backends sharing a child stall each other.** A busy loop in one backend blocks the others pinned to the same child until its deadline, up to 10 seconds. SPEC says "without slowing others". 08's pinning makes this true per child, not per backend; more `sandboxProcesses` reduces it.
 - **The admin "new version available" notice** isn't built.
 - **`frames/renamed`, `data/*` and `backend/*` lint rules** aren't built yet: M5 and M9–M10.
 - **The render tests** share one helper install in the temp folder and the machine's WebKit cache.

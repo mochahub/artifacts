@@ -29,7 +29,7 @@ Add one only when the store isn't enough, such as hiding votes until everyone ha
 
 ```ts
 // api/index.ts
-import { caller } from "./vendor/artifacts-kit/backend.js";
+import { caller } from "../vendor/artifacts-kit/backend.js";
 
 export default {
   async fetch(request, env) {

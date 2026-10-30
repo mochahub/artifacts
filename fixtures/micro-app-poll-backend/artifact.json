@@ -1,0 +1,17 @@
+{
+  "project": "demo",
+  "slug": "poll-backend",
+  "title": "Which direction, secretly?",
+  "backend": { "src": "api/index.js" },
+  "pages": [
+    { "id": "poll", "kind": "prototype", "src": "index.html", "device": "iphone" },
+    {
+      "id": "frames",
+      "kind": "canvas",
+      "title": "Frames",
+      "boards": [{ "id": "main", "title": "Main", "src": "boards/main.html" }],
+      "styles": [],
+      "scripts": []
+    }
+  ]
+}
