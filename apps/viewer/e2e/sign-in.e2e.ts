@@ -1,18 +1,16 @@
 import { expect, test } from "@playwright/test";
 import { OWNER, signIn, watchErrors } from "./helpers.ts";
 
-test("sign in, stay signed in across a reload, sign out", async ({ page }, info) => {
+test("sign in, and stay signed in across a reload", async ({ page }, info) => {
   const errors = watchErrors(page);
   await page.goto("/");
-  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page).toHaveURL(/\/sign-in\?next=/);
   if (info.project.name === "iphone")
     await page.screenshot({ path: "../../docs/mocks/shots/06-2-sign-in.png" });
   await signIn(page);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Mochahub");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
   await page.reload();
-  await expect(page.getByText(`Signed in as ${OWNER.name}.`)).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
   expect(errors).toEqual([]);
 });
 

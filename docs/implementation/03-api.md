@@ -129,7 +129,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 |---|---|---|
 | `GET /api/home` | `home.read` | `{ waiting: [ArtifactCard], recent: [ArtifactCard] }` |
 | `GET /api/projects?q=&sort=recent\|name` | `project.list` | `[{ id, slug, name, repo, artifactCount, openCount, updatedAt }]`, only projects with something visible. |
-| `GET /api/projects/:slug/artifacts?q=&status=all\|your_turn\|approved\|archived&sort=recent\|name` | `project.read` | `[ArtifactCard]` |
+| `GET /api/projects/:slug/artifacts?q=&status=all\|your_turn\|approved\|archived&sort=recent\|name` | `project.read` | `{ project: { slug, name, repo }, artifacts: [ArtifactCard] }` |
 | `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. If deleted: 410 `gone` with only `details: { deletedAt }` for a caller who passes the visibility rule in 04 with `deleted_at` ignored, otherwise 404. |
 | `GET /api/artifacts/:id` | `artifact.read` | Same. |
 | `PATCH /api/artifacts/:id` | `artifact.manage` | `{ visibility? }` |

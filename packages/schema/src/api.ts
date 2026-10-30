@@ -271,6 +271,13 @@ export const ProjectRow = z.object({
   openCount: z.number().int(),
   updatedAt: Time,
 });
+export const ProjectArtifacts = z.object({
+  project: z.object({ slug: z.string(), name: z.string(), repo: z.string().nullable() }),
+  artifacts: z.array(ArtifactCard),
+});
+export type ProjectArtifacts = z.infer<typeof ProjectArtifacts>;
+export type ProjectRow = z.infer<typeof ProjectRow>;
+export type Home = z.infer<typeof Home>;
 export const PatchArtifact = z.object({ visibility: Visibility.optional() });
 
 // Sharing
@@ -292,7 +299,24 @@ export const VersionRow = z.object({
   decision: DecisionKind.optional(),
   changes: z.object({ frames: z.number().int(), blocks: z.number().int() }),
 });
+export type VersionRow = z.infer<typeof VersionRow>;
 export const NameVersion = z.object({ name: z.string().nullable() });
+
+export const CanvasFrame = z.object({
+  key: z.string(),
+  board: z.string(),
+  title: z.string().nullable(),
+  device: z.string().nullable(),
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  contentHash: z.string(),
+  renders: z.object({ "1x": z.string(), "2x": z.string(), "3x": z.string(), thumb: z.string() }),
+  live: z.boolean(),
+  changed: z.boolean(),
+});
+export type CanvasFrame = z.infer<typeof CanvasFrame>;
 
 // Publishing
 const FileRef = z.object({ hash: Sha256, size: z.number().int().nonnegative(), type: z.string() });

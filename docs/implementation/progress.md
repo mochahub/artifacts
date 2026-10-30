@@ -9,8 +9,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M0 Spikes | `main` history | `fafc2f6` | n/a |
 | M1 Foundations | `m1-foundations` | `9de1ffc` | green (run 41045711327) |
 | M2 Sign-in and CLI skeleton | `m2-sign-in` | `e6b5af8` | green (run 41048009618) |
-| M3 Publishing | `m3-publishing` | see git log | see below |
-| M4–M11 | not started | | |
+| M3 Publishing | `m3-publishing` | `ae1a852` | green (run 41050356260) |
+| M4 Viewer | `m4-viewer` | in progress | |
+| M5–M11 | not started | | |
 
 ## Verified
 
@@ -18,6 +19,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 
 - **M2 (2026-10-30):** 220 tests including the full permission matrix; every API route reached by a test (`scripts/route-coverage.ts`); 12 Playwright WebKit tests at iPhone and desktop size. `artifacts setup --docker` ran for real from a locally built image in a sandboxed home: compose up, claim, `whoami`, `doctor`, all passed, then torn down.
 - **M3 (2026-10-30):** real WebKit: the CameraBuddy fixture (26 frames, 8 articles, 9 pages) publishes; republishing uploads 0 files and reports no changes; a shared-CSS edit reports only the frame whose pixels changed; a Markdown edit reports only that block. Lint catches seeded overlap, clipping, nondeterminism, home indicator, offscreen, contrast (warning), missing, absolute and outside references, bad ids and a bad manifest. Mermaid and chart SVG pass the article allowlist with no `<style>` or `foreignObject`.
+
+- **M4 (2026-10-30):** Playwright WebKit at iPhone size and desktop against the real fixture: lists, search, filters, artifact page, page switcher, version history, 26 frames drawn with one changed, frames list, deep links, pinned versions, synthesized touch pan and pinch, double-tap, keyboard, article blocks, embeds, tables without page overflow, settings surviving a reload. Screenshots: `docs/mocks/shots/`. Compared by eye with boards 01–03; found and fixed the overview layout and cover crop.
 
 ## Decisions to review
 
@@ -36,6 +39,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 12. **M3, no `<style>` in articles.** 05 allowed `style` without `url()`, but a `<style>` applies to the whole viewer page. The helper copies Mermaid's styles onto attributes instead, and the allowlist drops `style` entirely.
 13. **M3, charts.** `::chart` takes `{ type: "bar"|"line", labels, series }` and the CLI draws plain SVG, with no browser. 05 had said WebKit, without a format.
 14. **M3, no render cache.** Publishing always re-renders. Output is deterministic, so unchanged frames still upload nothing. To change: add a cache keyed by input hashes in `render.ts`.
+
+15. **M4, two-column canvas on tall screens.** 06 said left to right, but board 02 draws 2×2, and looks beat the text (README). Wide screens keep one row.
+16. **M4, "changed" compares with the previous version,** not the version you last read. Board 03 says "since you read v3". Doing that needs a comparison base per person, which arrives with compare in M7.
 
 ## Needs you
 

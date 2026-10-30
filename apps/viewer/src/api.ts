@@ -10,7 +10,10 @@ export class ApiFailure extends Error {
 }
 
 /** Calls the API, re-prompting once if it asks for a recent sign-in. */
-export async function api<T>(path: string, init: { method?: string; json?: unknown } = {}): Promise<T> {
+export async function api<T>(
+  path: string,
+  init: { method?: string; json?: unknown; text?: boolean } = {},
+): Promise<T> {
   const response = await fetch(path, {
     method: init.method ?? "GET",
     headers: init.json === undefined ? {} : { "Content-Type": "application/json" },
@@ -26,6 +29,7 @@ export async function api<T>(path: string, init: { method?: string; json?: unkno
       error.details,
     );
   }
+  if (init.text) return text as T;
   return (text ? JSON.parse(text) : undefined) as T;
 }
 

@@ -1,9 +1,14 @@
 import { render } from "preact";
-import { LocationProvider, Route, Router } from "preact-iso";
+import { ErrorBoundary, LocationProvider, Route, Router } from "preact-iso";
+import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
+import { ArtifactPage } from "./routes/artifact.tsx";
 import { Device } from "./routes/device.tsx";
 import { Home } from "./routes/home.tsx";
 import { NotFound } from "./routes/not-found.tsx";
+import { PageRoute } from "./routes/page.tsx";
+import { ProjectPage } from "./routes/project.tsx";
+import { Projects } from "./routes/projects.tsx";
 import { Reset } from "./routes/reset.tsx";
 import { SignIn } from "./routes/sign-in.tsx";
 import { boot, bootFailed, meta, ready } from "./session.ts";
@@ -24,13 +29,22 @@ function App() {
   if (!meta.value?.orgName) return <AlmostReady />;
   return (
     <LocationProvider>
-      <Router>
-        <Route path="/" component={Home} />
-        <Route path="/sign-in" component={SignIn} />
-        <Route path="/device" component={Device} />
-        <Route path="/reset/:token" component={Reset} />
-        <Route default component={NotFound} />
-      </Router>
+      <ErrorBoundary>
+        <Router>
+          <Route path="/" component={Home} />
+          <Route path="/projects" component={Projects} />
+          <Route path="/activity" component={Activity} />
+          <Route path="/sign-in" component={SignIn} />
+          <Route path="/device" component={Device} />
+          <Route path="/reset/:token" component={Reset} />
+          <Route path="/:project" component={ProjectPage} />
+          <Route path="/:project/:artifact" component={ArtifactPage} />
+          <Route path="/:project/:artifact/v/:n" component={PageRoute} />
+          <Route path="/:project/:artifact/v/:n/:page" component={PageRoute} />
+          <Route path="/:project/:artifact/:page" component={PageRoute} />
+          <Route default component={NotFound} />
+        </Router>
+      </ErrorBoundary>
     </LocationProvider>
   );
 }

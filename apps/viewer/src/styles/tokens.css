@@ -13,6 +13,8 @@
   --warn-word: #c0392b;
   --soft: rgba(0, 0, 0, 0.06);
   --sheet: rgba(250, 250, 252, 0.985);
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-line: rgba(0, 0, 0, 0.08);
   --canvas: #1b1d22;
 
   --bg: #f5f6f8;
@@ -38,6 +40,8 @@
     --warn-word: var(--warn);
     --soft: rgba(255, 255, 255, 0.1);
     --sheet: rgba(34, 36, 42, 0.96);
+    --glass: rgba(36, 38, 44, 0.72);
+    --glass-line: rgba(255, 255, 255, 0.16);
 
     --bg: #15171c;
     --card: #20232a;
@@ -46,4 +50,20 @@
     --tx3: #6b717c;
     --sep: rgba(255, 255, 255, 0.08);
   }
+}
+
+/* The canvas is dark whatever the theme, and so is what floats on it. */
+.on-canvas {
+  --tx: #f2f3f5;
+  --tx2: #a0a6b1;
+  --tx3: #6b717c;
+  --sep: rgba(255, 255, 255, 0.08);
+  --card: #20232a;
+  --bg: #15171c;
+  --soft: rgba(255, 255, 255, 0.1);
+  --sheet: rgba(34, 36, 42, 0.96);
+  --glass: rgba(36, 38, 44, 0.72);
+  --glass-line: rgba(255, 255, 255, 0.16);
+  --agent-word: var(--agent);
+  --mark-word: var(--mark);
 }
