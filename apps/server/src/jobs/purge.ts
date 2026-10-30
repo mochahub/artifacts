@@ -44,6 +44,13 @@ async function deleteVersionRows(tx: Parameters<Parameters<Deps["db"]["transacti
   await tx.delete(versions).where(inArray(versions.id, ids));
 }
 
+/**
+ * The daily job picked its rows before taking the lock. If one was restored and deleted again since, its
+ * 30 days start over, so the job (no actor) leaves it. A person's purge doesn't wait for the 30 days.
+ */
+const notDue = (current: { purgeAfter: Date | null }, actorId: string | null, now: Date) =>
+  actorId === null && (current.purgeAfter === null || current.purgeAfter > now);
+
 /** SPEC §5.5: everything goes, except one line saying that it happened. */
 export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: string | null) {
   const { db, clock } = deps;
@@ -51,7 +58,7 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 0))`);
     // Rechecked under the lock: it may have been restored since this purge was decided.
     const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, artifact.id)).limit(1);
-    if (!current?.deletedAt) return null;
+    if (!current?.deletedAt || notDue(current, actorId, clock.now())) return null;
     const [project] = await tx.select().from(projects).where(eq(projects.id, artifact.projectId)).limit(1);
     const threadRows = await tx
       .select({ id: threads.id, cropKey: threads.cropKey })
@@ -134,7 +141,7 @@ export async function purgeVersion(
   const crops = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 0))`);
     const [current] = await tx.select().from(versions).where(eq(versions.id, version.id)).limit(1);
-    if (!current?.deletedAt) return null;
+    if (!current?.deletedAt || notDue(current, actorId, clock.now())) return null;
 
     // A version removed because it showed a secret: its crops and quoted words show it too (SPEC §5.5).
     const moved = await tx
