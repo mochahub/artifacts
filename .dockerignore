@@ -1,7 +1,22 @@
+# Nothing here is needed to build the image, and the secrets and local state must never reach a layer.
 **/node_modules
 **/dist
 **/test-results
+**/playwright-report
+**/*.tsbuildinfo
 .git
+.github
 .artifacts
+**/.artifacts
+.env
+.env.*
+!.env.example
+**/.auth.json
+**/.token
+.DS_Store
 docs
 spikes
+fixtures
+assets
+skill
+deploy

@@ -17,7 +17,7 @@ function run(command: string[], cwd: string) {
   if (!result.success) throw new CliError(`${command.join(" ")} failed:\n${result.stderr.toString()}`);
 }
 
-/** Writes docker-compose.yml, .env and s3.json. Never overwrites an existing deployment's secrets. */
+/** Writes docker-compose.yml and .env (mode 0600; SeaweedFS reads its keys from it too). Never overwrites an existing deployment's secrets. */
 export function writeDeployment(dir: string, image: string, port: number) {
   if (existsSync(join(dir, ".env"))) {
     throw new CliError(`${dir} already has a deployment. Pick another folder with --dir.`);
@@ -29,6 +29,7 @@ export function writeDeployment(dir: string, image: string, port: number) {
   const s3Port = port + 253; // 8080 becomes 8333, weed's usual port.
   const env = {
     ARTIFACTS_IMAGE: image,
+    BIND_ADDRESS: "127.0.0.1",
     VIEWER_PORT: port,
     LIVE_PORT: port + 1,
     S3_PORT: s3Port,
@@ -49,19 +50,6 @@ export function writeDeployment(dir: string, image: string, port: number) {
       .map(([key, value]) => `${key}=${value}`)
       .join("\n")}\n`,
     { mode: 0o600 },
-  );
-  writeFileSync(
-    join(dir, "s3.json"),
-    JSON.stringify({
-      identities: [
-        {
-          name: "artifacts",
-          credentials: [{ accessKey, secretKey }],
-          actions: ["Admin", "Read", "List", "Tagging", "Write"],
-        },
-      ],
-    }),
-    { mode: 0o644 },
   );
   return { url: env.PUBLIC_URL, setupToken };
 }
