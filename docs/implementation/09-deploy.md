@@ -59,7 +59,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 | `SETUP_TOKEN` | yes | 32+ random chars | Template variable function; not sealed (SPEC §7.4) |
 | `SESSION_SECRET` | yes | 64 random chars | Keys for content tokens (HKDF, info `"content"`). Caller pseudonyms use `org.pseudonym_key` instead (02). |
 | `OPS_SECRET` | yes | 64 random chars | For `/internal/jobs/*` |
-| `PORT`, `CONTENT_PORT`, `INTERNAL_PORT` | no | 8080, 8081, 8082 | |
+| `PORT`, `CONTENT_PORT`, `INTERNAL_PORT` | no | 8080, 8081, 8082 | Must differ (boot refuses otherwise). A viewer URL that is plain http away from localhost, or an `OPS_SECRET` reused as another secret, is logged as a warning. |
 | `LOG_LEVEL` | no | `info` | JSON logs to stdout |
 | `GITHUB_RELEASES_REPO` | no | `mochahub/artifacts` | For the "new version available" notice in Settings. `none` turns it off. A private repo: no notice. |
 
