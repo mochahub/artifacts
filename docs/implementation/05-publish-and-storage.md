@@ -141,7 +141,7 @@ Article threads have no crop; their quote is the context.
 - **Library:** `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`, path-style, created with `requestChecksumCalculation: "WHEN_REQUIRED"` and `responseChecksumValidation: "WHEN_REQUIRED"`. The SDK's default puts a checksum of an empty body into presigned PUT URLs, which some S3 servers reject (spike S3).
 - **Endpoint:** `S3_ENDPOINT` (Railway's bucket endpoint, or SeaweedFS's).
 - **GET URLs:** signed with the time rounded down to the UTC day and an expiry of 24 hours plus a margin, so URLs are stable within a day (03).
-- **PUT URLs:** signed per request, valid 15 minutes, with `Content-Type`, `Content-Length`, `Cache-Control` and `If-None-Match: *` signed.
+- **PUT URLs:** signed per request, valid 15 minutes, with `Content-Type`, `Content-Length`, `Cache-Control` and `If-None-Match: *` signed. The signed `Content-Type` is the declared one only for PNG, JPEG, GIF, WebP and AVIF; every other file is stored as `application/octet-stream`, because the viewer's `/r/<hash>` route and the bucket both send the stored type, and an author's page, script or SVG must not run from either. Live previews serve the manifest's type, so they don't change.
 - **Verifying content:** the `blobs` table (02) lists hashes the server has checked. `prepare` calls a hash missing unless it has a row. `commit` downloads every referenced hash without a row, hashes it, and adds the row; a mismatch deletes the object and answers 400 `invalid`. Reading from the bucket is free, and each blob is only read once.
 
 ## Clean-up
