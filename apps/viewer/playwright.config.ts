@@ -19,8 +19,12 @@ export default defineConfig({
   // `claim` sees the server in setup mode, then claims it for every other test.
   projects: [
     { name: "claim", testMatch: "claim.setup.ts", use: iphone },
-    { name: "iphone", use: iphone, dependencies: ["claim"] },
-    { name: "desktop", use: { viewport: { width: 1440, height: 900 } }, dependencies: ["claim"] },
+    { name: "iphone", use: { ...iphone, storageState: "e2e/.auth.json" }, dependencies: ["claim"] },
+    {
+      name: "desktop",
+      use: { viewport: { width: 1440, height: 900 }, storageState: "e2e/.auth.json" },
+      dependencies: ["claim"],
+    },
   ],
   // Runs the real server against docker-compose.test.yml, serving the built viewer. `bun run e2e` sets both up.
   webServer: {

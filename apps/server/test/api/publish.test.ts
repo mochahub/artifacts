@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PublishPrepared, PublishResult } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
-import { sha256 } from "../../src/auth/secrets.ts";
-import { artifacts, people, projects, tokens } from "../../src/db/schema.ts";
+import { artifacts, people, projects } from "../../src/db/schema.ts";
 import { claim, startTestServer, type TestServer } from "../helpers.ts";
 import { file, hash, makePerson, publish } from "../publish-helper.ts";
 

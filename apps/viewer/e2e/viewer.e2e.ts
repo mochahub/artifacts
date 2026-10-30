@@ -1,15 +1,10 @@
 import { expect, type Page, test } from "@playwright/test";
-import { signIn, watchErrors } from "./helpers.ts";
+import { watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
   if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
   if (project === "desktop") await page.screenshot({ path: `../../docs/mocks/shots/desktop-${name}.png` });
 };
-
-test.beforeEach(async ({ page }) => {
-  await signIn(page);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
-});
 
 const transform = (page: Page) =>
   page.evaluate(() => {
@@ -19,6 +14,7 @@ const transform = (page: Page) =>
 
 test("projects and a project list the fixture", async ({ page }, info) => {
   const errors = watchErrors(page);
+  await page.goto("/");
   await expect(page.getByText("Camera Buddy roadmap").first()).toBeVisible();
 
   await page.goto("/projects");
@@ -33,7 +29,7 @@ test("projects and a project list the fixture", async ({ page }, info) => {
   await page.getByLabel("Find in this project").fill("nope");
   await expect(page.getByText("Nothing here.")).toBeVisible();
   await page.getByLabel("Find in this project").fill("road");
-  await expect(page.getByText("Waiting on you").or(page.getByText("Not reviewed yet")).first()).toBeVisible();
+  await expect(page.locator(".tile").getByText("Camera Buddy roadmap")).toBeVisible();
   await shot(page, info.project.name, "01-3-project");
   expect(errors).toEqual([]);
 });
@@ -214,7 +210,7 @@ test("a pinned version shows that version", async ({ page }) => {
 });
 
 test("signed-out visitors are sent to sign in and back", async ({ browser }) => {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   const page = await context.newPage();
   await page.goto("http://localhost:18080/camerabuddy/roadmap/plan");
   await expect(page).toHaveURL(/\/sign-in\?next=/);

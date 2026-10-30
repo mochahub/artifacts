@@ -1,8 +1,9 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, ChevronRight, FileText, History, Images } from "lucide-preact";
+import { ChevronLeft, ChevronRight, CircleCheck, FileText, History, Images } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { AgentMark, StatusWord } from "../components/cards.tsx";
+import { DecideSheet } from "../components/review.tsx";
 import { VersionSheet } from "../components/sheets.tsx";
 import { agentShort, ago, plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
@@ -16,8 +17,10 @@ export const artifactPath = (project: string, slug: string) =>
 function Detail() {
   const { params } = useRoute();
   const project = params.project ?? "";
-  const { data, error } = usePoll<Artifact>(artifactPath(project, params.artifact ?? ""), 10_000);
+  const remote = usePoll<Artifact>(artifactPath(project, params.artifact ?? ""), 10_000);
+  const { data, error } = remote;
   const history = useSignal(false);
+  const deciding = useSignal(false);
 
   if (error.value?.status === 410) return <Deleted at={error.value.details.deletedAt as string} />;
   if (error.value) return <NotFound />;
@@ -76,10 +79,44 @@ function Detail() {
         ))}
       </div>
       <div class="spacer" />
-      {first && (
-        <a class="btn ink" href={`${base}/${first.key}`}>
-          {changed.length > 0 ? "Review changes" : "Start reviewing"}
-        </a>
+      {artifact.decision && (
+        <p class="status-note">
+          {artifact.decision.kind === "approved" ? "Approved" : "Changes requested"} on v
+          {artifact.decision.version} by {artifact.decision.by}
+          {artifact.decision.note ? `: ${artifact.decision.note}` : "."}
+        </p>
+      )}
+      <div class="row">
+        {first && (
+          <a class="btn ink" href={`${base}/${first.key}`}>
+            {changed.length > 0 ? "Review changes" : "Start reviewing"}
+          </a>
+        )}
+        {artifact.permissions.comment && (
+          <button
+            type="button"
+            class="round"
+            style="width:52px;height:52px"
+            aria-label="Approve or request changes"
+            onClick={() => {
+              deciding.value = true;
+            }}
+          >
+            <CircleCheck />
+          </button>
+        )}
+      </div>
+      {deciding.value && (
+        <DecideSheet
+          artifact={artifact}
+          onClose={() => {
+            deciding.value = false;
+          }}
+          onDone={() => {
+            deciding.value = false;
+            remote.refresh();
+          }}
+        />
       )}
       {history.value && (
         <VersionSheet

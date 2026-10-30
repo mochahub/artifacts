@@ -23,6 +23,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 
 - **M4 (2026-10-30):** Playwright WebKit at iPhone size and desktop against the real fixture: lists, search, filters, artifact page, page switcher, version history, 26 frames drawn with one changed, frames list, deep links, pinned versions, synthesized touch pan and pinch, double-tap, keyboard, article blocks, embeds, tables without page overflow, settings surviving a reload. Screenshots: `docs/mocks/shots/`. Compared by eye with boards 01–03; found and fixed the overview layout and cover crop.
 
+- **M5 (2026-10-30):** the automated round trip passes with the real CLI and fixture: a person comments and requests changes; `status` and `comments --open --json` show it, with a crop that downloads; the agent edits and publishes, and `threadsOnChanged` names the thread; `reply --fixed`; a token can't resolve, a person can. Re-anchoring has unit tests for frames, blocks, moved quotes, repeated quotes and the threshold. Renaming a commented frame stops the publish. Skill install writes both folders under a sandboxed home.
+
 ## Decisions to review
 
 1. **M2, Docker image before M8.** `setup --docker` needs an image that can't be pushed yet, so `apps/server/Dockerfile` came forward from M8 and `--image`/`ARTIFACTS_IMAGE` overrides the default `ghcr.io/mochahub/artifacts:<version>`. To change: nothing needed once images are released.
@@ -43,6 +45,10 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 
 15. **M4, two-column canvas on tall screens.** 06 said left to right, but board 02 draws 2×2, and looks beat the text (README). Wide screens keep one row.
 16. **M4, "changed" compares with the previous version,** not the version you last read. Board 03 says "since you read v3". Doing that needs a comparison base per person, which arrives with compare in M7.
+
+17. **M5, `frames/renamed` has no rename guess.** 07 asked for the likely rename by pixel similarity. It says what's gone and stops if comments would be orphaned, which is the part that protects anything.
+18. **M5, a comment on a resolved thread leaves it resolved.** SPEC only says a reply to a *fixed* thread reopens it. Reopen is an explicit button.
+19. **M5, crop links last about a day, not an hour.** They use the same day-stable presigned URL as renders, so phones keep them cached.
 
 ## Needs you
 
