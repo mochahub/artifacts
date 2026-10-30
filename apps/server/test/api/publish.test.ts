@@ -261,5 +261,4 @@ describe("publishing", () => {
       0,
     );
   });
-
 });
