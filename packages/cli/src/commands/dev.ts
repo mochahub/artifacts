@@ -10,8 +10,6 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { isDataKey } from "@artifacts/schema";
-// @ts-expect-error: plain JavaScript shared with the server
-import { startChild } from "../../../sandbox/src/host.js";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
 import { viewerAssets } from "../dev/assets.ts";
 import { staticLint } from "../lint/static.ts";
@@ -314,13 +312,22 @@ export async function devCommand(flags: { port: number }, out: Output) {
   }
 
   /** The same sandbox as the server, with env.DATA on .artifacts/data (08). */
-  let sandbox: ReturnType<typeof startChild> | null = null;
+  type Child = {
+    up: Promise<void>;
+    run(
+      options: unknown,
+    ): Promise<{ response?: SandboxResponse; logs?: { level: string; message: string }[] }>;
+  };
+  type SandboxResponse = { status: number; headers: [string, string][]; body: string };
+  let sandbox: Child | null = null;
   let requests = 0;
   async function backend(request: Request, path: string) {
     const source = built?.files.get("__backend.js");
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (!source) return new Response("No backend", { status: 404, headers: CORS });
     const dir = ensureHelper(out);
+    // From the helper folder, not bundled: the binary embeds this file as text for that folder (07).
+    const { startChild } = await import(join(dir, "sandbox-host.js"));
     sandbox ??= startChild({
       childPath: join(dir, "sandbox-child.js"),
       prelude: readFileSync(join(dir, "sandbox-prelude.js"), "utf8"),
@@ -328,9 +335,10 @@ export async function devCommand(flags: { port: number }, out: Output) {
         sandbox = null;
       },
     });
-    await sandbox.up;
+    const child = sandbox as Child;
+    await child.up;
     const code = readFileSync(source.source, "utf8");
-    const { response, logs } = await sandbox.run({
+    const { response, logs } = await child.run({
       id: ++requests,
       hash: source.hash,
       code: () => code,

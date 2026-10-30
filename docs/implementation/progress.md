@@ -42,6 +42,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 - **M10 (2026-10-30):** the four design checks in `spikes/s10/`. 24 sandbox tests: isolation, no globals, timeouts, floods and recursion, teardown in flight, a dead child, empty environment, read-only for viewers and archived, old versions run their own code, log and size caps, rate limit, queue limit. A real backend ran **inside the Docker image**, via `setup --docker`, publish, a vote and `artifacts logs`. `artifacts dev` serves the real viewer and a backend with no server.
 - **M10 independent review (subagent, 2026-10-30):** 12 findings, all fixed, with tests for each that could fail. The worst: a frame could reach any `/api/*` route with the viewer's session through `..` in a data key.
 - **M11 (2026-10-30):** 432 tests, 74 Playwright tests plus 4 that apply to one device only. SSE across a real server, including inside the Docker image; a listener recovering from a cut Postgres connection through a TCP proxy. Web Push against a local fake push service: payloads decrypted by a separate RFC 8291 implementation in the test, VAPID signature and claims verified; the reviewer also matched RFC 8291's Appendix A vector byte for byte. The Chromium e2e reloads a version with no network, then signs out and checks the kept data is gone. **Web Push has not reached a real push service or a real device.** Load figures: [load-notes.md](load-notes.md), local only.
+- **Compiled binary (2026-10-30):** a final check found `bun build --compile` had been failing since M10, because `host.js` was imported as both code and text; CI didn't build the binary. Fixed, and CI now builds and runs it. On the macOS binary: `artifacts mcp` spawned itself correctly, and `artifacts dev` installed its helpers, served the viewer and ran a backend.
 - **M11 independent review (subagent, 2026-10-30):** 12 findings and one spec gap, all fixed. The worst: a model-supplied MCP argument could send the token to another server.
 
 ## Decisions to review
@@ -137,6 +138,8 @@ In this order. Nothing here has been done or tested by the agent.
 - **The render tests** share one helper install in the temp folder and the machine's WebKit cache.
 - **The reauth sheet** has no e2e test yet, because the e2e server's clock can't be moved. The API side is tested.
 - **A view-only stream outlives lost access by up to 5 minutes.** Events hold no content, so it learns only that something changed.
+- **The worker's revocation is blunt:** a 404 on any artifact address, a mistyped one included, clears everything kept offline on that device. It costs a re-download, nothing else. Guests' `/api/me` answer clears it too, so guests get almost no offline copies.
+- **Offline has only been tested in Chromium,** not WebKit or Safari: Needs you 15.
 - **A device offline when its access ends keeps its copies** until it next reaches the server. A cached render opens without asking the server.
 - **The digest is one count, with no time zone:** it goes out when the daily job runs.
 - **Service-worker revocation and the sign-out push path** have no e2e test: the first needs losing access mid-session, the second a real push subscription.

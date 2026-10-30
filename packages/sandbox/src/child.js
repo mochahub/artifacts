@@ -205,6 +205,9 @@ async function run(message) {
   answer({ response: result });
 }
 
+// Without a parent nobody can use this process, and nothing else would stop it.
+process.on("disconnect", () => process.exit(0));
+
 process.on("message", (message) => {
   if (message.t === "run") run(message);
   if (message.t === "data-result") calls.get(message.call)?.(message.answer);
