@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
-import { can } from "../auth/can.ts";
+import { seesArtifact } from "../auth/can.ts";
 import {
   activity,
   artifacts,
@@ -48,6 +48,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       artifactId: row.id,
       projectId: row.projectId,
       actorPersonId: actorId(c.get("caller")),
+      agent:
+        c.get("caller").kind === "person" ? null : (c.req.header("artifacts-agent")?.slice(0, 60) ?? null),
       kind,
       payload,
       createdAt: clock.now(),
@@ -95,10 +97,13 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
   routes.post("/api/artifacts/:id/undelete", { action: "artifact.delete", resource: artifact }, async (c) => {
     const resource = await artifact(c as ApiContext);
     if (!resource.deletedAt) throw new ApiError("conflict", "It isn't in Recently deleted.");
-    await db
-      .update(artifacts)
-      .set({ deletedAt: null, deletedBy: null, purgeAfter: null })
-      .where(eq(artifacts.id, resource.id));
+    await db.transaction(async (tx) => {
+      await tx.execute(LOCK(resource.id));
+      await tx
+        .update(artifacts)
+        .set({ deletedAt: null, deletedBy: null, purgeAfter: null })
+        .where(eq(artifacts.id, resource.id));
+    });
     await record(c as ApiContext, resource, "undeleted");
     return c.json({ ok: true });
   });
@@ -215,10 +220,24 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           )
           .orderBy(asc(versions.n))
           .limit(1);
-        if (!next) return;
+        if (!next)
+          throw new ApiError("conflict", "The latest version can't be removed. Publish a fix first.");
+        const [pageRows, frameRows, blockRows] = await Promise.all([
+          tx.select().from(pages).where(eq(pages.versionId, next.id)),
+          tx.select().from(frames).where(eq(frames.versionId, next.id)),
+          tx.select().from(blocks).where(eq(blocks.versionId, next.id)),
+        ]);
+        await reanchorThreads(
+          tx,
+          resource.id,
+          pageRows.map((row) => ({ key: row.pageKey })),
+          frameRows,
+          blockRows,
+          version.n,
+        );
         await tx
           .update(threads)
-          .set({ createdVersion: next.n, anchorState: "moved_version" })
+          .set({ createdVersion: next.n, movedFromVersion: version.n })
           .where(and(eq(threads.artifactId, resource.id), eq(threads.createdVersion, version.n)));
       });
       await record(c as ApiContext, resource, "version_deleted", { version: version.n });
@@ -232,10 +251,13 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
     async (c) => {
       const { resource, version } = await versionParam(c as ApiContext);
       if (!version.deletedAt) throw new ApiError("conflict", "That version isn't removed.");
-      await db
-        .update(versions)
-        .set({ deletedAt: null, deletedBy: null, purgeAfter: null })
-        .where(eq(versions.id, version.id));
+      await db.transaction(async (tx) => {
+        await tx.execute(LOCK(resource.id));
+        await tx
+          .update(versions)
+          .set({ deletedAt: null, deletedBy: null, purgeAfter: null })
+          .where(eq(versions.id, version.id));
+      });
       await record(c as ApiContext, resource, "version_undeleted", { version: version.n });
       return c.json({ ok: true });
     },
@@ -435,7 +457,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       }
       if (!seen.has(id)) seen.set(id, await findArtifact(deps, orgId, id));
       const resource = seen.get(id);
-      if (resource && can(caller, "artifact.read", resource)) visible.push(entry);
+      // Deletion hides the artifact, not its history: SPEC §5.5 wants the line in Activity.
+      if (resource && seesArtifact(caller, resource)) visible.push(entry);
       if (visible.length === 50) break;
     }
     return etagJson(c, {
@@ -448,7 +471,10 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         payload: row.payload,
         createdAt: row.createdAt.toISOString(),
       })),
-      nextCursor: visible.length === 50 ? visible.at(-1)?.row.createdAt.toISOString() : null,
+      nextCursor:
+        rows.length === 200 || visible.length === 50
+          ? (visible.at(-1) ?? rows.at(-1))?.row.createdAt.toISOString()
+          : null,
     });
   });
 }

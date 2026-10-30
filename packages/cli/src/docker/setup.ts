@@ -22,7 +22,7 @@ export function writeDeployment(dir: string, image: string, port: number) {
   if (existsSync(join(dir, ".env"))) {
     throw new CliError(`${dir} already has a deployment. Pick another folder with --dir.`);
   }
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const accessKey = secret(16);
   const secretKey = secret(32);
   const setupToken = secret(24);

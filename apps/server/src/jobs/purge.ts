@@ -47,6 +47,9 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
   const { db, clock } = deps;
   const crops = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 0))`);
+    // Rechecked under the lock: it may have been restored since this purge was decided.
+    const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, artifact.id)).limit(1);
+    if (!current?.deletedAt) return null;
     const [project] = await tx.select().from(projects).where(eq(projects.id, artifact.projectId)).limit(1);
     const threadRows = await tx
       .select({ id: threads.id, cropKey: threads.cropKey })
@@ -106,8 +109,15 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
     });
     return threadRows.flatMap((row) => (row.cropKey ? [row.cropKey] : []));
   });
-  await Promise.all(crops.map((key) => deps.bucket.delete(key)));
-  await deletePrefix(deps, `data/${artifact.id}/`);
+  if (crops === null) return false;
+  // Past this point the rows are gone. A bucket failure is logged, and the daily sweep finishes it.
+  try {
+    await Promise.all(crops.map((key) => deps.bucket.delete(key)));
+    await deletePrefix(deps, `data/${artifact.id}/`);
+  } catch (error) {
+    deps.log.warn("purge left objects for the sweep", { artifact: artifact.id, error: String(error) });
+  }
+  return true;
 }
 
 export async function purgeVersion(
@@ -117,8 +127,27 @@ export async function purgeVersion(
   actorId: string | null,
 ) {
   const { db, clock } = deps;
-  await db.transaction(async (tx) => {
+  const crops = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 0))`);
+    const [current] = await tx.select().from(versions).where(eq(versions.id, version.id)).limit(1);
+    if (!current?.deletedAt) return null;
+
+    // A version removed because it showed a secret: its crops and quoted words show it too (SPEC §5.5).
+    const moved = await tx
+      .select()
+      .from(threads)
+      .where(and(eq(threads.artifactId, artifact.id), eq(threads.movedFromVersion, version.n)));
+    for (const thread of moved) {
+      const anchor = thread.anchor as { type: string; blockKey?: string } | null;
+      await tx
+        .update(threads)
+        .set({
+          cropKey: null,
+          anchor: anchor?.type === "text" ? { type: "block", blockKey: anchor.blockKey } : thread.anchor,
+        })
+        .where(eq(threads.id, thread.id));
+    }
+
     await deleteVersionRows(tx, [version.id]);
     const [project] = await tx.select().from(projects).where(eq(projects.id, artifact.projectId)).limit(1);
     await tx.insert(tombstones).values({
@@ -142,7 +171,15 @@ export async function purgeVersion(
       payload: { title: artifact.title, version: version.n },
       createdAt: clock.now(),
     });
+    return moved.flatMap((thread) => (thread.cropKey ? [thread.cropKey] : []));
   });
+  if (crops === null) return false;
+  try {
+    await Promise.all(crops.map((key) => deps.bucket.delete(key)));
+  } catch (error) {
+    deps.log.warn("purge left crops for the sweep", { version: version.id, error: String(error) });
+  }
+  return true;
 }
 
 /** Everything past its 30 days (05, "Clean-up"). */
@@ -153,12 +190,21 @@ export async function purgeExpired(deps: Deps) {
     .select()
     .from(artifacts)
     .where(and(isNotNull(artifacts.deletedAt), lt(artifacts.purgeAfter, now)));
-  for (const row of expired) await purgeArtifact(deps, row, null);
+  // One failure mustn't stop the rest.
+  const each = async (work: () => Promise<unknown>) => {
+    try {
+      await work();
+    } catch (error) {
+      deps.log.error("purge failed", { error: String(error) });
+    }
+  };
+  for (const row of expired) await each(() => purgeArtifact(deps, row, null));
   const versionRows = await db
     .select({ version: versions, artifact: artifacts })
     .from(versions)
     .innerJoin(artifacts, eq(artifacts.id, versions.artifactId))
     .where(and(isNotNull(versions.deletedAt), lt(versions.purgeAfter, now), isNull(artifacts.deletedAt)));
-  for (const { version, artifact } of versionRows) await purgeVersion(deps, artifact, version, null);
+  for (const { version, artifact } of versionRows)
+    await each(() => purgeVersion(deps, artifact, version, null));
   return { artifacts: expired.length, versions: versionRows.length };
 }

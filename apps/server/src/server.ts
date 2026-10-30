@@ -28,6 +28,8 @@ export type StartOptions = {
   viewerDir?: string | null;
   /** Called with every API route served; tests use it to prove each route was exercised. */
   onRoute?: (method: string, path: string) => void;
+  /** Tests move the clock, so they run jobs by hand. */
+  jobs?: boolean;
 };
 
 const PRIVATE_PEER = /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$|^f[cd]/;
@@ -118,7 +120,7 @@ export async function startServer(env: Env, options: StartOptions) {
     Bun.serve({ port: env.internalPort, fetch: createInternalApp(env, log, jobsFor(deps)).fetch }),
   ] as const;
   const [viewerServer, contentServer, internalServer] = servers;
-  const stopJobs = startJobs(deps);
+  const stopJobs = options.jobs === false ? () => {} : startJobs(deps);
   log.info("listening", {
     port: viewerServer.port,
     contentPort: contentServer.port,
@@ -135,6 +137,7 @@ export async function startServer(env: Env, options: StartOptions) {
     db,
     bucket,
     routes: routes.list,
+    deps,
     async stop() {
       stopJobs();
       await Promise.all(servers.map((server) => server.stop(true)));

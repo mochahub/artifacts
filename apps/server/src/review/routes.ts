@@ -79,7 +79,10 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
           n: row.n,
           pageKey: row.pageKey,
           anchor: row.anchor as Anchor | null,
-          anchorState: row.anchorState,
+          anchorState:
+            row.movedFromVersion !== null && row.anchorState === "ok"
+              ? ("moved_version" as const)
+              : row.anchorState,
           status: row.status,
           createdVersion: row.createdVersion,
           fixedVersion: row.fixedVersion,

@@ -81,6 +81,7 @@ export async function startTestServer(overrides: Record<string, string> = {}) {
     log: silent,
     clock,
     viewerDir: viewerFixture(),
+    jobs: false,
     onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
   });
   const base = `http://127.0.0.1:${server.ports.viewer}`;

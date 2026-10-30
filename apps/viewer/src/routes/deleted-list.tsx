@@ -2,6 +2,7 @@ import { useSignal } from "@preact/signals";
 import { ChevronLeft } from "lucide-preact";
 import { ApiFailure, api, post } from "../api.ts";
 import { ReauthSheet } from "../components/reauth.tsx";
+import { Sheet } from "../components/sheets.tsx";
 import { plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
 import { SignedIn } from "./guard.tsx";
@@ -25,6 +26,7 @@ function List() {
   const list = usePoll<Row[]>("/api/deleted", 60_000);
   const retry = useSignal<(() => Promise<void>) | null>(null);
   const error = useSignal<string | null>(null);
+  const confirming = useSignal(false);
 
   async function run(work: () => Promise<void>) {
     error.value = null;
@@ -74,13 +76,54 @@ function List() {
       )}
       {error.value && <p class="err">{error.value}</p>}
       {rows.length > 0 && (
-        <button type="button" class="btn soft" style="color:var(--warn-word)" onClick={eraseAll}>
+        <button
+          type="button"
+          class="btn soft"
+          style="color:var(--warn-word)"
+          onClick={() => {
+            confirming.value = true;
+          }}
+        >
           Delete all now
         </button>
       )}
       <p class="fn">
         Erased for good after 30 days. Agents can move things here, but only a person can erase them.
       </p>
+      {confirming.value && (
+        <Sheet
+          title={`Erase ${plural(rows.length, "item")} for good?`}
+          onClose={() => {
+            confirming.value = false;
+          }}
+        >
+          <div class="group">
+            {rows.map((row) => (
+              <div class="li" key={`${row.artifact.id}${row.version ?? ""}`}>
+                <div class="grow">
+                  <div class="tt">
+                    {row.artifact.title}
+                    {row.version ? `, v${row.version}` : ""}
+                  </div>
+                  <div class="ss">{row.deletedBy ? `Deleted by ${row.deletedBy}` : ""}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p class="sub">Versions, comments, saved data and backends go now. This can't be undone.</p>
+          <button
+            type="button"
+            class="btn soft"
+            style="color:var(--warn-word)"
+            onClick={() => {
+              confirming.value = false;
+              eraseAll();
+            }}
+          >
+            Erase them now
+          </button>
+        </Sheet>
+      )}
       {retry.value && (
         <ReauthSheet
           onCancel={() => {
