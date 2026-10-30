@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { artifacts, blocks, frames, pages, versions } from "../../../apps/server/src/db/schema.ts";
-import { OWNER, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import { OWNER, signIn, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
 import { camerabuddy, cli, copyFixture, fixture, sandbox } from "./sandbox.ts";
 
 const lint = async (name: string, env: Record<string, string>) => {
@@ -154,6 +154,68 @@ describe("publishing with the real CLI", () => {
     expect(html).not.toContain("<style");
     expect(html).not.toContain("foreignObject");
   }, 120_000);
+
+  test("a backend publishes, runs, keeps logs, and its data exports with names", async () => {
+    const dir = copyFixture(join(import.meta.dir, "../../../fixtures/micro-app-poll-backend"));
+    const published = await cli(["publish", "--json"], signedIn(), dir);
+    expect(published.stderr).not.toContain("✗");
+    expect(published.code).toBe(0);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "poll-backend"));
+    expect(row?.hasBackend).toBe(true);
+    const [version] = await t.server.db
+      .select()
+      .from(versions)
+      .where(eq(versions.artifactId, row?.id as string));
+    expect(version?.backendHash).toMatch(/^[0-9a-f]{64}$/);
+
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    const headers = { Host: new URL(url).host, Origin: url };
+    const mint = await t.api(`/api/artifacts/${row?.id}/content-token`, {
+      method: "POST",
+      cookie,
+      json: { version: 1 },
+      headers,
+    });
+    const { base } = (await mint.json()) as { base: string };
+    const response = await fetch(
+      `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}api/votes`,
+      {
+        method: "POST",
+        headers: {
+          Host: new URL(t.server.deps.env.contentUrl as string).host,
+          "Sec-Fetch-Dest": "empty",
+          "Content-Type": "application/json",
+        },
+        body: '{"choice":"a"}',
+      },
+    );
+    expect(await response.json()).toMatchObject({ totals: { a: 1, b: 0 }, mine: "a", name: "Zahin" });
+
+    const logs = JSON.parse((await cli(["logs", "--json"], signedIn(), dir)).stdout);
+    expect(logs[0].message).toBe("vote from Zahin");
+    const exported = JSON.parse((await cli(["data", "export"], signedIn(), dir)).stdout);
+    expect(Object.keys(exported.shared.votes.by)).toHaveLength(1);
+    const listed = JSON.parse((await cli(["data", "ls", "--json"], signedIn(), dir)).stdout);
+    expect(listed[0].key).toBe("votes");
+    const got = JSON.parse((await cli(["data", "get", "votes", "--json"], signedIn(), dir)).stdout);
+    expect(got.schema).toBe(1);
+    expect((await cli(["data", "clear", "--json"], signedIn(), dir)).code).toBe(0);
+    expect(JSON.parse((await cli(["data", "ls", "--json"], signedIn(), dir)).stdout)).toEqual([]);
+  }, 120_000);
+
+  test("backend lint: network calls and anything unbundled are refused", async () => {
+    const dir = copyFixture(join(import.meta.dir, "../../../fixtures/micro-app-poll-backend"));
+    writeFileSync(
+      join(dir, "api/index.js"),
+      'export default { async fetch() { await fetch("https://x.test"); setTimeout(() => {}, 1); return new Response(""); } };',
+    );
+    const result = await cli(["lint", "--json"], box.env, dir);
+    const body = JSON.parse(result.stdout);
+    expect(
+      body.problems.filter((p: { rule: string }) => p.rule === "backend/network").length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(result.code).toBe(1);
+  }, 60_000);
 
   test("init makes something that renders", async () => {
     const dir = copyFixture(fixture("refs"));

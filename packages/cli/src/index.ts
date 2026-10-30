@@ -2,7 +2,7 @@
 import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
-import { dataCommand } from "./commands/data.ts";
+import { dataCommand, logsCommand } from "./commands/data.ts";
 import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
@@ -45,6 +45,7 @@ const USAGE = `artifacts ${VERSION}
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
   artifacts dev [--port 4321]
   artifacts data ls | get <key> | export | clear [--scope shared|me]
+  artifacts logs [--follow] [--version <n>]
   artifacts visibility org|me
   artifacts versions | versions name <n> "<label>" | diff <a> <b> | restore <n>
   artifacts archive [<project>/<slug>] [--undo]
@@ -76,6 +77,7 @@ const OPTIONS = {
   fixed: { type: "boolean" },
   all: { type: "boolean" },
   role: { type: "string" },
+  follow: { type: "boolean" },
   scope: { type: "string" },
   to: { type: "string" },
   undo: { type: "boolean" },
@@ -106,7 +108,7 @@ async function main(argv: string[]) {
   try {
     // Its number would otherwise be read as a positional.
     const isUpgrade = argv[0] === "upgrade";
-    const takesVersion = ["open", "delete", "undelete"].includes(argv[0] ?? "");
+    const takesVersion = ["open", "delete", "undelete", "logs"].includes(argv[0] ?? "");
     const args = takesVersion
       ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
       : argv;
@@ -174,6 +176,11 @@ async function main(argv: string[]) {
     }
     case "data":
       return dataCommand(first, positionals[2], { scope: values.scope, server: values.server }, out);
+    case "logs":
+      return logsCommand(
+        { follow: values.follow, version: optionAfter("--version"), server: values.server },
+        out,
+      );
     case "dev":
       return devCommand({ port: values.port ? Number(values.port) : 4321 }, out);
     case "versions":

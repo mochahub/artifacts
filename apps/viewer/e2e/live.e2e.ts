@@ -80,3 +80,15 @@ test("the bridge ignores other windows, and a frame can't name another artifact"
   );
   expect(answered).toBe(false);
 });
+
+test("the poll with a backend: votes stay hidden, totals come back", async ({ page }, info) => {
+  const slug = `poll-b-${info.project.name}`;
+  publishFixture("micro-app-poll-backend", slug, token());
+  await page.goto(`/demo/${slug}/poll`);
+  const frame = live(page);
+  await frame.getByRole("button", { name: /^B/ }).click();
+  await expect(frame.getByText("You picked B")).toBeVisible();
+  await expect(frame.locator("#count-b")).toHaveText("1");
+  await page.reload();
+  await expect(live(page).getByText("You picked B")).toBeVisible();
+});

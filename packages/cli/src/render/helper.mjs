@@ -9,6 +9,49 @@ import { webkit } from "playwright-core";
 import sharp from "sharp";
 
 const job = JSON.parse(readFileSync(process.argv[2], "utf8"));
+
+/** A backend, run the same way as on the server, against the fixtures and read-only (05). */
+let sandbox = null;
+let sandboxId = 0;
+async function runBackend(request, path) {
+  if (!job.backend) return new Response("no backend", { status: 404 });
+  const { startChild } = await import("./sandbox-host.js");
+  const dir = dirname(process.argv[1]);
+  sandbox ??= startChild({
+    childPath: join(dir, "sandbox-child.js"),
+    prelude: readFileSync(join(dir, "sandbox-prelude.js"), "utf8"),
+  });
+  await sandbox.up;
+  const code = readFileSync(job.backend, "utf8");
+  const { response } = await sandbox.run({
+    id: ++sandboxId,
+    hash: sha256(code),
+    code: () => code,
+    limits: { timeoutMs: 10_000, memoryMb: 64 },
+    request: {
+      url: `https://backend.invalid/${path}`,
+      method: request.method,
+      headers: {
+        "content-type": request.headers.get("content-type") ?? "",
+        "x-caller": JSON.stringify({
+          id: "preview",
+          name: "Preview",
+          kind: "member",
+          canComment: false,
+          isPublisher: false,
+        }),
+      },
+      body: await request.text(),
+    },
+    onData: async (raw) => {
+      const op = JSON.parse(raw);
+      if (op.op === "get") return { value: job.fixtures.shared?.[op.key] ?? null };
+      if (op.op === "list") return { value: Object.keys(job.fixtures.shared ?? {}) };
+      return { value: true };
+    },
+  });
+  return new Response(response.body, { status: response.status, headers: new Headers(response.headers) });
+}
 const SCALES = [1, 2, 3];
 const VIEWPORT = { width: 1600, height: 1200 };
 const NOW = new Date("2026-01-01T09:41:00").getTime();
@@ -37,6 +80,8 @@ const server = Bun.serve({
   async fetch(request) {
     const path = decodeURIComponent(new URL(request.url).pathname).slice(1);
     const generated = pagesByPath.get(path);
+    const api = /(?:^|\/)(api\/.*)$/.exec(path);
+    if (api && job.backend) return runBackend(request, api[1]);
     if (generated) return new Response(generated, { headers: { "Content-Type": "text/html" } });
     const file = Bun.file(resolve(job.root, path));
     if (!resolve(job.root, path).startsWith(resolve(job.root)) || !(await file.exists())) {
@@ -445,5 +490,6 @@ try {
   writeFileSync(join(job.out, "result.json"), JSON.stringify(result));
 } finally {
   await browser.close();
+  sandbox?.kill();
   server.stop(true);
 }

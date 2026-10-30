@@ -13,6 +13,8 @@ const GAP = 80;
 export type BundleFile = { path: string; hash: string; size: number; type: string; source: string };
 
 export type RenderResult = {
+  /** The bundled backend's hash, if there is one. */
+  backendHash: string | null;
   files: Map<string, BundleFile>;
   /** Render blobs, by hash, not listed in the version's files. */
   renders: Map<string, string>;
@@ -50,6 +52,50 @@ const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).
 function fixtures(root: string) {
   const path = join(root, "fixtures/data.json");
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+}
+
+const MAX_BACKEND = 1024 * 1024;
+
+/** One ES module with no imports (05). */
+function bundleBackend(root: string, src: string, outDir: string) {
+  const path = join(outDir, "__backend.js");
+  const build = asBun(
+    ["build", src, "--target=browser", "--format=esm", "--minify", `--outfile=${path}`],
+    root,
+  );
+  if (!build.success) throw new CliError(`The backend didn't bundle:\n${build.stderr.toString()}`);
+  return path;
+}
+
+/** What the sandbox would refuse anyway, found before publishing (07). */
+export function backendProblems(source: string): Problem[] {
+  const problems: Problem[] = [];
+  if (Buffer.byteLength(source) > MAX_BACKEND) {
+    problems.push({ rule: "backend/size", severity: "error", message: "The bundled backend is over 1 MB." });
+  }
+  const banned: [RegExp, string][] = [
+    [/\bfetch\s*\(/, "fetch"],
+    [/\bWebSocket\b/, "WebSocket"],
+    [/\bXMLHttpRequest\b/, "XMLHttpRequest"],
+    [/\bset(Timeout|Interval)\s*\(/, "timers"],
+    [/\bconnect\s*\(/, "connect()"],
+    [/\bimport\s*\(/, "import()"],
+    [/\brequire\s*\(/, "require()"],
+    [/^\s*import\s/m, "imports that aren't bundled"],
+    [/\bprocess\.(env|exit|argv)\b/, "process"],
+  ];
+  // The handler is itself called `fetch`: only calls count, not `fetch(request, env) {`.
+  const calls = source.replace(/\bfetch\s*\([^()]*\)\s*\{/g, "");
+  for (const [pattern, name] of banned) {
+    if (pattern.test(calls)) {
+      problems.push({
+        rule: "backend/network",
+        severity: "error",
+        message: `The backend uses ${name}, which the sandbox doesn't have.`,
+      });
+    }
+  }
+  return problems;
 }
 
 function runHelper(root: string, job: Record<string, unknown>, out: Output): HelperResult {
@@ -93,10 +139,13 @@ export function render(
     .filter(([path, absolute]) => /\.(png|jpe?g)$/i.test(path) && Bun.file(absolute).size > 500 * 1024)
     .map(([path]) => path);
 
+  const backendPath = manifest.backend ? bundleBackend(root, manifest.backend.src, outDir) : null;
+
   const helper = runHelper(
     root,
     {
       root,
+      backend: backendPath,
       boards,
       mermaid,
       images: heavy,
@@ -128,6 +177,20 @@ export function render(
     writeFileSync(source, body);
     files.set(path, { path, hash: sha256(body), size: Buffer.byteLength(body), type, source });
   };
+
+  let backendHash: string | null = null;
+  if (backendPath) {
+    const body = readFileSync(backendPath);
+    backendHash = sha256(body);
+    files.set("__backend.js", {
+      path: "__backend.js",
+      hash: backendHash,
+      size: body.length,
+      type: "text/javascript",
+      source: backendPath,
+    });
+    problems.push(...backendProblems(body.toString()));
+  }
 
   const renders = new Map<string, string>();
   const frames: FrameRecord[] = [];
@@ -274,5 +337,5 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
     source: join(outDir, `${og}.webp`),
   });
 
-  return { files, renders, pages, frames, blocks, problems, contactSheet };
+  return { files, renders, pages, frames, blocks, problems, contactSheet, backendHash };
 }

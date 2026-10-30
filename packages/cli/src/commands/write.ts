@@ -3,6 +3,8 @@ import { basename, join } from "node:path";
 import { PublishPrepared, PublishResult } from "@artifacts/schema";
 import article from "../../../kit/src/article.css" with { type: "text" };
 // @ts-expect-error: embedded as text
+import backend from "../../../kit/src/backend.js" with { type: "text" };
+// @ts-expect-error: embedded as text
 import data from "../../../kit/src/data.js" with { type: "text" };
 // @ts-expect-error: embedded as text
 import frames from "../../../kit/src/frames/index.js" with { type: "text" };
@@ -204,6 +206,7 @@ export async function publishCommand(flags: PublishFlags, out: Output) {
           { hash: file.hash, size: file.size, type: file.type },
         ]),
       ),
+      backendHash: rendered.backendHash,
       pages: rendered.pages,
       frames: rendered.frames,
       blocks: rendered.blocks,
@@ -278,6 +281,7 @@ export function initCommand(flags: { project?: string; slug?: string; kind?: str
   mkdirSync(join(root, "vendor/artifacts-kit"), { recursive: true });
   writeFileSync(join(root, "vendor/artifacts-kit/frames.js"), frames);
   writeFileSync(join(root, "vendor/artifacts-kit/data.js"), data);
+  writeFileSync(join(root, "vendor/artifacts-kit/backend.js"), backend);
   writeFileSync(join(root, "vendor/artifacts-kit/tokens.css"), tokens);
   writeFileSync(join(root, "vendor/artifacts-kit/article.css"), article);
   writeFileSync(join(root, "vendor/artifacts-kit/VERSION"), `${VERSION}\n`);
