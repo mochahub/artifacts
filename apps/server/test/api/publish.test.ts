@@ -177,6 +177,34 @@ describe("publishing", () => {
     expect((await t.api(`/api/artifacts/not-a-uuid/r/${render}`, { bearer: owner.token })).status).toBe(404);
   });
 
+  test("a content type that isn't a plain media type is refused at prepare and at commit", async () => {
+    const files = (type: string) => [{ path: "a.txt", sha256: hash("a"), size: 1, type }];
+    const prepare = (type: string) =>
+      t.api("/api/publish/prepare", {
+        method: "POST",
+        bearer: owner.token,
+        json: { project: "camerabuddy", slug: "types", title: "Types", files: files(type) },
+      });
+    for (const bad of ["text/plain\r\nSet-Cookie: a=b", "html", "text/html\u0000", `text/${"x".repeat(300)}`]) {
+      expect(await error(await prepare(bad))).toBe("invalid");
+    }
+    const ok = await prepare("text/html; charset=utf-8");
+    expect(ok.status).toBe(200);
+    const { uploadId } = PublishPrepared.parse(await ok.json());
+    const commit = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: {
+        uploadId,
+        files: { "a.txt": { hash: hash("a"), size: 1, type: "text/plain\r\nSet-Cookie: a=b" } },
+        pages: [],
+        frames: [],
+        blocks: [],
+      },
+    });
+    expect(await error(commit)).toBe("invalid");
+  });
+
   test("a bundle file is stored as an inert type, so /r/ can't serve a page or script on the viewer's origin", async () => {
     const page = file("evil.html", `<script src="x.js"></script>${Bun.randomUUIDv7()}`, "text/html");
     const script = file("x.js", `alert(1)//${Bun.randomUUIDv7()}`, "text/javascript");
