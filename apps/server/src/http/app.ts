@@ -35,6 +35,8 @@ export function createApp(log: Logger) {
 
   app.onError((error, c) => {
     if (error instanceof ApiError) {
+      if (typeof error.details.retryAfter === "number")
+        c.header("Retry-After", String(error.details.retryAfter));
       return c.json(
         errorBody(error.code, error.message, error.details),
         error.status as ContentfulStatusCode,

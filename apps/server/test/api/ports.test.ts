@@ -82,10 +82,10 @@ describe("the three ports", () => {
       }
     });
 
-    test("an unknown API path is a JSON 404, not the viewer", async () => {
+    test("in setup mode an unknown API path is a JSON 503, not the viewer (04)", async () => {
       const response = await viewer("/api/nope");
-      expect(response.status).toBe(404);
-      expect(ApiErrorBody.parse(await response.json()).error.code).toBe("not_found");
+      expect(response.status).toBe(503);
+      expect(ApiErrorBody.parse(await response.json()).error.code).toBe("setup_mode");
     });
 
     test("serves the viewer, with index.html for client-side routes", async () => {

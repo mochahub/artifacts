@@ -129,6 +129,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `agent` | text null | "Claude Code", detected by the CLI. |
 | `status` | `device_status` | |
 | `person_id` | uuid null | Set on approval. |
+| `ip`, `user_agent` | text null | Where `POST /api/device/start` came from, shown on the approval page (03). |
 | `created_at`, `expires_at` | timestamptz | 10 minutes. |
 
 **`tokens`**: CLI and organization tokens.

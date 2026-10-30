@@ -320,6 +320,8 @@ export const deviceCodes = pgTable("device_codes", {
   agent: text("agent"),
   status: deviceStatus("status").notNull().default("pending"),
   personId: uuid("person_id").references(() => people.id),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
   createdAt: createdAt(),
   expiresAt: time("expires_at").notNull(),
 });

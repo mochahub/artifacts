@@ -15,6 +15,13 @@
       "when": 1793357256144,
       "tag": "0001_phase_1",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793358613528,
+      "tag": "0002_silent_mordo",
+      "breakpoints": true
     }
   ]
 }
