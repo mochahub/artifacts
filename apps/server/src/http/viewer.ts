@@ -21,6 +21,11 @@ export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
   ].join("; ");
   return async (c, next) => {
     await next();
+    // An answer from the API is for one caller (or a redirect holding a signed address), so a cache in
+    // between must not keep it, unless the route says how it may be kept.
+    if (c.req.path.startsWith("/api/") && !c.res.headers.has("Cache-Control")) {
+      c.header("Cache-Control", "no-store");
+    }
     c.header("Content-Security-Policy", csp);
     c.header("Strict-Transport-Security", "max-age=31536000");
     c.header("X-Frame-Options", "DENY");
