@@ -79,7 +79,9 @@ describe("lifecycle", () => {
   test("through the app, only pictures come out, as downloads (?via=app)", async () => {
     // A publisher chooses each file's type, so a page of theirs must never be served from this origin.
     const page = file("page.html", "<script src=/x.js></script>", "text/html");
-    expect((await publish(t, token, { slug: "via-app", extra: [page] })).status).toBe(200);
+    // Its own render, since the test overwrites it in the bucket and every default publish shares one.
+    const frameHash = hash(Bun.randomUUIDv7());
+    expect((await publish(t, token, { slug: "via-app", frameHash, extra: [page] })).status).toBe(200);
     const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "via-app"));
     const read = (blob: string) =>
       t.api(`/api/artifacts/${row?.id}/r/${blob}?via=app`, { cookie, redirect: "manual" });
@@ -103,6 +105,14 @@ describe("lifecycle", () => {
     // A picture whose stored type says otherwise goes by the redirect too.
     await t.server.bucket.put(`blobs/${render}`, "<script>1</script>", { contentType: "text/html" });
     expect((await read(render)).status).toBe(302);
+
+    // A picture of any image type still comes through for the service worker, which can't follow the
+    // redirect; an SVG is safe here because it's an attachment, which a browser downloads rather than runs.
+    await t.server.bucket.put(`blobs/${render}`, "<svg/>", { contentType: "image/svg+xml" });
+    const svg = await read(render);
+    expect(svg.status).toBe(200);
+    expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+    expect(svg.headers.get("content-disposition")).toBe("attachment");
   });
 
   test("a version number that isn't a number the database can hold is a 400", async () => {
