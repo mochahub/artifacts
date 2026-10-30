@@ -90,11 +90,19 @@ export class SandboxPool {
     const work = previous.then(async () => {
       const child = await this.child(index);
       const id = ++this.nextId;
-      // The child enforces the deadline. This is the backstop if it can't, say a hang in the engine.
-      const backstop = setTimeout(() => child.kill(), options.limits.timeoutMs + 2000);
-      const result = await child.run({ ...options, hash: key, id });
-      clearTimeout(backstop);
-      return result;
+      // The child enforces the deadline. This is the backstop if it can't, say a hang in the engine. It
+      // starts when the child picks the request up: before that it may be waiting behind another
+      // backend's loop, and killing the child for that would take every backend on it down.
+      let backstop: ReturnType<typeof setTimeout> | undefined;
+      const start = () => {
+        clearTimeout(backstop);
+        backstop = setTimeout(() => child.kill(), options.limits.timeoutMs + 2000);
+      };
+      try {
+        return await child.run({ ...options, hash: key, id, onStart: start });
+      } finally {
+        clearTimeout(backstop);
+      }
     });
     // The queue holds only that it's over, never the result, which may be megabytes.
     const tail = work.then(noop, noop);

@@ -30,11 +30,19 @@ import {
 import { ApiError } from "../http/errors.ts";
 import { notifyPublished } from "../push/notify.ts";
 import { reanchor } from "../review/reanchor.ts";
-import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
+import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, storedType, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
 const UPLOAD_HOURS = 2;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
+const MAX_FILES = 20_000;
+/** `type/subtype`, then optional parameters, in printable ASCII only: it becomes a response header (03). */
+const MEDIA_TYPE = /^[A-Za-z0-9][\w.+-]*\/[\w.+-]+(;[\x20-\x7e]*)?$/;
+const checkType = (path: string, type: string) => {
+  if (type.length > 200 || !MEDIA_TYPE.test(type)) {
+    throw new ApiError("invalid", `${path} has a content type that isn't valid.`);
+  }
+};
 
 /** Everything commit needs from prepare, signed, so a half-finished publish leaves nothing in Postgres. */
 type UploadTicket = {
@@ -132,6 +140,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
 
     const declared = new Map<string, { size: number; type: string }>();
     for (const file of body.files) {
+      checkType(file.path, file.type);
       if (file.size > MAX_FILE_BYTES) {
         throw new ApiError("too_large", `${file.path} is too big.`, { limit: MAX_FILE_BYTES });
       }
@@ -142,7 +151,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     const signed = await mapLimit(missing, 32, async ([sha256, { size, type }]) => ({
       sha256,
       ...(await bucket.presignPut(blobKey(sha256), {
-        contentType: type,
+        contentType: storedType(type),
         contentLength: size,
         cacheControl: IMMUTABLE,
       })),
@@ -184,7 +193,10 @@ export function publishRoutes(routes: Routes, deps: Deps) {
 
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();
-    for (const file of Object.values(body.files)) wanted.set(file.hash, file.size);
+    for (const [path, file] of Object.entries(body.files)) {
+      checkType(path, file.type);
+      wanted.set(file.hash, file.size);
+    }
     const paths = new Set(Object.keys(body.files));
     for (const frame of body.frames) {
       for (const hash of Object.values(frame.renders)) if (!wanted.has(hash)) wanted.set(hash, null);
@@ -195,7 +207,21 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     if (body.backendHash && !wanted.has(body.backendHash)) {
       throw new ApiError("invalid", "The backend module isn't in the bundle.");
     }
+    // Prepare declared at most this many files, renders included, and each hash is looked up and maybe
+    // downloaded here, so a manifest can't name more.
+    if (wanted.size > MAX_FILES) {
+      throw new ApiError("too_large", "That's too many files.", { limit: MAX_FILES });
+    }
     await verifyBlobs(deps, org.id, wanted);
+    // The sandbox fetches this module on every request, so a huge one must never get in (08).
+    if (body.backendHash) {
+      const size = (await knownBlobs(deps, org.id, [body.backendHash])).get(body.backendHash) ?? 0;
+      if (size > org.settings.limits.backendCodeBytes) {
+        throw new ApiError("too_large", "The backend is too big.", {
+          limit: org.settings.limits.backendCodeBytes,
+        });
+      }
+    }
 
     // The CLI's article HTML can't be trusted: it goes into the viewer's own page (05).
     const safePages: PageRecord[] = await mapLimit(body.pages, 4, async (page) => {
@@ -205,12 +231,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       const object = await bucket.get(blobKey(hash));
       if (!object) throw new ApiError("invalid", `Article ${page.key} has no HTML.`);
       const clean = sanitizeArticle(new TextDecoder().decode(object.body));
-      const htmlHash = await putBlob(
-        deps,
-        org.id,
-        new TextEncoder().encode(clean),
-        "text/html; charset=utf-8",
-      );
+      const htmlHash = await putBlob(deps, org.id, new TextEncoder().encode(clean));
       return { ...page, meta: { ...page.meta, htmlHash } };
     });
 

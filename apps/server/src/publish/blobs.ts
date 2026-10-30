@@ -7,6 +7,19 @@ import { ApiError } from "../http/errors.ts";
 export const blobKey = (hash: string) => `blobs/${hash}`;
 export const IMMUTABLE = "public, max-age=31536000, immutable";
 
+const INERT = "application/octet-stream";
+const RASTER = /^image\/(png|jpeg|gif|webp|avif)$/;
+
+/**
+ * The type a blob is stored with. The viewer's /r/ route sends this type from the viewer's own origin,
+ * and the bucket sends it from its own, so a page, script or SVG must not keep the type its author
+ * declared. Live previews don't use it: the content port serves the manifest's type (03).
+ */
+export const storedType = (declared: string) => {
+  const essence = (declared.split(";")[0] as string).trim().toLowerCase();
+  return RASTER.test(essence) ? essence : INERT;
+};
+
 /** Runs at most `limit` at a time. */
 export async function mapLimit<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -71,10 +84,10 @@ export async function verifyBlobs(deps: Deps, orgId: string, wanted: Map<string,
 }
 
 /** Stores bytes the server made itself, such as re-sanitized article HTML. */
-export async function putBlob(deps: Deps, orgId: string, body: Uint8Array, contentType: string) {
+export async function putBlob(deps: Deps, orgId: string, body: Uint8Array) {
   const hash = createHash("sha256").update(body).digest("hex");
   if ((await knownBlobs(deps, orgId, [hash])).has(hash)) return hash;
-  await deps.bucket.put(blobKey(hash), body, { contentType, cacheControl: IMMUTABLE });
+  await deps.bucket.put(blobKey(hash), body, { contentType: INERT, cacheControl: IMMUTABLE });
   await deps.db
     .insert(blobs)
     .values({ orgId, hash, size: body.length, verifiedAt: deps.clock.now() })

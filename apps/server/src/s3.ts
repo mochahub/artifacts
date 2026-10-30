@@ -109,6 +109,19 @@ export class Bucket {
     }
   }
 
+  /** Part of an object, both ends included, so media can be read in pieces rather than whole. */
+  async getRange(key: string, start: number, end: number): Promise<Uint8Array | null> {
+    try {
+      const result = await this.s3.send(
+        new GetObjectCommand({ Bucket: this.name, Key: key, Range: `bytes=${start}-${end}` }),
+      );
+      return (await result.Body?.transformToByteArray()) ?? new Uint8Array();
+    } catch (error) {
+      if (statusOf(error) === 404) return null;
+      throw error;
+    }
+  }
+
   async head(key: string): Promise<ObjectHead | null> {
     try {
       const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.name, Key: key }));
