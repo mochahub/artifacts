@@ -447,7 +447,9 @@ export const Comment = z.object({
   version: z.number().int(),
   marksFixed: z.boolean(),
   createdAt: Time,
+  editedAt: Time.nullable().optional(),
 });
+export type Comment = z.infer<typeof Comment>;
 export const Thread = z.object({
   id: Id,
   n: z.number().int(),
@@ -470,8 +472,13 @@ export const CreateThread = z.object({
   anchor: Anchor.nullable(),
   body: Body,
   version: z.number().int(),
+  agent: z.string().max(60).nullable().optional(),
 });
-export const CreateComment = z.object({ body: Body, marksFixed: z.boolean().optional() });
+export const CreateComment = z.object({
+  body: Body,
+  marksFixed: z.boolean().optional(),
+  agent: z.string().max(60).nullable().optional(),
+});
 export const EditComment = z.object({ body: Body });
 export const CreateDecision = z.object({
   version: z.number().int(),
@@ -481,10 +488,12 @@ export const CreateDecision = z.object({
 export const ArtifactReviewStatus = z.object({
   version: z.number().int(),
   decision: DecisionKind.nullable(),
+  decisionVersion: z.number().int().nullable(),
   note: z.string().nullable(),
   open: z.array(Thread),
   fixedAwaiting: z.array(Thread),
 });
+export type ArtifactReviewStatus = z.infer<typeof ArtifactReviewStatus>;
 export const Seen = z.object({
   version: z.number().int(),
   pageKey: z.string().optional(),

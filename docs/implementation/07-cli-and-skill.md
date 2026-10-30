@@ -90,7 +90,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | Command | Does |
 |---|---|
 | `artifacts status [<project>/<slug>] [--json]` | Latest decision (approved or changes requested, by whom, note), version, open and fixed-awaiting counts. The skill runs this first in every session. |
-| `artifacts comments [--open\|--fixed\|--all] [--page <key>] [--json]` | Threads. JSON per thread: `{ id: n, page, frame?, x?, y?, block?, quote?, version, author, text, status, anchorState, crop: url, replies: [...] }`. With `--json`, crops are signed URLs the agent can download (they expire in 1 hour). |
+| `artifacts comments [--open\|--fixed\|--all] [--page <key>] [--json]` | Threads. JSON per thread: `{ id: n, page, frame?, x?, y?, block?, quote?, version, author, text, status, anchorState, crop: url, replies: [...] }`. With `--json`, crops are signed URLs the agent can download (they last about a day). |
 | `artifacts reply <n> "<text>" [--fixed]` | Comment on thread n; `--fixed` marks it fixed in the latest version. |
 | `artifacts versions [--json]` | Version list. |
 | `artifacts versions name <n> "<label>"` | Name a version. |

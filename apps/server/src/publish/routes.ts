@@ -1,4 +1,5 @@
 import {
+  type Anchor,
   type BlockRecord,
   type FrameRecord,
   type PageRecord,
@@ -7,15 +8,26 @@ import {
   type PublishResult,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { type ArtifactRow, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
-import { activity, artifacts, blocks, frames, pages, people, projects, versions } from "../db/schema.ts";
+import {
+  activity,
+  artifacts,
+  blocks,
+  frames,
+  pages,
+  people,
+  projects,
+  threads,
+  versions,
+} from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { reanchor } from "../review/reanchor.ts";
 import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
@@ -264,6 +276,8 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       });
       await writeContent(tx, org.id, versionId, safePages, body.frames, body.blocks);
 
+      const reanchored = await reanchorThreads(tx, ticket.artifactId, safePages, body.frames, body.blocks);
+
       const before = previous
         ? await hashesOf(tx, previous.id)
         : { frames: new Map<string, string>(), blocks: new Map<string, string>() };
@@ -292,6 +306,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
         version: n,
         frames: diff(before.frames, after.frames),
         blocks: diff(before.blocks, after.blocks),
+        ...reanchored,
       };
     });
 
@@ -299,13 +314,72 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       version: result.version,
       url: `${env.publicUrl}/${ticket.project}/${ticket.slug}`,
       changes: { frames: result.frames, blocks: result.blocks },
-      threadsOnChanged: [],
-      orphaned: [],
+      threadsOnChanged: result.threadsOnChanged,
+      orphaned: result.orphaned,
       uploaded: ticket.uploaded,
       reused: ticket.reused,
     };
     return c.json(response);
   });
+}
+
+/** 05, "Re-anchoring". Runs inside the commit, and again when a version is restored or removed. */
+export async function reanchorThreads(
+  tx: Tx,
+  artifactId: string,
+  pageRows: { key: string }[],
+  frameRows: { pageKey: string; frameKey: string; contentHash: string }[],
+  blockRows: { pageKey: string; blockKey: string; contentHash: string; text: string }[],
+) {
+  const open = await tx
+    .select()
+    .from(threads)
+    .where(and(eq(threads.artifactId, artifactId), ne(threads.status, "resolved"), isNotNull(threads.anchor)))
+    .orderBy(threads.n);
+  const pageKeys = new Set(pageRows.map((page) => page.key));
+  const threadsOnChanged: number[] = [];
+  const orphaned: number[] = [];
+  const cache = new Map<number, Awaited<ReturnType<typeof hashesOf>>>();
+
+  for (const thread of open) {
+    if (!pageKeys.has(thread.pageKey)) continue;
+    let then = cache.get(thread.createdVersion);
+    if (!then) {
+      const [version] = await tx
+        .select({ id: versions.id })
+        .from(versions)
+        .where(and(eq(versions.artifactId, artifactId), eq(versions.n, thread.createdVersion)))
+        .limit(1);
+      then = version ? await hashesOf(tx, version.id) : { frames: new Map(), blocks: new Map() };
+      cache.set(thread.createdVersion, then);
+    }
+    const prefix = `${thread.pageKey}/`;
+    const unprefix = (map: Map<string, string>) =>
+      new Map(
+        [...map]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, hash]) => [key.slice(prefix.length), hash]),
+      );
+    const result = reanchor(
+      thread.anchor as Anchor,
+      { frames: then.frames, blocks: unprefix(then.blocks) },
+      {
+        frames: new Map(
+          frameRows.filter((f) => f.pageKey === thread.pageKey).map((f) => [f.frameKey, f.contentHash]),
+        ),
+        blocks: blockRows
+          .filter((b) => b.pageKey === thread.pageKey)
+          .map((b) => ({ key: b.blockKey, hash: b.contentHash, text: b.text })),
+      },
+    );
+    await tx
+      .update(threads)
+      .set({ anchor: result.anchor, anchorState: result.state })
+      .where(eq(threads.id, thread.id));
+    if (result.state === "orphaned") orphaned.push(thread.n);
+    if (result.state === "updated" && thread.status === "open") threadsOnChanged.push(thread.n);
+  }
+  return { threadsOnChanged, orphaned };
 }
 
 type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];

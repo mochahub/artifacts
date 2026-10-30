@@ -219,11 +219,11 @@ Commit checks: every hash in `files` and every render hash exists in the bucket 
 |---|---|---|
 | `GET /api/artifacts/:id/threads?status=open\|fixed\|resolved\|all&page=&version=` | `artifact.read` | `[Thread]`, with comments. |
 | `POST /api/artifacts/:id/threads` | `artifact.comment` | `{ pageKey, anchor, body, version }` → `Thread`. Canvas anchors trigger crop generation (05). |
-| `POST /api/threads/:id/comments` | `artifact.comment` | `{ body, marksFixed?: bool }`. `marksFixed` is allowed for CLI tokens and the publisher: sets `status = fixed`, `fixed_version` = latest. A comment on a `fixed` thread by anyone but the fixer sets it back to `open`. |
+| `POST /api/threads/:id/comments` | `artifact.comment` | `{ body, marksFixed?: bool, agent? }`. `agent` is the CLI's detected agent, kept only for CLI tokens. `marksFixed` is allowed for CLI tokens and the publisher: sets `status = fixed`, `fixed_version` = latest. A comment on a `fixed` thread by anyone but the fixer sets it back to `open`. |
 | `POST /api/threads/:id/resolve` / `reopen` | `thread.resolve` (people only, never tokens) | |
 | `PATCH /api/comments/:id` / `DELETE` | author only | Edit or delete your own comment within 24 hours. |
 | `POST /api/artifacts/:id/decisions` | `artifact.decide` (people only) | `{ version, kind, note }` |
-| `GET /api/artifacts/:id/status` | `artifact.read` | For `artifacts status`: `{ version, decision, note, open: [Thread], fixedAwaiting: [Thread] }` |
+| `GET /api/artifacts/:id/status` | `artifact.read` | For `artifacts status`: `{ version, decision, decisionVersion, note, open: [Thread], fixedAwaiting: [Thread] }` |
 | `POST /api/artifacts/:id/seen` | `artifact.read` | `{ version, pageKey?, position? }` updates `views` or `guest_views`. |
 
 `Thread` = `{ id, n, pageKey, anchor, anchorState, status, createdVersion, fixedVersion, author: { name, kind: "person"|"guest"|"agent" }, crop: url|null, comments: [{ id, author, agent, body, version, marksFixed, createdAt }], createdAt, resolvedAt }`.

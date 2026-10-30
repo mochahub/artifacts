@@ -1,4 +1,5 @@
 import { publishRoutes } from "../publish/routes.ts";
+import { reviewRoutes } from "../review/routes.ts";
 import { authRoutes } from "./auth.ts";
 import type { Deps } from "./deps.ts";
 import { deviceRoutes } from "./device.ts";
@@ -15,6 +16,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   deviceRoutes(routes, deps);
   publishRoutes(routes, deps);
   listRoutes(routes, deps);
+  reviewRoutes(routes, deps);
   versionRoutes(routes, deps);
   fileRoutes(routes, deps);
 }
