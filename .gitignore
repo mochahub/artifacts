@@ -16,3 +16,7 @@ apps/viewer/e2e/.token
 
 # Agent worktrees used by Claude Code
 .claude/
+
+# Keys and certificates
+*.pem
+*.key
