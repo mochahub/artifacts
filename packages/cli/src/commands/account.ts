@@ -23,7 +23,9 @@ export async function signedIn(server: string | undefined): Promise<Client> {
   return new Client(url, token);
 }
 
+/** The link comes from the server, so only web pages open: not file:, an app's own scheme, or a path. */
 function openBrowser(url: string) {
+  if (!/^https?:\/\//i.test(url)) return;
   const command =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
   try {
