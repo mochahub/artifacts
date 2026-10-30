@@ -210,6 +210,8 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
     .first()
     .evaluate((img: HTMLImageElement) => img.decode());
   await page.getByRole("button", { name: "Contents" }).click();
+  // Focus moves into the sheet, so a keyboard or screen reader user isn't left behind the dim.
+  await expect(page.getByRole("dialog", { name: "Contents" })).toBeFocused();
   await page.getByRole("dialog").getByRole("button", { name: "Phase 2" }).click();
   await expect(page.locator('[data-block="phase-2"]')).toBeInViewport();
   expect(errors).toEqual([]);
