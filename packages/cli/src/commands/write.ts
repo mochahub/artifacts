@@ -13,6 +13,7 @@ import { CliError, type Output, UsageError } from "../output.ts";
 import { render } from "../render/render.ts";
 import { VERSION } from "../version.ts";
 import { signedIn } from "./account.ts";
+import { renamedProblems } from "./review.ts";
 
 function printProblems(problems: Problem[], out: Output) {
   for (const problem of problems) {
@@ -138,7 +139,13 @@ export async function publishCommand(flags: PublishFlags, out: Output) {
     printProblems(problems, out);
     throw new CliError("Lint found errors, so nothing was published.");
   }
+  const renamed = await renamedProblems(client, manifest.project, manifest.slug, {
+    frames: new Set(rendered.frames.map((frame) => frame.frameKey)),
+    blocks: new Set(rendered.blocks.map((block) => `${block.pageKey}/${block.blockKey}`)),
+  });
+  problems.push(...(renamed as Problem[]));
   printProblems(problems, out);
+  if (hasErrors(problems)) throw new CliError("Lint found errors, so nothing was published.");
   const articles = rendered.pages.filter((page) => page.kind === "article").length;
   out.say(
     `✓ lint     ${rendered.frames.length} frames, ${articles} articles, ${problems.length || "no"} problems`,

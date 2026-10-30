@@ -1,8 +1,12 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Meta } from "@artifacts/schema";
 import { Client } from "../client.ts";
 import { pickServer } from "../config.ts";
 import { getToken } from "../credentials/index.ts";
 import { CliError, type Output } from "../output.ts";
+import { helperDir } from "../render/install.ts";
+import { skillCurrent, skillDirs } from "../skill/install.ts";
 import { VERSION } from "../version.ts";
 
 type Check = { name: string; ok: boolean; detail: string };
@@ -39,7 +43,21 @@ export async function doctor(server: string | undefined, out: Output) {
       }
     }
   }
-  const ok = checks.every((check) => check.ok);
+  const { claude, codex } = skillDirs();
+  const skills = [claude, codex].filter(skillCurrent);
+  checks.push({
+    name: "skill",
+    ok: skills.length > 0,
+    detail:
+      skills.length > 0 ? `Current in ${skills.join(", ")}` : "Not installed. Run artifacts skill install.",
+  });
+  const webkit = existsSync(join(helperDir(), ".installed"));
+  checks.push({
+    name: "webkit",
+    ok: webkit,
+    detail: webkit ? "Installed." : "Installs itself on the first render.",
+  });
+  const ok = checks.every((check) => check.ok || check.name === "webkit");
   out.result({ ok, checks }, () => {
     for (const check of checks) out.say(`${check.ok ? "✓" : "✗"} ${check.name}  ${check.detail}`);
   });

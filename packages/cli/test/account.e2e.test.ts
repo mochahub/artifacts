@@ -30,11 +30,14 @@ describe("the account commands against a real server", () => {
   });
 
   test("setup <url> claims a server in setup mode", async () => {
-    const child = start(["setup", url, "--org", "Mochahub", "--name", OWNER.name, "--email", OWNER.email], {
-      ...box.env,
-      ARTIFACTS_SETUP_TOKEN: SETUP_TOKEN,
-      ARTIFACTS_PASSWORD: OWNER.password,
-    });
+    const child = start(
+      ["setup", url, "--org", "Mochahub", "--name", OWNER.name, "--email", OWNER.email, "--no-skill"],
+      {
+        ...box.env,
+        ARTIFACTS_SETUP_TOKEN: SETUP_TOKEN,
+        ARTIFACTS_PASSWORD: OWNER.password,
+      },
+    );
     child.stdin.end();
     expect(await child.exited).toBe(0);
     const stored = join(box.home, ".config/artifacts/credentials.json");
@@ -53,6 +56,12 @@ describe("the account commands against a real server", () => {
   });
 
   test("doctor passes when everything is right", async () => {
+    const missing = JSON.parse((await cli(["doctor", "--json"], box.env)).stdout);
+    expect(missing.ok).toBe(false);
+    expect(missing.checks.find((check: { name: string }) => check.name === "skill").detail).toContain(
+      "skill install",
+    );
+    await cli(["skill", "install"], box.env);
     const result = await cli(["doctor", "--json"], box.env);
     expect(JSON.parse(result.stdout).ok).toBe(true);
   });
