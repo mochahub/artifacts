@@ -179,7 +179,9 @@ The expected result is computed from a second, deliberately simple table in the 
 | Password sign-in | Per account and per IP, above |
 | `POST /api/device/start` | 10 per IP per hour |
 | `POST /api/device/poll` | 1 per `interval` per code |
+| Looking up, approving or denying a device code (`/api/device/:userCode…`) | 30 per signed-in person per 15 minutes |
 | `POST /api/s/:token/guest` | 20 per IP per hour |
+| `POST /api/auth/passkey/options` | 60 per IP per 15 minutes (each call stores a challenge for 5 minutes) |
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
