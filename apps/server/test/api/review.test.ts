@@ -79,6 +79,19 @@ describe("the review API", () => {
     expect((await thread({ anchor: { type: "frame", frameKey: "live-view", x: 2, y: 0 } })).status).toBe(400);
   });
 
+  test("a version number the database can't hold is a 400, not a 500", async () => {
+    const huge = 99_999_999_999;
+    expect((await thread({ version: huge })).status).toBe(400);
+    expect((await t.api(`/api/artifacts/${id}/threads?version=${huge}`, { bearer: token })).status).toBe(400);
+    const decide = await t.api(`/api/artifacts/${id}/decisions`, {
+      method: "POST",
+      cookie,
+      json: { version: huge, kind: "approved" },
+    });
+    expect(decide.status).toBe(400);
+    expect(await error(decide)).toBe("invalid");
+  });
+
   test("permissions: outsiders see nothing, no caller is refused", async () => {
     expect((await t.api(`/api/artifacts/${id}/threads`)).status).toBe(401);
     expect((await t.api(`/api/artifacts/${id}/threads`, { bearer: viewerOnly })).status).toBe(404);

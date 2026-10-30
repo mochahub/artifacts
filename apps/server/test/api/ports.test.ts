@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ApiErrorBody, DEFAULT_ORG_SETTINGS, Health, Meta } from "@artifacts/schema";
+import { DrizzleQueryError } from "drizzle-orm";
 import { org } from "../../src/db/schema.ts";
+import { createApp } from "../../src/http/app.ts";
 import { createLogger } from "../../src/log.ts";
 import { startServer } from "../../src/server.ts";
 import { VERSION } from "../../src/version.ts";
@@ -104,6 +106,11 @@ describe("the three ports", () => {
       expect((await viewer("/assets/index-gone.js")).status).toBe(404);
     });
 
+    test("a NUL byte in a path is a 404, not a server error", async () => {
+      expect((await viewer("/%00")).status).toBe(404);
+      expect((await viewer("/assets/%00.js")).status).toBe(404);
+    });
+
     test("static paths can't climb out of the viewer folder", async () => {
       for (const path of ["/..%2f..%2f..%2fetc%2fhosts", "/%2e%2e/%2e%2e/etc/hosts"]) {
         const text = await (await viewer(path)).text();
@@ -163,6 +170,25 @@ describe("the three ports", () => {
       expect(line).toMatchObject({ level: "info", msg: "request", route: "/api/health", status: 200 });
       expect(line.requestId).toBeTruthy();
       expect(typeof line.ms).toBe("number");
+    });
+
+    test("never contain what a failed query was sent", async () => {
+      // drizzle's message lists every parameter: emails, comment bodies, token hashes.
+      const out: string[] = [];
+      const app = createApp(createLogger("info", (line) => out.push(line)));
+      app.get("/boom", () => {
+        throw new DrizzleQueryError(
+          "insert into people (email) values ($1)",
+          ["secret@example.com"],
+          new Error("boom"),
+        );
+      });
+      const response = await app.request("/boom");
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain("secret@example.com");
+      const logged = out.find((line) => line.includes("unhandled error")) as string;
+      expect(logged).toContain("insert into people");
+      expect(logged).not.toContain("secret@example.com");
     });
 
     test("never contain a path's token", async () => {
