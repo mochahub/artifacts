@@ -56,7 +56,7 @@ Results of the verification spikes in [11-milestones.md](11-milestones.md#m0--ve
 
 **Decided (2026-10-29): SeaweedFS**, pinned to `chrislusf/seaweedfs:4.50` (multi-arch). SPEC §7, §7.6, §7.9 and §11, and 05, 07, 09, 10 and 11 now say SeaweedFS.
 
-**Railway half (not run):** the same script against the Railway bucket, after S1 (steps below). Tigris documents both conditional headers; the run confirms Railway passes them through. Whether Safari keeps presigned GETs cached is checked on the iPhone during M4.
+**Railway half:** passed 22/22 on 2026-10-30, in both URL styles ([results below](#s1-s3-and-s6-on-railway-run-2026-10-30)). Whether Safari keeps presigned GETs cached still needs a real iPhone (progress.md, "Needs you").
 
 ## S4 · workerd worker loader
 
