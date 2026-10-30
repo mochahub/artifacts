@@ -581,3 +581,25 @@ describe("reset links after a password is set", () => {
     expect((await t.api(`/api/reset/${pending}`)).status).toBe(410);
   });
 });
+
+describe("guessing device codes", () => {
+  let t: TestServer;
+  let cookie: string;
+  beforeAll(async () => {
+    t = await startTestServer();
+    await claim(t);
+    cookie = await signIn(t, OWNER.email, OWNER.password);
+  });
+  afterAll(() => t.stop());
+
+  test("a signed-in person gets 30 code lookups per 15 minutes, hits or misses", async () => {
+    const lookup = (code: string) => t.api(`/api/device/${code}`, { cookie });
+    for (let i = 0; i < 30; i++) expect((await lookup("BBBB-BBBB")).status).toBe(404);
+    expect((await lookup("BBBB-BBBB")).status).toBe(429);
+    const approve = await t.api("/api/device/BBBB-BBBB/approve", { method: "POST", cookie });
+    expect(approve.status).toBe(429);
+    t.clock.advance(15 * 60_000 + 1000);
+    cookie = await signIn(t, OWNER.email, OWNER.password);
+    expect((await lookup("BBBB-BBBB")).status).toBe(404);
+  });
+});
