@@ -2,6 +2,7 @@ import { useSignal } from "@preact/signals";
 import { X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { ApiFailure, post } from "../api.ts";
+import { assertion } from "../passkey.ts";
 
 /** Confirms who's there before a sensitive action, then calls `done` so it can be retried (04). */
 export function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): void }) {
@@ -31,6 +32,20 @@ export function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): 
             <X />
           </button>
         </div>
+        <button
+          type="button"
+          class="btn ink"
+          onClick={async () => {
+            try {
+              await post("/api/auth/reauth", await assertion());
+              onDone();
+            } catch (failure) {
+              error.value = failure instanceof ApiFailure ? failure.message : "That passkey didn't work.";
+            }
+          }}
+        >
+          Use a passkey
+        </button>
         <label class="gh" for="reauth-password">
           Password
         </label>
@@ -46,7 +61,7 @@ export function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): 
           }}
         />
         {error.value && <p class="err">{error.value}</p>}
-        <button class="btn ink" type="submit">
+        <button class="btn soft" type="submit">
           Confirm
         </button>
       </form>

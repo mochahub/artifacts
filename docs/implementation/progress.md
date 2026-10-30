@@ -11,8 +11,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M2 Sign-in and CLI skeleton | `m2-sign-in` | `e6b5af8` | green (run 41048009618) |
 | M3 Publishing | `m3-publishing` | `ae1a852` | green (run 41050356260) |
 | M4 Viewer | `m4-viewer` | `530c18a` | green (run 41052782581) |
-| M5 Review loop | `m5-review` | in progress | |
-| M6–M11 | not started | | |
+| M5 Review loop | `m5-review` | `84a68ad` | green |
+| M6 People and sharing | `m6-people` | in progress | |
+| M7–M11 | not started | | |
 
 ## Verified
 
@@ -49,6 +50,10 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 17. **M5, `frames/renamed` has no rename guess.** 07 asked for the likely rename by pixel similarity. It says what's gone and stops if comments would be orphaned, which is the part that protects anything.
 18. **M5, a comment on a resolved thread leaves it resolved.** SPEC only says a reply to a *fixed* thread reopens it. Reopen is an explicit button.
 19. **M5, crop links last about a day, not an hour.** They use the same day-stable presigned URL as renders, so phones keep them cached.
+
+20. **M6, "Copy" on a pending invite makes a new link.** 06 says copy "the link again", but 02 stores only a hash, so it can't be shown again. Copying rotates it and the old link stops. Share links work the same way: shown once, revoked by row.
+21. **M6, the Share sheet has no "Nothing" option.** Links are many per artifact, so "nothing" means no live links; each has a Revoke.
+22. **M6, an admin can't reset an owner's password.** Otherwise an admin could take over an owner account. Owners use `artifacts recover`.
 
 ## Needs you
 

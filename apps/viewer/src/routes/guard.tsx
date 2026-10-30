@@ -11,3 +11,11 @@ export function SignedIn({ children }: { children: ComponentChildren }) {
   }, [route, url]);
   return me.value ? children : null;
 }
+
+/** For pages a guest can open too: signs in only once the API says nobody is there. */
+export function useSignInOn401(status: number | undefined) {
+  const { route, url } = useLocation();
+  useEffect(() => {
+    if (status === 401) route(`/sign-in?next=${encodeURIComponent(url)}`, true);
+  }, [status, route, url]);
+}

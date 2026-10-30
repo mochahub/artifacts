@@ -7,7 +7,7 @@ import { PageSwitcher, VersionSheet } from "../components/sheets.tsx";
 import { usePoll } from "../poll.ts";
 import { artifactPath } from "./artifact.tsx";
 import { Deleted } from "./deleted.tsx";
-import { SignedIn } from "./guard.tsx";
+import { useSignInOn401 } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
 
 const CanvasView = lazy(() => import("../canvas/view.tsx").then((m) => m.CanvasView));
@@ -22,6 +22,7 @@ function Page() {
   const slug = params.artifact ?? "";
   const remote = usePoll<Artifact>(artifactPath(project, slug), 10_000);
   const artifact = remote.data.value;
+  useSignInOn401(remote.error.value?.status);
   const pinned = Number(params.n ?? query.v) || null;
   const version = pinned ?? artifact?.latestVersion ?? null;
   const detail = usePoll<Version>(
@@ -34,6 +35,7 @@ function Page() {
 
   if (remote.error.value?.status === 410)
     return <Deleted at={remote.error.value.details.deletedAt as string} />;
+  if (remote.error.value?.status === 401) return null;
   if (remote.error.value || detail.error.value) return <NotFound />;
   if (!artifact || !detail.data.value || !version) return null;
   const key = params.page ?? artifact.pages[0]?.key;
@@ -79,8 +81,4 @@ function Page() {
   );
 }
 
-export const PageRoute = () => (
-  <SignedIn>
-    <Page />
-  </SignedIn>
-);
+export const PageRoute = Page;

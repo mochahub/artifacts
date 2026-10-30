@@ -22,7 +22,7 @@ jobs:
           test -z "$(git status --porcelain apps/server/drizzle)"
       # Before the tests: the CLI's render tests drive WebKit too.
       - name: Install WebKit
-        run: bunx playwright install --with-deps webkit
+        run: bunx playwright install --with-deps webkit chromium
         working-directory: apps/viewer
       # SeaweedFS needs a command and a mounted key file, which `services:` can't give it.
       - name: Unit, data-model and API tests against Postgres and SeaweedFS

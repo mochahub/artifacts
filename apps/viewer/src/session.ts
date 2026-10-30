@@ -12,7 +12,8 @@ export async function refreshMe() {
     const { person } = await api<{ person: Person }>("/api/me");
     me.value = person;
   } catch (error) {
-    if (!(error instanceof ApiFailure) || error.status !== 401) throw error;
+    // A guest gets 403 here: not signed in as a person, and not a failure.
+    if (!(error instanceof ApiFailure) || (error.status !== 401 && error.status !== 403)) throw error;
     me.value = null;
   }
 }

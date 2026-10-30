@@ -4,12 +4,15 @@ import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
 import { ArtifactPage } from "./routes/artifact.tsx";
 import { Device } from "./routes/device.tsx";
+import { GuestLanding } from "./routes/guest.tsx";
 import { Home } from "./routes/home.tsx";
+import { Join } from "./routes/join.tsx";
 import { NotFound } from "./routes/not-found.tsx";
 import { PageRoute } from "./routes/page.tsx";
 import { ProjectPage } from "./routes/project.tsx";
 import { Projects } from "./routes/projects.tsx";
 import { Reset } from "./routes/reset.tsx";
+import { Settings } from "./routes/settings.tsx";
 import { SignIn } from "./routes/sign-in.tsx";
 import { boot, bootFailed, meta, ready } from "./session.ts";
 import "./styles/tokens.css";
@@ -37,6 +40,10 @@ function App() {
           <Route path="/sign-in" component={SignIn} />
           <Route path="/device" component={Device} />
           <Route path="/reset/:token" component={Reset} />
+          <Route path="/join/:token" component={Join} />
+          <Route path="/s/:token" component={GuestLanding} />
+          <Route path="/settings" component={Settings} />
+          <Route path="/settings/:section" component={Settings} />
           <Route path="/:project" component={ProjectPage} />
           <Route path="/:project/:artifact" component={ArtifactPage} />
           <Route path="/:project/:artifact/v/:n" component={PageRoute} />

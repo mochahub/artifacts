@@ -1,14 +1,16 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, ChevronRight, CircleCheck, FileText, History, Images } from "lucide-preact";
+import { ChevronLeft, ChevronRight, CircleCheck, FileText, History, Images, Share } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { AgentMark, StatusWord } from "../components/cards.tsx";
 import { DecideSheet } from "../components/review.tsx";
+import { ShareSheet } from "../components/share.tsx";
 import { VersionSheet } from "../components/sheets.tsx";
 import { agentShort, ago, plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
+import { me } from "../session.ts";
 import { Deleted } from "./deleted.tsx";
-import { SignedIn } from "./guard.tsx";
+import { useSignInOn401 } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
 
 export const artifactPath = (project: string, slug: string) =>
@@ -19,10 +21,13 @@ function Detail() {
   const project = params.project ?? "";
   const remote = usePoll<Artifact>(artifactPath(project, params.artifact ?? ""), 10_000);
   const { data, error } = remote;
+  useSignInOn401(error.value?.status);
+  const sharing = useSignal(false);
   const history = useSignal(false);
   const deciding = useSignal(false);
 
   if (error.value?.status === 410) return <Deleted at={error.value.details.deletedAt as string} />;
+  if (error.value?.status === 401) return null;
   if (error.value) return <NotFound />;
   const artifact = data.value;
   if (!artifact) return null;
@@ -37,6 +42,18 @@ function Detail() {
           <ChevronLeft />
           {artifact.project}
         </a>
+        {artifact.permissions.share && (
+          <button
+            type="button"
+            class="round"
+            aria-label="Share"
+            onClick={() => {
+              sharing.value = true;
+            }}
+          >
+            <Share />
+          </button>
+        )}
         <button
           type="button"
           class="round"
@@ -92,7 +109,7 @@ function Detail() {
             {changed.length > 0 ? "Review changes" : "Start reviewing"}
           </a>
         )}
-        {artifact.permissions.comment && (
+        {artifact.permissions.comment && me.value && (
           <button
             type="button"
             class="round"
@@ -106,6 +123,15 @@ function Detail() {
           </button>
         )}
       </div>
+      {sharing.value && (
+        <ShareSheet
+          artifact={artifact}
+          onClose={() => {
+            sharing.value = false;
+          }}
+          onChanged={() => remote.refresh()}
+        />
+      )}
       {deciding.value && (
         <DecideSheet
           artifact={artifact}
@@ -130,8 +156,4 @@ function Detail() {
   );
 }
 
-export const ArtifactPage = () => (
-  <SignedIn>
-    <Detail />
-  </SignedIn>
-);
+export const ArtifactPage = Detail;

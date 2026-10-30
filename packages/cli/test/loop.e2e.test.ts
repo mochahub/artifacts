@@ -131,6 +131,31 @@ describe("the review loop", () => {
     expect(result.stderr).toContain("frames/renamed");
   }, 120_000);
 
+  test("org invite, reset-link, visibility and share", async () => {
+    const dir = copyFixture(camerabuddy);
+    const invite = JSON.parse(
+      (await cli(["org", "invite", "sam@example.com", "--role", "reviewer", "--json"], agent())).stdout,
+    );
+    expect(invite.url).toContain("/join/");
+    expect((await cli(["org", "invite", "x@example.com", "--role", "owner"], agent())).code).toBe(1);
+    const reset = JSON.parse((await cli(["org", "reset-link", OWNER.email, "--json"], agent())).stdout);
+    expect(reset.url).toContain("/reset/");
+    expect((await cli(["org", "reset-link", "nobody@example.com"], agent())).code).toBe(1);
+
+    expect((await cli(["visibility", "me"], agent(), dir)).code).toBe(0);
+    expect((await cli(["visibility", "nonsense"], agent(), dir)).code).toBe(2);
+    const link = JSON.parse(
+      (await cli(["share", "--link", "--comment", "--expires", "7d", "--json"], agent(), dir)).stdout,
+    );
+    expect(link.url).toContain("/s/");
+    const person = JSON.parse(
+      (await cli(["share", "--invite", "out@example.com", "--comment", "--json"], agent(), dir)).stdout,
+    );
+    expect(person.url).toContain("/join/");
+    expect((await cli(["share", "--invite", "out2@example.com", "--publish"], agent(), dir)).code).toBe(1);
+    expect((await cli(["share"], agent(), dir)).code).toBe(2);
+  });
+
   test("skill install writes both folders, and never outside this home", async () => {
     const result = await cli(["skill", "install", "--json"], box.env);
     expect(result.code).toBe(0);

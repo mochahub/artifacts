@@ -18,6 +18,7 @@ const PUBLIC_ROUTES = [
   "GET /api/invites/:token",
   "POST /api/invites/:token/accept",
   "GET /api/s/:token",
+  "GET /api/s/:token/cover",
   "POST /api/s/:token/guest",
 ].sort();
 
