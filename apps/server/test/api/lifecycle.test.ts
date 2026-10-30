@@ -8,6 +8,8 @@ import {
   frames,
   guestLinks,
   people,
+  pushSubscriptions,
+  sessions,
   shareLinks,
   threads,
   tombstones,
@@ -391,6 +393,39 @@ describe("lifecycle", () => {
     };
     expect(people_.items.length).toBeGreaterThan(0);
     expect((await t.api("/api/activity")).status).toBe(401);
+  });
+
+  test("expire clears ended sessions, and the pushes that belonged to them", async () => {
+    const now = t.clock.now();
+    const session = async (name: string, expiresAt: Date) => {
+      const sessionId = Bun.randomUUIDv7();
+      await t.server.db.insert(sessions).values({
+        id: sessionId,
+        orgId,
+        tokenHash: name,
+        personId,
+        domain: "viewer.test",
+        authAt: now,
+        lastSeenAt: now,
+        expiresAt,
+      });
+      await t.server.db.insert(pushSubscriptions).values({
+        id: Bun.randomUUIDv7(),
+        orgId,
+        personId,
+        sessionId,
+        endpoint: `https://fcm.googleapis.com/${name}`,
+        keys: { p256dh: "x", auth: "x" },
+      });
+    };
+    await session("ended", new Date(now.getTime() - 1000));
+    await session("current", new Date(now.getTime() + 3600_000));
+    expect((await job("expire")).status).toBe(200);
+    const left = await t.server.db.select().from(pushSubscriptions);
+    expect(left.map((row) => row.endpoint)).toEqual(["https://fcm.googleapis.com/current"]);
+    const names = (await t.server.db.select().from(sessions)).map((row) => row.tokenHash);
+    expect(names).toContain("current");
+    expect(names).not.toContain("ended");
   });
 
   test("expire clears leftovers, and the job needs the secret", async () => {
