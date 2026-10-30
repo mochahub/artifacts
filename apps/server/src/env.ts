@@ -108,6 +108,25 @@ export function parseEnv(raw: Record<string, string | undefined>): { env: Env; w
     }
   }
 
+  // Secure cookies and passkeys only work over HTTPS, apart from the machine's own address (09).
+  for (const origin of viewerOrigins) {
+    const { protocol, hostname } = new URL(origin);
+    const own =
+      hostname === "localhost" || hostname.endsWith(".localhost") || /^(127\.|\[::1\])/.test(hostname);
+    if (protocol === "http:" && !own) {
+      warnings.push(
+        `${origin} is plain http, so sign-in cookies and passkeys won't be secure; put HTTPS in front`,
+      );
+    }
+  }
+  const ports = [v.PORT, v.CONTENT_PORT, v.INTERNAL_PORT].filter((port) => port !== 0);
+  if (new Set(ports).size !== ports.length) {
+    throw new EnvError("PORT, CONTENT_PORT and INTERNAL_PORT must all be different");
+  }
+  if (v.OPS_SECRET === v.SESSION_SECRET || v.OPS_SECRET === v.SETUP_TOKEN) {
+    warnings.push("OPS_SECRET is also another secret; each should be its own random value");
+  }
+
   return {
     warnings,
     env: {
