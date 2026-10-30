@@ -47,11 +47,17 @@ export function saveServer(entry: ServerEntry) {
 }
 
 export const normalizeUrl = (url: string) => {
+  let parsed: URL;
   try {
-    return new URL(url.includes("://") ? url : `https://${url}`).origin;
+    parsed = new URL(url.includes("://") ? url : `https://${url}`);
   } catch {
     throw new CliError(`"${url}" isn't a URL.`);
   }
+  // A file: or custom scheme has the origin "null", which is not a server.
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new CliError(`"${url}" isn't a web address. Use http:// or https://.`);
+  }
+  return parsed.origin;
 };
 
 /** --server, then ARTIFACTS_URL, then the default server in config (07). */
