@@ -567,7 +567,7 @@ Consequences:
 - Stored values come back through `postMessage` and are never served as a page, so stored data can't inject script into the viewer.
 - Writes go through the app rather than presigned URLs. Values are small, and it avoids needing CORS on the bucket, which Railway's bucket docs don't mention.
 
-**Concurrent writes.** Railway's buckets run on Tigris, and Tigris documents `If-Match` and `If-None-Match` on uploads, answering 412 when the condition fails. SeaweedFS, used in `deploy/compose`, supports both (spike S3, 2026-10-29). **Unverified:** that Railway's bucket endpoint passes them through; spike S3 tests it on Railway. Where they're missing, the app serializes writes per key with a Postgres advisory lock: a lock only, with no rows written.
+**Concurrent writes.** Railway's buckets run on Tigris, and Tigris documents `If-Match` and `If-None-Match` on uploads, answering 412 when the condition fails. SeaweedFS, used in `deploy/compose`, supports both, and Railway's bucket endpoint passes them through (spike S3: 22 of 22 checks on both, 2026-10-30). Conditional writes are required of the bucket, so there's no lock-only fallback ([08](implementation/08-micro-apps.md#data-store-server)).
 
 **Versions.** Data belongs to the artifact, not to a version, so it survives republishing and restoring.
 - If a new version changes the shape of the data, the artifact's code handles it. The skill tells agents to keep a `schema` number in stored values, or to start new keys.

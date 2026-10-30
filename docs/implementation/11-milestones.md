@@ -151,7 +151,7 @@ Plus the re-anchoring unit tests.
 **Build:**
 - Content tokens and live frames: Try it on canvas frames and the `prototype` page kind.
 - The bridge (08).
-- The data API, with limits, usage, conditional writes (or locks, per S3), and files.
+- The data API, with limits, usage, conditional writes, and files.
 - `@artifacts/kit/data`, fixtures in render, and the dev data folder.
 - `artifacts data`.
 - The `data/*` lint rules, and the viewer notices ("Saved for you", "Its author can see what's saved").
