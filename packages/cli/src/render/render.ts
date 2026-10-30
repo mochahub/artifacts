@@ -314,12 +314,13 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
       pages.push({
         key: page.id,
         kind: "gallery",
-        title: page.id,
+        title: page.title ?? page.id,
         group: null,
         position,
         meta: {
           items: page.items.map((item) => ({
             hash: files.get(item.src)?.hash as string,
+            type: files.get(item.src)?.type,
             caption: item.caption,
           })),
         },

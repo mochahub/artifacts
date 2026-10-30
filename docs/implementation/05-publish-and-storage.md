@@ -26,7 +26,7 @@ const Page = z.discriminatedUnion("kind", [
     boards: z.array(z.object({ id: Key, title: z.string(), subtitle: z.string().optional(), src: RelPath })).min(1),
     styles: z.array(RelPath).default([]), scripts: z.array(RelPath).default([]) }),
   z.object({ id: Key, kind: z.literal("prototype"), src: RelPath, device: Device.default("iphone") }),   // Phase 2
-  z.object({ id: Key, kind: z.literal("gallery"), items: z.array(z.object({ src: RelPath, caption: z.string().optional() })) }), // Phase 2
+  z.object({ id: Key, kind: z.literal("gallery"), title: z.string().optional(), items: z.array(z.object({ src: RelPath, caption: z.string().optional() })) }), // Phase 2
 ]);
 // Key: a-z0-9-, 1–60. RelPath: relative, no "..", no leading "/", must exist.
 ```

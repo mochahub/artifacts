@@ -12,11 +12,20 @@ import {
   X,
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
+import { useEffect } from "preact/hooks";
 import { useRoute } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
 import { ReauthSheet } from "../components/reauth.tsx";
 import { Sheet } from "../components/sheets.tsx";
 import { ago } from "../format.ts";
+import {
+  canPush,
+  clearOffline,
+  currentSubscription,
+  needsInstall,
+  turnOffNotifications,
+  turnOnNotifications,
+} from "../notify.ts";
 import { addPasskey, passkeyName } from "../passkey.ts";
 import { usePoll } from "../poll.ts";
 import { me, meta } from "../session.ts";
@@ -79,6 +88,7 @@ function Index() {
   const admin = ADMIN();
   const rows = [
     ["/settings/sign-in", "Sign-in", "Passkeys, password and sessions"],
+    ["/settings/notifications", "Notifications", "On this device"],
     ...(admin
       ? [
           ["/settings/people", "People", "Members, outside people and invites"],
@@ -112,6 +122,7 @@ function Index() {
         class="btn soft"
         onClick={async () => {
           await post("/api/auth/logout");
+          clearOffline();
           location.href = "/sign-in";
         }}
       >
@@ -560,6 +571,7 @@ function People() {
 }
 
 type Org = {
+  newVersion: string | null;
   name: string;
   settings: { defaultVisibility: "me" | "org"; linkSharing: boolean };
   domains: { home: string; publicUrl: string; moreUrls: string[]; contentUrl: string | null };
@@ -641,6 +653,11 @@ function OrgSettings() {
   };
   return (
     <Frame title="Organization">
+      {body.newVersion && (
+        <p class="fn">
+          Version {body.newVersion} is out. Run <code>artifacts upgrade --server</code> to move to it.
+        </p>
+      )}
       <label class="gh" for="org-name">
         Name
       </label>
@@ -763,8 +780,64 @@ function Tokens() {
   );
 }
 
+function Notifications() {
+  const on = useSignal<boolean | null>(null);
+  const error = useSignal<string | null>(null);
+  useEffect(() => {
+    currentSubscription().then((subscription) => {
+      on.value = subscription !== null;
+    });
+  }, []);
+  const change = async (work: () => Promise<unknown>) => {
+    try {
+      await work();
+      on.value = (await currentSubscription()) !== null;
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  };
+  return (
+    <main class="main">
+      <a class="back" href="/settings">
+        <ChevronLeft />
+        Settings
+      </a>
+      <h1 class="h1">Notifications</h1>
+      {needsInstall() ? (
+        <div class="empty">
+          iPhone only sends web notifications to apps on your Home Screen. Add this site there first.
+        </div>
+      ) : !canPush() ? (
+        <div class="empty">This browser can't receive notifications.</div>
+      ) : (
+        on.value !== null && (
+          <>
+            <div class="group">
+              <div class="li">
+                <div class="grow">
+                  <div class="tt">{on.value ? "On for this device" : "Off for this device"}</div>
+                  <div class="ss">When an agent publishes or someone replies, and a daily summary</div>
+                </div>
+              </div>
+            </div>
+            {error.value && <p class="err">{error.value}</p>}
+            <button
+              type="button"
+              class="btn soft"
+              onClick={() => change(on.value ? turnOffNotifications : turnOnNotifications)}
+            >
+              {on.value ? "Turn off" : "Turn on"}
+            </button>
+          </>
+        )
+      )}
+    </main>
+  );
+}
+
 const PAGES: Record<string, () => preact.JSX.Element | null> = {
   "sign-in": SignIn,
+  notifications: Notifications,
   people: People,
   domains: Domains,
   org: OrgSettings,

@@ -270,7 +270,7 @@ describe("the backend sandbox", () => {
     ["the heap", "const k = []; while (true) k.push({ s: k.length });"],
     ["recursion", "const f = (n) => f(n + 1) + 1; f(0);"],
   ] as const) {
-    test(`a flood of $namefails that request and nothing else`, async () => {
+    test(`a flood of ${name} fails that request and nothing else`, async () => {
       const { call } = await deploy(`export default { fetch() { ${source} } };`);
       expect((await call("x")).status).toBe(500);
       const next = await deploy(`export default { fetch() { return Response.json("fine"); } };`);

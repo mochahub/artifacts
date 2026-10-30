@@ -25,10 +25,10 @@ export default defineConfig({
       use: { viewport: { width: 1440, height: 900 }, storageState: "e2e/.auth.json" },
       dependencies: ["claim"],
     },
-    // Virtual authenticators need Chromium's CDP (10); everything else runs in WebKit.
+    // Virtual authenticators need Chromium's CDP (10), and the offline test its service worker controls.
     {
       name: "passkeys",
-      testMatch: "passkeys.chromium.ts",
+      testMatch: "*.chromium.ts",
       use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
       dependencies: ["claim"],
     },

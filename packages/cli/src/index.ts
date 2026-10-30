@@ -5,6 +5,7 @@ import { login, logout, recover, serverName, whoami } from "./commands/account.t
 import { dataCommand, logsCommand } from "./commands/data.ts";
 import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
+import { mcpCommand } from "./commands/mcp.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
 import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
 import {
@@ -44,6 +45,7 @@ const USAGE = `artifacts ${VERSION}
   artifacts skill install [--claude] [--codex]
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
   artifacts dev [--port 4321]
+  artifacts mcp
   artifacts data ls | get <key> | export | clear [--scope shared|me]
   artifacts logs [--follow] [--version <n>]
   artifacts visibility org|me
@@ -181,6 +183,8 @@ async function main(argv: string[]) {
         { follow: values.follow, version: optionAfter("--version"), server: values.server },
         out,
       );
+    case "mcp":
+      return mcpCommand();
     case "dev":
       return devCommand({ port: values.port ? Number(values.port) : 4321 }, out);
     case "versions":

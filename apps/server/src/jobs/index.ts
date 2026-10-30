@@ -15,6 +15,7 @@ import {
   versions,
   webauthnChallenges,
 } from "../db/schema.ts";
+import { sendDigest } from "../push/notify.ts";
 import { purgeExpired } from "./purge.ts";
 
 const DAY = 24 * 3600_000;
@@ -137,6 +138,7 @@ export const jobsFor = (deps: Deps): Record<string, () => Promise<unknown>> => (
   gc: () => collectGarbage(deps),
   expire: () => expireLeftovers(deps),
   usage: () => recountRecent(deps),
+  digest: () => sendDigest(deps),
 });
 
 /** Once a day, on one replica at a time (05). */

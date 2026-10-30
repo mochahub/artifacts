@@ -2,7 +2,7 @@ import type { Artifact, VersionRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check, FileText, Images, X } from "lucide-preact";
 import type { ComponentChildren } from "preact";
-import { useEffect, useLayoutEffect } from "preact/hooks";
+import { useLayoutEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
 import { agentShort, ago } from "../format.ts";

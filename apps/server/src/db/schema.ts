@@ -20,7 +20,7 @@ import {
 
 /**
  * Every Phase 1 table in docs/implementation/02-data-model.md, which owns these names.
- * Phase 2 tables (backend_logs, artifact_usage, push_subscriptions) arrive with M9–M11.
+ * Phase 2 tables (backend_logs, artifact_usage, push_subscriptions) arrived with M9–M11.
  * Migrations only add: never edit a generated migration, never drop a column in the same release.
  */
 
@@ -644,3 +644,21 @@ export const tombstones = pgTable("tombstones", {
   deletedBy: uuid("deleted_by").references(() => people.id),
   purgedAt: time("purged_at").notNull().defaultNow(),
 });
+
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    endpoint: text("endpoint").notNull().unique(),
+    keys: jsonb("keys").notNull(),
+    createdAt: createdAt(),
+    lastOkAt: time("last_ok_at"),
+  },
+  (t) => [index("push_subscriptions_person_idx").on(t.personId)],
+);

@@ -38,5 +38,7 @@ test("home: a new version is waiting, before anyone has looked at it", async ({ 
   await page.locator(".cover img").evaluate((img: HTMLImageElement) => img.decode());
   await page.screenshot({ path: "../../docs/mocks/shots/01-1-review.png" });
   // Every other test reuses this session: signing in each time would hit the real per-IP limit.
+  // The install sheet would otherwise cover every test's first comment; live-review.e2e.ts clears this.
+  await page.evaluate(() => localStorage.setItem("artifacts.install-asked", "1"));
   await page.context().storageState({ path: "e2e/.auth.json" });
 });

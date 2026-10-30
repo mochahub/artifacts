@@ -16,7 +16,9 @@ import {
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
 import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
+import { blobKey } from "../publish/blobs.ts";
 import { reanchorThreads } from "../publish/routes.ts";
+import { diffRegions, type Region } from "../review/regions.ts";
 import { artifactParam, findArtifact, type LoadedArtifact } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
 import type { ApiContext, Routes } from "./routes.ts";
@@ -31,6 +33,39 @@ const actorId = (caller: Caller) => {
 
 /** The same lock as publish commit, so nothing changes under a publish in progress (03). */
 const LOCK = (id: string) => sql`select pg_advisory_xact_lock(hashtextextended(${id}, 0))`;
+
+/** One render pair never changes its answer, so it's worked out once. */
+const regionCache = new Map<string, Region[]>();
+const MAX_CACHED_REGIONS = 2000;
+const MAX_FRAMES_DIFFED = 40;
+
+/** Per changed frame: the two @2x renders, and where they differ (03). */
+async function changedRegions(
+  deps: Deps,
+  keys: string[],
+  before: (typeof frames.$inferSelect)[],
+  after: (typeof frames.$inferSelect)[],
+) {
+  const rendersOf = (rows: typeof before, key: string) =>
+    rows.find((row) => `${row.pageKey}/${row.frameKey}` === key)?.renders as { "2x": string } | undefined;
+  const result: Record<string, { before: string; after: string; regions: Region[] }> = {};
+  for (const key of keys.slice(0, MAX_FRAMES_DIFFED)) {
+    const a = rendersOf(before, key)?.["2x"];
+    const b = rendersOf(after, key)?.["2x"];
+    if (!a || !b) continue;
+    let regions = regionCache.get(`${a}:${b}`);
+    if (!regions) {
+      const [first, second] = await Promise.all([deps.bucket.get(blobKey(a)), deps.bucket.get(blobKey(b))]);
+      if (!first || !second) continue;
+      // A render the image library can't read still counts as changed: it just has no boxes.
+      regions = await diffRegions(first.body, second.body).catch(() => [] as Region[]);
+      if (regionCache.size >= MAX_CACHED_REGIONS) regionCache.clear();
+      regionCache.set(`${a}:${b}`, regions);
+    }
+    result[key] = { before: a, after: b, regions };
+  }
+  return result;
+}
 
 export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
@@ -399,8 +434,12 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       new Map(rows.map((row) => [`${row.pageKey}/${row.frameKey}`, row.contentHash]));
     const blockMap = (rows: typeof from.blockRows) =>
       new Map(rows.map((row) => [`${row.pageKey}/${row.blockKey}`, row.contentHash]));
+    const frameChanges = changes(frameMap(from.frameRows), frameMap(to.frameRows));
     return etagJson(c, {
-      frames: changes(frameMap(from.frameRows), frameMap(to.frameRows)),
+      frames: {
+        ...frameChanges,
+        regions: await changedRegions(deps, frameChanges.changed, from.frameRows, to.frameRows),
+      },
       blocks: changes(blockMap(from.blockRows), blockMap(to.blockRows)),
       notes: to.row.notes,
     });

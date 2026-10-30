@@ -20,6 +20,7 @@ import { wellKnownWebauthn } from "./http/well-known.ts";
 import { createInternalApp } from "./internal/app.ts";
 import { jobsFor, startJobs } from "./jobs/index.ts";
 import type { Logger } from "./log.ts";
+import { Events } from "./realtime/events.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
 import { SandboxPool } from "./sandbox/pool.ts";
 
@@ -32,6 +33,7 @@ export type StartOptions = {
   onRoute?: (method: string, path: string) => void;
   /** Tests move the clock, so they run jobs by hand. */
   jobs?: boolean;
+  pushAllow?: (endpoint: string) => boolean;
 };
 
 const PRIVATE_PEER = /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$|^f[cd]/;
@@ -85,6 +87,9 @@ export async function startServer(env: Env, options: StartOptions) {
     return homeDomain;
   };
 
+  const events = new Events(env.databaseUrl);
+  await events.start();
+
   const deps: Deps = {
     env,
     db,
@@ -95,6 +100,8 @@ export async function startServer(env: Env, options: StartOptions) {
     origins: async () => viewerOrigins(env, await currentHomeDomain()),
     clientIp,
     sandbox: null,
+    events,
+    pushAllow: options.pushAllow,
   };
   deps.sandbox = new SandboxPool(
     org?.settings.sandboxProcesses ?? DEFAULT_ORG_SETTINGS.sandboxProcesses,
@@ -119,7 +126,7 @@ export async function startServer(env: Env, options: StartOptions) {
   const routes = new Routes(viewer);
   mountApi(routes, deps);
   viewer.all("/api/*", (c) => c.notFound());
-  viewer.get("*", serveViewer(options.viewerDir === undefined ? findViewerDir() : options.viewerDir));
+  viewer.get("*", serveViewer(options.viewerDir === undefined ? findViewerDir() : options.viewerDir, deps));
 
   const servers = [
     Bun.serve({ port: env.port, fetch: viewer.fetch }),
@@ -149,6 +156,7 @@ export async function startServer(env: Env, options: StartOptions) {
       stopJobs();
       deps.sandbox?.stop();
       await Promise.all(servers.map((server) => server.stop(true)));
+      await events.stop();
       await close();
     },
   };

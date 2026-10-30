@@ -1,5 +1,7 @@
 import { dataRoutes } from "../data/routes.ts";
 import { publishRoutes } from "../publish/routes.ts";
+import { pushRoutes } from "../push/notify.ts";
+import { eventRoutes } from "../realtime/events.ts";
 import { reviewRoutes } from "../review/routes.ts";
 import { authRoutes } from "./auth.ts";
 import type { Deps } from "./deps.ts";
@@ -29,4 +31,6 @@ export function mountApi(routes: Routes, deps: Deps) {
   lifecycleRoutes(routes, deps);
   fileRoutes(routes, deps);
   dataRoutes(routes, deps);
+  eventRoutes(routes, deps);
+  pushRoutes(routes, deps);
 }
