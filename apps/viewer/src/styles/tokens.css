@@ -1,0 +1,43 @@
+/* Ported from docs/mocks/kit.css, the reference for the look.
+   Colour has two jobs: yellow is a person's mark, violet is an agent's change. */
+:root {
+  --mark: #ffd84d;
+  --mark-ink: #2a2100;
+  --mark-hl: rgba(255, 216, 77, 0.5);
+  --mark-word: #8a6a00;
+  --agent: #8f7cff;
+  --agent-word: #5b47e0;
+  --ok: #2fb36b;
+  --ok-word: #1d8a50;
+  --warn: #ff7a59;
+  --canvas: #1b1d22;
+
+  --bg: #f5f6f8;
+  --card: #fff;
+  --tx: #121418;
+  --tx2: #5e6470;
+  --tx3: #9aa0aa;
+  --sep: #e4e6ea;
+
+  --ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --serif: ui-serif, "New York", "Iowan Old Style", Charter, Georgia, serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mark-hl: rgba(255, 216, 77, 0.3);
+    --mark-word: var(--mark);
+    --agent-word: var(--agent);
+    --ok-word: var(--ok);
+
+    --bg: #15171c;
+    --card: #20232a;
+    --tx: #f2f3f5;
+    --tx2: #a0a6b1;
+    --tx3: #6b717c;
+    --sep: rgba(255, 255, 255, 0.08);
+  }
+}

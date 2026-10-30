@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "artifacts",
+      "credentials": [{ "accessKey": "devaccesskey", "secretKey": "devsecretkey" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

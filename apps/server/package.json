@@ -1,0 +1,24 @@
+{
+  "name": "@artifacts/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outfile=dist/server.js",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@artifacts/schema": "workspace:*",
+    "@aws-sdk/client-s3": "^3.1160.0",
+    "@aws-sdk/s3-request-presigner": "^3.1160.0",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
+    "postgres": "^4.0.0",
+    "tldts": "^7.4.19",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.11"
+  }
+}

@@ -1,0 +1,33 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--tx);
+  font: 16px / 1.4 var(--ui);
+  -webkit-text-size-adjust: 100%;
+}
+
+.page {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 4rem) calc(env(safe-area-inset-right) + 1.5rem)
+    calc(env(safe-area-inset-bottom) + 2rem) calc(env(safe-area-inset-left) + 1.5rem);
+}
+
+.title {
+  margin: 0 0 0.5rem;
+  font: 700 2.25rem / 1.12 var(--serif);
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  margin: 0;
+  color: var(--tx2);
+}
+
+.page a {
+  color: inherit;
+}
