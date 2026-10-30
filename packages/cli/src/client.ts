@@ -1,3 +1,4 @@
+import { detectAgent } from "./agent.ts";
 import { CliError } from "./output.ts";
 import { VERSION } from "./version.ts";
 
@@ -23,6 +24,7 @@ export class Client {
         method,
         headers: {
           "Artifacts-CLI": VERSION,
+          ...(detectAgent() ? { "Artifacts-Agent": detectAgent() as string } : {}),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },

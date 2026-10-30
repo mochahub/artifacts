@@ -34,6 +34,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 - **M7 (2026-10-30):** API tests for every lifecycle transition, purge erasing rows, data and crops while leaving one tombstone, the slug rule, GC keeping referenced, young and removed-version blobs, the 30-day job. `versions`, `diff`, `restore`, `archive`, `delete` and `undelete` via the real CLI. WebKit e2e for the menu, delete sheet, deleted link, Recently deleted, version history and Activity.
 - **M8 (2026-10-30):** the release dry run built the image (with sharp loading and encoding inside it) and all five CLI binaries, with `SHA256SUMS`. The compiled macOS binary renders in WebKit via `BUN_BE_BUN`. **Clean machine (`scripts/clean-install-test.sh`):** a bare Debian trixie container with its own Docker daemon, a non-root user, no Bun or Node: `install.sh` verified the checksum and installed, then `artifacts setup --docker` claimed a working server, and `whoami` and `doctor` passed. The Railway path passes against a fake `railway` binary only; **it has not run on Railway.**
 
+- **M7–M8 independent review (subagent, 2026-10-30):** 12 findings plus 4 small ones, all fixed. It also removed `oven/bun:1.4.2` and `seaweedfs:4.50` from the local Docker cache; they re-pull when needed.
+
 ## Decisions to review
 
 1. **M2, Docker image before M8.** `setup --docker` needs an image that can't be pushed yet, so `apps/server/Dockerfile` came forward from M8 and `--image`/`ARTIFACTS_IMAGE` overrides the default `ghcr.io/mochahub/artifacts:<version>`. To change: nothing needed once images are released.

@@ -8,7 +8,7 @@ import {
   type PublishResult,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { type ArtifactRow, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
@@ -18,6 +18,7 @@ import { signPayload, verifyPayload } from "../auth/signed.ts";
 import {
   activity,
   artifacts,
+  blobs,
   blocks,
   frames,
   pages,
@@ -270,6 +271,16 @@ export function publishRoutes(routes: Routes, deps: Deps) {
             .where(and(eq(versions.artifactId, current.id), eq(versions.n, current.latestVersion)))
             .limit(1)
         : [];
+      // GC removes a blob's row before its object, so a hash it took meanwhile shows up here.
+      const hashes = [...wanted.keys(), ...safePages.flatMap((page) => page.meta.htmlHash ?? [])];
+      const present = await tx
+        .select({ hash: blobs.hash })
+        .from(blobs)
+        .where(and(eq(blobs.orgId, org.id), inArray(blobs.hash, hashes)));
+      if (new Set(present.map((row) => row.hash)).size < new Set(hashes).size) {
+        throw new ApiError("conflict", "A file was cleaned up during this publish. Publish again.");
+      }
+
       const versionId = Bun.randomUUIDv7();
       await tx.insert(versions).values({
         id: versionId,
@@ -341,6 +352,7 @@ export async function reanchorThreads(
   pageRows: { key: string }[],
   frameRows: { pageKey: string; frameKey: string; contentHash: string }[],
   blockRows: { pageKey: string; blockKey: string; contentHash: string; text: string }[],
+  onlyCreatedOn?: number,
 ) {
   const open = await tx
     .select()
@@ -354,6 +366,7 @@ export async function reanchorThreads(
 
   for (const thread of open) {
     if (!pageKeys.has(thread.pageKey)) continue;
+    if (onlyCreatedOn !== undefined && thread.createdVersion !== onlyCreatedOn) continue;
     let then = cache.get(thread.createdVersion);
     if (!then) {
       const [version] = await tx

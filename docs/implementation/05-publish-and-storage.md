@@ -122,7 +122,7 @@ The server runs this inside commit, for every thread with `status ≠ resolved` 
 
 **Restored and removed versions:**
 - Restoring a version re-anchors exactly the same way.
-- Removing a version moves threads made on it to the next live version, with `anchor_state = moved_version` and their anchors re-checked against that version.
+- Removing a version moves threads made on it to the next live version, with `moved_from_version` set and their anchors re-checked against that version. The API reports `anchorState: moved_version` for them while the anchor is still fine. Purging the version deletes their crops and removes quoted text, because both show what was removed.
 
 The change summary in `PublishResult` and `GET /compare` comes from comparing `content_hash` per frame key and block key between the two versions.
 

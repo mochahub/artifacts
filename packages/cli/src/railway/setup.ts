@@ -1,4 +1,6 @@
-import { type ClaimAnswers, claim, health } from "../commands/account.ts";
+import { Meta } from "@artifacts/schema";
+import { Client } from "../client.ts";
+import { type ClaimAnswers, claim } from "../commands/account.ts";
 import { saveServer } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
 import { ask } from "../prompt.ts";
@@ -77,7 +79,11 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
 
   // Railway has no variable for the second domain, so setup writes it (spike S1).
   railway(["variable", "set", `CONTENT_URL=https://${content}`, "--service", SERVICE], dir);
-  await until("the server to come back", async () => (await health(url)).ok && isDeployed(dir));
+  // Until it reports the new value, what answers may still be the deploy before this one.
+  await until("the server to come back", async () => {
+    const meta = Meta.parse(await new Client(url).get("/api/meta"));
+    return meta.contentUrl === `https://${content}` && isDeployed(dir);
+  });
   out.say(`✓ Running: ${url}   (home domain for passkeys)`);
 
   const token = variables(dir).SETUP_TOKEN;

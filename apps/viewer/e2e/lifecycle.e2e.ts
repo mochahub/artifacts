@@ -47,8 +47,12 @@ test("delete, the deleted link, Recently deleted and restore", async ({ page }, 
   await page.goto("/settings/deleted");
   await expect(page.getByText("30 days left").first()).toBeVisible();
   await shot(page, info.project.name, "07-3-recently-deleted");
+  await page.getByRole("button", { name: "Delete all now" }).click();
+  await expect(page.getByRole("dialog").getByText("This can't be undone.")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Restore" }).first().click();
-  await expect(page.getByText("Nothing here.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Restore" })).toHaveCount(0);
   await page.goto(`/camerabuddy/${slug}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy roadmap");
 });

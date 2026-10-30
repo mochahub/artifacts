@@ -1,0 +1,1 @@
+ALTER TABLE "threads" ADD COLUMN "moved_from_version" integer;

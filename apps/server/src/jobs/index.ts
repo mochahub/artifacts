@@ -1,12 +1,14 @@
 import { inArray, lt, sql } from "drizzle-orm";
 import type { Deps } from "../api/deps.ts";
 import {
+  artifacts,
   blobs,
   deviceCodes,
   frames,
   invites,
   pages,
   resetLinks,
+  threads,
   versions,
   webauthnChallenges,
 } from "../db/schema.ts";
@@ -15,6 +17,7 @@ import { purgeExpired } from "./purge.ts";
 const DAY = 24 * 3600_000;
 const JOB_LOCK = 7_316_004;
 const GC_MIN_AGE_MS = DAY;
+const FIRST_RUN_MS = 60_000;
 
 /** Every hash a version still needs (05, "Collect garbage"). */
 async function referencedHashes(deps: Deps) {
@@ -42,31 +45,66 @@ async function referencedHashes(deps: Deps) {
 
 /** Deletes blobs nothing uses, once they're a day old, so an upload awaiting commit is safe. */
 export async function collectGarbage(deps: Deps) {
-  const referenced = await referencedHashes(deps);
   const cutoff = deps.clock.now().getTime() - GC_MIN_AGE_MS;
+  const hashOf = (key: string) => key.slice("blobs/".length);
   let cursor: string | undefined;
   let deleted = 0;
   let bytes = 0;
   do {
     const page = await deps.bucket.list("blobs/", { cursor });
-    const stale = page.objects.filter(
-      (object) => !referenced.has(object.key.slice("blobs/".length)) && object.updatedAt.getTime() < cutoff,
-    );
-    await Promise.all(stale.map((object) => deps.bucket.delete(object.key)));
-    if (stale.length > 0) {
-      await deps.db.delete(blobs).where(
-        inArray(
-          blobs.hash,
-          stale.map((object) => object.key.slice("blobs/".length)),
-        ),
-      );
+    const old = page.objects.filter((object) => object.updatedAt.getTime() < cutoff);
+    if (old.length > 0) {
+      // Fresh for every page. Rows go first, so a publish reusing one of these can't commit.
+      const referenced = await referencedHashes(deps);
+      const stale = old.filter((object) => !referenced.has(hashOf(object.key)));
+      if (stale.length > 0) {
+        await deps.db.delete(blobs).where(
+          inArray(
+            blobs.hash,
+            stale.map((object) => hashOf(object.key)),
+          ),
+        );
+        const still = await referencedHashes(deps);
+        const gone = stale.filter((object) => !still.has(hashOf(object.key)));
+        await Promise.all(gone.map((object) => deps.bucket.delete(object.key)));
+        deleted += gone.length;
+        bytes += gone.reduce((sum, object) => sum + object.size, 0);
+      }
     }
-    deleted += stale.length;
-    bytes += stale.reduce((sum, object) => sum + object.size, 0);
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
+  await sweepOrphans(deps, cutoff);
   deps.log.info("garbage collected", { deleted, bytes });
   return { deleted, bytes };
+}
+
+const UUID_AT = /^(?:crops|data)\/([0-9a-f-]{36})/;
+
+/** What a purge's bucket step left behind, if the bucket failed after the rows were gone. */
+async function sweepOrphans(deps: Deps, cutoff: number) {
+  for (const [prefix, table] of [
+    ["crops/", threads],
+    ["data/", artifacts],
+  ] as const) {
+    let cursor: string | undefined;
+    do {
+      const page = await deps.bucket.list(prefix, { cursor });
+      const ids = [...new Set(page.objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
+      const alive = ids.length
+        ? new Set(
+            (await deps.db.select({ id: table.id }).from(table).where(inArray(table.id, ids))).map(
+              (row) => row.id,
+            ),
+          )
+        : new Set<string>();
+      const dead = page.objects.filter((object) => {
+        const id = UUID_AT.exec(object.key)?.[1];
+        return id && !alive.has(id) && object.updatedAt.getTime() < cutoff;
+      });
+      await Promise.all(dead.map((object) => deps.bucket.delete(object.key)));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+  }
 }
 
 /** Leftovers (05). */
@@ -104,9 +142,12 @@ export function startJobs(deps: Deps) {
     });
     return reserved;
   };
-  const timer = setInterval(
-    () => run().catch((error) => deps.log.error("jobs failed", { error: String(error) })),
-    DAY,
-  );
-  return () => clearInterval(timer);
+  const tick = () => run().catch((error) => deps.log.error("jobs failed", { error: String(error) }));
+  // Soon after boot too: a server redeployed daily would otherwise never reach its first run.
+  const first = setTimeout(tick, FIRST_RUN_MS);
+  const timer = setInterval(tick, DAY);
+  return () => {
+    clearTimeout(first);
+    clearInterval(timer);
+  };
 }

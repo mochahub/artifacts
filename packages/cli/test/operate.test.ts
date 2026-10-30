@@ -15,7 +15,12 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
   beforeAll(async () => {
     const port = 51600 + Math.floor(Math.random() * 2000);
     url = `http://127.0.0.1:${port}`;
-    t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
+    t = await startTestServer({
+      PUBLIC_URL: url,
+      MORE_URLS: "",
+      PORT: String(port),
+      CONTENT_URL: "https://content.up.railway.app",
+    });
   });
   afterAll(() => t.stop());
 

@@ -229,6 +229,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `status` | `thread_status` | |
 | `created_version` | int | Version it was made on. |
 | `fixed_version` | int null | Set by an agent's `reply --fixed`. |
+| `moved_from_version` | int null | The removed version this thread was made on. It survives later re-anchoring, and purging that version scrubs the thread's crop and quote, which show the removed content. |
 | `author_person_id`, `author_guest_id` | uuid null | Exactly one is set. |
 | `author_name` | text | Snapshot for display. |
 | `crop_key` | text null | `crops/<thread id>.webp` for canvas threads. |

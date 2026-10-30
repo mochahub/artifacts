@@ -476,6 +476,7 @@ export const threads = pgTable(
     status: threadStatus("status").notNull().default("open"),
     createdVersion: integer("created_version").notNull(),
     fixedVersion: integer("fixed_version"),
+    movedFromVersion: integer("moved_from_version"),
     authorPersonId: uuid("author_person_id").references(() => people.id),
     authorGuestId: uuid("author_guest_id").references(() => guests.id),
     authorName: text("author_name").notNull(),

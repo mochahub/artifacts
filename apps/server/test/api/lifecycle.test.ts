@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import sharp from "sharp";
 import {
   activity,
   artifacts,
@@ -12,6 +13,7 @@ import {
   tombstones,
   versions,
 } from "../../src/db/schema.ts";
+import { purgeArtifact } from "../../src/jobs/purge.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { file, hash, makePerson, publish } from "../publish-helper.ts";
 
@@ -174,7 +176,7 @@ describe("lifecycle", () => {
     expect((await post(`/api/artifacts/${row.id}/versions/3/delete`, { bearer: token })).status).toBe(409);
     expect((await post(`/api/artifacts/${row.id}/versions/2/delete`, { bearer: token })).status).toBe(200);
     const [moved] = await t.server.db.select().from(threads).where(eq(threads.id, thread.id));
-    expect(moved).toMatchObject({ createdVersion: 3, anchorState: "moved_version" });
+    expect(moved).toMatchObject({ createdVersion: 3, movedFromVersion: 2 });
     expect((await t.api(`/api/artifacts/${row.id}/versions/2`, { bearer: token })).status).toBe(404);
     const list = (await (await t.api(`/api/artifacts/${row.id}/versions`, { bearer: token })).json()) as {
       n: number;
@@ -198,6 +200,82 @@ describe("lifecycle", () => {
       version: number;
     };
     expect(next.version).toBe(4);
+  });
+
+  test("purging a removed version takes its crops and quotes with it", async () => {
+    const png = await sharp({ create: { width: 786, height: 1704, channels: 4, background: "#20232a" } })
+      .webp()
+      .toBuffer();
+    const row = await fresh();
+    await publish(t, token, { slug: row.slug, frameHash: hash(`crop-${row.slug}`), renderBytes: png });
+    await publish(t, token, { slug: row.slug, frameHash: hash(`next-${row.slug}`) });
+    const threadOn = async (anchor: unknown, pageKey: string) =>
+      (await (
+        await t.api(`/api/artifacts/${row.id}/threads`, {
+          method: "POST",
+          bearer: token,
+          json: { pageKey, anchor, body: "A secret", version: 2 },
+        })
+      ).json()) as { id: string; crop: string | null };
+    const pin = await threadOn({ type: "frame", frameKey: "live-view", x: 0.5, y: 0.5 }, "mocks");
+    const quote = await threadOn(
+      { type: "text", blockKey: "intro/p1", quote: { exact: "Hello", prefix: "", suffix: "" } },
+      "plan",
+    );
+    expect(pin.crop).not.toBeNull();
+    await post(`/api/artifacts/${row.id}/versions/2/delete`, { bearer: token });
+    const listed = (await (await t.api(`/api/artifacts/${row.id}/threads`, { bearer: token })).json()) as {
+      id: string;
+      anchorState: string;
+      createdVersion: number;
+    }[];
+    expect(listed.find((entry) => entry.id === quote.id)).toMatchObject({
+      createdVersion: 3,
+      anchorState: "moved_version",
+    });
+
+    // A publish in between must not lose track of them.
+    await publish(t, token, { slug: row.slug, frameHash: hash(`again-${row.slug}`) });
+    expect((await t.api(`/api/artifacts/${row.id}/versions/2`, { method: "DELETE", cookie })).status).toBe(
+      200,
+    );
+    const [pinned] = await t.server.db.select().from(threads).where(eq(threads.id, pin.id));
+    expect(pinned?.cropKey).toBeNull();
+    expect(await t.server.bucket.head(`crops/${pin.id}.webp`)).toBeNull();
+    const [quoted] = await t.server.db.select().from(threads).where(eq(threads.id, quote.id));
+    expect(quoted?.anchor).toEqual({ type: "block", blockKey: "intro/p1" });
+  });
+
+  test("a deleted artifact's history stays in Activity", async () => {
+    const row = await fresh();
+    await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    const { items } = (await (await t.api("/api/activity", { bearer: token })).json()) as {
+      items: { kind: string; artifact: { slug: string } | null }[];
+    };
+    expect(items.some((item) => item.kind === "deleted" && item.artifact?.slug === row.slug)).toBe(true);
+    await post(`/api/artifacts/${row.id}/undelete`, { bearer: token });
+  });
+
+  test("a purge that lost a race with a restore does nothing", async () => {
+    const row = await fresh();
+    await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    const [stale] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, row.id));
+    await post(`/api/artifacts/${row.id}/undelete`, { bearer: token });
+    expect(await purgeArtifact(t.server.deps, stale as typeof artifacts.$inferSelect, null)).toBe(false);
+    expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(200);
+  });
+
+  test("agents' lifecycle actions are marked as theirs", async () => {
+    const row = await fresh();
+    await t.api(`/api/artifacts/${row.id}/archive`, {
+      method: "POST",
+      bearer: token,
+      headers: { "Artifacts-Agent": "Claude Code" },
+    });
+    const { items } = (await (await t.api("/api/activity?filter=agents", { bearer: token })).json()) as {
+      items: { kind: string; actor: string }[];
+    };
+    expect(items[0]).toMatchObject({ kind: "archived", actor: "Claude Code" });
   });
 
   test("restore publishes a copy, which re-anchors threads", async () => {
@@ -264,9 +342,9 @@ describe("lifecycle", () => {
     };
     expect(theirs.items.some((item) => item.artifact?.slug === secret.slug)).toBe(false);
     const agents = (await (await t.api("/api/activity?filter=agents", { bearer: token })).json()) as {
-      items: unknown[];
+      items: { agent: string | null }[];
     };
-    expect(agents.items).toEqual([]);
+    expect(agents.items.every((item) => item.agent !== null)).toBe(true);
     const people_ = (await (await t.api("/api/activity?filter=people", { bearer: token })).json()) as {
       items: unknown[];
     };
@@ -334,5 +412,14 @@ describe("garbage collection", () => {
     for (const hashed of [...used, render]) {
       expect(await t.server.bucket.head(`blobs/${hashed}`)).not.toBeNull();
     }
+
+    // The sweep: what a failed purge left in the bucket, with nothing in Postgres pointing at it.
+    const ghost = Bun.randomUUIDv7();
+    await t.server.bucket.put(`data/${ghost}/shared/x`, "{}");
+    await t.server.bucket.put(`crops/${ghost}.webp`, "x");
+    t.clock.advance(25 * 3600_000);
+    await gc();
+    expect(await t.server.bucket.head(`data/${ghost}/shared/x`)).toBeNull();
+    expect(await t.server.bucket.head(`crops/${ghost}.webp`)).toBeNull();
   });
 });

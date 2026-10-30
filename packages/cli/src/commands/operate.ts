@@ -77,7 +77,9 @@ function upgradeDocker(server: ServerEntry, version: string, out: Output) {
 export async function upgradeCommand(flags: { server?: boolean; to?: string; target?: string }, out: Output) {
   const version = flags.to ?? (await latestVersion());
   if (!flags.server) await replaceBinary(version, out);
-  installSkill({}, out);
+  // The skill is compiled in, so the new binary is the one that has the new skill.
+  if (process.execPath.endsWith("/bun") || flags.server) installSkill({}, out);
+  else Bun.spawnSync([process.execPath, "skill", "install"], { stdout: "ignore", stderr: "inherit" });
 
   const url = (() => {
     try {
@@ -89,8 +91,9 @@ export async function upgradeCommand(flags: { server?: boolean; to?: string; tar
   const entry = url ? readConfig().servers.find((server) => server.url === url) : undefined;
   if (!entry || !url) return out.result({ cli: version, server: null }, () => {});
   const meta = Meta.parse(await new Client(url).get("/api/meta"));
-  if (!flags.server && meta.version === version)
-    return out.result({ cli: version, server: version }, () => {});
+  // Without --server, only ever move an older server forward (07).
+  const older = meta.version.localeCompare(version, undefined, { numeric: true }) < 0;
+  if (!flags.server && !older) return out.result({ cli: version, server: meta.version }, () => {});
   if (entry.railway) upgradeRailway(entry, version, out);
   else if (entry.docker) upgradeDocker(entry, version, out);
   else {
