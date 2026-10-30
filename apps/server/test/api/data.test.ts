@@ -314,4 +314,44 @@ describe("limits, with an org that's lowered them", () => {
     });
     expect(big.status).toBe(413);
   });
+
+  /** A body that never declares a length and never ends; `taken()` is how much the server pulled from it. */
+  const endless = () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 64 * 1024;
+        controller.enqueue(new Uint8Array(64 * 1024));
+      },
+    });
+    return { body, taken: () => pulled };
+  };
+
+  test("a body with no length is cut off at the limit, not read to the end", async () => {
+    const file = endless();
+    const upload = await t
+      .api(`/api/artifacts/${id}/files/shared/chunked`, {
+        method: "PUT",
+        bearer: token,
+        body: file.body,
+        headers: { "Content-Type": "text/plain" },
+        duplex: "half",
+      })
+      .catch(() => null);
+    expect(upload?.status ?? 413).toBe(413);
+    expect(file.taken()).toBeLessThan(4 * 1024 * 1024);
+
+    const json = endless();
+    const value = await t
+      .api(`/api/artifacts/${id}/data/shared/chunked`, {
+        method: "PUT",
+        bearer: token,
+        body: json.body,
+        headers: { "Content-Type": "application/json" },
+        duplex: "half",
+      })
+      .catch(() => null);
+    expect(value?.status ?? 413).toBe(413);
+    expect(json.taken()).toBeLessThan(4 * 1024 * 1024);
+  });
 });

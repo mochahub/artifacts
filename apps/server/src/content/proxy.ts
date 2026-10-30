@@ -12,6 +12,7 @@ import {
   listKeys,
   pseudonym,
   putValue,
+  readLimited,
 } from "../data/store.ts";
 import { findOrg } from "../db/index.ts";
 import { backendLogs, versions } from "../db/schema.ts";
@@ -118,18 +119,6 @@ const orgOf = async (deps: Deps) => {
   return org;
 };
 
-/** Reads a body with no Content-Length without taking more of it than the limit. */
-async function readBody(c: Context, limit: number) {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of (c.req.raw.body ?? []) as AsyncIterable<Uint8Array>) {
-    size += chunk.length;
-    if (size > limit) throw new ApiError("too_large", "That request is too big.", { limit });
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString();
-}
-
 /** One line for backend_logs: no NUL, which Postgres refuses, and capped in bytes. */
 const logLine = (message: string) =>
   Buffer.from(message.replaceAll("\0", "")).subarray(0, MAX_LOG_LINE).toString();
@@ -158,11 +147,7 @@ export async function runBackend(
   const key = callerKey(caller) ?? "nobody";
   deps.limits.hit(`backend:${payload.a}:${key}`, limits.backendRequestsPerMinute, MINUTE);
 
-  const declared = Number(c.req.header("content-length") ?? 0);
-  if (declared > limits.backendRequestBytes) {
-    throw new ApiError("too_large", "That request is too big.", { limit: limits.backendRequestBytes });
-  }
-  const body = await readBody(c, limits.backendRequestBytes);
+  const body = Buffer.from(await readLimited(c.req.raw, limits.backendRequestBytes)).toString();
 
   // The size was proved at publish. Looking it up first keeps a limit lowered since then from loading a huge file.
   const size = (await knownBlobs(deps, org.id, [hash])).get(hash);
