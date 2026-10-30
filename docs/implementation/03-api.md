@@ -71,7 +71,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `POST /api/auth/password` | none | `{ email, password }` → sets `art_session`; `{ person }`. Rate limits in 04. |
 | `POST /api/auth/passkey/options` | none | → WebAuthn authentication options (`rpId`, `challengeId`). Empty `allowCredentials` (discoverable). |
 | `POST /api/auth/passkey/verify` | none | `{ challengeId, response }` → sets cookie; `{ person }` |
-| `POST /api/auth/logout` | session | Ends this session. |
+| `POST /api/auth/logout` | session or CLI token | Ends this session, or revokes the token that called it, so `artifacts logout` leaves nothing valid behind. |
 | `GET /api/me` | any person caller | `{ person: { id, name, email, role }, org: { name }, recentAuth: bool }` |
 | `GET /api/me/sessions` | session | Sessions and CLI tokens: `[{ id, kind: "session"\|"cli", name, userAgent, lastSeenAt, current }]` |
 | `DELETE /api/me/sessions/:id` | session | Ends a session or revokes a CLI token. |
@@ -117,8 +117,8 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. |
 | `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. |
 | `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens. |
-| `POST /api/people/:id/reset-link` | `people.manage` | → `{ url, expiresAt }` |
-| `POST /api/invites` | `people.manage` | `{ email, role }` → `{ invite, url }` |
+| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }` |
+| `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |
 | `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ token }` shown once. |
 | `GET /api/shares` | `org.manage` | Every outside share (people and links) across artifacts. |

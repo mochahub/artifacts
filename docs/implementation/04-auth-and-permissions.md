@@ -19,7 +19,7 @@ Precedence when several are present: Bearer token, then session cookie, then gue
 
 ## Secrets and formats
 
-- **Session cookie** `art_session`: 32 random bytes, base64url. `HttpOnly; Secure; SameSite=Lax; Path=/`, host-only on the viewer domain that set it, `Max-Age` 30 days, refreshed when `last_seen_at` is more than a day old.
+- **Session cookie** `art_session`: 32 random bytes, base64url. `HttpOnly; Secure; SameSite=Lax; Path=/` (`Secure` is left off only on a plain-http viewer origin, where browsers would drop the cookie: local Compose, dev and e2e), host-only on the viewer domain that set it, `Max-Age` 30 days, refreshed when `last_seen_at` is more than a day old.
 - **Guest cookie** `art_guest`: same format and flags, `Max-Age` 90 days.
 - **Tokens** (`art_` + base32 of 32 bytes), **invite**, **reset** and **share link** secrets (32 bytes base64url), and **device codes**: stored as SHA-256 hex. Compared by hash lookup, which avoids timing leaks.
 - **`SETUP_TOKEN`**: compared with `crypto.timingSafeEqual` on equal-length buffers.
@@ -100,7 +100,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 
 - **CLI tokens** from the device flow or setup get `publish comment read manage data`.
 - **Org tokens:** the admin picks scopes and projects.
-- **What no token can do:** resolve threads, decide (approve or request changes), purge, manage people, manage org settings, or approve devices. Those are people-only actions (SPEC §5.5, §6).
+- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6).
 
 ## The permission function
 
@@ -122,12 +122,16 @@ Can the caller see an artifact at all (`artifact.read`)?
 | orgToken | `visibility = org` and the project is in its `project_ids` (or all), and it has `read` |
 | content | The token's artifact and version |
 
+Someone in `artifact_access` with `view` can only view, whatever their role: on a `me` artifact, a member added with `view` can't comment.
+
 Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /api/deleted` and undelete/purge, for their deleter and admins. The only other trace is for a caller who passes the table above with `deleted_at` ignored: they get 410 `gone` on its page and `slug_deleted` on its slug (03). Everyone else gets 404 and plain `conflict`, as if it had never existed.
 
 ### Actions
 
 | Action | Who (after visibility) |
 |---|---|
+| `account.read` | Any person caller: a session or a CLI token |
+| `account.manage` | A person in a browser session, never a token: their sessions, password, passkeys, approving devices |
 | `home.read`, `project.list`, `project.read` | Any person caller; tokens with `read` |
 | `artifact.read` | Visibility rule above |
 | `artifact.comment` | owner, admin, member, reviewer; outside and guests with `comment` permission; cliToken with `comment`. Not on archived artifacts. |
@@ -143,7 +147,8 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `data.export` | The publisher and admins (people or cliToken with `data`) |
 | `org.read` | Admins, owner |
 | `org.manage`, `people.manage`, `tokens.manage` | Admins, owner (people only) |
-| `people.read` | Admins, owner |
+| `people.read` | Admins, owner; an admin's cliToken with `read` |
+| `people.invite` | Admins, owner; an admin's cliToken with `manage`. `artifacts org invite` and `org reset-link` need this (SPEC §10). |
 
 ### Test matrix
 
@@ -157,7 +162,7 @@ The expected result is computed from a second, deliberately simple table in the 
 
 ## CSRF, hosts and headers
 
-- **CSRF:** non-GET requests authenticated by cookie must have `Origin` ∈ viewer origins. Token-authenticated requests are exempt, since they carry no cookies.
+- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Token-authenticated requests are exempt, since they carry no cookies.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
   - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`

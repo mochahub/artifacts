@@ -90,14 +90,13 @@ export async function startTestServer(overrides: Record<string, string> = {}) {
     init: RequestInit & { json?: unknown; cookie?: string; bearer?: string } = {},
   ) => {
     const { json, cookie, bearer, ...rest } = init;
-    const headers: Record<string, string> = {
-      Host: "viewer.test",
-      ...(rest.headers as Record<string, string>),
-    };
+    const host = overrides.PUBLIC_URL ? new URL(overrides.PUBLIC_URL).host : "viewer.test";
+    const headers: Record<string, string> = { Host: host, ...(rest.headers as Record<string, string>) };
     if (json !== undefined) headers["Content-Type"] = "application/json";
     if (cookie) {
       headers.Cookie = cookie;
-      if (rest.method && rest.method !== "GET") headers.Origin ??= "http://viewer.test";
+      if (rest.method && rest.method !== "GET")
+        headers.Origin ??= overrides.PUBLIC_URL ?? "http://viewer.test";
     }
     if (bearer) headers.Authorization = `Bearer ${bearer}`;
     return fetch(`${base}${path}`, {

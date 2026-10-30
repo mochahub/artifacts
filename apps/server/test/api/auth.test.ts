@@ -452,8 +452,9 @@ describe("recovery and reset", () => {
 
   test("recovery is limited to 5 per hour", async () => {
     const statuses: number[] = [];
-    for (let i = 0; i < 5; i++)
+    for (let i = 0; i < 6; i++)
       statuses.push((await recover({ setupToken: "x", email: OWNER.email })).status);
+    expect(statuses.slice(0, 5).every((status) => status === 403)).toBe(true);
     expect(statuses.at(-1)).toBe(429);
   });
 });

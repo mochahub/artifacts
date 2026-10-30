@@ -1,6 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
 const secret = "e2e-secret-e2e-secret-e2e-secret-e2e";
+const iphone = {
+  viewport: { width: 393, height: 852 },
+  deviceScaleFactor: 3,
+  isMobile: true,
+  hasTouch: true,
+};
 
 export default defineConfig({
   testDir: "e2e",
@@ -10,12 +16,11 @@ export default defineConfig({
   reporter: "line",
   use: { baseURL: "http://localhost:18080", browserName: "webkit", trace: "retain-on-failure" },
   // Viewports from 10, "Test layers".
+  // `claim` sees the server in setup mode, then claims it for every other test.
   projects: [
-    {
-      name: "iphone",
-      use: { viewport: { width: 393, height: 852 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true },
-    },
-    { name: "desktop", use: { viewport: { width: 1440, height: 900 } } },
+    { name: "claim", testMatch: "claim.setup.ts", use: iphone },
+    { name: "iphone", use: iphone, dependencies: ["claim"] },
+    { name: "desktop", use: { viewport: { width: 1440, height: 900 } }, dependencies: ["claim"] },
   ],
   // Runs the real server against docker-compose.test.yml, serving the built viewer. `bun run e2e` sets both up.
   webServer: {

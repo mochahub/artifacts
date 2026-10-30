@@ -23,12 +23,11 @@
 
 ## Credentials
 
-- **Where:** tokens go in the OS keychain via `Bun.secrets`, which works on macOS (spike S5). On Linux without a desktop session it throws `ERR_SECRETS_PLATFORM_ERROR` (no D-Bus), so the CLI falls back to the file below. Windows is untested. If `Bun.secrets` is missing or throws, the CLI tries:
-  - **macOS:** `security add-generic-password`
-  - **Linux:** `secret-tool` (libsecret)
-  - **Windows:** Credential Manager via PowerShell
+- **Where:** tokens go in the OS keychain via `Bun.secrets`, which works on macOS (spike S5). On Linux without a desktop session it throws `ERR_SECRETS_PLATFORM_ERROR` (no D-Bus), so the CLI falls back to the file below. Windows is untested. If `Bun.secrets` is missing or throws, the CLI uses the fallback.
 - **Fallback:** `~/.config/artifacts/credentials.json` with mode 0600, and a warning.
 - **CI:** `ARTIFACTS_TOKEN` and `ARTIFACTS_URL` environment variables override everything.
+- **Tests:** `ARTIFACTS_CREDENTIALS=file` forces the file, and config honours `HOME` and `XDG_CONFIG_HOME`, so tests never touch the real keychain.
+- **No prompts:** `ARTIFACTS_PASSWORD`, `ARTIFACTS_SETUP_TOKEN` and `--org`, `--name`, `--email` answer `setup`'s questions; `ARTIFACTS_NO_BROWSER=1` stops `login` opening a browser.
 
 ## Which artifact a command acts on
 
@@ -41,7 +40,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | Command | Does |
 |---|---|
 | `artifacts setup` | Interactive: Railway (recommended), Docker, or an existing server. Railway path below. |
-| `artifacts setup --docker [--dir <path>]` | Writes `docker-compose.yml` and `.env` (generated `SETUP_TOKEN`, `SESSION_SECRET`, `OPS_SECRET`, SeaweedFS keys) into the folder, runs `docker compose up -d`, waits for `/api/health`, then claims. |
+| `artifacts setup --docker [--dir <path>] [--image <ref>] [--port <n>]` | Writes `docker-compose.yml` and `.env` (generated `SETUP_TOKEN`, `SESSION_SECRET`, `OPS_SECRET`, SeaweedFS keys) and `s3.json` into the folder, runs `docker compose up -d`, waits for `/api/health`, then claims. `--image` (or `ARTIFACTS_IMAGE`) replaces `ghcr.io/mochahub/artifacts:<cli version>`. `--port n` uses n for the viewer, n+1 for content and n+253 for the bucket. |
 | `artifacts setup <url>` | If `GET /api/health` says `setupMode`: read the token (Railway CLI, if this server is in config) or ask for it, then claim. Otherwise sign in with the device flow. Then offer to install the skill. |
 | `artifacts recover <url>` | Asks for `SETUP_TOKEN` and an owner's email; prints a one-hour reset link (`POST /api/recover`). |
 | `artifacts login [<url>]`, `logout`, `whoami` | Device flow; remove the token; show person, role and server. |

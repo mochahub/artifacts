@@ -33,6 +33,7 @@
       "dependencies": {
         "@artifacts/schema": "workspace:*",
         "@preact/signals": "^2.11.4",
+        "lucide-preact": "^1.65.0",
         "preact": "^11.1.0",
         "preact-iso": "^2.12.2",
       },
@@ -45,6 +46,17 @@
         "vite": "^8.3.5",
       },
     },
+    "packages/cli": {
+      "name": "@artifacts/cli",
+      "version": "0.1.0",
+      "bin": {
+        "artifacts": "src/index.ts",
+      },
+      "dependencies": {
+        "@artifacts/schema": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/schema": {
       "name": "@artifacts/schema",
       "version": "0.1.0",
@@ -54,6 +66,8 @@
     },
   },
   "packages": {
+    "@artifacts/cli": ["@artifacts/cli@workspace:packages/cli"],
+
     "@artifacts/schema": ["@artifacts/schema@workspace:packages/schema"],
 
     "@artifacts/server": ["@artifacts/server@workspace:apps/server"],
@@ -437,6 +451,8 @@
     "lilconfig": ["lilconfig@3.1.4", "", {}, "sha512-zJZyBmQhArDRefuWTypZxwDpFDIYmrj8ypSBvwGD5P13Y95s6DjzKgu4DVdGbeQa5PDEsAOCAPNk4X+QOR006w=="],
 
     "lru-cache": ["lru-cache@5.1.1", "", { "dependencies": { "yallist": "^3.0.2" } }, "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w=="],
+
+    "lucide-preact": ["lucide-preact@1.65.0", "", { "peerDependencies": { "preact": "^10.27.2 || ^11.0.0-0" } }, "sha512-3WYdNgmacu4aFTn2DCOQFmX7cyh8C/J699nWicAAGfl6GHrtcPmQWd2s9jb1q0GhMY+xxudaWn34KQNLOA4y+g=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 

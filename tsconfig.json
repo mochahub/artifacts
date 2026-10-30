@@ -1,4 +1,9 @@
 {
   "files": [],
-  "references": [{ "path": "packages/schema" }, { "path": "apps/server" }, { "path": "apps/viewer" }]
+  "references": [
+    { "path": "packages/schema" },
+    { "path": "apps/server" },
+    { "path": "apps/viewer" },
+    { "path": "packages/cli" }
+  ]
 }

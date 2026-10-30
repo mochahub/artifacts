@@ -1,0 +1,270 @@
+/* The mocks' kit (docs/mocks/kit.css) at real size: mock phones are 226 px wide inside, real ones
+   393, so sizes here are about 1.7 times the mocks'. Class names match the mocks where practical. */
+
+.screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 44px) calc(env(safe-area-inset-right) + 22px)
+    calc(env(safe-area-inset-bottom) + 24px) calc(env(safe-area-inset-left) + 22px);
+}
+.spacer {
+  flex: 1;
+}
+.center {
+  text-align: center;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.h1 {
+  margin: 0;
+  font: 700 34px / 1.12 var(--serif);
+  letter-spacing: -0.01em;
+}
+.h1.m {
+  font-size: 30px;
+}
+.sub {
+  margin: 6px 0 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--tx2);
+}
+.fn {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--tx3);
+}
+.gh {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tx2);
+  margin: 2px 0 -8px 4px;
+  display: block;
+}
+.mono {
+  font-family: var(--mono);
+}
+.err {
+  font-size: 15px;
+  color: var(--warn-word);
+}
+
+.logo {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--mark);
+  display: inline-block;
+}
+.logo::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 15px;
+  height: 15px;
+  background: var(--bg);
+  border-radius: 10px 0 10px 0;
+}
+.logo.lg {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+}
+.logo.lg::after {
+  width: 30px;
+  height: 30px;
+  border-radius: 18px 0 18px 0;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: 0 0 0 0.5px var(--sep);
+}
+.group {
+  background: var(--card);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 0 0 0.5px var(--sep);
+}
+.li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  min-height: 56px;
+  color: inherit;
+  text-decoration: none;
+}
+.li + .li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 0;
+  border-top: 0.5px solid var(--sep);
+}
+.li > svg {
+  flex: none;
+  color: var(--tx2);
+  width: 22px;
+  height: 22px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.tt {
+  font-size: 17px;
+  font-weight: 500;
+}
+.ss {
+  font-size: 14px;
+  color: var(--tx2);
+  margin-top: 2px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 99px;
+  padding: 0 22px;
+  font: 600 17px var(--ui);
+  color: inherit;
+  background: none;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn svg {
+  width: 20px;
+  height: 20px;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.ink {
+  background: var(--tx);
+  color: var(--bg);
+}
+.btn.mark {
+  background: var(--mark);
+  color: var(--mark-ink);
+}
+.btn.soft {
+  background: var(--soft);
+}
+
+.field {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  padding: 13px 16px;
+  border-radius: 16px;
+  border: 0.5px solid var(--sep);
+  background: var(--card);
+  color: var(--tx);
+  font: 17px var(--ui);
+  outline: none;
+}
+.field:focus {
+  border-color: var(--mark);
+  box-shadow: 0 0 0 3px rgba(255, 216, 77, 0.25);
+}
+
+.term {
+  border-radius: 16px;
+  background: #0f1013;
+  color: #d7dae0;
+  font: 14px / 1.5 var(--mono);
+  padding: 14px 16px;
+  overflow-wrap: anywhere;
+}
+.term .p {
+  color: #8b919c;
+}
+
+.code {
+  padding: 14px;
+  text-align: center;
+  font: 700 30px var(--mono);
+  letter-spacing: 5px;
+}
+
+.dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  z-index: 45;
+}
+.sheet {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  max-width: 480px;
+  margin: 0 auto;
+  max-height: calc(100dvh - 60px);
+  overflow: auto;
+  z-index: 50;
+  padding: 12px 22px 24px;
+  border-radius: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--sheet);
+  border: 0.5px solid var(--sep);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.12);
+}
+.grabber {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--tx3);
+  opacity: 0.5;
+  align-self: center;
+  flex: none;
+}
+.shead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.shead .t {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 700;
+}
+.x {
+  width: 44px;
+  height: 44px;
+  margin: -6px -8px -6px 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--tx2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.x svg {
+  width: 20px;
+  height: 20px;
+}

@@ -1,38 +1,30 @@
-import type { Meta } from "@artifacts/schema";
-import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
+import { useLocation } from "preact-iso";
+import { post } from "../api.ts";
+import { me, meta } from "../session.ts";
 
-type State = { kind: "loading" } | { kind: "ready"; meta: Meta } | { kind: "failed" };
-
-/** A placeholder: it shows the viewer talking to the server. The real Review home arrives in M4. */
+/** A placeholder until the real Review home in M4. */
 export function Home() {
-  const state = useSignal<State>({ kind: "loading" });
-
+  const { route } = useLocation();
   useEffect(() => {
-    fetch("/api/meta")
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return response.json() as Promise<Meta>;
-      })
-      .then((meta) => {
-        state.value = { kind: "ready", meta };
-      })
-      .catch(() => {
-        state.value = { kind: "failed" };
-      });
-  }, [state]);
-
-  const current = state.value;
+    if (!me.value) route("/sign-in", true);
+  }, [route]);
+  if (!me.value) return null;
   return (
-    <main class="page">
-      <h1 class="title">
-        {current.kind === "ready" && current.meta.orgName ? current.meta.orgName : "Artifacts"}
-      </h1>
-      {current.kind === "failed" && <p class="sub">The server isn't answering.</p>}
-      {current.kind === "ready" && !current.meta.orgName && (
-        <p class="sub">This deployment isn't set up yet.</p>
-      )}
-      {current.kind === "ready" && <p class="sub">Server version {current.meta.version}</p>}
+    <main class="screen">
+      <h1 class="h1">{meta.value?.orgName}</h1>
+      <p class="sub">Signed in as {me.value.name}.</p>
+      <button
+        type="button"
+        class="btn soft"
+        onClick={async () => {
+          await post("/api/auth/logout");
+          me.value = null;
+          route("/sign-in", true);
+        }}
+      >
+        Sign out
+      </button>
     </main>
   );
 }

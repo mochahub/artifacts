@@ -21,10 +21,8 @@ const newerThan = (a: string, b: string) => {
 
 /**
  * Runs before every /api route: setup mode (04), the CLI's minimum version, CSRF, then the caller.
- * The org row is cached once it exists; it's only ever created once, and its name is re-read per route when needed.
  */
 export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
-  let cached: OrgRow | null = null;
   return async (c, next) => {
     const path = c.req.path;
     if (!path.startsWith("/api/")) return next();
@@ -36,8 +34,8 @@ export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
       });
     }
 
-    cached ??= await findOrg(deps.db);
-    if (!cached) {
+    const org = await findOrg(deps.db);
+    if (!org) {
       if (!SETUP_ROUTES.has(path)) throw new ApiError("setup_mode", "This deployment isn't set up yet.");
       return next();
     }
@@ -53,8 +51,8 @@ export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
       }
     }
 
-    c.set("org", cached);
-    c.set("caller", await resolveCaller(c, deps, cached));
+    c.set("org", org);
+    c.set("caller", await resolveCaller(c, deps, org));
     return next();
   };
 }

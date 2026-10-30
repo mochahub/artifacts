@@ -86,6 +86,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 `docker-compose.yml`: `artifacts`, `postgres:17`, `chrislusf/seaweedfs:4.50` (pinned; `weed server -s3` with an `s3.json` of keys generated into the folder, plus explicit `-master.volumeSizeLimitMB` and `-volume.max`, because weed otherwise derives the volume count from free disk and a small disk gets none; the app creates its bucket at boot if missing). `artifacts setup --docker` writes it with `.env`. Ports:
 - `8080`: the viewer
 - `8081`: content
+- `8333`: the bucket, because presigned URLs go straight to it (`S3_PUBLIC_ENDPOINT`). On a remote machine, change `S3_PUBLIC_ENDPOINT` in `.env` to an address clients can reach.
 
 Put a reverse proxy (Caddy example in the README) in front for HTTPS. Passkeys and `Secure` cookies need HTTPS, except on `localhost`.
 
