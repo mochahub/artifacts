@@ -77,7 +77,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
   2. In one transaction, creates `org` (with `home_domain` = request host), the owner, their password and a CLI token.
   3. Leaves setup mode.
 
-  It answers 409 once an owner exists.
+  It answers 409 once an owner exists, before it looks at the token, so it can't be used to test guesses; in setup mode, wrong tokens are limited to 20 per IP per hour.
 - **`POST /api/recover`:** with a valid `SETUP_TOKEN`, issues a one-hour reset link for an existing owner. It's written to activity as `recovered`.
 
 ## Device flow (`artifacts login` and `artifacts setup <url>` for teammates)
@@ -184,5 +184,6 @@ The expected result is computed from a second, deliberately simple table in the 
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
 | `POST /api/recover` | 5 per IP per hour |
+| `POST /api/setup` | 20 per IP per hour, while in setup mode |
 
 With more than one replica, limits are per replica. That's acceptable for a self-hosted deployment.
