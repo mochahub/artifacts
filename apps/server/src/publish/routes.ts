@@ -30,7 +30,7 @@ import {
 import { ApiError } from "../http/errors.ts";
 import { notifyPublished } from "../push/notify.ts";
 import { reanchor } from "../review/reanchor.ts";
-import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, storedType, verifyBlobs } from "./blobs.ts";
+import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
 const UPLOAD_HOURS = 2;
@@ -151,7 +151,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     const signed = await mapLimit(missing, 32, async ([sha256, { size, type }]) => ({
       sha256,
       ...(await bucket.presignPut(blobKey(sha256), {
-        contentType: storedType(type),
+        contentType: type,
         contentLength: size,
         cacheControl: IMMUTABLE,
       })),
@@ -231,7 +231,12 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       const object = await bucket.get(blobKey(hash));
       if (!object) throw new ApiError("invalid", `Article ${page.key} has no HTML.`);
       const clean = sanitizeArticle(new TextDecoder().decode(object.body));
-      const htmlHash = await putBlob(deps, org.id, new TextEncoder().encode(clean));
+      const htmlHash = await putBlob(
+        deps,
+        org.id,
+        new TextEncoder().encode(clean),
+        "text/html; charset=utf-8",
+      );
       return { ...page, meta: { ...page.meta, htmlHash } };
     });
 

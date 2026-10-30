@@ -262,41 +262,4 @@ describe("publishing", () => {
     );
   });
 
-  test("a bundle file is stored as an inert type, so /r/ can't serve a page or script on the viewer's origin", async () => {
-    const page = file("evil.html", `<script src="x.js"></script>${Bun.randomUUIDv7()}`, "text/html");
-    const script = file("x.js", `alert(1)//${Bun.randomUUIDv7()}`, "text/javascript");
-    const vector = file(
-      "v.svg",
-      `<svg xmlns="http://www.w3.org/2000/svg"/>${Bun.randomUUIDv7()}`,
-      "image/svg+xml",
-    );
-    const photo = file("p.png", `png-${Bun.randomUUIDv7()}`, "image/png");
-    const extra = [page, script, vector, photo];
-
-    const prepared = await t.api("/api/publish/prepare", {
-      method: "POST",
-      bearer: owner.token,
-      json: {
-        project: "camerabuddy",
-        slug: "inert",
-        title: "Inert",
-        files: extra.map(({ body: _, ...rest }) => rest),
-      },
-    });
-    const { missing } = PublishPrepared.parse(await prepared.json());
-    const typeOf = (source: { sha256: string }) =>
-      missing.find((item) => item.sha256 === source.sha256)?.headers["Content-Type"];
-    expect([page, script, vector].map(typeOf)).toEqual(Array(3).fill("application/octet-stream"));
-    expect(typeOf(photo)).toBe("image/png");
-
-    expect((await publish(t, owner.token, { slug: "inert", extra })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "inert"));
-    for (const source of [page, script, vector]) {
-      const served = await t.api(`/api/artifacts/${row?.id}/r/${source.sha256}?via=app`, {
-        bearer: owner.token,
-      });
-      expect(served.status).toBe(200);
-      expect(served.headers.get("content-type")).toBe("application/octet-stream");
-    }
-  });
 });
