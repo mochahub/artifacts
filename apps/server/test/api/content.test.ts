@@ -39,6 +39,7 @@ describe("the content host", () => {
     expect(response.headers.get("content-type")).toBe("text/html");
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     const csp = response.headers.get("content-security-policy") as string;
     expect(csp).toContain("default-src http://content.test");

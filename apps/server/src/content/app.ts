@@ -62,29 +62,31 @@ export function createContentApp(deps: Deps) {
   const blobs = new BlobCache();
   const checks = new Map<string, { ok: boolean; at: number }>();
 
-  const csp = env.contentUrl
-    ? (() => {
-        const self = env.contentUrl;
-        const store = bucketOrigin(env.s3);
-        const viewers = env.viewerOrigins.join(" ");
-        return [
-          `default-src ${self}`,
-          `script-src ${self} 'unsafe-inline'`,
-          `style-src ${self} 'unsafe-inline'`,
-          `font-src ${self}`,
-          `img-src ${self} data: blob: ${store}`,
-          `media-src ${self} blob: ${store}`,
-          `connect-src ${self}`,
-          `frame-ancestors ${viewers}`,
-          "base-uri 'none'",
-          "form-action 'none'",
-          "sandbox allow-scripts",
-        ].join("; ");
-      })()
-    : "";
+  const cspFor = (origins: string[]) =>
+    env.contentUrl
+      ? (() => {
+          const self = env.contentUrl;
+          const store = bucketOrigin(env.s3);
+          const viewers = origins.join(" ");
+          return [
+            `default-src ${self}`,
+            `script-src ${self} 'unsafe-inline'`,
+            `style-src ${self} 'unsafe-inline'`,
+            `font-src ${self}`,
+            `img-src ${self} data: blob: ${store}`,
+            `media-src ${self} blob: ${store}`,
+            `connect-src ${self}`,
+            `frame-ancestors ${viewers}`,
+            "base-uri 'none'",
+            "form-action 'none'",
+            "sandbox allow-scripts",
+          ].join("; ");
+        })()
+      : "";
 
   app.use(async (c, next) => {
     await next();
+    const csp = cspFor(await deps.origins()); // Includes the home domain, which isn't in the environment.
     c.header("Access-Control-Allow-Origin", "*");
     if (csp) c.header("Content-Security-Policy", csp);
     c.header("Referrer-Policy", "no-referrer");
@@ -154,7 +156,8 @@ export function createContentApp(deps: Deps) {
     }
     return c.body(body as Uint8Array<ArrayBuffer>, 200, {
       "Content-Type": file.type,
-      "Cache-Control": "private, max-age=300",
+      // No caching: a frame must not keep reading files after its access ends (04).
+      "Cache-Control": "no-store",
     });
   }
 

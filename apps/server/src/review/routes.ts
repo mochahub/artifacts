@@ -5,7 +5,7 @@ import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { activity, blocks, comments, decisions, frames, threads, versions } from "../db/schema.ts";
+import { activity, artifacts, blocks, comments, decisions, frames, threads, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
 import { blobKey } from "../publish/blobs.ts";
@@ -42,6 +42,13 @@ function authorOf(caller: Caller, artifactId: string, agent: string | null | und
   }
   throw new ApiError("forbidden", "You can't comment.");
 }
+
+const commenterId = (caller: Caller) =>
+  caller.kind === "person" || caller.kind === "cliToken"
+    ? caller.person.id
+    : caller.kind === "guest"
+      ? caller.guestId
+      : caller.kind;
 
 const authorView = (row: { authorGuestId: string | null; authorName: string; agent?: string | null }) => ({
   name: row.agent ?? row.authorName,
@@ -164,7 +171,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     const caller = c.get("caller");
     const artifactId = c.req.param("id") as string;
     const orgId = c.get("org").id;
-    limits.hit(`comment:${JSON.stringify(caller)}`, 30, MINUTE);
+    limits.hit(`comment:${commenterId(caller)}`, 30, MINUTE);
 
     const [version] = await db
       .select({ id: versions.id })
@@ -211,10 +218,12 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     const row = await db.transaction(async (tx) => {
       // Thread numbers are per artifact, and never reused.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifactId}, 1))`);
-      const [{ next } = { next: 1 }] = await tx
-        .select({ next: sql<number>`coalesce(max(${threads.n}), 0) + 1` })
-        .from(threads)
-        .where(eq(threads.artifactId, artifactId));
+      const [counted] = await tx
+        .update(artifacts)
+        .set({ threadCounter: sql`${artifacts.threadCounter} + 1` })
+        .where(eq(artifacts.id, artifactId))
+        .returning({ next: artifacts.threadCounter });
+      const next = counted?.next ?? 1;
       const [thread] = await tx
         .insert(threads)
         .values({
@@ -281,7 +290,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
       const body = await parseBody(c, CreateComment);
       const caller = c.get("caller");
       const thread = await threadParam(c as ApiContext);
-      limits.hit(`comment:${JSON.stringify(caller)}`, 30, MINUTE);
+      limits.hit(`comment:${commenterId(caller)}`, 30, MINUTE);
       const resource = await findArtifact(deps, thread.orgId, thread.artifactId);
       if (!resource) throw new ApiError("not_found", "Not found.");
       const mayFix =
@@ -289,6 +298,10 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
       if (body.marksFixed && !mayFix)
         throw new ApiError("forbidden", "Only an agent or the publisher marks a thread fixed.");
 
+      // Leaving "resolved" is for people, with Reopen (03).
+      if (body.marksFixed && thread.status === "resolved") {
+        throw new ApiError("conflict", "That thread is resolved. A person has to reopen it.");
+      }
       const author = authorOf(caller, thread.artifactId, body.agent);
       const latest = resource.row.latestVersion;
       const [fixer] = await db

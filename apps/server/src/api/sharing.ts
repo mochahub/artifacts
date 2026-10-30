@@ -221,6 +221,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       !row ||
       row.link.revokedAt ||
       row.artifact.deletedAt ||
+      !c.get("org").settings.linkSharing ||
       (row.link.expiresAt && row.link.expiresAt <= clock.now())
     ) {
       throw new ApiError("gone", "This link no longer works.");

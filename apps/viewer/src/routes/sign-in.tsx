@@ -9,7 +9,7 @@ import { me, meta } from "../session.ts";
 
 /** Only same-site paths, so a crafted link can't send someone elsewhere after signing in. */
 export function safeNext(value: string | undefined) {
-  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+  return value?.startsWith("/") && !value.startsWith("//") && !value.includes("\\") ? value : "/";
 }
 
 export function SignIn() {

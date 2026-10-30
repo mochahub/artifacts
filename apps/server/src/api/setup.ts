@@ -57,7 +57,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.post("/api/recover", { public: true }, async (c) => {
-    deps.limits.hit("recover", 5, HOUR);
+    deps.limits.hit(`recover:${deps.clientIp(c)}`, 5, HOUR);
     const body = await parseBody(c, RecoverRequest);
     if (!safeEqual(body.setupToken, env.setupToken))
       throw new ApiError("forbidden", "That setup token is wrong.");

@@ -237,6 +237,13 @@ describe("sharing", () => {
     });
     expect(refused.status).toBe(403);
     await t.api("/api/org", { method: "PATCH", cookie: owner, json: { settings: { linkSharing: true } } });
+    const { url } = await link("view");
+    const cookie = await guestOn(url);
+    await t.api("/api/org", { method: "PATCH", cookie: owner, json: { settings: { linkSharing: false } } });
+    expect((await t.api(`/api/artifacts/${id}`, { cookie })).status).toBe(404);
+    expect((await t.api(`/api/s/${secretOf(url)}`)).status).toBe(410);
+    await t.api("/api/org", { method: "PATCH", cookie: owner, json: { settings: { linkSharing: true } } });
+    expect((await t.api(`/api/artifacts/${id}`, { cookie })).status).toBe(200);
   });
 
   test("archived: sharing is read-only", async () => {

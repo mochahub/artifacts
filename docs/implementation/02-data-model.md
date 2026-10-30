@@ -163,6 +163,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `publisher_id` | uuid FK people | Who first published it. Owns it for archive, delete, share and data export. |
 | `latest_version` | int | Highest live version number. |
 | `has_backend` | bool | True if the latest version has a backend. |
+| `thread_counter` | int | The last thread number used. Numbers are never reused, even after a thread's only comment is deleted. |
 | `archived_at`, `archived_by` | timestamptz, uuid null | Archived = read-only (SPEC §5.5). |
 | `deleted_at`, `deleted_by`, `purge_after` | timestamptz, uuid null, timestamptz | In Recently deleted while set; `purge_after` = `deleted_at` + 30 days. |
 | `created_at`, `updated_at` | timestamptz | |

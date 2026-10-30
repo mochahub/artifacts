@@ -38,7 +38,8 @@ export function authRoutes(
       )
       .limit(1);
     const ok = await Bun.password.verify(password, row?.hash ?? (await dummyHash));
-    return ok && row ? row.person : null;
+    // No password row means no password can be right, whatever the dummy hash says.
+    return ok && row?.hash ? row.person : null;
   }
 
   routes.post("/api/auth/password", { public: true }, async (c) => {

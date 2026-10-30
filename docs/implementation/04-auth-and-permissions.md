@@ -183,6 +183,6 @@ The expected result is computed from a second, deliberately simple table in the 
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
-| `POST /api/recover` | 5 per hour |
+| `POST /api/recover` | 5 per IP per hour |
 
 With more than one replica, limits are per replica. That's acceptable for a self-hosted deployment.

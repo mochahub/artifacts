@@ -148,6 +148,19 @@ describe("the review API", () => {
     expect((await t.api("/api/threads/not-a-thread/resolve", { method: "POST", cookie })).status).toBe(404);
   });
 
+  test("a token can't take a thread out of resolved", async () => {
+    const one = await made();
+    await t.api(`/api/threads/${one.id}/resolve`, { method: "POST", cookie });
+    const refused = await reply(one.id, { body: "Done", marksFixed: true }, { bearer: token });
+    expect(refused.status).toBe(409);
+  });
+
+  test("a thread's number is never reused, even after its only comment is deleted", async () => {
+    const one = await made();
+    await t.api(`/api/comments/${one.comments[0]?.id}`, { method: "DELETE", bearer: token });
+    expect((await made()).n).toBe(one.n + 1);
+  });
+
   test("you edit or delete only your own comment, for 24 hours", async () => {
     const one = await made();
     const commentId = one.comments[0]?.id as string;

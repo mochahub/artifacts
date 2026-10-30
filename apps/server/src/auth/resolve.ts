@@ -2,7 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Deps } from "../api/deps.ts";
-import type { OrgRow } from "../db/index.ts";
+import { findOrg, type OrgRow } from "../db/index.ts";
 import { guestLinks, guests, people, sessions, shareLinks, tokens } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import type { Caller, GuestLink } from "./caller.ts";
@@ -94,6 +94,7 @@ async function byGuest(deps: Deps, org: OrgRow, secret: string): Promise<Caller 
 /** A guest's current links. The content port calls this too, to re-check an open frame (04). */
 export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> {
   const now = deps.clock.now();
+  const org = await findOrg(deps.db);
   const rows = await deps.db
     .select({ row: guestLinks, link: shareLinks })
     .from(guestLinks)
@@ -105,7 +106,11 @@ export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> 
     permission: link.permission,
     name: row.name,
     // Checked on every request, so revoking a link ends access at once (02).
-    active: !link.revokedAt && (!link.expiresAt || link.expiresAt > now) && row.expiresAt > now,
+    active:
+      org?.settings.linkSharing === true &&
+      !link.revokedAt &&
+      (!link.expiresAt || link.expiresAt > now) &&
+      row.expiresAt > now,
   }));
   return { kind: "guest", guestId, links };
 }

@@ -201,6 +201,7 @@ export const artifacts = pgTable(
       .references(() => people.id),
     latestVersion: integer("latest_version").notNull().default(0),
     hasBackend: boolean("has_backend").notNull().default(false),
+    threadCounter: integer("thread_counter").notNull().default(0),
     archivedAt: time("archived_at"),
     archivedBy: uuid("archived_by").references(() => people.id),
     deletedAt: time("deleted_at"),

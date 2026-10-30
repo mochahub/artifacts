@@ -26,6 +26,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 
 - **M5 (2026-10-30):** the automated round trip passes with the real CLI and fixture: a person comments and requests changes; `status` and `comments --open --json` show it, with a crop that downloads; the agent edits and publishes, and `threadsOnChanged` names the thread; `reply --fixed`; a token can't resolve, a person can. Re-anchoring has unit tests for frames, blocks, moved quotes, repeated quotes and the threshold. Renaming a commented frame stops the publish. Skill install writes both folders under a sandboxed home.
 
+- **M6 (2026-10-30):** full permission matrix, 328 tests, every one of 70 routes reached. Passkeys: a software authenticator covers registration, sign-in, re-auth, Related Origin Requests, and refuses no user verification, foreign origins, the content host, replayed and expired challenges; a Chromium virtual authenticator covers the real browser flow. WebKit e2e covers invites, guests, revocation and settings.
+- **M6 independent review (subagent, 2026-10-30):** 15 findings, all fixed with tests. The worst: passkey-only accounts accepted the dummy password in the source.
+
 ## Decisions to review
 
 1. **M2, Docker image before M8.** `setup --docker` needs an image that can't be pushed yet, so `apps/server/Dockerfile` came forward from M8 and `--image`/`ARTIFACTS_IMAGE` overrides the default `ghcr.io/mochahub/artifacts:<version>`. To change: nothing needed once images are released.
@@ -54,6 +57,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 20. **M6, "Copy" on a pending invite makes a new link.** 06 says copy "the link again", but 02 stores only a hash, so it can't be shown again. Copying rotates it and the old link stops. Share links work the same way: shown once, revoked by row.
 21. **M6, the Share sheet has no "Nothing" option.** Links are many per artifact, so "nothing" means no live links; each has a Revoke.
 22. **M6, an admin can't reset an owner's password.** Otherwise an admin could take over an owner account. Owners use `artifacts recover`.
+
+23. **M6 review, turning link sharing off stops existing links** at once, and turning it back on restores them. SPEC only says admins can turn it off. To change: remove the check in `liveLink` and `guestCaller`.
+24. **M6 review, an admin's token can invite only members and reviewers,** and can't issue a reset link for an admin or itself; otherwise a token could mint itself a browser session, which 04 forbids. The viewer has no such limit.
 
 ## Needs you
 

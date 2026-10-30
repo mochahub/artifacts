@@ -25,8 +25,16 @@ export class RateLimits {
     return kept;
   }
 
+  /** Keys only shrink when hit again, so random ones would otherwise pile up forever. */
+  private sweep(now: number) {
+    if (this.hits.size < 50_000) return;
+    for (const [key, times] of this.hits) if ((times.at(-1) ?? 0) < now - 2 * HOUR) this.hits.delete(key);
+    if (this.hits.size >= 50_000) this.hits.clear();
+  }
+
   /** Counts one attempt; throws 429 past `limit` in `windowMs`. */
   hit(key: string, limit: number, windowMs: number) {
+    this.sweep(this.clock.now().getTime());
     const kept = this.recent(this.hits, key, windowMs);
     const now = this.clock.now().getTime();
     if (kept.length >= limit) throw limited((kept[0] as number) + windowMs - now);

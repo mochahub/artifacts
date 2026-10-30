@@ -56,6 +56,8 @@ export class Routes {
     this.list.push({ method: method.toUpperCase(), path, guard });
     const guarded: Handler<ApiVars> = async (c, next) => {
       if ("action" in guard && !guard.inHandler) {
+        // Before the resource: an unknown id and a real one must look the same to nobody (03).
+        if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
         const resource: Resource = guard.resource ? await guard.resource(c) : { type: "org" };
         const caller = c.get("caller");
         if (guard.recentAuth && caller.kind === "person" && !caller.recentAuth) {
