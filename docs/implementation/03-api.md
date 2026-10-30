@@ -148,7 +148,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | Method, path | Action | Notes |
 |---|---|---|
 | `POST /api/artifacts/:id/archive` / `unarchive` | `artifact.archive` | |
-| `POST /api/artifacts/:id/delete` | `artifact.delete` | Moves to Recently deleted; ends share links; `{ purgeAfter }`. |
+| `POST /api/artifacts/:id/delete` | `artifact.delete` | Moves to Recently deleted; share links stop while it's there and work again if it's restored; `{ purgeAfter }`. |
 | `POST /api/artifacts/:id/undelete` | `artifact.delete` | |
 | `DELETE /api/artifacts/:id` | `artifact.purge` (a person, recent auth) | Purge now. Only from Recently deleted. |
 | `GET /api/deleted` | `deleted.read` | Recently deleted artifacts and versions the caller deleted (admins: all). `[{ kind, artifact, version?, deletedBy, deletedAt, purgeAfter }]` |

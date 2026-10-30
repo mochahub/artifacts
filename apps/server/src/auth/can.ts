@@ -181,8 +181,9 @@ function canOnOrg(caller: Caller, action: Action): boolean {
     case "account.read":
       return person !== null;
     case "account.manage":
-    case "deleted.read":
       return session;
+    case "deleted.read":
+      return session || (caller.kind === "cliToken" && caller.scopes.includes("manage"));
     case "home.read":
     case "project.list":
     case "project.read":

@@ -1,8 +1,18 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, ChevronRight, CircleCheck, FileText, History, Images, Share } from "lucide-preact";
+import {
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  Ellipsis,
+  FileText,
+  History,
+  Images,
+  Share,
+} from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { AgentMark, StatusWord } from "../components/cards.tsx";
+import { ArchivedBanner, ArtifactMenu } from "../components/manage.tsx";
 import { DecideSheet } from "../components/review.tsx";
 import { ShareSheet } from "../components/share.tsx";
 import { VersionSheet } from "../components/sheets.tsx";
@@ -23,6 +33,7 @@ function Detail() {
   const { data, error } = remote;
   useSignInOn401(error.value?.status);
   const sharing = useSignal(false);
+  const menu = useSignal(false);
   const history = useSignal(false);
   const deciding = useSignal(false);
 
@@ -57,6 +68,16 @@ function Detail() {
         <button
           type="button"
           class="round"
+          aria-label="More"
+          onClick={() => {
+            menu.value = true;
+          }}
+        >
+          <Ellipsis />
+        </button>
+        <button
+          type="button"
+          class="round"
           aria-label="Version history"
           onClick={() => {
             history.value = true;
@@ -65,6 +86,7 @@ function Detail() {
           <History />
         </button>
       </div>
+      <ArchivedBanner artifact={artifact} onChanged={() => remote.refresh()} />
       <h1 class="h1">{artifact.title}</h1>
       <div class="row ss">
         {artifact.agent && <AgentMark agent={artifact.agent} small />}
@@ -123,6 +145,23 @@ function Detail() {
           </button>
         )}
       </div>
+      {menu.value && (
+        <ArtifactMenu
+          artifact={artifact}
+          onClose={() => {
+            menu.value = false;
+          }}
+          onChanged={() => remote.refresh()}
+          onShare={() => {
+            menu.value = false;
+            sharing.value = true;
+          }}
+          onHistory={() => {
+            menu.value = false;
+            history.value = true;
+          }}
+        />
+      )}
       {sharing.value && (
         <ShareSheet
           artifact={artifact}

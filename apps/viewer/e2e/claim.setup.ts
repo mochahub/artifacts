@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { OWNER, SETUP_TOKEN, signIn, watchErrors } from "./helpers.ts";
 import { seedFixture } from "./seed.ts";
@@ -22,7 +23,9 @@ test("claim the server and publish the fixture for the rest of the run", async (
     data: { setupToken: SETUP_TOKEN, orgName: "Mochahub", clientName: "e2e", ...OWNER },
   });
   expect(response.status()).toBe(200);
-  seedFixture("http://localhost:18080", (await response.json()).token);
+  const { token } = await response.json();
+  writeFileSync("e2e/.token", token);
+  seedFixture(token);
 });
 
 test("home: a new version is waiting, before anyone has looked at it", async ({ page }) => {

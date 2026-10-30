@@ -7,7 +7,7 @@ import type { Logger } from "../log.ts";
 const digest = (value: string) => createHash("sha256").update(value).digest();
 
 /** Operators' job triggers; jobs register here from M7 on (05, "Clean-up"). */
-export function createInternalApp(env: Env, log: Logger, jobs: Record<string, () => Promise<void>> = {}) {
+export function createInternalApp(env: Env, log: Logger, jobs: Record<string, () => Promise<unknown>> = {}) {
   const app = createApp(log);
   const expected = digest(`Bearer ${env.opsSecret}`);
 
@@ -17,8 +17,7 @@ export function createInternalApp(env: Env, log: Logger, jobs: Record<string, ()
     }
     const job = Object.hasOwn(jobs, c.req.param("name")) ? jobs[c.req.param("name")] : undefined;
     if (!job) throw new ApiError("not_found", "No such job.");
-    await job();
-    return c.json({ ok: true });
+    return c.json({ ok: true, result: (await job()) ?? null });
   });
 
   return app;
