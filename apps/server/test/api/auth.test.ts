@@ -149,6 +149,28 @@ describe("signing in", () => {
     expect((await t.api("/api/me", { cookie })).status).toBe(200);
   });
 
+  test("CSRF: only a Bearer token skips the Origin check, not any Authorization header", async () => {
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    const raw = (headers: Record<string, string>) =>
+      fetch(`http://127.0.0.1:${t.server.ports.viewer}/api/auth/logout`, {
+        method: "POST",
+        headers: { Host: "viewer.test", Cookie: cookie, ...headers },
+      });
+    // The server would still read the cookie here, so the header can't be a way round the check.
+    expect(await error(await raw({ Authorization: "Basic eDp4" }))).toBe("csrf");
+    expect(await error(await raw({ Authorization: "bearer lowercase", Origin: "http://evil.test" }))).toBe(
+      "csrf",
+    );
+    expect((await t.api("/api/me", { cookie })).status).toBe(200);
+    // A real token needs no Origin: it carries no cookie, so it reaches the route (which wants a browser).
+    const bearer = await fetch(`http://127.0.0.1:${t.server.ports.viewer}/api/auth/reauth`, {
+      method: "POST",
+      headers: { Host: "viewer.test", Authorization: `Bearer ${owner.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ password: OWNER.password }),
+    });
+    expect(await error(bearer)).toBe("forbidden");
+  });
+
   test("CSRF: a browser on another site can't sign someone in", async () => {
     const response = await t.api("/api/auth/password", {
       method: "POST",
