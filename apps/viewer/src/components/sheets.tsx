@@ -2,7 +2,7 @@ import type { Artifact, VersionRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check, FileText, Images, X } from "lucide-preact";
 import type { ComponentChildren } from "preact";
-import { useLayoutEffect } from "preact/hooks";
+import { useLayoutEffect, useRef } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
 import { agentShort, ago } from "../format.ts";
@@ -19,6 +19,7 @@ export function Sheet({
   children: ComponentChildren;
   extra?: ComponentChildren;
 }) {
+  const dialog = useRef<HTMLDivElement>(null);
   // As the sheet appears, not a frame later, so a quick Escape still closes it.
   useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -27,10 +28,20 @@ export function Sheet({
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   }, [onClose]);
+  // Focus goes into the sheet, unless something inside already took it, and back to what opened it.
+  useLayoutEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    if (dialog.current && !dialog.current.contains(document.activeElement)) {
+      dialog.current.focus({ preventScroll: true });
+    }
+    return () => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, []);
   return (
     <>
       <div class="dim" onClick={onClose} aria-hidden="true" />
-      <div class="sheet" role="dialog" aria-label={title}>
+      <div class="sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialog}>
         <div class="grabber" />
         <div class="shead">
           <div class="t">{title}</div>
