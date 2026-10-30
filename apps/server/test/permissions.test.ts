@@ -35,6 +35,18 @@ const orgToken = (projectIds: string[]): Caller => ({
   projectIds,
 });
 
+const cliToken = (
+  id: string,
+  role: "admin" | "reviewer" | "outside" | "member",
+  scopes: string[],
+): Caller => ({
+  kind: "cliToken",
+  tokenId: "t",
+  agent: null,
+  scopes,
+  person: { id, name: "x", email: "x@example.com", role },
+});
+
 type Name = keyof typeof CALLERS;
 const CALLERS = {
   owner: person(OTHER, "owner"),
@@ -55,8 +67,13 @@ const CALLERS = {
     scopes: CLI_SCOPES,
     person: { id: PUBLISHER, name: "x", email: "x@example.com", role: "member" },
   },
+  "cliToken (admin, not the publisher)": cliToken(OTHER, "admin", CLI_SCOPES),
+  "cliToken (reviewer)": cliToken(OTHER, "reviewer", CLI_SCOPES),
+  "cliToken (outside, added)": cliToken(OUTSIDE_ADDED, "outside", CLI_SCOPES),
+  "cliToken (publisher, read only)": cliToken(PUBLISHER, "member", ["read"]),
   "orgToken (allowed project)": orgToken([PROJECT]),
   "orgToken (other project)": orgToken([OTHER_PROJECT]),
+  "orgToken (no read scope)": { ...orgToken([PROJECT]), scopes: ALL_SCOPES.filter((s) => s !== "read") },
   anonymous: { kind: "anonymous" },
 } satisfies Record<string, Caller>;
 
@@ -82,10 +99,14 @@ const GUESTS_OK: Name[] = ["guest (view link)", "guest (comment link)"];
 /** Who sees the artifact, ignoring deletion: the "Visibility first" table. */
 function sees(name: Name, visibility: "me" | "org"): boolean {
   if (name === "member (publisher)" || name === "cliToken (publisher)") return true;
+  if (name === "cliToken (publisher, read only)" || name === "cliToken (admin, not the publisher)")
+    return true;
   if (ADMINS.includes(name) || name === "member (added with publish)" || name === "outside (added)")
     return true;
+  if (name === "cliToken (outside, added)") return true;
   if (GUESTS_OK.includes(name) || name === "guest (comment link)") return true;
-  if (name === "member (other)" || name === "reviewer") return visibility === "org";
+  if (name === "member (other)" || name === "reviewer" || name === "cliToken (reviewer)")
+    return visibility === "org";
   if (name === "orgToken (allowed project)") return visibility === "org";
   return false;
 }
@@ -101,6 +122,9 @@ const commenters: Name[] = [
   "outside (added)",
   "guest (comment link)",
   "cliToken (publisher)",
+  "cliToken (admin, not the publisher)",
+  "cliToken (reviewer)",
+  "cliToken (outside, added)",
 ];
 const people: Name[] = [
   "owner",
@@ -117,37 +141,45 @@ const publishers: Name[] = [
   "member (publisher)",
   "member (added with publish)",
   "cliToken (publisher)",
+  "cliToken (admin, not the publisher)",
   "orgToken (allowed project)",
 ];
+// A token manages only as the publisher (04), so an admin's token doesn't, whatever the admin may do.
 const managers: Name[] = ["owner", "admin", "member (publisher)", "cliToken (publisher)"];
+// The one place an admin's token acts as the admin on others' artifacts: "people or cliToken with data".
+const exporters: Name[] = [...managers, "cliToken (admin, not the publisher)"];
+const tokenAdmins: Name[] = ["cliToken (admin, not the publisher)"];
 
 function expected(name: Name, action: Action, visibility: "me" | "org", lifecycle: Lifecycle): boolean {
   const seen = sees(name, visibility);
   const live = lifecycle !== "deleted";
   const unarchived = lifecycle === "active";
   const anyPerson = !name.startsWith("guest") && name !== "anonymous" && !name.startsWith("orgToken");
+  const readOnly = name === "cliToken (publisher, read only)";
   switch (action) {
     case "home.read":
     case "project.list":
     case "project.read":
-      return anyPerson || name.startsWith("orgToken");
+      return anyPerson || (name.startsWith("orgToken") && name !== "orgToken (no read scope)");
     case "account.read":
       return anyPerson;
     case "account.manage":
-      return anyPerson && name !== "cliToken (publisher)";
+      return anyPerson && !name.startsWith("cliToken");
     case "deleted.read":
-      return anyPerson;
+      return anyPerson && !readOnly; // A token needs manage: agents can undelete, so they must find what they deleted.
     case "project.create":
+      // Members and up. A token also needs publish (cli) or org (org token); reviewers and outside people never.
       return (
         ["owner", "admin", "member (publisher)", "member (added with publish)", "member (other)"].includes(
           name,
         ) ||
-        name.startsWith("cliToken") ||
+        ["cliToken (publisher)", "cliToken (admin, not the publisher)"].includes(name) ||
         name.startsWith("orgToken")
       );
     case "artifact.read":
-    case "data.read":
       return live && seen;
+    case "data.read":
+      return live && seen && !readOnly; // A token needs the data scope.
     case "artifact.comment":
     case "data.write":
       return unarchived && seen && commenters.includes(name);
@@ -165,15 +197,16 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "artifact.purge":
       return ["owner", "admin", "member (publisher)"].includes(name);
     case "data.export":
-      return live && seen && managers.includes(name);
+      return live && seen && exporters.includes(name);
     case "org.read":
     case "people.read":
+      return ADMINS.includes(name) || tokenAdmins.includes(name);
     case "org.manage":
     case "people.manage":
     case "tokens.manage":
-      return ADMINS.includes(name);
+      return ADMINS.includes(name); // People only.
     case "people.invite":
-      return ADMINS.includes(name);
+      return ADMINS.includes(name) || tokenAdmins.includes(name);
   }
 }
 
