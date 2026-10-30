@@ -36,7 +36,7 @@ Precedence when several are present: Bearer token, then session cookie, then gue
 ## Passwords
 
 - argon2id with `Bun.password.hash(password, { algorithm: "argon2id" })`. Bun's defaults are 64 MiB of memory and 2 passes.
-- At least 12 characters and at most 256. No other composition rules.
+- At least 12 characters and at most 256. No other composition rules. At sign-in and re-authentication a longer password is refused as wrong without being hashed or counted against the account.
 - Rate limits, kept in memory per process:
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
@@ -185,5 +185,7 @@ The expected result is computed from a second, deliberately simple table in the 
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
 | `POST /api/recover` | 5 per IP per hour |
 | `POST /api/setup` | 20 per IP per hour, while in setup mode |
+
+Each map holds at most 50,000 keys; past that, expired keys go first and then the oldest tenth, so random addresses can't grow memory without bound or wipe every limit at once.
 
 With more than one replica, limits are per replica. That's acceptable for a self-hosted deployment.
