@@ -25,6 +25,8 @@ export async function publish(
     visibility?: "me" | "org";
     extra?: ReturnType<typeof file>[];
     tamper?: string;
+    renderBytes?: Uint8Array;
+    frameKey?: string;
   } = {},
 ) {
   const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame"), visibility } = options;
@@ -33,7 +35,14 @@ export async function publish(
     "__articles/plan.html",
     '<p data-block="intro/p1" onclick="x()">Hello<script>1</script></p>',
   );
-  const render = file("__renders/a.webp", `render-${frameHash}`, "image/webp");
+  const render = options.renderBytes
+    ? {
+        ...file("__renders/a.webp", "", "image/webp"),
+        body: options.renderBytes as unknown as string,
+        sha256: createHash("sha256").update(options.renderBytes).digest("hex"),
+        size: options.renderBytes.length,
+      }
+    : file("__renders/a.webp", `render-${frameHash}`, "image/webp");
   const files = [...(options.files ?? [page, article, render]), ...(options.extra ?? [])];
   const prepared = await t.api("/api/publish/prepare", {
     method: "POST",
@@ -79,7 +88,7 @@ export async function publish(
         {
           pageKey: "mocks",
           boardKey: "main",
-          frameKey: "live-view",
+          frameKey: options.frameKey ?? "live-view",
           title: "Live view",
           device: "iphone",
           x: 0,

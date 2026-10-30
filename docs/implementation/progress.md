@@ -10,8 +10,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M1 Foundations | `m1-foundations` | `9de1ffc` | green (run 41045711327) |
 | M2 Sign-in and CLI skeleton | `m2-sign-in` | `e6b5af8` | green (run 41048009618) |
 | M3 Publishing | `m3-publishing` | `ae1a852` | green (run 41050356260) |
-| M4 Viewer | `m4-viewer` | in progress | |
-| M5–M11 | not started | | |
+| M4 Viewer | `m4-viewer` | `530c18a` | green (run 41052782581) |
+| M5 Review loop | `m5-review` | in progress | |
+| M6–M11 | not started | | |
 
 ## Verified
 
