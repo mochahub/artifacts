@@ -147,7 +147,10 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect((await cli(["upgrade", "--server", "--to", "../../x"], e)).code).toBe(2);
     expect(calls()).toBe(before);
 
-    const insecure = await cli(["upgrade"], { ...e, ARTIFACTS_LATEST_URL: "http://releases.example.com/latest" });
+    const insecure = await cli(["upgrade"], {
+      ...e,
+      ARTIFACTS_LATEST_URL: "http://releases.example.com/latest",
+    });
     expect(insecure.code).toBe(1);
     expect(insecure.stderr).toContain("isn't https");
   });
@@ -157,8 +160,12 @@ describe("checksums", () => {
   test("a file name has to match whole, not just at its end", () => {
     const sums = `${"a".repeat(64)}  evil-artifacts-linux-x64\n${"b".repeat(64)}  artifacts-linux-x64\n`;
     expect(checksumFor(sums, "artifacts-linux-x64")).toBe("b".repeat(64));
-    expect(checksumFor(`${"a".repeat(64)}  evil-artifacts-linux-x64\n`, "artifacts-linux-x64")).toBeUndefined();
-    expect(checksumFor(`${"c".repeat(64)} *artifacts-linux-x64\n`, "artifacts-linux-x64")).toBe("c".repeat(64));
+    expect(
+      checksumFor(`${"a".repeat(64)}  evil-artifacts-linux-x64\n`, "artifacts-linux-x64"),
+    ).toBeUndefined();
+    expect(checksumFor(`${"c".repeat(64)} *artifacts-linux-x64\n`, "artifacts-linux-x64")).toBe(
+      "c".repeat(64),
+    );
   });
 });
 

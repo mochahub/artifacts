@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -8,7 +9,6 @@ import {
   watch,
   writeFileSync,
 } from "node:fs";
-import { randomBytes } from "node:crypto";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { isDataKey } from "@artifacts/schema";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";

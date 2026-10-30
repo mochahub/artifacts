@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { artifactRef } from "../src/commands/review.ts";
 import { capOutput } from "../src/commands/mcp.ts";
+import { artifactRef } from "../src/commands/review.ts";
 import { saveServer } from "../src/config.ts";
 import { UsageError } from "../src/output.ts";
 import { cli, sandbox } from "./sandbox.ts";
@@ -57,7 +57,9 @@ describe("the server list", () => {
       const railway = { projectId: "p", service: "artifacts" };
       saveServer({ url: "https://art.example.com", name: "artifacts", railway });
       saveServer({ url: "https://art.example.com", name: "art.example.com" });
-      const [server] = JSON.parse(readFileSync(join(box.env.XDG_CONFIG_HOME as string, "artifacts/config.json"), "utf8")).servers;
+      const [server] = JSON.parse(
+        readFileSync(join(box.env.XDG_CONFIG_HOME as string, "artifacts/config.json"), "utf8"),
+      ).servers;
       expect(server).toMatchObject({ name: "artifacts", railway, default: true });
     } finally {
       delete process.env.XDG_CONFIG_HOME;

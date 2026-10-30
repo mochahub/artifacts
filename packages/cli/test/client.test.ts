@@ -18,9 +18,13 @@ describe("the API client", () => {
     fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === "/redirect") {
-        return new Response(null, { status: 302, headers: { Location: `http://127.0.0.1:${elsewhere.port}/` } });
+        return new Response(null, {
+          status: 302,
+          headers: { Location: `http://127.0.0.1:${elsewhere.port}/` },
+        });
       }
-      if (path === "/html") return new Response("<html><body>Bad gateway, see /secret/path</body></html>", { status: 502 });
+      if (path === "/html")
+        return new Response("<html><body>Bad gateway, see /secret/path</body></html>", { status: 502 });
       if (path === "/stall") return new Promise<Response>(() => {});
       return Response.json({ ok: true });
     },

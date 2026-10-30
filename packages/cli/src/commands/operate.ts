@@ -50,7 +50,8 @@ async function latestVersion(): Promise<string> {
   if (!response.ok) throw new CliError(`Couldn't read the latest release (${response.status}).`);
   const { tag_name: tag } = (await response.json()) as { tag_name: string };
   const version = String(tag).replace(/^v/, "");
-  if (!VERSION_NUMBER.test(version)) throw new CliError(`The latest release is called "${tag}", which isn't a version.`);
+  if (!VERSION_NUMBER.test(version))
+    throw new CliError(`The latest release is called "${tag}", which isn't a version.`);
   return version;
 }
 
