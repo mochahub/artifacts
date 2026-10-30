@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { sha256 } from "../../src/auth/secrets.ts";
 import { artifacts, tokens } from "../../src/db/schema.ts";
+import { isPushEndpoint } from "../../src/push/notify.ts";
 import { Events } from "../../src/realtime/events.ts";
-import { claim, createDatabase, startTestServer } from "../helpers.ts";
+import { claim, createDatabase, OWNER, signIn, startTestServer } from "../helpers.ts";
 import { publish } from "../publish-helper.ts";
 
 /** A TCP proxy to Postgres that can be cut, for an outage long enough that the driver gives up. */
@@ -99,7 +100,58 @@ describe("the event listener", () => {
   }, 15_000);
 });
 
+describe("push endpoints", () => {
+  test("only the real push services over https, never a private address", () => {
+    for (const good of [
+      "https://fcm.googleapis.com/fcm/send/abc",
+      "https://web.push.apple.com/abc",
+      "https://updates.push.services.mozilla.com/wpush/v2/abc",
+      "https://par02p.notify.windows.com/?token=abc",
+    ]) {
+      expect(isPushEndpoint(good)).toBe(true);
+    }
+    for (const bad of [
+      "http://fcm.googleapis.com/fcm/send/abc",
+      "https://fcm.googleapis.com:8443/x",
+      "https://fcm.googleapis.com.evil.test/x",
+      "https://evilfcm.googleapis.com/x",
+      "https://fcm.googleapis.com@127.0.0.1/x",
+      "https://127.0.0.1/x",
+      "https://[::1]/x",
+      "https://localhost/x",
+      "https://10.0.0.5/x",
+      "https://169.254.169.254/latest/meta-data",
+      "https://metadata.google.internal/x",
+      "https://web.push.apple.com.internal/x",
+      "ftp://fcm.googleapis.com/x",
+    ]) {
+      expect(isPushEndpoint(bad)).toBe(false);
+    }
+  });
+});
+
 describe("live streams", () => {
+  test("a push subscription needs a browser's real keys", async () => {
+    const t = await startTestServer();
+    try {
+      await claim(t);
+      const cookie = await signIn(t, OWNER.email, OWNER.password);
+      const subscribe = (keys: { p256dh: string; auth: string }) =>
+        t.api("/api/push/subscribe", {
+          method: "POST",
+          cookie,
+          json: { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys },
+        });
+      expect((await subscribe({ p256dh: "AAAA", auth: "AAAA" })).status).toBe(400);
+      const point = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url");
+      expect(
+        (await subscribe({ p256dh: point, auth: Buffer.alloc(16, 2).toString("base64url") })).status,
+      ).toBe(200);
+    } finally {
+      await t.stop();
+    }
+  });
+
   test("an org token's ten streams are its own, not every org token's", async () => {
     const t = await startTestServer();
     try {
