@@ -15,6 +15,7 @@ import { type Env, EnvError } from "./env.ts";
 import { createApp } from "./http/app.ts";
 import { apiGuards } from "./http/guards.ts";
 import { requireViewerHost, serveViewer, viewerHeaders } from "./http/viewer.ts";
+import { wellKnownWebauthn } from "./http/well-known.ts";
 import { createInternalApp } from "./internal/app.ts";
 import type { Logger } from "./log.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
@@ -104,6 +105,7 @@ export async function startServer(env: Env, options: StartOptions) {
     });
   }
   metaRoutes(viewer, env, db);
+  viewer.get("/.well-known/webauthn", wellKnownWebauthn(deps));
   const routes = new Routes(viewer);
   mountApi(routes, deps);
   viewer.all("/api/*", (c) => c.notFound());

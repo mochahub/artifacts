@@ -84,6 +84,7 @@ export const RecoverResponse = z.object({ resetUrl: z.string() });
 // Sign-in and account
 export const PasswordSignIn = z.object({ email: Email, password: z.string() });
 export const PersonResponse = z.object({ person: Person });
+export const PasskeyOptions = z.object({ local: z.boolean().optional() });
 export const PasskeyVerify = z.object({ challengeId: Id, response: z.unknown() });
 export const Me = z.object({ person: Person, org: z.object({ name: z.string() }), recentAuth: z.boolean() });
 export const SessionRow = z.object({
