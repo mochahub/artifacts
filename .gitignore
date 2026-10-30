@@ -13,3 +13,7 @@ playwright-report/
 docs/review/comments.json
 apps/viewer/e2e/.auth.json
 apps/viewer/e2e/.token
+
+# Keys and certificates
+*.pem
+*.key
