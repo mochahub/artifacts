@@ -245,6 +245,16 @@ describe("the backend sandbox", () => {
     await t.server.db.update(org).set({ settings });
   });
 
+  test("query strings are read as the URL standard reads them, so a backend sees what the client sent", async () => {
+    const { call } = await deploy(`export default { fetch(request) {
+      const q = new URL(request.url).searchParams;
+      return Response.json({ token: q.get("token"), bad: q.get("bad"), good: q.get("good"), all: q.getAll("a"), n: [...q].length });
+    } };`);
+    // "=" inside a value, a lone "%", empty parts, and "+" and escapes together.
+    const response = await call("x?token=abc==&bad=100%&&a=1&a=2&good=a%2Bb+c");
+    expect(await response.json()).toEqual({ token: "abc==", bad: "100%", good: "a+b c", all: ["1", "2"], n: 5 });
+  });
+
   test("an answer the browser can't be sent is a 502, not an unhandled error", async () => {
     for (const answer of [
       `new Response("x", { status: 99 })`,
