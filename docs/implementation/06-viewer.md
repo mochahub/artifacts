@@ -42,6 +42,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/` | Review home (01·1; desktop 04·3) |
 | `/projects` | Projects (01·2) |
 | `/activity` | Activity (05·5) |
+| `/search` | Search: artifacts, pages and comments (also ⌘K) |
 | `/:project` | A project: search, sort, filter tabs All / Your turn / Approved / Archived (01·3, 07·4) |
 | `/:project/:artifact` | The artifact and its pages (01·4) |
 | `/:project/:artifact/:page` | A page: canvas (02) or article (03); `?v=5` pins a version; `#frame=live-view`; `?c=<thread n>` opens a thread |
@@ -60,7 +61,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/settings/tokens` | Org tokens (admins) |
 | `/settings/org` | Org name, default visibility, link sharing, limits |
 
-**Reserved project slugs**, refused by the schema: `api`, `s`, `t`, `join`, `reset`, `device`, `sign-in`, `settings`, `projects`, `activity`, `setup`, `assets`, `internal`, `well-known`, `favicon.ico`, `manifest.webmanifest`, `sw.js`.
+**Reserved project slugs**, refused by the schema: `api`, `s`, `t`, `join`, `reset`, `device`, `sign-in`, `settings`, `projects`, `activity`, `search`, `setup`, `assets`, `internal`, `well-known`, `favicon.ico`, `manifest.webmanifest`, `sw.js`. A page id of `compare` is refused too, because `/:project/:artifact/compare` is the compare screen.
 
 In setup mode, every route renders the "Almost ready" page (06·1).
 
@@ -191,7 +192,7 @@ See [08-micro-apps.md](08-micro-apps.md#try-it). Phase 2.
 - **Phase 2 realtime:** an open artifact uses `GET /api/events` (SSE) and refreshes on each event. With a stream open, its fast polls drop to one a minute as a safety net.
 - **Service worker** (Phase 2, with the install prompt):
   - caches the app shell, plus renders and article HTML of versions you've opened (cache-first, since they're immutable). Renders are fetched with `?via=app`, because a bucket's answer can't be read without CORS. Video and audio aren't kept.
-  - fetches API calls network-first, with the last response kept for offline reading. Search, sessions and sign-in answers are never kept.
+  - fetches API calls network-first, with the last response kept for offline reading. Search, sessions, sign-in answers, and anything that lists other people (people, tokens, invites, who an artifact is shared with, its saved data and files) are never kept.
   - keeps at most 1,500 files and 300 API answers, oldest out first
   - forgets everything but the app when the artifact or the session says this device has no access (401, 403, 404, 410), and at sign-out. A revoked device keeps its copies only until it next reaches the server.
   - handles Web Push

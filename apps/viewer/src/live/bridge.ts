@@ -94,8 +94,10 @@ export function startBridge({ iframe, artifactId, canWrite, onUse }: Options) {
   }
 
   const onMessage = async (event: MessageEvent) => {
-    // The source check is what matters: an opaque frame's origin is just "null" (08).
-    if (event.source !== iframe.contentWindow || event.data?.artifacts !== 1) return;
+    // The source check is what matters: an opaque frame's origin is just "null" (08). A message from a
+    // window that has since closed has no source, and a detached iframe has no contentWindow: null
+    // equals null, so that case is refused outright.
+    if (!event.source || event.source !== iframe.contentWindow || event.data?.artifacts !== 1) return;
     const target = event.source as Window;
     const parsed = BridgeRequest.safeParse(event.data);
     if (!parsed.success) {

@@ -42,9 +42,7 @@ const SVG_ATTRIBUTES = [
   "dy",
   "d",
   "points",
-  "fill",
   "fillOpacity",
-  "stroke",
   "strokeWidth",
   "strokeOpacity",
   "strokeDasharray",
@@ -68,6 +66,13 @@ const SVG_ATTRIBUTES = [
 ];
 
 const INTERNAL_URL = /^url\(#[\w-]+\)$/;
+// A paint is a colour word, a hex or rgb()/hsl() colour, or a reference to something in the same SVG
+// (computed styles quote it: `url("#a")`).
+// An allowlist, because CSS escapes (`\75rl(`) get past any test for "url(".
+const PAINT =
+  /^(?:none|currentColor|transparent|[a-zA-Z]{3,20}|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\([\d\s.,%/]{1,60}\)|url\((?:"#[\w-]+"|#[\w-]+)\))$/;
+// Images are bundle files only: a relative or protocol-relative `src` would load from the viewer's own origin.
+const BLOB_SRC = /^artifacts:blob\/[\w-]{1,128}$/;
 
 /**
  * The article allowlist (05). The CLI uses it to build articles and the server re-applies it at
@@ -86,7 +91,7 @@ export const ARTICLE_SCHEMA: Options = {
     ...defaultSchema.attributes,
     "*": ["id", "ariaHidden", "dataBlock", "dataVerdict", "dataCallout", "dataFrameRef"],
     a: ["href", "title"],
-    img: ["src", "alt", "title", "width", "height"],
+    img: [["src", BLOB_SRC], "alt", "title", "width", "height"],
     code: [["className", /^language-[\w-]+$/]],
     th: ["align", "colSpan", "rowSpan"],
     td: ["align", "colSpan", "rowSpan"],
@@ -94,7 +99,13 @@ export const ARTICLE_SCHEMA: Options = {
     ...Object.fromEntries(
       SVG_TAGS.map((tag) => [
         tag,
-        [...SVG_ATTRIBUTES, ["markerEnd", INTERNAL_URL], ["markerStart", INTERNAL_URL]],
+        [
+          ...SVG_ATTRIBUTES,
+          ["fill", PAINT],
+          ["stroke", PAINT],
+          ["markerEnd", INTERNAL_URL],
+          ["markerStart", INTERNAL_URL],
+        ],
       ]),
     ),
   },
