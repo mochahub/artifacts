@@ -35,6 +35,13 @@ import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, storedType, verifyBl
 const UPLOAD_INFO = "upload";
 const UPLOAD_HOURS = 2;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
+/** `type/subtype`, then optional parameters, in printable ASCII only: it becomes a response header (03). */
+const MEDIA_TYPE = /^[A-Za-z0-9][\w.+-]*\/[\w.+-]+(;[\x20-\x7e]*)?$/;
+const checkType = (path: string, type: string) => {
+  if (type.length > 200 || !MEDIA_TYPE.test(type)) {
+    throw new ApiError("invalid", `${path} has a content type that isn't valid.`);
+  }
+};
 
 /** Everything commit needs from prepare, signed, so a half-finished publish leaves nothing in Postgres. */
 type UploadTicket = {
@@ -132,6 +139,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
 
     const declared = new Map<string, { size: number; type: string }>();
     for (const file of body.files) {
+      checkType(file.path, file.type);
       if (file.size > MAX_FILE_BYTES) {
         throw new ApiError("too_large", `${file.path} is too big.`, { limit: MAX_FILE_BYTES });
       }
@@ -184,7 +192,10 @@ export function publishRoutes(routes: Routes, deps: Deps) {
 
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();
-    for (const file of Object.values(body.files)) wanted.set(file.hash, file.size);
+    for (const [path, file] of Object.entries(body.files)) {
+      checkType(path, file.type);
+      wanted.set(file.hash, file.size);
+    }
     const paths = new Set(Object.keys(body.files));
     for (const frame of body.frames) {
       for (const hash of Object.values(frame.renders)) if (!wanted.has(hash)) wanted.set(hash, null);
