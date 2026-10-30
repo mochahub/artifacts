@@ -193,6 +193,11 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   await expect(page.locator(".article")).toHaveAttribute("style", /--ui/);
   await shot(page, info.project.name, "03-6-settings");
 
+  // Images above the target change the layout as they load, so settle first.
+  await page
+    .locator(".article figure img")
+    .first()
+    .evaluate((img: HTMLImageElement) => img.decode());
   await page.getByRole("button", { name: "Contents" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Phase 2" }).click();
   await expect(page.locator('[data-block="phase-2"]')).toBeInViewport();

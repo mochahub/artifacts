@@ -12,7 +12,7 @@ apps/
 packages/
   schema/           zod: manifest.ts, api.ts, messages.ts; exported types
   cli/              src/{commands/, railway/, docker/, publish/, render/, lint/, dev/, credentials/}, test/
-  kit/              src/{frames/, tokens.css, article.css, data.ts, backend.ts}; built to dist/ and vendored by `artifacts init`
+  kit/              src/{frames/, tokens.css, article.css, data.js, backend.js}: plain JavaScript and CSS, vendored as they are by `artifacts init`
 skill/              SKILL.md, references/
 deploy/
   railway/          README.md, template notes

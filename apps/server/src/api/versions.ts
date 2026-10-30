@@ -147,6 +147,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
                 contentHash: frame.contentHash,
                 renders: frame.renders,
                 live: frame.livePath !== null,
+                livePath: frame.livePath,
                 changed: previous !== undefined && old !== frame.contentHash,
               };
             }),

@@ -53,3 +53,12 @@ export function publishCopy(slug: string, token: string, twice = false) {
     publish();
   }
 }
+
+/** Another fixture from the repo, under a slug of its own. */
+export function publishFixture(name: string, slug: string, token: string) {
+  const dir = mkdtempSync(join(tmpdir(), "artifacts-e2e-"));
+  cpSync(join(import.meta.dirname, "../../../fixtures", name), dir, { recursive: true });
+  const manifest = join(dir, "artifact.json");
+  writeFileSync(manifest, readFileSync(manifest, "utf8").replace(/"slug": "[^"]+"/, `"slug": "${slug}"`));
+  execFileSync("bun", [cli, "publish", "--json"], { cwd: dir, env: envFor(dir, token), stdio: "pipe" });
+}

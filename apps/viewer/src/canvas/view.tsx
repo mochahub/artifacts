@@ -1,6 +1,7 @@
 import type { Artifact, CanvasFrame, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Images, List, Menu, MessageCircle, Move } from "lucide-preact";
+import { createPortal } from "preact/compat";
 import { useEffect, useRef } from "preact/hooks";
 import {
   CommentSheet,
@@ -11,6 +12,7 @@ import {
 } from "../components/review.tsx";
 import { Sheet } from "../components/sheets.tsx";
 import { renderUrl } from "../format.ts";
+import { LiveFrame, savedNotice } from "../live/frame.tsx";
 import type { Remote } from "../poll.ts";
 import { type Board, CanvasEngine, type Pin } from "./engine.ts";
 
@@ -26,6 +28,47 @@ type Props = {
   onVersions(): void;
 };
 
+/** Lays the live page over the frame's picture, and puts the picture back on Done (08). */
+function TryIt({
+  artifact,
+  frame,
+  version,
+  engine,
+}: {
+  artifact: Artifact;
+  frame: CanvasFrame;
+  version: number;
+  engine: CanvasEngine | null;
+}) {
+  const scope = useSignal<"shared" | "me" | null>(null);
+  const host = useSignal<HTMLElement | null>(null);
+  useEffect(() => {
+    host.value = engine?.liveHost(frame.key) ?? null;
+    return () => engine?.closeLive(frame.key);
+  }, [engine, frame.key, host]);
+  return (
+    <>
+      {scope.value && (
+        <div class="notice glass">{savedNotice(scope.value)}. Its author can see what's saved.</div>
+      )}
+      {host.value &&
+        createPortal(
+          <LiveFrame
+            artifact={artifact}
+            version={version}
+            path={frame.livePath as string}
+            width={frame.w}
+            height={frame.h}
+            onUse={(used) => {
+              scope.value = used;
+            }}
+          />,
+          host.value,
+        )}
+    </>
+  );
+}
+
 export function CanvasView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
@@ -38,6 +81,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
   const draft = useSignal<(Draft & { pin: Pin }) | null>(null);
   const openId = useSignal<string | null>(null);
   const listOpen = useSignal(false);
+  const trying = useSignal<CanvasFrame | null>(null);
   const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
   const openThread = all.find((thread) => thread.id === openId.value) ?? null;
   const canComment = artifact.permissions.comment && latest;
@@ -179,7 +223,21 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         <button type="button" class="vchip" aria-label="Version history" onClick={onVersions}>
           v{version}
         </button>
+        {frame?.live && (
+          <button
+            type="button"
+            class="btn soft fit"
+            onClick={() => {
+              trying.value = trying.value ? null : frame;
+            }}
+          >
+            {trying.value ? "Done" : "Try it"}
+          </button>
+        )}
       </div>
+      {trying.value && (
+        <TryIt artifact={artifact} frame={trying.value} version={version} engine={engine.current} />
+      )}
       <div class="vbar glass">
         <button
           type="button"

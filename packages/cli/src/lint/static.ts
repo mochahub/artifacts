@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { Manifest } from "@artifacts/schema";
 import { Parser } from "htmlparser2";
 import { crawl, typeOf } from "../bundle/crawl.ts";
@@ -58,6 +59,39 @@ export async function staticLint(root: string, manifest: Manifest) {
         seen.set(key, board.src);
       }
     }
+  }
+
+  // data/api: state belongs in the kit's store, where reviewers' copies stay apart (07).
+  const usesKitData = [...files.keys()].some((path) => path.endsWith("artifacts-kit/data.js"));
+  for (const [path, absolute] of files) {
+    if (!/\.(html?|m?js)$/i.test(path) || path.includes("artifacts-kit/")) continue;
+    const source = readFileSync(absolute, "utf8");
+    const banned = /\b(localStorage|sessionStorage|indexedDB|document\.cookie)\b/.exec(source)?.[1];
+    if (banned) {
+      problems.push({
+        rule: "data/api",
+        severity: "error",
+        file: path,
+        message: `${path} uses ${banned}. Use the kit's data API.`,
+      });
+    }
+    const external = /\bfetch\(\s*["'`](https?:|\/\/|\/)[^"'`]*/.exec(source);
+    if (external) {
+      problems.push({
+        rule: "data/api",
+        severity: "error",
+        file: path,
+        message: `${path} calls ${external[0].slice(6)}. Only relative api/ paths work.`,
+      });
+    }
+  }
+  if (usesKitData && !existsSync(join(root, "fixtures/data.json"))) {
+    problems.push({
+      rule: "data/fixtures",
+      severity: "error",
+      message:
+        "This artifact reads saved data, so add fixtures/data.json. Renders must not depend on what reviewers clicked.",
+    });
   }
 
   let total = 0;

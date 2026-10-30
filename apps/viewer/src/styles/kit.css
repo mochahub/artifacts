@@ -1347,3 +1347,41 @@
   white-space: nowrap;
   z-index: 40;
 }
+
+/* Live frames */
+.live {
+  display: block;
+  border: 0;
+  background: #fff;
+}
+.proto {
+  position: fixed;
+  inset: 0;
+  background: var(--canvas);
+}
+.stage {
+  position: absolute;
+  inset: calc(env(safe-area-inset-top) + 74px) 0 0;
+  display: flex;
+  justify-content: center;
+}
+.stage .live {
+  max-width: 480px;
+}
+.fr .live {
+  position: absolute;
+  inset: 0;
+}
+.notice {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom) + 92px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 99px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  z-index: 40;
+  color: var(--tx);
+}

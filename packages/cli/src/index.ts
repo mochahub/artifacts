@@ -2,6 +2,8 @@
 import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
+import { dataCommand } from "./commands/data.ts";
+import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
 import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
@@ -41,6 +43,8 @@ const USAGE = `artifacts ${VERSION}
   artifacts reply <n> "<text>" [--fixed]
   artifacts skill install [--claude] [--codex]
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
+  artifacts dev [--port 4321]
+  artifacts data ls | get <key> | export | clear [--scope shared|me]
   artifacts visibility org|me
   artifacts versions | versions name <n> "<label>" | diff <a> <b> | restore <n>
   artifacts archive [<project>/<slug>] [--undo]
@@ -72,6 +76,7 @@ const OPTIONS = {
   fixed: { type: "boolean" },
   all: { type: "boolean" },
   role: { type: "string" },
+  scope: { type: "string" },
   to: { type: "string" },
   undo: { type: "boolean" },
   link: { type: "boolean" },
@@ -167,6 +172,10 @@ async function main(argv: string[]) {
       const dirs = installSkill({ claude: values.claude, codex: values.codex }, out);
       return out.result({ installed: dirs }, () => {});
     }
+    case "data":
+      return dataCommand(first, positionals[2], { scope: values.scope, server: values.server }, out);
+    case "dev":
+      return devCommand({ port: values.port ? Number(values.port) : 4321 }, out);
     case "versions":
       return versionsCommand(first, positionals.slice(2), { server: values.server }, out);
     case "diff":

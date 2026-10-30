@@ -14,8 +14,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M5 Review loop | `m5-review` | `84a68ad` | green |
 | M6 People and sharing | `m6-people` | `d79e2a1` | green |
 | M7 Lifecycle | `m7-lifecycle` | `7c59d9e` | green |
-| M8 Distribution | `m8-distribution` | in progress | |
-| M9–M11 | not started | | |
+| M8 Distribution | `m8-distribution` | `9356dac` | green |
+| M9 Micro apps I | `m9-micro-apps` | in progress | |
+| M10–M11 | not started | | |
 
 ## Verified
 
@@ -83,7 +84,6 @@ Gathered as each milestone is reached. So far, from the brief:
 
 ## Known gaps
 
-- **`artifacts dev`** isn't built yet (M9, with the data folder and live frames). Phase 1 lists it.
 - **The admin "new version available" notice** isn't built.
 - **`frames/renamed`, `data/*` and `backend/*` lint rules** aren't built yet: M5 and M9–M10.
 - **The render tests** share one helper install in the temp folder and the machine's WebKit cache.
