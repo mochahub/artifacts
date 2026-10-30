@@ -40,7 +40,7 @@ Precedence when several are present: Bearer token, then session cookie, then gue
 - Rate limits, kept in memory per process:
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
-- Changing or resetting a password ends every other session of that person.
+- Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
 
 ## Passkeys (WebAuthn)
 

@@ -501,3 +501,41 @@ describe("recovery and reset", () => {
     expect(statuses.at(-1)).toBe(429);
   });
 });
+
+describe("reset links after a password is set", () => {
+  let t: TestServer;
+  beforeAll(async () => {
+    t = await startTestServer();
+    await claim(t);
+  });
+  afterAll(() => t.stop());
+
+  const recover = async () => {
+    const { resetUrl } = (await (
+      await t.api("/api/recover", { method: "POST", json: { setupToken: SETUP, email: OWNER.email } })
+    ).json()) as { resetUrl: string };
+    return (resetUrl.split("/reset/")[1] as string).trim();
+  };
+
+  test("using one link retires the person's other unused links", async () => {
+    const [first, second] = [await recover(), await recover()] as [string, string];
+    const reset = await t.api(`/api/reset/${first}`, {
+      method: "POST",
+      json: { password: "a freshly reset password" },
+    });
+    expect(reset.status).toBe(200);
+    expect((await t.api(`/api/reset/${second}`)).status).toBe(410);
+  });
+
+  test("so does changing the password while signed in", async () => {
+    const cookie = await signIn(t, OWNER.email, "a freshly reset password");
+    const pending = await recover();
+    const changed = await t.api("/api/me/password", {
+      method: "POST",
+      cookie,
+      json: { password: "yet another long password" },
+    });
+    expect(changed.status).toBe(200);
+    expect((await t.api(`/api/reset/${pending}`)).status).toBe(410);
+  });
+});

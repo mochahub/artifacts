@@ -166,6 +166,11 @@ export function authRoutes(
       .insert(passwords)
       .values({ personId, orgId, hash, updatedAt })
       .onConflictDoUpdate({ target: passwords.personId, set: { hash, updatedAt } });
+    // A new password ends the reset links still out there, or a leaked one would undo it.
+    await db
+      .update(resetLinks)
+      .set({ usedAt: updatedAt })
+      .where(and(eq(resetLinks.personId, personId), isNull(resetLinks.usedAt)));
   }
 
   async function liveReset(c: ApiContext) {
