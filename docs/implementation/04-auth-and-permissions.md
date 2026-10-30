@@ -141,7 +141,7 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `artifact.manage`, `artifact.share` | The publisher, admins, owner; cliToken with `manage` as the publisher. `share` also requires `org.settings.linkSharing` for links. Only these callers can add someone with `publish`, and only organization members can receive it. |
 | `artifact.archive`, `artifact.delete` | Same as `manage` (archive and delete are undoable) |
 | `artifact.purge` | The publisher or an admin, as a **person** with `recentAuth`. Never a token. |
-| `deleted.read` | People: their own deletions; admins: all |
+| `deleted.read` | People, and cliTokens with `manage`: their own deletions; admins: all. Agents can undelete, so they need to find what they deleted. |
 | `data.read` | Anyone with `artifact.read` (for `me`, only their own key space) |
 | `data.write` | Anyone with `artifact.comment`, on their own `me` space or `shared`. Not on archived artifacts. A backend's `env.DATA` writes follow the same rule for the caller of that request: read-only for viewers and on archived artifacts (08). |
 | `data.export` | The publisher and admins (people or cliToken with `data`) |

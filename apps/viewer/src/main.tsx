@@ -3,6 +3,8 @@ import { ErrorBoundary, LocationProvider, Route, Router } from "preact-iso";
 import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
 import { ArtifactPage } from "./routes/artifact.tsx";
+import { ComparePage } from "./routes/compare.tsx";
+import { RecentlyDeleted } from "./routes/deleted-list.tsx";
 import { Device } from "./routes/device.tsx";
 import { GuestLanding } from "./routes/guest.tsx";
 import { Home } from "./routes/home.tsx";
@@ -43,9 +45,11 @@ function App() {
           <Route path="/join/:token" component={Join} />
           <Route path="/s/:token" component={GuestLanding} />
           <Route path="/settings" component={Settings} />
+          <Route path="/settings/deleted" component={RecentlyDeleted} />
           <Route path="/settings/:section" component={Settings} />
           <Route path="/:project" component={ProjectPage} />
           <Route path="/:project/:artifact" component={ArtifactPage} />
+          <Route path="/:project/:artifact/compare" component={ComparePage} />
           <Route path="/:project/:artifact/v/:n" component={PageRoute} />
           <Route path="/:project/:artifact/v/:n/:page" component={PageRoute} />
           <Route path="/:project/:artifact/:page" component={PageRoute} />

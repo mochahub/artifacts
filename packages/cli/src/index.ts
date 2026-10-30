@@ -4,7 +4,17 @@ import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
 import { doctor } from "./commands/doctor.ts";
 import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
-import { commentsCommand, replyCommand, statusCommand } from "./commands/review.ts";
+import {
+  archiveCommand,
+  commentsCommand,
+  deleteCommand,
+  diffCommand,
+  replyCommand,
+  restoreCommand,
+  statusCommand,
+  undeleteCommand,
+  versionsCommand,
+} from "./commands/review.ts";
 import { setup } from "./commands/setup.ts";
 import { initCommand, lintCommand, openCommand, publishCommand, renderCommand } from "./commands/write.ts";
 import { normalizeUrl, pickServer } from "./config.ts";
@@ -29,6 +39,9 @@ const USAGE = `artifacts ${VERSION}
   artifacts skill install [--claude] [--codex]
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
   artifacts visibility org|me
+  artifacts versions | versions name <n> "<label>" | diff <a> <b> | restore <n>
+  artifacts archive [<project>/<slug>] [--undo]
+  artifacts delete | undelete [<project>/<slug>] [--version <n>]
   artifacts share --link [--comment] [--expires 1d|7d|30d]
   artifacts share --invite <email> [--comment|--publish]
 
@@ -56,6 +69,7 @@ const OPTIONS = {
   fixed: { type: "boolean" },
   all: { type: "boolean" },
   role: { type: "string" },
+  undo: { type: "boolean" },
   link: { type: "boolean" },
   invite: { type: "string" },
   comment: { type: "boolean" },
@@ -78,10 +92,10 @@ async function main(argv: string[]) {
   >;
   try {
     // Its number would otherwise be read as a positional.
-    const args =
-      argv[0] === "open"
-        ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
-        : argv;
+    const takesVersion = ["open", "delete", "undelete"].includes(argv[0] ?? "");
+    const args = takesVersion
+      ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
+      : argv;
     parsed = parseArgs({ args, options: OPTIONS, allowPositionals: true });
   } catch (error) {
     throw new UsageError((error as Error).message);
@@ -140,6 +154,18 @@ async function main(argv: string[]) {
       const dirs = installSkill({ claude: values.claude, codex: values.codex }, out);
       return out.result({ installed: dirs }, () => {});
     }
+    case "versions":
+      return versionsCommand(first, positionals.slice(2), { server: values.server }, out);
+    case "diff":
+      return diffCommand(first, positionals[2], { server: values.server }, out);
+    case "restore":
+      return restoreCommand(first, { server: values.server }, out);
+    case "archive":
+      return archiveCommand(first, { undo: values.undo, server: values.server }, out);
+    case "delete":
+      return deleteCommand(first, { version: optionAfter("--version"), server: values.server }, out);
+    case "undelete":
+      return undeleteCommand(first, { version: optionAfter("--version"), server: values.server }, out);
     case "org":
       return orgCommand(first, positionals[2], { role: values.role, server: values.server }, out);
     case "visibility":

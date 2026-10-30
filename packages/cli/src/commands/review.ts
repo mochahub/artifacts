@@ -171,3 +171,135 @@ export async function renamedProblems(
   }
   return problems;
 }
+
+type VersionList = {
+  n: number;
+  name: string | null;
+  message: string | null;
+  publishedBy: string;
+  agent: string | null;
+  publishedAt: string;
+  restoredFrom: number | null;
+}[];
+
+export async function versionsCommand(
+  sub: string | undefined,
+  args: (string | undefined)[],
+  flags: { server?: string },
+  out: Output,
+) {
+  const client = await signedIn(flags.server);
+  if (sub === "name") {
+    const [n, label] = args;
+    if (!n || !label) throw new UsageError('Usage: artifacts versions name <n> "<label>"');
+    const artifact = await resolveArtifact(client, undefined);
+    await client.request("PATCH", `/api/artifacts/${artifact.id}/versions/${n}`, { name: label });
+    return out.result({ n: Number(n), name: label }, () => out.say(`✓ v${n} is "${label}".`));
+  }
+  const artifact = await resolveArtifact(client, sub);
+  const list = await client.get<VersionList>(`/api/artifacts/${artifact.id}/versions`);
+  out.result(list, () => {
+    for (const version of list) {
+      const label = version.name ? ` "${version.name}"` : "";
+      out.say(
+        `v${version.n}${label}  ${version.agent ?? version.publishedBy}, ${version.publishedAt.slice(0, 10)}  ${version.message ?? ""}`,
+      );
+    }
+  });
+}
+
+export async function diffCommand(
+  a: string | undefined,
+  b: string | undefined,
+  flags: { server?: string },
+  out: Output,
+) {
+  const number = (value: string | undefined) => value?.replace(/^v/, "");
+  if (!number(a) || !number(b)) throw new UsageError("Usage: artifacts diff <a> <b>");
+  const client = await signedIn(flags.server);
+  const artifact = await resolveArtifact(client, undefined);
+  type Change = { added: string[]; removed: string[]; changed: string[] };
+  const result = await client.get<{ frames: Change; blocks: Change }>(
+    `/api/artifacts/${artifact.id}/compare?from=${number(a)}&to=${number(b)}`,
+  );
+  out.result(result, () => {
+    for (const kind of ["frames", "blocks"] as const) {
+      const change = result[kind];
+      out.say(
+        `${kind}: ${change.added.length} added, ${change.removed.length} removed, ${change.changed.length} changed`,
+      );
+      for (const key of [...change.added, ...change.removed, ...change.changed]) out.say(`  ${key}`);
+    }
+  });
+}
+
+export async function restoreCommand(n: string | undefined, flags: { server?: string }, out: Output) {
+  if (!n || !/^\d+$/.test(n)) throw new UsageError("Usage: artifacts restore <n>");
+  const client = await signedIn(flags.server);
+  const artifact = await resolveArtifact(client, undefined);
+  const result = await client.post<{ n: number }>(`/api/artifacts/${artifact.id}/versions/${n}/restore`);
+  out.result(result, () => out.say(`✓ v${n} is now v${result.n}.`));
+}
+
+export async function archiveCommand(
+  target: string | undefined,
+  flags: { undo?: boolean; server?: string },
+  out: Output,
+) {
+  const client = await signedIn(flags.server);
+  const artifact = await resolveArtifact(client, target);
+  await client.post(`/api/artifacts/${artifact.id}/${flags.undo ? "unarchive" : "archive"}`);
+  out.result({ ok: true }, () =>
+    out.say(
+      flags.undo
+        ? `✓ Unarchived ${artifact.title}.`
+        : `✓ Archived ${artifact.title}. It's read-only, and its links keep working.`,
+    ),
+  );
+}
+
+type DeletedRow = {
+  kind: string;
+  artifact: { id: string; project: string; slug: string; title: string };
+  version?: number;
+};
+
+export async function deleteCommand(
+  target: string | undefined,
+  flags: { version?: string; server?: string },
+  out: Output,
+) {
+  const client = await signedIn(flags.server);
+  const artifact = await resolveArtifact(client, target);
+  const path = flags.version
+    ? `/api/artifacts/${artifact.id}/versions/${flags.version}/delete`
+    : `/api/artifacts/${artifact.id}/delete`;
+  const { purgeAfter } = await client.post<{ purgeAfter: string }>(path);
+  const undo = `artifacts undelete ${artifact.project}/${artifact.slug}${flags.version ? ` --version ${flags.version}` : ""}`;
+  out.result({ purgeAfter, undo }, () => {
+    out.say(`✓ Moved to Recently deleted, until ${purgeAfter.slice(0, 10)}.`);
+    out.say(`  Undo: ${undo}`);
+  });
+}
+
+export async function undeleteCommand(
+  target: string | undefined,
+  flags: { version?: string; server?: string },
+  out: Output,
+) {
+  const client = await signedIn(flags.server);
+  const { project, slug } = artifactRef(target);
+  const list = await client.get<DeletedRow[]>("/api/deleted");
+  const entry = list.find(
+    (row) =>
+      row.artifact.project === project &&
+      row.artifact.slug === slug &&
+      (flags.version ? row.version === Number(flags.version) : row.kind === "artifact"),
+  );
+  if (!entry) throw new CliError(`Nothing of yours called ${project}/${slug} is in Recently deleted.`);
+  const path = flags.version
+    ? `/api/artifacts/${entry.artifact.id}/versions/${flags.version}/undelete`
+    : `/api/artifacts/${entry.artifact.id}/undelete`;
+  await client.post(path);
+  out.result({ ok: true }, () => out.say(`✓ Restored ${entry.artifact.title}.`));
+}

@@ -29,7 +29,7 @@ test("projects and a project list the fixture", async ({ page }, info) => {
   await page.getByLabel("Find in this project").fill("nope");
   await expect(page.getByText("Nothing here.")).toBeVisible();
   await page.getByLabel("Find in this project").fill("road");
-  await expect(page.locator(".tile").getByText("Camera Buddy roadmap")).toBeVisible();
+  await expect(page.locator(".tile").getByText("Camera Buddy roadmap").first()).toBeVisible();
   await shot(page, info.project.name, "01-3-project");
   expect(errors).toEqual([]);
 });

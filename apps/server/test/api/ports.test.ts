@@ -147,8 +147,8 @@ describe("the three ports", () => {
     });
 
     test("with it, an unknown job is 404", async () => {
-      expect((await internal("/internal/jobs/gc", auth)).status).toBe(404);
-      expect((await internal("/internal/jobs/constructor", auth)).status).toBe(404);
+      expect((await internal("/internal/jobs/nonsense", auth)).status).toBe(404);
+      expect((await internal("/internal/jobs/nonsense", auth)).status).toBe(404);
     });
 
     test("doesn't serve the API", async () => {

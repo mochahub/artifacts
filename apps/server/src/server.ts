@@ -17,6 +17,7 @@ import { apiGuards } from "./http/guards.ts";
 import { requireViewerHost, serveViewer, viewerHeaders } from "./http/viewer.ts";
 import { wellKnownWebauthn } from "./http/well-known.ts";
 import { createInternalApp } from "./internal/app.ts";
+import { jobsFor, startJobs } from "./jobs/index.ts";
 import type { Logger } from "./log.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
 
@@ -114,9 +115,10 @@ export async function startServer(env: Env, options: StartOptions) {
   const servers = [
     Bun.serve({ port: env.port, fetch: viewer.fetch }),
     Bun.serve({ port: env.contentPort, fetch: createContentApp(deps).fetch }),
-    Bun.serve({ port: env.internalPort, fetch: createInternalApp(env, log).fetch }),
+    Bun.serve({ port: env.internalPort, fetch: createInternalApp(env, log, jobsFor(deps)).fetch }),
   ] as const;
   const [viewerServer, contentServer, internalServer] = servers;
+  const stopJobs = startJobs(deps);
   log.info("listening", {
     port: viewerServer.port,
     contentPort: contentServer.port,
@@ -134,6 +136,7 @@ export async function startServer(env: Env, options: StartOptions) {
     bucket,
     routes: routes.list,
     async stop() {
+      stopJobs();
       await Promise.all(servers.map((server) => server.stop(true)));
       await close();
     },

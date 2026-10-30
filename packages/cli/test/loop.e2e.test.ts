@@ -162,6 +162,32 @@ describe("the review loop", () => {
     expect((await cli(["share"], agent(), dir)).code).toBe(2);
   });
 
+  test("versions, name, diff, restore, archive, delete and undelete", async () => {
+    const dir = copyFixture(camerabuddy);
+    const run = (...args: string[]) => cli(args, agent(), dir);
+    const list = JSON.parse((await run("versions", "--json")).stdout);
+    expect(list[0].n).toBe(2);
+    expect((await run("versions", "name", "1", "First draft")).code).toBe(0);
+    const diff = JSON.parse((await run("diff", "v1", "v2", "--json")).stdout);
+    expect(diff.frames.changed).toEqual(["mocks/live-view"]);
+    expect(JSON.parse((await run("restore", "1", "--json")).stdout)).toEqual({ n: 3 });
+
+    expect((await run("archive")).code).toBe(0);
+    expect((await run("publish", "-m", "x")).code).toBe(1);
+    expect((await run("archive", "--undo")).code).toBe(0);
+
+    const removed = JSON.parse((await run("delete", "--version", "2", "--json")).stdout);
+    expect(removed.undo).toBe("artifacts undelete camerabuddy/roadmap --version 2");
+    expect((await run("undelete", "camerabuddy/roadmap", "--version", "2")).code).toBe(0);
+
+    const deleted = await cli(["delete", "camerabuddy/roadmap", "--json"], agent());
+    expect(JSON.parse(deleted.stdout).purgeAfter).toBeString();
+    expect((await run("status")).code).toBe(1);
+    expect((await cli(["undelete", "camerabuddy/roadmap"], agent())).code).toBe(0);
+    expect((await run("status")).code).toBe(0);
+    expect((await cli(["undelete", "nothing/here"], agent())).code).toBe(1);
+  }, 120_000);
+
   test("skill install writes both folders, and never outside this home", async () => {
     const result = await cli(["skill", "install", "--json"], box.env);
     expect(result.code).toBe(0);

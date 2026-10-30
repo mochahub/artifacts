@@ -134,8 +134,9 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "account.read":
       return anyPerson;
     case "account.manage":
-    case "deleted.read":
       return anyPerson && name !== "cliToken (publisher)";
+    case "deleted.read":
+      return anyPerson;
     case "project.create":
       return (
         ["owner", "admin", "member (publisher)", "member (added with publish)", "member (other)"].includes(
