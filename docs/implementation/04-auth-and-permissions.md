@@ -162,7 +162,7 @@ The expected result is computed from a second, deliberately simple table in the 
 
 ## CSRF, hosts and headers
 
-- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Token-authenticated requests are exempt, since they carry no cookies.
+- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Requests with `Authorization: Bearer …` are exempt, since they carry no cookies and the server ignores cookies for them. Any other `Authorization` header gets no exemption.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
   - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`
