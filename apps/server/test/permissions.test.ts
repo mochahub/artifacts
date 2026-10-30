@@ -243,6 +243,15 @@ describe("rules the matrix can't express", () => {
     expect(can(CALLERS.admin, "artifact.delete", gone)).toBe(true);
   });
 
+  test("someone who deleted an artifact as an admin can't purge it once they're only a member", () => {
+    const gone = artifact("org", "deleted");
+    gone.deletedBy = OTHER;
+    const formerAdmin = CALLERS["member (other)"];
+    expect(can(formerAdmin, "artifact.purge", gone)).toBe(false);
+    expect(can(formerAdmin, "artifact.delete", gone)).toBe(false);
+    expect(can(CALLERS.admin, "artifact.purge", gone)).toBe(true);
+  });
+
   test("a guest's rights stop at their own artifact", () => {
     const elsewhere = { ...live, id: "00000000-0000-7000-8000-0000000000f1" };
     expect(can(CALLERS["guest (comment link)"], "artifact.read", elsewhere)).toBe(false);
