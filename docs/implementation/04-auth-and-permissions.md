@@ -30,7 +30,7 @@ Precedence when several are present: Bearer token, then session cookie, then gue
   - **Not a grant on its own:** every content-port request re-checks that the artifact and version are live and that the caller still has access (cached at most 5 seconds; [03](03-api.md#content-host-live-previews)). Deleting an artifact, removing a person or revoking a link stops open frames within seconds.
   - **Scope:** only valid on `/t/<token>/v<v>/` for that artifact.
 - **`OPS_SECRET`**: a template-generated random string on the app only, for `/internal/jobs/*`.
-- **Backend sandboxes** hold no secrets: they run in child processes with an empty environment, and their `env.DATA` calls are scoped by the app to the request in flight ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
+- **Backend sandboxes** hold no secrets: they run in child processes with no secrets in their environment (just `BUN_BE_BUN=1`), and their `env.DATA` calls are scoped by the app to the request in flight ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
 - **Rotating `SESSION_SECRET`** signs everyone out and invalidates open content tokens, and nothing else. Caller pseudonyms use `org.pseudonym_key` (02).
 
 ## Passwords
@@ -165,7 +165,7 @@ The expected result is computed from a second, deliberately simple table in the 
 - **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Requests with `Authorization: Bearer …` are exempt, since they carry no cookies and the server ignores cookies for them. Any other `Authorization` header gets no exemption.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
-  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'`
+  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; media-src 'self' <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'` (`frame-src` is sent only when `CONTENT_URL` is set)
   - `Strict-Transport-Security: max-age=31536000`
   - `X-Frame-Options: DENY`
   - `Cross-Origin-Opener-Policy: same-origin`
@@ -189,6 +189,9 @@ The expected result is computed from a second, deliberately simple table in the 
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
 | `POST /api/recover` | 5 per IP per hour |
 | `POST /api/setup` | 20 per IP per hour, while in setup mode |
+| Search (`GET /api/search`) | 60 per caller per minute |
+| Compare (`GET /api/artifacts/:id/compare`) | 30 per caller per minute, for diffs not yet made |
+| Event streams (`GET /api/events`) | 10 open per caller |
 
 Each map holds at most 50,000 keys; past that, expired keys go first and then the oldest tenth, so random addresses can't grow memory without bound or wipe every limit at once.
 

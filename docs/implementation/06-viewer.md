@@ -46,7 +46,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/:project` | A project: search, sort, filter tabs All / Your turn / Approved / Archived (01·3, 07·4) |
 | `/:project/:artifact` | The artifact and its pages (01·4) |
 | `/:project/:artifact/:page` | A page: canvas (02) or article (03); `?v=5` pins a version; `#frame=live-view`; `?c=<thread n>` opens a thread |
-| `/:project/:artifact/v/:n` | Same as above, pinned to version n (SPEC §5.1 links) |
+| `/:project/:artifact/v/:n` and `/:project/:artifact/v/:n/:page` | Same as above, pinned to version n (SPEC §5.1 links) |
 | `/:project/:artifact/compare?from=4&to=5` | Compare (02·6) |
 | `/s/:token` | Share link landing: name entry, then the artifact (05·2) |
 | `/join/:token` | Accept an invite (06·6) |
@@ -55,6 +55,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/sign-in` | Sign in (06·2) |
 | `/settings` | Settings index |
 | `/settings/sign-in` | Passkeys, password, sessions (06·3) |
+| `/settings/notifications` | Web Push on this device |
 | `/settings/people` | People and invites (06·4, 06·5, 06·8) |
 | `/settings/domains` | Domains, read-only (06·9) |
 | `/settings/deleted` | Recently deleted (07·3) |

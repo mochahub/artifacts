@@ -40,7 +40,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | Command | Does |
 |---|---|
 | `artifacts setup` | Interactive: Railway (recommended), Docker, or an existing server. Railway path below. |
-| `artifacts setup --docker [--dir <path>] [--image <ref>] [--port <n>]` | Writes `docker-compose.yml` and `.env` (generated `SETUP_TOKEN`, `SESSION_SECRET`, `OPS_SECRET`, SeaweedFS keys) and `s3.json` into the folder, runs `docker compose up -d`, waits for `/api/health`, then claims. `--image` (or `ARTIFACTS_IMAGE`) replaces `ghcr.io/mochahub/artifacts:<cli version>`. `--port n` uses n for the viewer, n+1 for content and n+253 for the bucket. |
+| `artifacts setup --docker [--dir <path>] [--image <ref>] [--port <n>]` | Writes `docker-compose.yml` and `.env` (generated `SETUP_TOKEN`, `SESSION_SECRET`, `OPS_SECRET`, SeaweedFS keys) and `s3.json` into the folder, runs `docker compose up -d`, waits for `/api/health`, then claims. `--image` (or `ARTIFACTS_IMAGE`) replaces `ghcr.io/mochahub/artifacts:<cli version>`. `--port n` uses n for the viewer, n+1 for content and n+253 for the bucket. `--org`, `--name` and `--email` answer the questions about the organization and the owner, and `--no-skill` skips installing the skill (see "No prompts" above). |
 | `artifacts setup <url>` | If `GET /api/health` says `setupMode`: read the token (Railway CLI, if this server is in config) or ask for it, then claim. Otherwise sign in with the device flow. Then offer to install the skill. |
 | `artifacts recover <url>` | Asks for `SETUP_TOKEN` and an owner's email; prints a one-hour reset link (`POST /api/recover`). |
 | `artifacts login [<url>]`, `logout`, `whoami` | Device flow; remove the token; show person, role and server. |
@@ -128,7 +128,7 @@ Each rule has an id, a severity, and a message saying what's wrong and how to fi
 | `files/absolute` | error | No absolute paths or URLs to other hosts (fonts, CDNs). |
 | `files/outside` | error | No paths outside the manifest folder, and no symlinks that lead out of it (the crawl resolves links, so a cloned repo can't publish `~/.ssh` through one). |
 | `frames/ids` | error | Every frame has a unique `data-frame`; ids match `[a-z0-9-]+`. |
-| `frames/renamed` | warning, or error if it has open comments | A frame or block id that existed in the latest published version is missing; suggests the likely rename by pixel similarity. |
+| `frames/renamed` | warning, or error if it has open comments | A frame or block id that existed in the latest published version is missing. Says what is gone and stops the publish when comments would be orphaned. It doesn't guess the rename. |
 | `frames/overlap` | error | Interactive elements that overlap other interactive elements in a frame (bounding boxes, after layout). |
 | `frames/clipped` | error | Text whose `scrollWidth > clientWidth` with `overflow: hidden`, or that is ellipsized when the author didn't set `text-overflow`. |
 | `frames/home-indicator` | error | Text or controls under the iPhone home indicator area (bottom 34 pt) or the status bar. |
