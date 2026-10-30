@@ -66,7 +66,7 @@ function classify(reference: string): "skip" | "absolute" | "relative" {
 }
 
 /** A stray `%` ("100%.png") isn't valid percent-encoding; it stays as written and fails as a missing file. */
-const cleanUrl = (url: string) => {
+export const cleanUrl = (url: string) => {
   const bare = url.trim().split(/[?#]/)[0] as string;
   try {
     return decodeURI(bare);
