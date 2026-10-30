@@ -15,6 +15,7 @@ import { renderUrl } from "../format.ts";
 import { LiveFrame, savedNotice } from "../live/frame.tsx";
 import type { Remote } from "../poll.ts";
 import { type Board, CanvasEngine, type Pin } from "./engine.ts";
+import { canvasCommand } from "./keys.ts";
 
 export type CanvasPage = { key: string; title: string | null; boards: Board[]; frames: CanvasFrame[] };
 
@@ -127,11 +128,11 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
     (window as unknown as { __canvas?: CanvasEngine }).__canvas = instance;
 
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
-      if (event.key === "0") instance.fitAll(true);
-      if (event.key === "1") instance.zoomTo(1);
-      if (event.key === "n") instance.step(1);
-      if (event.key === "p") instance.step(-1);
+      const command = canvasCommand(event);
+      if (command === "fit") instance.fitAll(true);
+      if (command === "actual") instance.zoomTo(1);
+      if (command === "next") instance.step(1);
+      if (command === "previous") instance.step(-1);
     };
     const onHash = () => {
       const key = /frame=([\w-]+)/.exec(location.hash)?.[1];
