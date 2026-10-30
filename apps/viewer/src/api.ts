@@ -37,3 +37,11 @@ export const post = <T>(path: string, json: unknown = {}) => api<T>(path, { meth
 export const del = <T>(path: string, json: unknown = {}) => api<T>(path, { method: "DELETE", json });
 export const message = (failure: unknown) =>
   failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+
+/**
+ * Whether a failure means this address has nothing for you, as opposed to a bad moment (429, 5xx, a 503
+ * while the server restarts). Only the first replaces a screen that is already showing something: the
+ * polls would otherwise swap an open canvas for "Nothing here" and lose its pan, zoom and draft.
+ */
+export const isMissing = (failure: ApiFailure | null) =>
+  failure !== null && [400, 403, 404, 410].includes(failure.status);

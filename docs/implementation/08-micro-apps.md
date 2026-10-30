@@ -48,7 +48,7 @@ type Res = { artifacts: 1, id: string, ok: true, result: unknown }
 ```
 
 **Viewer rules:**
-1. **Check the sender:** accept a message only if `event.source === liveIframe.contentWindow` for the iframe it created, and `event.data.artifacts === 1`. `event.origin` is the string `"null"` for opaque origins, so the source check is what matters.
+1. **Check the sender:** accept a message only if `event.source` is set and `=== liveIframe.contentWindow` for the iframe it created (a closed sender has a null source, and a detached iframe a null window, which would otherwise match), and `event.data.artifacts === 1`. `event.origin` is the string `"null"` for opaque origins, so the source check is what matters.
 2. **Bind to the iframe:** the artifact id and version come from the iframe's own record in the viewer, never from the message.
 3. **Map to the API:** translate the op to the data API (03) with the viewer's own credentials (session or guest cookie), and post the result back to `event.source` with `targetOrigin "*"`. The data is the frame's own, so nothing leaks.
 4. **Limit:** cap in-flight requests at 8 per frame and drop the rest with `rate_limited`.
