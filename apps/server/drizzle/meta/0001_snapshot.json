@@ -1,5 +1,5 @@
 {
-  "id": "cb93b9ed-10e8-4b80-9443-5e5cfce29015",
+  "id": "9d30f45c-879d-4b5a-8595-7e9a56e9a158",
   "prevId": "2c700ff2-70db-476e-b0bb-6c0d426d0079",
   "version": "7",
   "dialect": "postgresql",
@@ -178,6 +178,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "person_id": {
           "name": "person_id",
           "type": "uuid",
@@ -213,6 +219,19 @@
           "tableTo": "artifacts",
           "columnsFrom": [
             "artifact_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "artifact_access_org_id_org_id_fk": {
+          "name": "artifact_access_org_id_org_id_fk",
+          "tableFrom": "artifact_access",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
           ],
           "columnsTo": [
             "id"
@@ -499,6 +518,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "version_id": {
           "name": "version_id",
           "type": "uuid",
@@ -532,6 +557,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "blocks_org_id_org_id_fk": {
+          "name": "blocks_org_id_org_id_fk",
+          "tableFrom": "blocks",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "blocks_version_id_versions_id_fk": {
           "name": "blocks_version_id_versions_id_fk",
           "tableFrom": "blocks",
@@ -824,6 +862,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "device_code_hash": {
           "name": "device_code_hash",
           "type": "text",
@@ -878,6 +922,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "device_codes_org_id_org_id_fk": {
+          "name": "device_codes_org_id_org_id_fk",
+          "tableFrom": "device_codes",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "device_codes_person_id_people_id_fk": {
           "name": "device_codes_person_id_people_id_fk",
           "tableFrom": "device_codes",
@@ -921,6 +978,12 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
           "notNull": true
         },
         "version_id": {
@@ -1004,6 +1067,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "frames_org_id_org_id_fk": {
+          "name": "frames_org_id_org_id_fk",
+          "tableFrom": "frames",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "frames_version_id_versions_id_fk": {
           "name": "frames_version_id_versions_id_fk",
           "tableFrom": "frames",
@@ -1040,6 +1116,12 @@
       "columns": {
         "guest_id": {
           "name": "guest_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -1085,6 +1167,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "guest_links_org_id_org_id_fk": {
+          "name": "guest_links_org_id_org_id_fk",
+          "tableFrom": "guest_links",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "guest_links_share_link_id_share_links_id_fk": {
           "name": "guest_links_share_link_id_share_links_id_fk",
           "tableFrom": "guest_links",
@@ -1123,6 +1218,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "artifact_id": {
           "name": "artifact_id",
           "type": "uuid",
@@ -1157,6 +1258,19 @@
           "tableTo": "guests",
           "columnsFrom": [
             "guest_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "guest_views_org_id_org_id_fk": {
+          "name": "guest_views_org_id_org_id_fk",
+          "tableFrom": "guest_views",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
           ],
           "columnsTo": [
             "id"
@@ -1473,6 +1587,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "version_id": {
           "name": "version_id",
           "type": "uuid",
@@ -1520,6 +1640,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "pages_org_id_org_id_fk": {
+          "name": "pages_org_id_org_id_fk",
+          "tableFrom": "pages",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "pages_version_id_versions_id_fk": {
           "name": "pages_version_id_versions_id_fk",
           "tableFrom": "pages",
@@ -1557,6 +1690,12 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
           "notNull": true
         },
         "person_id": {
@@ -1618,6 +1757,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "passkeys_org_id_org_id_fk": {
+          "name": "passkeys_org_id_org_id_fk",
+          "tableFrom": "passkeys",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "passkeys_person_id_people_id_fk": {
           "name": "passkeys_person_id_people_id_fk",
           "tableFrom": "passkeys",
@@ -1656,6 +1808,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "hash": {
           "name": "hash",
           "type": "text",
@@ -1678,6 +1836,19 @@
           "tableTo": "people",
           "columnsFrom": [
             "person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "passwords_org_id_org_id_fk": {
+          "name": "passwords_org_id_org_id_fk",
+          "tableFrom": "passwords",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
           ],
           "columnsTo": [
             "id"
@@ -1986,6 +2157,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "token_hash": {
           "name": "token_hash",
           "type": "text",
@@ -2044,6 +2221,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "sessions_org_id_org_id_fk": {
+          "name": "sessions_org_id_org_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "sessions_person_id_people_id_fk": {
           "name": "sessions_person_id_people_id_fk",
           "tableFrom": "sessions",
@@ -2808,6 +2998,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "artifact_id": {
           "name": "artifact_id",
           "type": "uuid",
@@ -2842,6 +3038,19 @@
           "tableTo": "people",
           "columnsFrom": [
             "person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "views_org_id_org_id_fk": {
+          "name": "views_org_id_org_id_fk",
+          "tableFrom": "views",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
           ],
           "columnsTo": [
             "id"
@@ -2887,6 +3096,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "challenge": {
           "name": "challenge",
           "type": "text",
@@ -2914,6 +3129,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "webauthn_challenges_org_id_org_id_fk": {
+          "name": "webauthn_challenges_org_id_org_id_fk",
+          "tableFrom": "webauthn_challenges",
+          "tableTo": "org",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "webauthn_challenges_person_id_people_id_fk": {
           "name": "webauthn_challenges_person_id_people_id_fk",
           "tableFrom": "webauthn_challenges",
