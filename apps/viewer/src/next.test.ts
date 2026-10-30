@@ -2,14 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { safeNext } from "./next.ts";
 
 describe("where sign-in sends you next", () => {
-  test.each([
-    "/",
-    "/camerabuddy/roadmap/plan",
-    "/camerabuddy/roadmap/plan?c=2",
-    "/settings/sign-in",
-  ])("follows the path %p", (value) => {
-    expect(safeNext(value)).toBe(value);
-  });
+  test.each(["/", "/camerabuddy/roadmap/plan", "/camerabuddy/roadmap/plan?c=2", "/settings/sign-in"])(
+    "follows the path %p",
+    (value) => {
+      expect(safeNext(value)).toBe(value);
+    },
+  );
 
   test.each([
     undefined,

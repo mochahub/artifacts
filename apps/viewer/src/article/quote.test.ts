@@ -18,14 +18,18 @@ describe("finding a quoted passage", () => {
   });
 
   test("finds a passage across a non-breaking space", () => {
-    const text = "Pairs in under a minute";
-    expect(cut(text, findQuote(text, { exact: "Pairs in under" }))).toBe("Pairs in under");
+    const nbsp = String.fromCharCode(160);
+    const text = `Pairs${nbsp}in under a minute`;
+    expect(cut(text, findQuote(text, { exact: "Pairs in under" }))).toBe(`Pairs${nbsp}in under`);
   });
 
   test("picks the occurrence whose surroundings match", () => {
     const text = "Done. It works. Then more. It works. Last.";
     const second = findQuote(text, { exact: "It works.", prefix: "Then more. ", suffix: " Last." });
-    expect(second).toEqual([text.lastIndexOf("It works."), text.lastIndexOf("It works.") + "It works.".length]);
+    expect(second).toEqual([
+      text.lastIndexOf("It works."),
+      text.lastIndexOf("It works.") + "It works.".length,
+    ]);
     const first = findQuote(text, { exact: "It works.", prefix: "Done. ", suffix: " Then more." });
     expect(first?.[0]).toBe(text.indexOf("It works."));
   });

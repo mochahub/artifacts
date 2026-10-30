@@ -38,7 +38,11 @@ describe("ago", () => {
 
   test("adds the year when it isn't this one", () => {
     expect(ago(iso(at(10, 21, 9, 0, 2025)), now)).toBe(
-      at(10, 21, 9, 0, 2025).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+      at(10, 21, 9, 0, 2025).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
     );
   });
 

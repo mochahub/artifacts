@@ -76,7 +76,17 @@ describe("hostile markup", () => {
         '<base href="//evil.test/"><meta http-equiv="refresh" content="0;url=//evil.test">' +
         '<form action="//evil.test"><input name="x"></form><iframe srcdoc="<script>1</script>"></iframe>',
     );
-    for (const bad of ["<use", "<set", "foreignObject", "<base", "<meta", "<form", "<iframe", "srcdoc", "action"]) {
+    for (const bad of [
+      "<use",
+      "<set",
+      "foreignObject",
+      "<base",
+      "<meta",
+      "<form",
+      "<iframe",
+      "srcdoc",
+      "action",
+    ]) {
       expect(clean).not.toContain(bad);
     }
   });
