@@ -36,11 +36,11 @@ Precedence when several are present: Bearer token, then session cookie, then gue
 ## Passwords
 
 - argon2id with `Bun.password.hash(password, { algorithm: "argon2id" })`. Bun's defaults are 64 MiB of memory and 2 passes.
-- At least 12 characters and at most 256. No other composition rules.
+- At least 12 characters and at most 256. No other composition rules. At sign-in and re-authentication a longer password is refused as wrong without being hashed or counted against the account.
 - Rate limits, kept in memory per process:
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
-- Changing or resetting a password ends every other session of that person.
+- Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
 
 ## Passkeys (WebAuthn)
 
@@ -77,7 +77,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
   2. In one transaction, creates `org` (with `home_domain` = request host), the owner, their password and a CLI token.
   3. Leaves setup mode.
 
-  It answers 409 once an owner exists.
+  It answers 409 once an owner exists, before it looks at the token, so it can't be used to test guesses; in setup mode, wrong tokens are limited to 20 per IP per hour.
 - **`POST /api/recover`:** with a valid `SETUP_TOKEN`, issues a one-hour reset link for an existing owner. It's written to activity as `recovered`.
 
 ## Device flow (`artifacts login` and `artifacts setup <url>` for teammates)
@@ -100,7 +100,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 
 - **CLI tokens** from the device flow or setup get `publish comment read manage data`.
 - **Org tokens:** the admin picks scopes and projects.
-- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6).
+- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner or itself. Those come from the viewer.
 
 ## The permission function
 
@@ -162,7 +162,7 @@ The expected result is computed from a second, deliberately simple table in the 
 
 ## CSRF, hosts and headers
 
-- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Token-authenticated requests are exempt, since they carry no cookies.
+- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Requests with `Authorization: Bearer …` are exempt, since they carry no cookies and the server ignores cookies for them. Any other `Authorization` header gets no exemption.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
   - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`
@@ -179,10 +179,15 @@ The expected result is computed from a second, deliberately simple table in the 
 | Password sign-in | Per account and per IP, above |
 | `POST /api/device/start` | 10 per IP per hour |
 | `POST /api/device/poll` | 1 per `interval` per code |
+| Looking up, approving or denying a device code (`/api/device/:userCode…`) | 30 per signed-in person per 15 minutes |
 | `POST /api/s/:token/guest` | 20 per IP per hour |
+| `POST /api/auth/passkey/options` | 60 per IP per 15 minutes (each call stores a challenge for 5 minutes) |
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
 | `POST /api/recover` | 5 per IP per hour |
+| `POST /api/setup` | 20 per IP per hour, while in setup mode |
+
+Each map holds at most 50,000 keys; past that, expired keys go first and then the oldest tenth, so random addresses can't grow memory without bound or wipe every limit at once.
 
 With more than one replica, limits are per replica. That's acceptable for a self-hosted deployment.

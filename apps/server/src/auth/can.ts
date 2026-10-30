@@ -134,7 +134,10 @@ function canOnArtifact(caller: Caller, action: Action, artifact: ArtifactResourc
     // Invisible to everyone, except that its deleter and admins can bring it back or purge it (04).
     const mine = person !== null && (isAdmin(person) || artifact.deletedBy === person.id);
     if (action === "artifact.delete") return mine && mayManage(caller, artifact);
-    if (action === "artifact.purge") return mine && caller.kind === "person" && caller.recentAuth;
+    // Like undelete, purge needs the role today, not just having deleted it as an admin once.
+    if (action === "artifact.purge") {
+      return mine && caller.kind === "person" && caller.recentAuth && mayManage(caller, artifact);
+    }
     return false;
   }
 

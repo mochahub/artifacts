@@ -118,12 +118,12 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/org` | `org.read` | Name, settings, domains (read-only view of `PUBLIC_URL`, `MORE_URLS`, `CONTENT_URL`, home domain). |
 | `PATCH /api/org` | `org.manage` | `{ name?, settings? }` |
 | `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. |
-| `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. |
+| `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. An admin or owner who becomes a member or reviewer also loses the invites and reset links they issued that are still unused. |
 | `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens. |
-| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }` |
+| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner or itself. |
 | `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |
-| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. |
+| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. A token gets 403 unless the invite is for a member or reviewer. |
 | `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ id, token }`, shown once. |
 | `GET /api/shares` | `org.manage` | Every outside share (people and links) across artifacts. |
 

@@ -85,6 +85,9 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
   });
 
   async function pending(c: ApiContext) {
+    // Codes are short enough to type, so a signed-in person can't be left to try them all.
+    const caller = c.get("caller");
+    if (caller.kind === "person") limits.hit(`device-code:${caller.person.id}`, 30, 15 * 60_000);
     const [row] = await db
       .select()
       .from(deviceCodes)

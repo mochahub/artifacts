@@ -8,6 +8,8 @@ import { ApiError } from "../http/errors.ts";
 import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
+const MAX_PASSWORD = 256;
+
 /** Verifying against this when the email is unknown keeps both answers the same speed. */
 const dummyHash = Bun.password.hash("not a real password", { algorithm: "argon2id" });
 
@@ -46,6 +48,10 @@ export function authRoutes(
     const body = await parseBody(c, PasswordSignIn);
     const account = body.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
+    // No password this long exists (04), so don't hash it, and don't count it against the account.
+    if (body.password.length > MAX_PASSWORD) {
+      throw new ApiError("unauthenticated", "That email or password isn't right.");
+    }
     const person = await checkPassword(c.get("org").id, body.email, body.password);
     if (!person) {
       limits.passwordFailed(account);
@@ -77,6 +83,8 @@ export function authRoutes(
     }
     const account = caller.person.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
+    if (body.password.length > MAX_PASSWORD)
+      throw new ApiError("unauthenticated", "That password isn't right.");
     const person = await checkPassword(c.get("org").id, caller.person.email, body.password);
     if (!person) {
       limits.passwordFailed(account);
@@ -166,6 +174,11 @@ export function authRoutes(
       .insert(passwords)
       .values({ personId, orgId, hash, updatedAt })
       .onConflictDoUpdate({ target: passwords.personId, set: { hash, updatedAt } });
+    // A new password ends the reset links still out there, or a leaked one would undo it.
+    await db
+      .update(resetLinks)
+      .set({ usedAt: updatedAt })
+      .where(and(eq(resetLinks.personId, personId), isNull(resetLinks.usedAt)));
   }
 
   async function liveReset(c: ApiContext) {
