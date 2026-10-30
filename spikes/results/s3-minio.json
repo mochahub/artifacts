@@ -1,0 +1,112 @@
+[
+  {
+    "name": "If-None-Match:* on a new key succeeds",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "If-None-Match:* on an existing key → 412",
+    "ok": true,
+    "detail": "412 PreconditionFailed"
+  },
+  {
+    "name": "If-Match with the current (quoted) ETag succeeds",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "If-Match with a stale ETag → 412",
+    "ok": true,
+    "detail": "412 PreconditionFailed"
+  },
+  {
+    "name": "If-Match with the current ETag unquoted succeeds",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "If-Match on a missing key fails (404 or 412)",
+    "ok": false,
+    "detail": "write succeeded"
+  },
+  {
+    "name": "10 concurrent creates → exactly 1 wins",
+    "ok": true,
+    "detail": "wins=1 losers=412"
+  },
+  {
+    "name": "10 concurrent If-Match updates → exactly 1 wins",
+    "ok": true,
+    "detail": "wins=1 losers=412"
+  },
+  {
+    "name": "DeleteObject with a wrong If-Match is refused",
+    "ok": false,
+    "detail": "deleted anyway"
+  },
+  {
+    "name": "DeleteObject with the right If-Match succeeds",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Presigned PUT signs content-type, content-length, cache-control",
+    "ok": true,
+    "detail": "cache-control;content-length;content-type;host"
+  },
+  {
+    "name": "Presigned PUT upload succeeds",
+    "ok": true,
+    "detail": "200"
+  },
+  {
+    "name": "Stored object keeps Cache-Control",
+    "ok": true,
+    "detail": "public, max-age=31536000, immutable"
+  },
+  {
+    "name": "Stored object keeps Content-Type",
+    "ok": true,
+    "detail": "text/plain"
+  },
+  {
+    "name": "Presigned PUT with a different Content-Type is refused",
+    "ok": true,
+    "detail": "403"
+  },
+  {
+    "name": "Presigned PUT with a different length is refused",
+    "ok": true,
+    "detail": "403"
+  },
+  {
+    "name": "Presigned GET URLs signed with the day's date are identical",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Presigned GET (signed at 00:00 UTC, 26 h expiry) works now",
+    "ok": true,
+    "detail": "200"
+  },
+  {
+    "name": "GET returns Cache-Control immutable",
+    "ok": true,
+    "detail": "public, max-age=31536000, immutable"
+  },
+  {
+    "name": "response-content-type override",
+    "ok": true,
+    "detail": "application/pdf"
+  },
+  {
+    "name": "response-content-disposition override",
+    "ok": true,
+    "detail": "attachment"
+  },
+  {
+    "name": "Conditional GET with If-None-Match → 304",
+    "ok": true,
+    "detail": "304"
+  }
+]

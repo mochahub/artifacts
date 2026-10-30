@@ -1,0 +1,230 @@
+<!--board {"title":"Setup, sign-in and people","subtitle":"Claiming a new deploy, passwords and passkeys, invites sent by hand, CLI approval, resets and domains","width":728}-->
+<div class="wrap">
+<div class="row">
+
+ <div class="cell">
+  <div class="phone light" data-url="artifacts-production.up.railway.app">
+   <div class="content" style="padding-top:40px;gap:12px;align-items:stretch">
+    <div style="display:flex;justify-content:center"><span class="logo" style="width:44px;height:44px;border-radius:11px"></span></div>
+    <div style="text-align:center"><div class="h1" style="font-size:21px">Almost ready</div><div class="sub" style="font-size:10px;margin-top:5px;line-height:1.45">This deployment isn't set up yet. Claim it from your terminal to create your organization and its owner.</div></div>
+    <div class="term" style="border-radius:10px;font-size:8.6px;box-shadow:none"><pre style="padding:9px 9px;white-space:pre"><span class="p">$</span> artifacts setup https://
+  artifacts-production
+  .up.railway.app</pre></div>
+    <div class="btn soft"><span data-i="copy"></span>Copy command</div>
+    <div style="flex:1"></div>
+    <div class="group" style="margin-bottom:8px">
+     <div class="li"><span data-i="key" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt" style="white-space:normal">Setup asks for a token</div><div class="ss">Railway → Variables → SETUP_TOKEN, or it reads it with the Railway CLI</div></div></div>
+    </div>
+   </div>
+  </div>
+  <div class="cap"><b>1 · Setup mode</b>You only see this if you deployed with Railway's button; <i>artifacts setup</i> claims its own deploys straight away. The token stops a stranger claiming the URL first.</div>
+ </div>
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:30px;gap:9px;align-items:stretch">
+    <div style="display:flex;align-items:center;gap:7px"><span class="logo" style="width:22px;height:22px"></span><b style="font-size:11px">Mochahub</b></div>
+    <div class="h1" style="margin-top:12px">Sign in</div>
+    <div class="btn ink" style="margin-top:4px"><span data-i="face"></span>Sign in with a passkey</div>
+    <div style="display:flex;align-items:center;gap:8px;margin:2px 0" class="fn"><i style="flex:1;border-top:.5px solid var(--l-sep)"></i>or use your password<i style="flex:1;border-top:.5px solid var(--l-sep)"></i></div>
+    <div class="gh">Email</div>
+    <div class="field">sam@example.com</div>
+    <div class="gh">Password</div>
+    <div class="field" style="letter-spacing:2px">••••••••••••••</div>
+    <div class="btn soft">Sign in</div>
+    <div style="flex:1"></div>
+    <div class="fn" style="text-align:center;line-height:1.45;margin-bottom:8px">Forgot your password? Ask an admin for a reset link.<br>New here? You need an invite.</div>
+   </div>
+  </div>
+  <div class="cap"><b>2 · Sign in</b>Passkey first, password second. No sign-up button and no "email me a link": accounts come from invites, and the server never sends mail.</div>
+ </div>
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:2px;gap:9px">
+    <div style="font-size:11px;color:#8a6a00">‹ Settings</div>
+    <div class="h1" style="font-size:24px">Sign-in</div>
+    <div class="gh">Passkeys</div>
+    <div class="group">
+     <div class="li"><span data-i="key" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt">iCloud Keychain</div><div class="ss">Added today on iPhone</div></div><span class="chev" data-i="chevR"></span></div>
+     <div class="li"><span data-i="key" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt">1Password</div><div class="ss">Added Oct 12 on MacBook Pro</div></div><span class="chev" data-i="chevR"></span></div>
+    </div>
+    <div class="btn ink"><span data-i="plus"></span>Add a passkey</div>
+    <div class="fn" style="line-height:1.45">Works on art.zahin.ca and artifacts-production.up.railway.app.</div>
+    <div class="gh">Password</div>
+    <div class="group"><div class="li"><div class="grow"><div class="tt">Change password</div><div class="ss">Set Oct 12</div></div><span class="chev" data-i="chevR"></span></div></div>
+    <div class="gh">Signed in on</div>
+    <div class="group">
+     <div class="li"><span data-i="laptop" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt">artifacts CLI</div><div class="ss">MacBook Pro, publishes and comments</div></div><span class="pill n">End</span></div>
+    </div>
+   </div>
+  </div>
+  <div class="cap"><b>3 · Passkeys and sessions</b>Several passkeys per person, and the password is optional once you have one. CLI sign-ins sit here too, so you can end them.</div>
+ </div>
+
+</div>
+<div class="row">
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:2px;gap:9px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><div class="h1" style="font-size:24px;margin-top:14px">People</div><span class="btn ink sm" style="margin-top:14px"><span data-i="plus"></span>Invite</span></div>
+    <div class="seg"><span class="on">Organization 4</span><span>Outside 2</span></div>
+    <div class="group">
+     <div class="li"><span class="av you">Z</span><div class="grow"><div class="tt">Zahin</div><div class="ss">Owner, zahin@…</div></div></div>
+     <div class="li"><span class="av" style="background:#4d6a8a">A</span><div class="grow"><div class="tt">Ana</div><div class="ss">Admin, ana@…</div></div></div>
+     <div class="li"><span class="av" style="background:#6a5a8a">J</span><div class="grow"><div class="tt">Jo</div><div class="ss">Member, jo@…</div></div><span class="chev" data-i="chevR"></span></div>
+    </div>
+    <div class="gh">Invited</div>
+    <div class="group">
+     <div class="li"><span class="av" style="background:#c9ccd3;color:#5e6470">S</span><div class="grow"><div class="tt">sam@example.com</div><div class="ss">Reviewer, expires in 6 days</div></div><span class="x" data-i="copy" style="flex:none"></span></div>
+    </div>
+    <div class="fn" style="line-height:1.45">Invites aren't emailed. Copy the link again any time until it's used, or revoke it.</div>
+   </div>
+   <div class="fadeb"></div>
+   <div class="tabbar glass"><div class="tab"><span data-i="inbox"></span>Review</div><div class="tab"><span data-i="folder"></span>Projects</div><div class="tab"><span data-i="bell"></span>Activity</div><div class="tab on"><span data-i="people"></span>People</div></div>
+  </div>
+  <div class="cap"><b>4 · People</b>Admins see members and pending invites. Outside lists the people artifacts were shared with, so an admin can see every outside share in one place.</div>
+ </div>
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:2px;opacity:.4">
+    <div class="h1" style="font-size:24px;margin-top:14px">People</div>
+   </div>
+   <div class="dim" style="background:rgba(0,0,0,.25)"></div>
+   <div class="sheet" style="top:92px;gap:8px">
+    <div class="grabber"></div>
+    <div class="shead"><div class="t">Invite to Mochahub</div><span class="x" data-i="x"></span></div>
+    <div class="gh">Email</div>
+    <div class="field">sam@example.com</div>
+    <div class="gh">Role</div>
+    <div class="seg"><span>Member</span><span class="on">Reviewer</span><span>Admin</span></div>
+    <div class="fn">Reviewers read and comment. They can't publish.</div>
+    <div class="card" style="padding:8px 10px;display:flex;align-items:center;gap:7px;margin-top:2px"><span data-i="link" style="color:var(--l-tx2)"></span><div class="grow mono" style="font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">art.zahin.ca/join/k7Qm…x2</div><span data-i="check" style="color:var(--ok)"></span></div>
+    <div class="btn ink"><span data-i="copy"></span>Copy invite link</div>
+    <div class="fn" style="text-align:center;line-height:1.45">Send it yourself in Messages or Slack. It works once and expires in 7 days.</div>
+   </div>
+  </div>
+  <div class="cap"><b>5 · Invite</b>The invite is a link you send, not an email we send. That keeps a deploy free of any email setup; the admin vouches for the address.</div>
+ </div>
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:30px;gap:10px;align-items:stretch">
+    <div style="display:flex;align-items:center;gap:7px"><span class="logo" style="width:22px;height:22px"></span><b style="font-size:11px">Mochahub</b></div>
+    <div class="ss" style="display:flex;align-items:center;gap:5px;margin-top:10px"><span class="av you sm">Z</span>Zahin invited you as a reviewer</div>
+    <div class="h1">Join Mochahub</div>
+    <div class="gh">Your name</div>
+    <div class="field">Sam</div>
+    <div class="gh">Email</div>
+    <div class="field" style="color:var(--l-tx2)">sam@example.com</div>
+    <div style="flex:1"></div>
+    <div class="btn ink"><span data-i="face"></span>Create a passkey</div>
+    <div class="btn soft" style="background:none">Use a password instead</div>
+    <div class="fn" style="text-align:center;margin-bottom:8px">You can add the other one later in Settings.</div>
+   </div>
+  </div>
+  <div class="cap"><b>6 · Accept</b>One screen. A passkey is the default because it's one tap on a phone; a password is there for browsers or people who'd rather.</div>
+ </div>
+
+</div>
+<div class="row">
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:14px;gap:9px;align-items:stretch">
+    <div style="display:flex;justify-content:center"><span data-i="term" style="font-size:24px;color:var(--l-tx)"></span></div>
+    <div style="text-align:center"><div class="h1" style="font-size:20px">Approve the CLI?</div><div class="sub" style="font-size:10px;margin-top:5px;line-height:1.45">Check this matches the code in your terminal.</div></div>
+    <div class="card mono" style="padding:9px;text-align:center;font-size:19px;font-weight:700;letter-spacing:3px">WDJB-MJHT</div>
+    <div class="group">
+     <div class="li"><span data-i="laptop" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt">Sam's MacBook Pro</div><div class="ss">From artifacts setup</div></div></div>
+     <div class="li"><span data-i="lock" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt" style="white-space:normal">Can publish and comment as Sam</div><div class="ss">Can't invite, share outside or change settings</div></div></div>
+    </div>
+    <div style="flex:1"></div>
+    <div class="btn ink">Approve</div>
+    <div class="btn soft" style="background:none">Deny</div>
+   </div>
+  </div>
+  <div class="cap"><b>7 · Approve the CLI</b>From <i>artifacts setup</i> on a teammate's machine. You sign in on your phone or laptop with your passkey, and the CLI never sees your password.</div>
+ </div>
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:2px;opacity:.4">
+    <div class="h1" style="font-size:24px;margin-top:14px">People</div>
+   </div>
+   <div class="dim" style="background:rgba(0,0,0,.25)"></div>
+   <div class="sheet" style="top:96px;gap:8px">
+    <div class="grabber"></div>
+    <div class="shead"><span class="av" style="background:#6a5a8a">J</span><div class="t">Jo</div><span class="x" data-i="x"></span></div>
+    <div class="group">
+     <div class="li"><div class="grow"><div class="tt">Role</div></div><span class="ss" style="margin:0">Member</span><span class="chev" data-i="chevR"></span></div>
+     <div class="li"><div class="grow"><div class="tt">Sign-in</div></div><span class="ss" style="margin:0">Password only</span></div>
+    </div>
+    <div class="gh">Password reset</div>
+    <div class="card" style="padding:8px 10px;display:flex;align-items:center;gap:7px"><span data-i="link" style="color:var(--l-tx2)"></span><div class="grow mono" style="font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">art.zahin.ca/reset/Hq3v…9a</div></div>
+    <div class="btn ink"><span data-i="copy"></span>Copy reset link</div>
+    <div class="fn" style="line-height:1.45">Works once, for 1 hour. Jo's other sign-ins end when the password changes.</div>
+    <div class="btn soft" style="color:#c0392b">Remove Jo from Mochahub</div>
+   </div>
+  </div>
+  <div class="cap"><b>8 · Reset a password</b>No email, so a forgotten password is an admin's link. People with a passkey never need this.</div>
+ </div>
+
+ <div class="cell">
+  <div class="phone light">
+   <div class="content" style="padding-top:2px;gap:9px">
+    <div style="font-size:11px;color:#8a6a00">‹ Settings</div>
+    <div class="h1" style="font-size:24px">Domains</div>
+    <div class="gh">Viewer</div>
+    <div class="group">
+     <div class="li"><span data-i="globe" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt" style="white-space:normal;word-break:break-all;font-size:10px">art.zahin.ca</div><div class="ss">Used in links you copy</div></div><span class="pill ok">Primary</span></div>
+     <div class="li"><span data-i="key" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt" style="white-space:normal;word-break:break-all;font-size:10px">artifacts-production.up.railway.app</div><div class="ss">Home of your passkeys. Keep it attached</div></div></div>
+    </div>
+    <div class="gh">Live previews</div>
+    <div class="group">
+     <div class="li"><span data-i="lock" style="color:var(--l-tx2)"></span><div class="grow"><div class="tt" style="white-space:normal;word-break:break-all;font-size:10px">artifacts-content-production.up.railway.app</div><div class="ss">Where interactive frames run, walled off from your account</div></div><span data-i="check" style="color:var(--ok)"></span></div>
+    </div>
+    <div class="card" style="padding:9px 10px;font-size:9.5px;line-height:1.45;color:var(--l-tx2)">Passkeys made on the Railway domain also work on art.zahin.ca in Safari on iOS 18+, Chrome 128+ and Firefox 152+. Older browsers use the password.</div>
+   </div>
+  </div>
+  <div class="cap"><b>9 · Domains</b>Start on Railway's domain and add your own later; the first stays the passkeys' home. Live previews run an artifact's own code, so they get a site of their own that can't read your sign-in.</div>
+ </div>
+
+</div>
+
+<div class="wide">
+ <div class="term">
+  <div class="tbar"><span class="lights" style="display:flex;gap:6px"><i style="width:10px;height:10px;border-radius:50%;background:#ff5f57"></i><i style="width:10px;height:10px;border-radius:50%;background:#febc2e"></i><i style="width:10px;height:10px;border-radius:50%;background:#28c840"></i></span>~ — zsh</div>
+<pre><span class="p">$</span> artifacts setup
+Where should your Artifacts server run?
+<span class="y">›</span> <b>Railway</b> (recommended)    Docker, on a machine you run    I already have one
+<span class="g">✓</span> Railway CLI 5.71.0, signed in as zahin@…
+Railway workspace: <span class="y">Zahin's Projects</span>
+<span class="g">✓</span> Created Railway project "artifacts"
+<span class="g">✓</span> Deployed the Artifacts template: app, Postgres, storage bucket
+<span class="g">✓</span> Running   https://artifacts-production.up.railway.app   <span class="d">(home domain for passkeys)</span>
+Organization name: <span class="y">Mochahub</span>
+Your name: <span class="y">Zahin</span>      Email: <span class="y">zahin@…</span>
+Password: ••••••••••••••   Again: ••••••••••••••
+<span class="g">✓</span> Created Mochahub with you as owner. This machine is signed in as you.
+Install the skill for Claude Code and Codex? [Y/n] y
+<span class="g">✓</span> ~/.claude/skills/artifacts   <span class="g">✓</span> Codex skills
+
+  Add a passkey      scan with your phone, or open …/settings/sign-in
+  Invite someone     artifacts org invite sam@example.com
+  Your own domain    artifacts domain add art.zahin.ca
+
+<span class="p">$</span> artifacts org invite sam@example.com --role reviewer
+<span class="g">✓</span> Invite for sam@example.com (Reviewer), works once, expires Nov 5
+  <span class="v">https://artifacts-production.up.railway.app/join/k7Qm…x2</span>   <span class="d">send this yourself; nothing was emailed</span>
+
+<span class="p">$</span> artifacts upgrade
+<span class="g">✓</span> CLI 0.4.0 → 0.5.0   <span class="g">✓</span> skill updated
+<span class="g">✓</span> Server 0.4.0 → 0.5.0 on Railway (image ghcr.io/…/artifacts:0.5.0), healthy</pre>
+ </div>
+ <div class="cap"><b>10 · The CLI is the way in</b>One command deploys the server through the Railway CLI, claims it, makes you the owner, signs this machine in and installs the skill. Invites print a link to send by hand, and <i>artifacts upgrade</i> updates the CLI, the skill and the server together.</div>
+</div>
+
+</div>
