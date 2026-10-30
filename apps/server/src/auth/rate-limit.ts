@@ -4,6 +4,7 @@ import { ApiError } from "../http/errors.ts";
 const FIFTEEN_MINUTES = 15 * 60_000;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const MAX_KEYS = 50_000;
 
 const limited = (retryAfterMs: number) =>
   new ApiError("rate_limited", "Too many attempts. Try again later.", {
@@ -28,9 +29,15 @@ export class RateLimits {
 
   /** Keys only shrink when hit again, so random ones would otherwise pile up forever. */
   private sweep(now: number) {
-    if (this.hits.size < 50_000) return;
-    for (const [key, times] of this.hits) if ((times.at(-1) ?? 0) < now - 2 * HOUR) this.hits.delete(key);
-    if (this.hits.size >= 50_000) this.hits.clear();
+    for (const map of [this.hits, this.accountFailures]) {
+      if (map.size < MAX_KEYS) continue;
+      for (const [key, times] of map) if ((times.at(-1) ?? 0) < now - 2 * HOUR) map.delete(key);
+      // Still full of live keys: drop the oldest tenth, so flooding can't also wipe everyone's limits.
+      for (const key of map.keys()) {
+        if (map.size < MAX_KEYS * 0.9) break;
+        map.delete(key);
+      }
+    }
   }
 
   /** Counts one attempt; throws 429 past `limit` in `windowMs`. */
@@ -67,6 +74,7 @@ export class RateLimits {
   }
 
   passwordFailed(email: string) {
+    this.sweep(this.clock.now().getTime());
     const failures = this.recent(this.accountFailures, email, HOUR + FIFTEEN_MINUTES);
     failures.push(this.clock.now().getTime());
     this.accountFailures.set(email, failures);

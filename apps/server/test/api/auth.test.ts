@@ -2,9 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DevicePollResult, DeviceStarted, Me, SessionRow } from "@artifacts/schema";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { RateLimits } from "../../src/auth/rate-limit.ts";
 import { sha256 } from "../../src/auth/secrets.ts";
 import { deviceCodes, org, people, resetLinks, sessions, tokens } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { claim, OWNER, signIn, startTestServer, type TestServer, testClock } from "../helpers.ts";
 
 const error = async (response: Response) =>
   ((await response.json()) as { error: { code: string } }).error.code;
@@ -332,6 +333,47 @@ describe("rate limits", () => {
     }
     expect(statuses.filter((s) => s === 401)).toHaveLength(30);
     expect(statuses.at(-1)).toBe(429);
+  });
+});
+
+describe("rate limit memory and input bounds", () => {
+  test("random addresses can't pile up failures forever, or wipe everyone's limits", () => {
+    const clock = testClock();
+    const limits = new RateLimits(clock);
+    const failures = () => (limits as unknown as { accountFailures: Map<string, number[]> }).accountFailures;
+    const hits = () => (limits as unknown as { hits: Map<string, number[]> }).hits;
+    for (let i = 0; i < 50_000; i++) limits.passwordFailed(`guess${i}@example.com`);
+    clock.advance(3 * 3600_000);
+    limits.passwordFailed("one-more@example.com");
+    expect(failures().size).toBeLessThan(100);
+
+    // Keys that are all still live past the cap lose only the oldest ones, not every limit at once.
+    for (let i = 0; i < 50_001; i++) limits.hit(`ip:${i}`, 5, 3600_000);
+    expect(hits().size).toBeLessThanOrEqual(50_000);
+    expect(hits().size).toBeGreaterThan(40_000);
+    for (let i = 0; i < 50_001; i++) limits.passwordFailed(`live${i}@example.com`);
+    expect(failures().size).toBeLessThanOrEqual(50_000);
+    expect(failures().size).toBeGreaterThan(40_000);
+  });
+
+  test("an oversized password is refused without counting against the account", async () => {
+    const t = await startTestServer();
+    try {
+      await claim(t);
+      const attempt = (password: string) =>
+        t.api("/api/auth/password", { method: "POST", json: { email: OWNER.email, password } });
+      for (let i = 0; i < 8; i++) expect((await attempt("x".repeat(257))).status).toBe(401);
+      expect((await attempt(OWNER.password)).status).toBe(200);
+      const cookie = await signIn(t, OWNER.email, OWNER.password);
+      const reauth = await t.api("/api/auth/reauth", {
+        method: "POST",
+        cookie,
+        json: { password: "x".repeat(100_000) },
+      });
+      expect(reauth.status).toBe(401);
+    } finally {
+      await t.stop();
+    }
   });
 });
 
