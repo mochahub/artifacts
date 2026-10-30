@@ -42,9 +42,19 @@ export function createApp(log: Logger) {
         error.status as ContentfulStatusCode,
       );
     }
+    // Postgres refusing a value (a number past int4, a NUL byte, text where a number goes) is the
+    // caller's input, not a fault here: class 22. Nothing about the database goes back to them.
+    const cause = (error as { cause?: { code?: unknown; message?: unknown } }).cause;
+    const code = (cause ?? (error as { code?: unknown })).code;
+    if (typeof code === "string" && code.startsWith("22")) {
+      log.warn("a value was refused by the database", { requestId: c.get("requestId"), code });
+      return c.json(errorBody("invalid", "The request isn't valid."), 400);
+    }
     log.error("unhandled error", {
       requestId: c.get("requestId"),
+      route: routePath(c),
       error: error instanceof Error ? (error.stack ?? error.message) : String(error),
+      cause: cause?.message,
     });
     return c.json(errorBody("internal", "Something went wrong."), 500);
   });

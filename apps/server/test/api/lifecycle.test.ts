@@ -103,6 +103,18 @@ describe("lifecycle", () => {
     expect((await read(render)).status).toBe(302);
   });
 
+  test("a version number that isn't a number the database can hold is a 400", async () => {
+    const row = await fresh();
+    for (const path of [
+      `/api/artifacts/${row.id}/compare?from=x&to=1`,
+      `/api/artifacts/${row.id}/compare?from=1&to=99999999999`,
+      `/api/artifacts/${row.id}/versions/99999999999`,
+      `/api/artifacts/${row.id}/v/99999999999/article/plan`,
+    ]) {
+      expect((await t.api(path, { bearer: token })).status).toBe(400);
+    }
+  });
+
   test("delete: links stop, the slug stays taken, and an agent can undo it", async () => {
     const row = await fresh("me");
     const { url } = (await (
