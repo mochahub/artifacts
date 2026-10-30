@@ -90,7 +90,7 @@ It then runs `remark-rehype`, `rehype-slug` and `rehype-sanitize`. Sanitizing us
 
 **The server re-sanitizes at commit.** The CLI's output can't be trusted (any token with `publish` could upload anything), and article HTML is inserted into the viewer's own page. So `commit` re-runs `rehype-sanitize` with the same allowlist (`@artifacts/schema/sanitize`) over every article's HTML blob, including inline SVG from Mermaid and charts (no `script`, `foreignObject`, `style` elements or attributes, or event attributes). Mermaid's styles are copied onto presentation attributes in the render helper, because a `<style>` in an article would apply to the whole viewer page. It stores the result as a new blob and records that hash in `pages.meta.htmlHash`. The viewer only ever loads that hash.
 
-Images referenced by articles are bundle files; the viewer loads them through `GET /api/artifacts/:id/r/:hash`. The CLI rewrites `src` to `artifacts:blob/<hash>` and the viewer maps that.
+Images referenced by articles are bundle files; the viewer loads them through `GET /api/artifacts/:id/r/:hash`. The CLI rewrites `src` to `artifacts:blob/<hash>` and the viewer maps that. The allowlist accepts no other `img` `src`: a relative, protocol-relative or absolute address is dropped, because it would load from the viewer's own origin or tell a third party who is reading. In inline SVG, `fill` and `stroke` take a colour or a `url(#id)` reference inside the same SVG, and nothing else.
 
 ## Publish protocol (CLI side)
 
