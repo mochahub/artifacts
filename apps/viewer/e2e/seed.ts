@@ -43,7 +43,12 @@ export function publishCopy(slug: string, token: string, twice = false) {
   const dir = mkdtempSync(join(tmpdir(), "artifacts-e2e-"));
   cpSync(fixture, dir, { recursive: true });
   const manifest = join(dir, "artifact.json");
-  writeFileSync(manifest, readFileSync(manifest, "utf8").replace('"slug": "roadmap"', `"slug": "${slug}"`));
+  writeFileSync(
+    manifest,
+    readFileSync(manifest, "utf8")
+      .replace('"slug": "roadmap"', `"slug": "${slug}"`)
+      .replace('"title": "Camera Buddy roadmap"', `"title": "Roadmap ${slug}"`),
+  );
   const publish = () =>
     execFileSync("bun", [cli, "publish", "--json"], { cwd: dir, env: envFor(dir, token), stdio: "pipe" });
   publish();
