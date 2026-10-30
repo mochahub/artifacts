@@ -2,9 +2,9 @@
 // and mermaid are installed, because a compiled binary can't load them. Takes a job file, writes
 // WebP renders into job.out, and writes job.out/result.json.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { webkit } from "playwright-core";
 import sharp from "sharp";
 
@@ -72,6 +72,9 @@ const TYPES = {
   ".json": "application/json",
 };
 
+const realRoot = realpathSync(job.root);
+const inside = (path) => path.startsWith(realRoot + sep);
+
 /** The bundle on 127.0.0.1, with generated board pages beside each board's own file. */
 const pagesByPath = new Map();
 const server = Bun.serve({
@@ -83,8 +86,10 @@ const server = Bun.serve({
     const api = /(?:^|\/)(api\/.*)$/.exec(path);
     if (api && job.backend) return runBackend(request, api[1]);
     if (generated) return new Response(generated, { headers: { "Content-Type": "text/html" } });
-    const file = Bun.file(resolve(job.root, path));
-    if (!resolve(job.root, path).startsWith(resolve(job.root)) || !(await file.exists())) {
+    // Only files that really live under the bundle: "/..%2Froot-x/secret" is a sibling folder whose
+    // name starts the same, and a link in the bundle may lead anywhere. The page's own script asks here.
+    const file = Bun.file(resolve(realRoot, path));
+    if (!inside(resolve(realRoot, path)) || !(await file.exists()) || !inside(realpathSync(file.name))) {
       return new Response("missing", { status: 404 });
     }
     const type = TYPES[path.slice(path.lastIndexOf(".")).toLowerCase()] ?? "application/octet-stream";

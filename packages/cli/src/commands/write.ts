@@ -260,8 +260,9 @@ export function initCommand(flags: { project?: string; slug?: string; kind?: str
   const root = process.cwd();
   if (existsSync(join(root, "artifact.json"))) throw new CliError("There's already an artifact.json here.");
   const kind = (flags.kind ?? "canvas") as keyof typeof STARTERS;
+  // hasOwn, so "--kind constructor" isn't taken for a starter.
+  if (!Object.hasOwn(STARTERS, kind)) throw new UsageError("--kind is canvas, article or prototype.");
   const starter = STARTERS[kind];
-  if (!starter) throw new UsageError("--kind is canvas, article or prototype.");
   const slugify = (value: string) =>
     value
       .toLowerCase()

@@ -17,9 +17,11 @@ export const helperDir = () => process.env.ARTIFACTS_HELPER_DIR ?? join(home(), 
 
 /** Spawns this binary as Bun (07), so nobody needs Bun or Node installed. */
 export function asBun(args: string[], cwd: string, env: Record<string, string> = {}) {
+  // The helper runs npm packages (and the page code it renders), which have no use for the token.
+  const { ARTIFACTS_TOKEN: _token, ...rest } = process.env;
   return Bun.spawnSync([process.execPath, ...args], {
     cwd,
-    env: { ...process.env, BUN_BE_BUN: "1", ...env },
+    env: { ...rest, BUN_BE_BUN: "1", ...env },
     stdout: "pipe",
     stderr: "pipe",
   });

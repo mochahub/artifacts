@@ -60,7 +60,8 @@ const MAX_BACKEND = 1024 * 1024;
 function bundleBackend(root: string, src: string, outDir: string) {
   const path = join(outDir, "__backend.js");
   const build = asBun(
-    ["build", src, "--target=browser", "--format=esm", "--minify", `--outfile=${path}`],
+    // "./" so a src that starts with a dash is a file, not an option to bun build.
+    ["build", `./${src}`, "--target=browser", "--format=esm", "--minify", `--outfile=${path}`],
     root,
   );
   if (!build.success) throw new CliError(`The backend didn't bundle:\n${build.stderr.toString()}`);

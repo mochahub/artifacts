@@ -41,17 +41,31 @@ export function saveServer(entry: ServerEntry) {
   writeConfig({
     servers: [
       ...rest.map((server) => ({ ...server, default: false })),
-      { ...previous, ...entry, default: true },
+      // A server set up here names itself (setup saves the hostname first, then "artifacts" with its
+      // Railway details). After that the name stays: railwayDir is named after it, so a later `login`
+      // saving the hostname mustn't rename it and point domain and upgrade at an unlinked folder.
+      {
+        ...previous,
+        ...entry,
+        name: entry.railway || entry.docker ? entry.name : (previous?.name ?? entry.name),
+        default: true,
+      },
     ],
   });
 }
 
 export const normalizeUrl = (url: string) => {
+  let parsed: URL;
   try {
-    return new URL(url.includes("://") ? url : `https://${url}`).origin;
+    parsed = new URL(url.includes("://") ? url : `https://${url}`);
   } catch {
     throw new CliError(`"${url}" isn't a URL.`);
   }
+  // A file: or custom scheme has the origin "null", which is not a server.
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new CliError(`"${url}" isn't a web address. Use http:// or https://.`);
+  }
+  return parsed.origin;
 };
 
 /** --server, then ARTIFACTS_URL, then the default server in config (07). */
