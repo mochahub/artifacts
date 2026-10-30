@@ -20,6 +20,7 @@ export function startChild({ childPath, prelude, onExit }) {
     ipc(message) {
       if (message.t === "ready") ready();
       if (message.t === "pong") pong?.(message.env);
+      if (message.t === "started") inFlight.get(message.id)?.onStart?.();
       if (message.t === "data") {
         const job = inFlight.get(message.id);
         const answer = job
@@ -58,7 +59,7 @@ export function startChild({ childPath, prelude, onExit }) {
     kill: () => child.kill(9),
     alive: () => child.exitCode === null,
     /** Runs one request. Resolves when the child answers or dies. */
-    run({ id, hash, code, limits, request, onData }) {
+    run({ id, hash, code, limits, request, onData, onStart }) {
       return new Promise((finish) => {
         const send = (withCode) =>
           child.send({
@@ -69,7 +70,7 @@ export function startChild({ childPath, prelude, onExit }) {
             request,
             ...(withCode ? { code: code(), prelude } : {}),
           });
-        inFlight.set(id, { finish, onData, resend: () => Promise.resolve().then(() => send(true)) });
+        inFlight.set(id, { finish, onData, onStart, resend: () => Promise.resolve().then(() => send(true)) });
         send(!sent.has(hash));
         sent.add(hash);
       });
