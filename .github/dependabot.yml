@@ -1,0 +1,42 @@
+# Weekly update PRs, with minor and patch bumps grouped so there is one PR to review per ecosystem.
+# Major bumps stay separate. Security advisories open their own PRs whatever the schedule (enable Dependabot
+# alerts and security updates in the repo's settings).
+version: 2
+updates:
+  # bun.lock, for every workspace (the root package.json lists them).
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      bun-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # The base images in apps/server/Dockerfile, pinned by digest.
+  - package-ecosystem: "docker"
+    directory: "/apps/server"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # postgres:17 and chrislusf/seaweedfs in deploy/compose. A Postgres major needs a dump and restore, so it's never automatic.
+  - package-ecosystem: "docker-compose"
+    directory: "/deploy/compose"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+    groups:
+      compose-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
