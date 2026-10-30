@@ -100,7 +100,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 
 - **CLI tokens** from the device flow or setup get `publish comment read manage data`.
 - **Org tokens:** the admin picks scopes and projects.
-- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6).
+- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner or itself. Those come from the viewer.
 
 ## The permission function
 
