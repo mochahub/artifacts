@@ -11,6 +11,7 @@ import {
   invites,
   pages,
   resetLinks,
+  sessions,
   threads,
   versions,
   webauthnChallenges,
@@ -125,6 +126,8 @@ export async function expireLeftovers(deps: Deps) {
   const old = new Date(now.getTime() - 30 * DAY);
   await deps.db.delete(webauthnChallenges).where(lt(webauthnChallenges.expiresAt, now));
   await deps.db.delete(deviceCodes).where(lt(deviceCodes.expiresAt, now));
+  // Their push subscriptions go with them (cascade): a dead device would otherwise count toward a person's ten.
+  await deps.db.delete(sessions).where(lt(sessions.expiresAt, now));
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
   await expireLogs(deps);
