@@ -29,7 +29,8 @@ import { VERSION } from "./version.ts";
 
 const USAGE = `artifacts ${VERSION}
 
-  artifacts setup [<url>] [--docker] [--dir <path>]
+  artifacts setup [<url>] [--docker [--dir <path>] [--image <ref>] [--port <n>]]
+                  [--org <name>] [--name <you>] [--email <you>] [--no-skill]
   artifacts login [<url>] | logout | whoami
   artifacts recover <url>
   artifacts doctor
@@ -55,7 +56,8 @@ const USAGE = `artifacts ${VERSION}
   artifacts share --link [--comment] [--expires 1d|7d|30d]
   artifacts share --invite <email> [--comment|--publish]
 
-Every command takes --json and --server <url|name>.`;
+Every command takes --json. Commands that talk to a server take --server <url|name>
+(on upgrade, --server means "the server too", and it can't name one).`;
 
 const OPTIONS = {
   json: { type: "boolean" },
