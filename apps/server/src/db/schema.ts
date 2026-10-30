@@ -591,6 +591,25 @@ export const artifactUsage = pgTable(
   (t) => [primaryKey({ columns: [t.artifactId, t.scope] })],
 );
 
+export const backendLogs = pgTable(
+  "backend_logs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    version: integer("version").notNull(),
+    level: text("level").notNull(),
+    message: text("message").notNull(),
+    requestId: text("request_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("backend_logs_artifact_created_idx").on(t.artifactId, t.createdAt)],
+);
+
 // Activity and lifecycle
 
 export const activity = pgTable(

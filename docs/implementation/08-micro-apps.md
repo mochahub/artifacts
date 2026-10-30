@@ -10,7 +10,7 @@
 | The bridge | `apps/viewer/src/live/bridge.ts` | The viewer page, the iframe's parent |
 | Data store | `apps/server/src/data/` | The app: the data API (03), and `env.DATA` for backends |
 | Backend proxy | `apps/server/src/content/proxy.ts` | The app, content port: `/t/<token>/v<n>/api/*` |
-| Sandbox | `apps/server/src/sandbox/` | Child processes of the app: QuickJS in WebAssembly, one instance per backend |
+| Sandbox | `packages/sandbox/` (child, prelude, parent side) and `apps/server/src/sandbox/pool.ts` | Child processes of the app: QuickJS in WebAssembly, one instance per backend |
 | `@artifacts/kit/backend` | `packages/kit/src/backend.js` | Inside the artifact's backend (`caller()`, types for `Env`) |
 
 ## Try it
@@ -140,7 +140,7 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 | File | Runs in | Does |
 |---|---|---|
 | `pool.ts` | The app | Starts and supervises the sandbox processes, routes requests, answers `env.DATA` calls and writes logs |
-| `child.ts` | Each sandbox process | Holds QuickJS instances and runs requests |
+| `packages/sandbox/src/child.js` | Each sandbox process | Holds QuickJS instances and runs requests |
 
 **Processes:**
 - The app starts `sandboxProcesses` children (default 2) with `Bun.spawn([process.execPath, child.js], { env: {}, ipc })`. The environment is **empty**: a child never has the database URL, bucket keys, `SESSION_SECRET` or `OPS_SECRET`. Its only channel is IPC to the app.
@@ -149,7 +149,7 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 **Instances:**
 - **One WebAssembly instance per backend hash**, created with its own `WebAssembly.Memory` whose maximum is `backendMemoryMb`; QuickJS's own limit is set 8 MB below that, and the stack to 512 KB. Never the shared `getQuickJS()` instance: a QuickJS bug in one backend must not be able to read another's memory.
 - **The code** is the bundled backend: one ES module with no imports, built by the CLI (05). The sandbox evaluates it as a module and refuses any `import`. The app sends it to the child by hash on first use.
-- **What the sandbox has:** the JavaScript language, the kit's small `Request`, `Response`, `Headers`, `URL`, `TextEncoder` and `TextDecoder` (bundled into each backend by `bun build`), `console`, and `env.DATA`. No `fetch`, sockets, timers, file system, environment or module loading.
+- **What the sandbox has:** the JavaScript language, small `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `TextEncoder` and `TextDecoder` (`packages/sandbox/src/prelude.js`, loaded before the backend), `console`, and `env.DATA` (`get`, `put`, `delete`, `list`). A key with no scope means `shared/<key>`. No `fetch`, sockets, timers, file system, environment or module loading.
 - **Warm cache:** up to 16 instances per child (least recently used), and an instance idle for 10 minutes is discarded.
 
 **Limits, enforced per request:**
@@ -157,9 +157,9 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 - **Memory:** an allocation past the limit throws "out of memory" inside the backend. The request answers 500 and the instance is discarded. **After every request**, an instance whose WebAssembly memory has grown past half of `backendMemoryMb` is discarded too, because WebAssembly memory never shrinks.
 - **One at a time:** each backend hash is pinned to one child, and its requests run one at a time (QuickJS is synchronous, and one instance has one deadline). At most 4 requests wait per backend and 32 per child; beyond that, 503 `busy`.
 - **Sizes:** request bodies over `backendRequestBytes` get 413 before reaching the sandbox; responses over `backendResponseBytes` get 502.
-- **Teardown:** an instance is freed only once its in-flight `env.DATA` calls have settled. If freeing fails, the child is restarted.
+- **Teardown:** freeing an instance with `env.DATA` calls in flight makes emscripten abort, which is catchable and leaves only that instance dead (checked in M10, `spikes/s10/`). So freeing is tried, a failure is ignored, and the instance is dropped; its own `WebAssembly.Memory` goes with it. Late `env.DATA` answers for it are ignored.
 
-Spike S4 tested pieces of this separately, not the design as a whole. QuickJS on a worker thread: a busy loop was interrupted on time while other work continued. Capped WebAssembly instances in one process: typed-array, string and heap floods stopped at the 64 MB cap, deep recursion stopped with "stack overflow", and process memory stayed at 100–150 MB. **Not yet tested, and required in M10 before relying on this design:** `Bun.spawn` with `ipc` and an empty environment; pinning each backend to one child; freeing an instance with `env.DATA` calls in flight; and whether an emscripten `abort()` can be caught and leaves only that instance dead.
+Checked before building (M10, `spikes/s10/`): `Bun.spawn` with `ipc` and an empty environment works, and the child sees no variables; a second child answers in 37 ms while the first runs a busy loop, which is then interrupted on time; freeing mid-call aborts emscripten, the abort is catchable, and the same child runs the next request; typed-array, string and heap floods and deep recursion all fail inside the backend and leave the child alive; a crashed child's exit reaches the parent.
 
 **Logs:** `console.*` lines go to the app over IPC, at most 100 per request and 8 KB each (02 `backend_logs`), with uncaught errors. `artifacts logs` reads them.
 

@@ -38,6 +38,7 @@ export const ERROR_STATUS = {
   cli_outdated: 426,
   rate_limited: 429,
   setup_mode: 503,
+  busy: 503,
 } as const;
 export type ErrorCode = keyof typeof ERROR_STATUS;
 

@@ -53,6 +53,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | 429 | `rate_limited` | `Retry-After` header set |
 | 500 | `internal` | An unexpected failure; the detail is only in the logs |
 | 503 | `setup_mode` | The deployment has no owner yet; only setup routes work |
+| 503 | `busy` | A backend's queue is full |
 
 ## Setup and meta
 
@@ -247,6 +248,7 @@ The viewer calls these on behalf of a live frame (protocol in [08-micro-apps.md]
 | `DELETE /api/artifacts/:id/files/:scope/:name` | `data.write` | |
 | `GET /api/artifacts/:id/data-export` | `data.export` (publisher, admins) | `{ shared: {…}, me: { "<id>": { name, data: {…} } }, files: [{ scope, owner, name, url }] }` |
 | `POST /api/artifacts/:id/data-clear` | `data.export` | `{ scope?: "shared"\|"me" }` |
+| `GET /api/artifacts/:id/logs?version=&after=` | `data.export` | The backend's console output for the last 24 hours: `[{ id, version, level, message, requestId, createdAt }]`, oldest first. `after` is a log id, for `--follow`. |
 
 `me` resolves to the caller's per-artifact pseudonym (a person or a share-link guest; see [08](08-micro-apps.md#request-flow)). Guests on a view-only link can read but not write.
 

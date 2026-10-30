@@ -1,0 +1,13 @@
+{
+  "name": "@artifacts/sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/host.js"
+  },
+  "dependencies": {
+    "quickjs-emscripten": "0.32.0"
+  }
+}

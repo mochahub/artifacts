@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
-    "build": "bun build src/index.ts --target=bun --external sharp --outfile=dist/server.js",
+    "build": "bun build src/index.ts --target=bun --external sharp --outfile=dist/server.js && cp ../../packages/sandbox/src/child.js dist/sandbox-child.js && cp ../../packages/sandbox/src/prelude.js dist/sandbox-prelude.js",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
@@ -16,6 +16,7 @@
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",
     "postgres": "^4.0.0",
+    "@artifacts/sandbox": "workspace:*",
     "sharp": "0.35.5",
     "tldts": "^7.4.19",
     "zod": "^4.6.7"
