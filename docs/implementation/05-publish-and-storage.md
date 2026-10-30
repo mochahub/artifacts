@@ -134,6 +134,8 @@ When a canvas thread is created:
 3. It draws the pin's position as a 6 px yellow ring.
 4. It writes `crops/<thread id>.webp`.
 
+The render is the author's upload, so sharp is given a limit of 64 million input pixels and only WebP, PNG and JPEG are accepted. A render over either gets no crop; the comment is saved anyway.
+
 Article threads have no crop; their quote is the context.
 
 ## Presigned URLs
