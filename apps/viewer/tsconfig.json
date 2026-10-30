@@ -6,7 +6,7 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node", "bun"]
   },
   "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"],
   "references": [{ "path": "../../packages/schema" }]

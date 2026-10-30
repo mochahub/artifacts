@@ -15,6 +15,7 @@ import { renderUrl } from "../format.ts";
 import { LiveFrame, savedNotice } from "../live/frame.tsx";
 import type { Remote } from "../poll.ts";
 import { type Board, CanvasEngine, type Pin } from "./engine.ts";
+import { frameFromHash, frameHash } from "./hash.ts";
 import { canvasCommand } from "./keys.ts";
 
 export type CanvasPage = { key: string; title: string | null; boards: Board[]; frames: CanvasFrame[] };
@@ -116,13 +117,13 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         onFocus(frame) {
           focus.value = frame;
           const url = new URL(location.href);
-          url.hash = frame ? `frame=${frame.key}` : "";
+          url.hash = frame ? frameHash(frame.key) : "";
           history.replaceState(history.state, "", url);
         },
       },
     );
     engine.current = instance;
-    const wanted = /frame=([\w-]+)/.exec(location.hash)?.[1];
+    const wanted = frameFromHash(location.hash);
     instance.fitAll();
     if (wanted) instance.focusFrame(wanted, false);
     (window as unknown as { __canvas?: CanvasEngine }).__canvas = instance;
@@ -135,7 +136,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
       if (command === "previous") instance.step(-1);
     };
     const onHash = () => {
-      const key = /frame=([\w-]+)/.exec(location.hash)?.[1];
+      const key = frameFromHash(location.hash);
       if (key) instance.focusFrame(key);
     };
     addEventListener("keydown", onKey);
