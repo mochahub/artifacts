@@ -157,6 +157,19 @@ describe("lists and artifacts", () => {
     expect(etag).toBeTruthy();
     const again = await t.api(`/api/artifacts/${id}`, { bearer: token, headers: { "If-None-Match": etag } });
     expect(again.status).toBe(304);
+    // A proxy that compresses turns it weak, and a browser may send several.
+    for (const header of [`W/${etag}`, `"other", ${etag}`, `W/"other", W/${etag}`, "*"]) {
+      const match = await t.api(`/api/artifacts/${id}`, {
+        bearer: token,
+        headers: { "If-None-Match": header },
+      });
+      expect(match.status).toBe(304);
+    }
+    const other = await t.api(`/api/artifacts/${id}`, {
+      bearer: token,
+      headers: { "If-None-Match": '"other"' },
+    });
+    expect(other.status).toBe(200);
   });
 
   test("a deleted artifact: 410 for those who could see it, 404 for everyone else", async () => {
