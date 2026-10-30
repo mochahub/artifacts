@@ -44,8 +44,8 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | 403 | `read_only` | The artifact is archived (SPEC §5.5) |
 | 404 | `not_found` | Missing, or not visible to the caller (never reveal existence) |
 | 409 | `conflict` | Slug taken, version not latest, etc. |
-| 409 | `slug_deleted` | Publishing to a slug in Recently deleted; `details: { deletedAt, deletedBy }` |
-| 410 | `gone` | Expired or used invite, reset or share link; a deleted artifact's page |
+| 409 | `slug_deleted` | Publishing to a slug in Recently deleted, for a caller who could see that artifact; `details: { deletedAt, deletedBy }`. Anyone else gets plain `conflict` |
+| 410 | `gone` | Expired or used invite, reset or share link; a deleted artifact's page, only for a caller who could see it before it was deleted (everyone else gets 404, so a 410 never reveals that an artifact existed) |
 | 412 | `precondition_failed` | `If-Match` didn't match (data store) |
 | 413 | `too_large` | Over a size limit; `details: { limit }` |
 | 421 | `misdirected` | Unknown `Host` |
@@ -130,7 +130,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/home` | `home.read` | `{ waiting: [ArtifactCard], recent: [ArtifactCard] }` |
 | `GET /api/projects?q=&sort=recent\|name` | `project.list` | `[{ id, slug, name, repo, artifactCount, openCount, updatedAt }]`, only projects with something visible. |
 | `GET /api/projects/:slug/artifacts?q=&status=all\|your_turn\|approved\|archived&sort=recent\|name` | `project.read` | `[ArtifactCard]` |
-| `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. 410 `gone` with no details if deleted (for people who could see it). |
+| `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. If deleted: 410 `gone` with only `details: { deletedAt }` for a caller who passes the visibility rule in 04 with `deleted_at` ignored, otherwise 404. |
 | `GET /api/artifacts/:id` | `artifact.read` | Same. |
 | `PATCH /api/artifacts/:id` | `artifact.manage` | `{ visibility? }` |
 | `GET /api/search?q=` | `home.read` | Phase 2 (⌘K): artifacts, pages, comments. |
@@ -179,7 +179,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. |
-| `GET /api/artifacts/:id/v/:n/article/:pageKey` | `artifact.read` | The article's HTML as re-sanitized by the server at commit ([05](05-publish-and-storage.md#building-articles-cli)), fetched as text and never navigated to. |
+| `GET /api/artifacts/:id/v/:n/article/:pageKey` | `artifact.read` | The article's HTML as re-sanitized by the server at commit ([05](05-publish-and-storage.md#building-articles-cli)), fetched as text and never navigated to. Served as `Content-Type: text/plain; charset=utf-8` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so a browser opening the URL directly can never render it on the viewer's origin. |
 | `GET /api/threads/:id/crop` | `artifact.read` | 302 to the crop. |
 
 **Presigned GET URLs** are signed for 24 hours with the signing time rounded down to the UTC day, so the same object gets the same URL all day and phones keep their cached copy. Responses from the bucket for `blobs/` carry `Cache-Control: public, max-age=31536000, immutable` (set as object metadata at upload).
@@ -211,7 +211,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
   "threadsOnChanged": [3, 4, 6, 8], "orphaned": [], "uploaded": { "files": 7, "bytes": 421888 }, "reused": 214 }
 ```
 
-Commit checks: every hash in `files` and every render hash exists in the bucket with the declared size (`HEAD`), the artifact isn't archived or deleted (409 `slug_deleted` with details), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
+Commit checks: every hash in `files` and every render hash exists in the bucket with the declared size (`HEAD`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
 
 ## Review
 

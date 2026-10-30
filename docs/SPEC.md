@@ -172,7 +172,7 @@ Two ways to clear an artifact away: **archive** when it's done and worth keeping
 |---|---|---|
 | What it's for | Finished work you may want to look back at | Mistakes, duplicates, things published by accident |
 | Lists | Hidden from Home, Projects and search; shown under a project's **Archived** filter | Gone from every list; shown in **Recently deleted** for 30 days |
-| Its links | Keep working, with an "Archived" banner | Stop working at once: viewers see "This artifact was deleted", and share links stop |
+| Its links | Keep working, with an "Archived" banner | Stop working at once: people who could see it are told "This artifact was deleted", anyone else gets the ordinary not-found page, and share links stop |
 | Reviewing | Read-only: no new comments, versions or approvals | Nothing |
 | Micro app | Try it still runs; its data folder becomes read-only, so backend writes are refused | Its backend stops |
 | Undo | **Unarchive**, any time | **Restore** within 30 days; after that it's purged for good |
@@ -182,7 +182,7 @@ Two ways to clear an artifact away: **archive** when it's done and worth keeping
 - **Purging is permanent.** After 30 days in Recently deleted, or when someone chooses "Delete now", the artifact is erased: its versions, pages, comments, share links, approvals, data folder and backend code. Its files are removed from the bucket unless another version or artifact still uses them (below).
 - **Agents can only do undoable things.** An agent's CLI token can archive, unarchive and move to Recently deleted, all of which a person can undo. Purging needs a person in the viewer.
 - **Confirmation says what goes.** The delete sheet lists what will be erased ("5 versions, 23 comments, its data and its backend") and when.
-- **The slug stays taken while it's recoverable.** Publishing to a deleted artifact's slug fails with "Deleted on Oct 29 by Zahin; restore it or pick another slug". After the purge the slug is free.
+- **The slug stays taken while it's recoverable.** Publishing to a deleted artifact's slug fails with "Deleted on Oct 29 by Zahin; restore it or pick another slug" for someone who could see the artifact; anyone else is only told the slug is taken. After the purge the slug is free.
 - **Activity records it.** "Zahin archived Camera Buddy roadmap" and "Claude moved Old onboarding to Recently deleted" appear in Activity. A purge leaves a one-line record (name, who, when) with no content.
 - **One version can be removed too,** for a version that should never have been published (say, it showed a secret). It's the same 30-day Recently deleted step. The artifact's other versions stay, and threads made on that version move to the next version, marked "made on a removed version". The only version, or the latest one, can't be removed; publish a fix first.
 - **Recently deleted** is a page under Settings. People see what they deleted; admins see everything.
@@ -527,7 +527,7 @@ data/<artifact id>/files/me/<caller id>/<name>
 | `shared` | Everyone | Anyone who can view the artifact | Anyone who can comment on it |
 | `me` | Each person, or each named guest on a link | That person; the publisher and admins, through the CLI | That person |
 
-In Try it, the viewer says which applies: "Saved for everyone" or "Saved for you". The publisher can read people's `me` data because it's review input, and the viewer says so. (This default is awaiting the user's confirmation; see §15.)
+In Try it, the viewer says which applies: "Saved for everyone" or "Saved for you". The publisher can read people's `me` data because it's review input, and the viewer says so. (Confirmed; see §15.)
 
 **What goes in each.** `shared` is for things everyone should see the same way; `me` is for things each reviewer should have their own copy of, so reviewers don't overwrite each other.
 - `shared`: a poll's tally, a team checklist, shared notes, a leaderboard.
@@ -794,5 +794,5 @@ Defaults the builder uses until the user says otherwise:
 9. **Retention:** keep every version forever. Archive and delete (§5.5) cover clearing things away by hand.
 10. **Viewer stack:** Preact SPA, for the 80 KB budget.
 11. **The 30-minute Claude Code artifacts test:** skipped; the direction is set.
-12. **Who can read `me` data in an artifact without a backend:** that person, plus the publisher and admins through the CLI, with the viewer saying so (§7.9). Asked, not yet confirmed.
+12. **Who can read `me` data in an artifact without a backend:** that person, plus the publisher and admins through the CLI, with the viewer saying so (§7.9). Confirmed 2026-10-30.
 13. **CLI install channel:** an install script that downloads the binary from GitHub Releases, plus `bun add -g @artifacts/cli`. Homebrew later.
