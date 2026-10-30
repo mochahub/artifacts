@@ -178,7 +178,11 @@ describe("publishing", () => {
     const put = prepared.missing[0];
     if (!put) throw new Error("expected a missing file");
     expect((await fetch(put.url, { method: "PUT", headers: put.headers, body })).status).toBe(200);
-    const again = await fetch(put.url, { method: "PUT", headers: put.headers, body: "evil-once" });
+    const again = await fetch(put.url, {
+      method: "PUT",
+      headers: put.headers,
+      body: "x".repeat(body.length),
+    });
     expect(again.status).toBe(412);
   });
 
