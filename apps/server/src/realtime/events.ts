@@ -2,6 +2,7 @@ import postgres from "postgres";
 import { findArtifact, isUuid } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import type { ApiContext, Routes } from "../api/routes.ts";
+import { callerKey } from "../data/store.ts";
 import { ApiError } from "../http/errors.ts";
 
 export type EventType = "thread" | "comment" | "version" | "decision" | "data";
@@ -105,8 +106,8 @@ export function eventRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/events", { action: "artifact.read", resource: artifact }, async (c) => {
     const resource = await artifact(c as ApiContext);
     const caller = c.get("caller");
-    const who =
-      "person" in caller ? caller.person.id : "guestId" in caller ? caller.guestId : c.get("org").id;
+    // An org token has no person, so it counts by itself rather than with every other one.
+    const who = callerKey(caller) ?? ("tokenId" in caller ? caller.tokenId : c.get("org").id);
     const open = streams.get(who) ?? 0;
     if (open >= MAX_STREAMS_PER_CALLER) throw new ApiError("rate_limited", "Too many live connections.");
     streams.set(who, open + 1);

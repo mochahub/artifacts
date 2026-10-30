@@ -1,6 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { sha256 } from "../../src/auth/secrets.ts";
+import { artifacts, tokens } from "../../src/db/schema.ts";
 import { Events } from "../../src/realtime/events.ts";
-import { createDatabase } from "../helpers.ts";
+import { claim, createDatabase, startTestServer } from "../helpers.ts";
+import { publish } from "../publish-helper.ts";
 
 /** A TCP proxy to Postgres that can be cut, for an outage long enough that the driver gives up. */
 function proxy(target: URL) {
@@ -94,4 +97,38 @@ describe("the event listener", () => {
     for (let i = 0; i < 40 && heard.length === 1; i++) await Bun.sleep(25);
     expect(heard).toEqual(["thread", "version"]);
   }, 15_000);
+});
+
+describe("live streams", () => {
+  test("an org token's ten streams are its own, not every org token's", async () => {
+    const t = await startTestServer();
+    try {
+      const { token, person } = await claim(t);
+      await publish(t, token, { slug: "live" });
+      const [row] = await t.server.db.select().from(artifacts);
+      const orgToken = async (secret: string) => {
+        await t.server.db.insert(tokens).values({
+          id: Bun.randomUUIDv7(),
+          orgId: row?.orgId as string,
+          kind: "org",
+          name: secret,
+          tokenHash: sha256(secret),
+          scopes: ["read"],
+          createdBy: person.id,
+        });
+        return secret;
+      };
+      const first = await orgToken("art_org_first_token");
+      const second = await orgToken("art_org_second_token");
+      const open = (bearer: string) => t.api(`/api/events?artifact=${row?.id}`, { bearer });
+      const held = await Promise.all(Array.from({ length: 10 }, () => open(first)));
+      expect(held.map((response) => response.status)).toEqual(new Array(10).fill(200));
+      expect((await open(first)).status).toBe(429);
+      const other = await open(second);
+      expect(other.status).toBe(200);
+      await Promise.all([other, ...held].map((response) => response.body?.cancel()));
+    } finally {
+      await t.stop();
+    }
+  });
 });
