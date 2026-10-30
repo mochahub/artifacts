@@ -1,4 +1,4 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { lazy, useLocation, useRoute } from "preact-iso";
 import type { ArticlePage } from "../article/view.tsx";
@@ -28,6 +28,7 @@ function Page() {
     artifact && version ? `/api/artifacts/${artifact.id}/versions/${version}` : null,
     3_600_000,
   );
+  const threads = usePoll<Thread[]>(artifact ? `/api/artifacts/${artifact.id}/threads` : null, 10_000);
   const pages = useSignal(false);
   const versions = useSignal(false);
 
@@ -40,6 +41,8 @@ function Page() {
   if (!page) return <NotFound />;
 
   const chrome = {
+    threads,
+    latest: version === artifact.latestVersion,
     onPages() {
       pages.value = true;
     },
@@ -52,13 +55,7 @@ function Page() {
       {page.kind === "article" ? (
         <ArticleView artifact={artifact} page={page as ArticlePage} version={version} {...chrome} />
       ) : (
-        <CanvasView
-          artifact={artifact}
-          page={page as CanvasPage}
-          version={version}
-          latest={version === artifact.latestVersion}
-          {...chrome}
-        />
+        <CanvasView artifact={artifact} page={page as CanvasPage} version={version} {...chrome} />
       )}
       {pages.value && (
         <PageSwitcher

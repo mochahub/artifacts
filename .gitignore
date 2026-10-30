@@ -11,3 +11,4 @@ playwright-report/
 
 # Review comments on the mocks stay local (01)
 docs/review/comments.json
+apps/viewer/e2e/.auth.json

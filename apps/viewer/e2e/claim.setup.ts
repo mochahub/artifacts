@@ -34,4 +34,6 @@ test("home: a new version is waiting, before anyone has looked at it", async ({ 
   await expect(page.locator(".tab .count")).toHaveText("1");
   await page.locator(".cover img").evaluate((img: HTMLImageElement) => img.decode());
   await page.screenshot({ path: "../../docs/mocks/shots/01-1-review.png" });
+  // Every other test reuses this session: signing in each time would hit the real per-IP limit.
+  await page.context().storageState({ path: "e2e/.auth.json" });
 });

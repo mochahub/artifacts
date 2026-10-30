@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { OWNER, signIn, watchErrors } from "./helpers.ts";
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test("sign in, and stay signed in across a reload", async ({ page }, info) => {
   const errors = watchErrors(page);
   await page.goto("/");

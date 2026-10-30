@@ -1,10 +1,19 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { List, Menu, Triangle } from "lucide-preact";
+import { List, Menu, MessageCircle, MessagesSquare, Triangle } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { api, post } from "../api.ts";
+import {
+  CommentSheet,
+  CommentsPanel,
+  CommentsSheet,
+  type Draft,
+  ThreadSheet,
+} from "../components/review.tsx";
 import { Sheet } from "../components/sheets.tsx";
 import { plural } from "../format.ts";
+import type { Remote } from "../poll.ts";
+import { decorate, quoteFromSelection } from "./marks.ts";
 
 export type ArticlePage = {
   key: string;
@@ -18,6 +27,8 @@ type Props = {
   artifact: Artifact;
   page: ArticlePage;
   version: number;
+  latest: boolean;
+  threads: Remote<Thread[]>;
   onPages(): void;
   onVersions(): void;
 };
@@ -25,15 +36,68 @@ type Props = {
 const SIZES = [17, 19, 21];
 const stored = (key: string, fallback: string) => localStorage.getItem(`artifacts.read.${key}`) ?? fallback;
 
-export function ArticleView({ artifact, page, version, onPages, onVersions }: Props) {
+export function ArticleView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
   const body = useRef<HTMLDivElement>(null);
   const contents = useSignal(false);
   const settings = useSignal(false);
   const changes = useSignal(false);
+  const pick = (event: MouseEvent) => {
+    if (!picking.value) return;
+    const block = (event.target as HTMLElement).closest<HTMLElement>("[data-block]");
+    const key = block?.dataset.block;
+    if (!key) return;
+    picking.value = false;
+    draft.value = { pageKey: page.key, anchor: { type: "block", blockKey: key }, where: where(key) };
+  };
   const size = useSignal(Number(stored("size", "19")));
   const font = useSignal(stored("font", "serif"));
   const theme = useSignal(stored("theme", "auto"));
   const changedCount = page.blocks.filter((block) => block.changed).length;
+  const loaded = useSignal(0);
+  const draft = useSignal<Draft | null>(null);
+  const picking = useSignal(false);
+  const selection = useSignal<{ draft: Draft; x: number; y: number } | null>(null);
+  const openId = useSignal<string | null>(null);
+  const listOpen = useSignal(false);
+  const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
+  const openThread = all.find((thread) => thread.id === openId.value) ?? null;
+  const openCount = all.filter((thread) => thread.status === "open").length;
+  const canComment = artifact.permissions.comment && latest;
+  const where = (key: string) =>
+    `${page.title ?? page.key} / ${page.outline.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
+
+  // Only when the marks change: redrawing them on every poll would disturb a selection in progress.
+  const marks = JSON.stringify(all.map((t) => [t.id, t.n, t.status, t.anchorState, t.anchor]));
+  useEffect(() => {
+    if (body.current && loaded.value > 0) {
+      decorate(body.current, all, (id) => {
+        openId.value = id;
+      });
+    }
+  }, [marks, loaded.value]);
+
+  useEffect(() => {
+    if (!canComment) return;
+    const onChange = () => {
+      const quote = body.current ? quoteFromSelection(body.current) : null;
+      if (!quote) {
+        selection.value = null;
+        return;
+      }
+      selection.value = {
+        x: quote.rect.left,
+        y: quote.rect.bottom + 54,
+        draft: {
+          pageKey: page.key,
+          anchor: { type: "text", blockKey: quote.blockKey, quote: quote.quote },
+          where: where(quote.blockKey),
+          quote: quote.quote.exact,
+        },
+      };
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  });
 
   useEffect(() => {
     localStorage.setItem("artifacts.read.size", String(size.value));
@@ -57,6 +121,7 @@ export function ArticleView({ artifact, page, version, onPages, onVersions }: Pr
               ?.setAttribute("data-changed", "");
           }
         }
+        loaded.value += 1;
       },
     );
     return () => {
@@ -82,8 +147,10 @@ export function ArticleView({ artifact, page, version, onPages, onVersions }: Pr
 
   return (
     <>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: picking a block is a touch shortcut; selecting text works by keyboard */}
       <article
-        class={`article${changes.value ? " show-changes" : ""}`}
+        class={`article${changes.value ? " show-changes" : ""}${picking.value ? " picking" : ""}`}
+        onClick={pick}
         style={{
           "--read-size": `${size.value}px`,
           "--read-font": font.value === "serif" ? "var(--serif)" : "var(--ui)",
@@ -205,7 +272,91 @@ export function ArticleView({ artifact, page, version, onPages, onVersions }: Pr
           <Triangle />
           Changes
         </button>
+        <i class="vsep" />
+        {canComment && (
+          <button
+            type="button"
+            class="vb"
+            aria-pressed={picking.value}
+            onClick={() => {
+              picking.value = !picking.value;
+            }}
+          >
+            <MessageCircle />
+            Comment
+          </button>
+        )}
+        <button
+          type="button"
+          class="vb"
+          onClick={() => {
+            listOpen.value = true;
+          }}
+        >
+          <MessagesSquare />
+          Comments
+          {openCount > 0 && <b class="count">{openCount}</b>}
+        </button>
       </div>
+      {picking.value && <div class="hint glass">Tap a paragraph</div>}
+      {selection.value && !draft.value && (
+        <button
+          type="button"
+          class="btn mark selbtn"
+          style={{ left: `${Math.max(12, selection.value.x)}px`, top: `${selection.value.y}px` }}
+          onClick={() => {
+            draft.value = selection.value?.draft ?? null;
+            selection.value = null;
+          }}
+        >
+          <MessageCircle />
+          Comment
+        </button>
+      )}
+      <CommentsPanel
+        threads={all}
+        onOpen={(thread) => {
+          openId.value = thread.id;
+        }}
+      />
+      {draft.value && (
+        <CommentSheet
+          artifact={artifact}
+          version={version}
+          draft={draft.value}
+          onClose={() => {
+            draft.value = null;
+          }}
+          onPosted={() => {
+            draft.value = null;
+            threads.refresh();
+          }}
+        />
+      )}
+      {openThread && (
+        <ThreadSheet
+          artifact={artifact}
+          thread={openThread}
+          title={`Comment ${openThread.n}`}
+          base={`/${artifact.project}/${artifact.slug}`}
+          threads={threads}
+          onClose={() => {
+            openId.value = null;
+          }}
+        />
+      )}
+      {listOpen.value && (
+        <CommentsSheet
+          threads={all}
+          onOpen={(thread) => {
+            listOpen.value = false;
+            openId.value = thread.id;
+          }}
+          onClose={() => {
+            listOpen.value = false;
+          }}
+        />
+      )}
       {contents.value && (
         <Sheet
           title="Contents"
