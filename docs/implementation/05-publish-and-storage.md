@@ -159,6 +159,6 @@ A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_adviso
    - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders` and `pages.meta.htmlHash` of non-purged versions.
    - **Sweep:** list `blobs/` (paginated `ListObjectsV2`) and delete objects not in the set whose `LastModified` is more than 24 hours old. The age check protects uploads from a publish that hasn't committed yet.
    - **Log:** record counts and bytes freed.
-3. **Expire leftovers:** `webauthn_challenges`, `device_codes`, used or expired `invites` and `reset_links` older than 30 days, and `backend_logs` older than 24 hours.
+3. **Expire leftovers:** `webauthn_challenges`, `device_codes`, ended `sessions` (with their push subscriptions), used or expired `invites` and `reset_links` older than 30 days, and `backend_logs` older than 24 hours.
 
 A manual trigger exists for testing and operators: `POST /internal/jobs/:name` on the internal port, with `OPS_SECRET`.

@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ApiErrorBody, DEFAULT_ORG_SETTINGS, Health, Meta } from "@artifacts/schema";
+import { DrizzleQueryError } from "drizzle-orm";
 import { org } from "../../src/db/schema.ts";
+import { createApp } from "../../src/http/app.ts";
 import { createLogger } from "../../src/log.ts";
 import { startServer } from "../../src/server.ts";
 import { VERSION } from "../../src/version.ts";
@@ -78,8 +80,17 @@ describe("the three ports", () => {
         const csp = response.headers.get("content-security-policy");
         expect(csp).toContain("frame-src http://content.test");
         expect(csp).toContain("frame-ancestors 'none'");
+        // These two don't fall back to default-src.
+        expect(csp).toContain("object-src 'none'");
+        expect(csp).toContain("form-action 'self'");
+        expect(response.headers.get("cross-origin-opener-policy")).toBe("same-origin");
         expect(csp).toContain("img-src 'self' data: blob: http://127.0.0.1:18333");
       }
+    });
+
+    test("API answers aren't cacheable unless the route says so", async () => {
+      expect((await viewer("/api/meta")).headers.get("cache-control")).toBe("no-store");
+      expect((await viewer("/api/nope")).headers.get("cache-control")).toBe("no-store");
     });
 
     test("in setup mode an unknown API path is a JSON 503, not the viewer (04)", async () => {
@@ -102,6 +113,11 @@ describe("the three ports", () => {
       expect(asset.status).toBe(200);
       expect(asset.headers.get("cache-control")).toContain("immutable");
       expect((await viewer("/assets/index-gone.js")).status).toBe(404);
+    });
+
+    test("a NUL byte in a path is a 404, not a server error", async () => {
+      expect((await viewer("/%00")).status).toBe(404);
+      expect((await viewer("/assets/%00.js")).status).toBe(404);
     });
 
     test("static paths can't climb out of the viewer folder", async () => {
@@ -151,6 +167,11 @@ describe("the three ports", () => {
       expect((await internal("/internal/jobs/nonsense", auth)).status).toBe(404);
     });
 
+    test("refuses a body bigger than a kilobyte before reading it", async () => {
+      const response = await internal("/internal/jobs/gc", { ...auth, body: "x".repeat(4096) });
+      expect(response.status).toBe(413);
+    });
+
     test("doesn't serve the API", async () => {
       expect((await internal("/api/health")).status).toBe(404);
     });
@@ -163,6 +184,25 @@ describe("the three ports", () => {
       expect(line).toMatchObject({ level: "info", msg: "request", route: "/api/health", status: 200 });
       expect(line.requestId).toBeTruthy();
       expect(typeof line.ms).toBe("number");
+    });
+
+    test("never contain what a failed query was sent", async () => {
+      // drizzle's message lists every parameter: emails, comment bodies, token hashes.
+      const out: string[] = [];
+      const app = createApp(createLogger("info", (line) => out.push(line)));
+      app.get("/boom", () => {
+        throw new DrizzleQueryError(
+          "insert into people (email) values ($1)",
+          ["secret@example.com"],
+          new Error("boom"),
+        );
+      });
+      const response = await app.request("/boom");
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain("secret@example.com");
+      const logged = out.find((line) => line.includes("unhandled error")) as string;
+      expect(logged).toContain("insert into people");
+      expect(logged).not.toContain("secret@example.com");
     });
 
     test("never contain a path's token", async () => {

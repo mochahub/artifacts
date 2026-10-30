@@ -270,6 +270,11 @@ export function pushRoutes(routes: Routes, deps: Deps) {
     const session = (c.get("caller") as { sessionId: string }).sessionId;
     const body = await parseBody(c, PushSubscribe);
     if (!allowed(deps, body.endpoint)) throw new ApiError("invalid", "That isn't a push service.");
+    // A browser's keys are an uncompressed P-256 point and 16 bytes of secret; anything else can't be sent to.
+    const point = Buffer.from(body.keys.p256dh, "base64url");
+    if (point.length !== 65 || point[0] !== 4 || Buffer.from(body.keys.auth, "base64url").length !== 16) {
+      throw new ApiError("invalid", "Those aren't a browser's push keys.");
+    }
     const existing = await deps.db
       .select({ id: pushSubscriptions.id })
       .from(pushSubscriptions)

@@ -36,7 +36,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 
 | HTTP | `code` | When |
 |---|---|---|
-| 400 | `invalid` | Body fails validation; `details` has zod issues |
+| 400 | `invalid` | Body fails validation; `details` has zod issues. Also a number or text Postgres refuses (a version past 2,147,483,647, a NUL byte), with empty `details`. |
 | 401 | `unauthenticated` | No valid caller |
 | 401 | `recent_auth_required` | The action needs a sign-in within 10 minutes; the viewer re-prompts |
 | 403 | `forbidden` | Caller can't do this |
@@ -182,7 +182,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 | Method, path | Action | Notes |
 |---|---|---|
-| `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. |
+| `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. With `?via=app` (the service worker, 06) an `image/*` file up to 64 MB comes through the app instead, as an `attachment` with `nosniff`, never as a page; anything else still gets the 302. |
 | `GET /api/artifacts/:id/v/:n/article/:pageKey` | `artifact.read` | The article's HTML as re-sanitized by the server at commit ([05](05-publish-and-storage.md#building-articles-cli)), fetched as text and never navigated to. Served as `Content-Type: text/plain; charset=utf-8` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so a browser opening the URL directly can never render it on the viewer's origin. |
 | `GET /api/threads/:id/crop` | `artifact.read` | 302 to the crop. |
 
@@ -222,13 +222,13 @@ Commit checks: every hash in `files` and every render hash exists in the bucket 
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/threads?status=open\|fixed\|resolved\|all&page=&version=` | `artifact.read` | `[Thread]`, with comments. |
-| `POST /api/artifacts/:id/threads` | `artifact.comment` | `{ pageKey, anchor, body, version }` → `Thread`. Canvas anchors trigger crop generation (05). |
+| `POST /api/artifacts/:id/threads` | `artifact.comment` | `{ pageKey, anchor, body, version }` → `Thread`. Canvas anchors trigger crop generation (05). A page key is up to 500 characters, a quote up to 10,000 and its prefix and suffix 500 each. |
 | `POST /api/threads/:id/comments` | `artifact.comment` | `{ body, marksFixed?: bool, agent? }`. `agent` is the CLI's detected agent, kept only for CLI tokens. `marksFixed` is allowed for CLI tokens and the publisher: sets `status = fixed`, `fixed_version` = latest. A comment on a `fixed` thread by anyone but the fixer sets it back to `open`. |
 | `POST /api/threads/:id/resolve` / `reopen` | `thread.resolve` (people only, never tokens) | |
 | `PATCH /api/comments/:id` / `DELETE` | author only | Edit or delete your own comment within 24 hours. |
-| `POST /api/artifacts/:id/decisions` | `artifact.decide` (people only) | `{ version, kind, note }` |
+| `POST /api/artifacts/:id/decisions` | `artifact.decide` (people only) | `{ version, kind, note }` (note up to 10,000 characters) |
 | `GET /api/artifacts/:id/status` | `artifact.read` | For `artifacts status`: `{ version, decision, decisionVersion, note, open: [Thread], fixedAwaiting: [Thread] }` |
-| `POST /api/artifacts/:id/seen` | `artifact.read` | `{ version, pageKey?, position? }` updates `views` or `guest_views`. |
+| `POST /api/artifacts/:id/seen` | `artifact.read` | `{ version, pageKey?, position? }` updates `views` or `guest_views`. `version` is capped at the latest; a position is kept only for a page the artifact has, up to 2,000 characters. |
 
 `Thread` = `{ id, n, pageKey, anchor, anchorState, status, createdVersion, fixedVersion, author: { name, kind: "person"|"guest"|"agent" }, crop: url|null, comments: [{ id, author, agent, body, version, marksFixed, createdAt }], createdAt, resolvedAt }`.
 
@@ -290,5 +290,5 @@ Backends don't use the internal API: they run in sandbox processes that talk to 
 | Method, path | Notes |
 |---|---|
 | `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. A stream closes after 5 minutes and the browser reconnects, which rechecks access. 10 streams per caller. |
-| `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. 10 devices per person. |
+| `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. `keys.p256dh` must be an uncompressed P-256 point (65 bytes) and `keys.auth` 16 bytes, base64url. 10 devices per person; ended sessions' devices are removed daily. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |

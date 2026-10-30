@@ -11,7 +11,14 @@ try {
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
       log.info("shutting down", { signal });
-      server.stop().then(() => process.exit(0));
+      // Whether or not it closed cleanly, the process ends; hanging on a failed stop would only get it killed.
+      server
+        .stop()
+        .then(() => process.exit(0))
+        .catch((error) => {
+          log.error("shutdown failed", { error: String(error) });
+          process.exit(1);
+        });
     });
   }
 } catch (error) {

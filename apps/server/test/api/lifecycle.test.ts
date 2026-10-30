@@ -8,6 +8,8 @@ import {
   frames,
   guestLinks,
   people,
+  pushSubscriptions,
+  sessions,
   shareLinks,
   threads,
   tombstones,
@@ -72,6 +74,57 @@ describe("lifecycle", () => {
     expect(archived.artifacts.map((card) => card.id)).toContain(row.id);
     expect((await post(`/api/artifacts/${row.id}/unarchive`, { bearer: token })).status).toBe(200);
     expect((await publish(t, token, { slug: row.slug })).status).toBe(200);
+  });
+
+  test("through the app, only pictures come out, as downloads (?via=app)", async () => {
+    // A publisher chooses each file's type, so a page of theirs must never be served from this origin.
+    const page = file("page.html", "<script src=/x.js></script>", "text/html");
+    // Its own render, since the test overwrites it in the bucket and every default publish shares one.
+    const frameHash = hash(Bun.randomUUIDv7());
+    expect((await publish(t, token, { slug: "via-app", frameHash, extra: [page] })).status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "via-app"));
+    const read = (blob: string) =>
+      t.api(`/api/artifacts/${row?.id}/r/${blob}?via=app`, { cookie, redirect: "manual" });
+    expect((await read(page.sha256)).status).toBe(302);
+
+    const [made] = await t.server.db
+      .select()
+      .from(versions)
+      .where(eq(versions.artifactId, row?.id as string));
+    const [frame] = await t.server.db
+      .select()
+      .from(frames)
+      .where(eq(frames.versionId, made?.id as string));
+    const render = (frame as { renders: { "2x": string } }).renders["2x"];
+    const image = await read(render);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/webp");
+    expect(image.headers.get("content-disposition")).toBe("attachment");
+    expect(image.headers.get("x-content-type-options")).toBe("nosniff");
+
+    // A picture whose stored type says otherwise goes by the redirect too.
+    await t.server.bucket.put(`blobs/${render}`, "<script>1</script>", { contentType: "text/html" });
+    expect((await read(render)).status).toBe(302);
+
+    // A picture of any image type still comes through for the service worker, which can't follow the
+    // redirect; an SVG is safe here because it's an attachment, which a browser downloads rather than runs.
+    await t.server.bucket.put(`blobs/${render}`, "<svg/>", { contentType: "image/svg+xml" });
+    const svg = await read(render);
+    expect(svg.status).toBe(200);
+    expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+    expect(svg.headers.get("content-disposition")).toBe("attachment");
+  });
+
+  test("a version number that isn't a number the database can hold is a 400", async () => {
+    const row = await fresh();
+    for (const path of [
+      `/api/artifacts/${row.id}/compare?from=x&to=1`,
+      `/api/artifacts/${row.id}/compare?from=1&to=99999999999`,
+      `/api/artifacts/${row.id}/versions/99999999999`,
+      `/api/artifacts/${row.id}/v/99999999999/article/plan`,
+    ]) {
+      expect((await t.api(path, { bearer: token })).status).toBe(400);
+    }
   });
 
   test("delete: links stop, the slug stays taken, and an agent can undo it", async () => {
@@ -265,6 +318,19 @@ describe("lifecycle", () => {
     expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(200);
   });
 
+  test("the daily purge leaves what was restored and deleted again since it chose it", async () => {
+    const row = await fresh();
+    await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    // The job chose this one when its 30 days were up; then it came back, and went again.
+    const chosen = { ...row, deletedAt: row.createdAt, purgeAfter: new Date(0) };
+    await post(`/api/artifacts/${row.id}/undelete`, { bearer: token });
+    await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    expect(await purgeArtifact(t.server.deps, chosen, null)).toBe(false);
+    expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(410);
+    // A person's purge doesn't wait for the 30 days.
+    expect(await purgeArtifact(t.server.deps, chosen, personId)).toBe(true);
+  });
+
   test("agents' lifecycle actions are marked as theirs", async () => {
     const row = await fresh();
     await t.api(`/api/artifacts/${row.id}/archive`, {
@@ -352,6 +418,39 @@ describe("lifecycle", () => {
     expect((await t.api("/api/activity")).status).toBe(401);
   });
 
+  test("expire clears ended sessions, and the pushes that belonged to them", async () => {
+    const now = t.clock.now();
+    const session = async (name: string, expiresAt: Date) => {
+      const sessionId = Bun.randomUUIDv7();
+      await t.server.db.insert(sessions).values({
+        id: sessionId,
+        orgId,
+        tokenHash: name,
+        personId,
+        domain: "viewer.test",
+        authAt: now,
+        lastSeenAt: now,
+        expiresAt,
+      });
+      await t.server.db.insert(pushSubscriptions).values({
+        id: Bun.randomUUIDv7(),
+        orgId,
+        personId,
+        sessionId,
+        endpoint: `https://fcm.googleapis.com/${name}`,
+        keys: { p256dh: "x", auth: "x" },
+      });
+    };
+    await session("ended", new Date(now.getTime() - 1000));
+    await session("current", new Date(now.getTime() + 3600_000));
+    expect((await job("expire")).status).toBe(200);
+    const left = await t.server.db.select().from(pushSubscriptions);
+    expect(left.map((row) => row.endpoint)).toEqual(["https://fcm.googleapis.com/current"]);
+    const names = (await t.server.db.select().from(sessions)).map((row) => row.tokenHash);
+    expect(names).toContain("current");
+    expect(names).not.toContain("ended");
+  });
+
   test("expire clears leftovers, and the job needs the secret", async () => {
     expect((await job("expire")).status).toBe(200);
     const denied = await fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/gc`, {
@@ -421,5 +520,34 @@ describe("garbage collection", () => {
     await gc();
     expect(await t.server.bucket.head(`data/${ghost}/shared/x`)).toBeNull();
     expect(await t.server.bucket.head(`crops/${ghost}.webp`)).toBeNull();
+  });
+
+  test("the sweep removes a crop no thread points at, even when its thread is still there", async () => {
+    // What purging a version leaves if the bucket failed after the thread's crop_key was cleared.
+    await publish(t, token, { slug: "crops", frameHash: hash("crops") });
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "crops"));
+    const make = async (pointed: boolean) => {
+      const threadId = Bun.randomUUIDv7();
+      const key = `crops/${threadId}.webp`;
+      await t.server.db.insert(threads).values({
+        id: threadId,
+        orgId: row?.orgId as string,
+        artifactId: row?.id as string,
+        n: pointed ? 101 : 100,
+        pageKey: "mocks",
+        createdVersion: 1,
+        authorName: "x",
+        authorPersonId: (await t.server.db.select().from(people))[0]?.id as string,
+        cropKey: pointed ? key : null,
+      });
+      await t.server.bucket.put(key, "x");
+      return key;
+    };
+    const forgotten = await make(false);
+    const kept = await make(true);
+    t.clock.advance(25 * 3600_000);
+    await gc();
+    expect(await t.server.bucket.head(forgotten)).toBeNull();
+    expect(await t.server.bucket.head(kept)).not.toBeNull();
   });
 });
