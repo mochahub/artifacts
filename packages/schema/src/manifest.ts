@@ -12,6 +12,7 @@ export const RESERVED_SLUGS = new Set([
   "settings",
   "projects",
   "activity",
+  "search",
   "setup",
   "assets",
   "internal",
@@ -29,6 +30,10 @@ export const Slug = z
   .refine((value) => !RESERVED_SLUGS.has(value), "this word is reserved");
 
 export const Key = z.string().regex(/^[a-z0-9-]{1,60}$/, "use 1–60 characters of a-z, 0-9 and -");
+
+/** Page ids that would collide with `/:project/:artifact/<word>` routes (06, "Routes"). */
+export const RESERVED_PAGE_IDS = new Set(["compare"]);
+const PageId = Key.refine((value) => !RESERVED_PAGE_IDS.has(value), "this word is reserved");
 
 /** Whether the file exists is checked by lint, which can see the bundle. */
 export const RelPath = z
@@ -49,14 +54,14 @@ export type Device = z.infer<typeof Device>;
 
 export const ManifestPage = z.discriminatedUnion("kind", [
   z.object({
-    id: Key,
+    id: PageId,
     kind: z.literal("article"),
     src: RelPath,
     title: z.string().optional(),
     group: z.string().optional(),
   }),
   z.object({
-    id: Key,
+    id: PageId,
     kind: z.literal("canvas"),
     title: z.string().optional(),
     group: z.string().optional(),
@@ -66,9 +71,9 @@ export const ManifestPage = z.discriminatedUnion("kind", [
     styles: z.array(RelPath).default([]),
     scripts: z.array(RelPath).default([]),
   }),
-  z.object({ id: Key, kind: z.literal("prototype"), src: RelPath, device: Device.default("iphone") }),
+  z.object({ id: PageId, kind: z.literal("prototype"), src: RelPath, device: Device.default("iphone") }),
   z.object({
-    id: Key,
+    id: PageId,
     kind: z.literal("gallery"),
     title: z.string().optional(),
     items: z.array(z.object({ src: RelPath, caption: z.string().optional() })),
