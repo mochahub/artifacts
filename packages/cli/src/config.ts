@@ -41,7 +41,8 @@ export function saveServer(entry: ServerEntry) {
   writeConfig({
     servers: [
       ...rest.map((server) => ({ ...server, default: false })),
-      { ...previous, ...entry, default: true },
+      // The name stays: it names the Railway folder (railwayDir), so a later `login` mustn't rename it.
+      { ...previous, ...entry, name: previous?.name ?? entry.name, default: true },
     ],
   });
 }
