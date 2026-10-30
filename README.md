@@ -4,13 +4,27 @@ Self-hosted publishing and review for what coding agents make: plans, research, 
 
 MIT licensed. It needs a container host, Postgres and an S3-compatible bucket.
 
+## How it works
+
+An agent runs `artifacts publish`. The CLI checks the work, renders each screen in WebKit, and uploads only the files the server doesn't have. The server stores them by hash in a bucket and records a new version in Postgres. People open the link in a viewer made for phones, and pin comments to a screen or a passage. The agent reads the open comments with `artifacts comments`, fixes the work, publishes again and replies. Comments follow the work across versions. Artifact code runs on a separate domain, in a sandbox, so it can't read anyone's sign-in. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the diagrams.
+
+## Requirements
+
+- A machine for the server that runs Docker containers, or a Railway account.
+- Postgres. Railway and the Docker setup both provide it, and the Docker setup runs 17.
+- An S3-compatible bucket that supports conditional writes (`If-Match` and `If-None-Match`). Railway's bucket and SeaweedFS, which the Docker setup uses, both do.
+- HTTPS in front of the server, except on `localhost`. Passkeys and `Secure` cookies need it.
+- Two domains on different registrable domains, one for the viewer and one for Live previews. Railway's generated domains already are.
+- On the machine that publishes: macOS, Linux or Windows. Linux needs WebKit's system libraries, and `artifacts doctor` prints the command. Windows is untested.
+- To work on the code: Bun (the version in `.bun-version`) and Docker.
+
 ## Install
 
 ```sh
 curl -fsSL https://github.com/mochahub/artifacts/releases/latest/download/install.sh | sh
 ```
 
-Or `bun add -g @artifacts/cli`. Nobody needs Bun or Node for the binary. WebKit downloads the first time you render.
+Or `bun add -g @artifacts/cli`, once a release has been published to npm. Nobody needs Bun or Node for the binary. WebKit downloads the first time you render.
 
 ## Set up
 
@@ -19,6 +33,8 @@ artifacts setup
 ```
 
 This deploys to Railway (app, Postgres and a bucket), claims the server, makes you the owner, signs this machine in and installs the skill for Claude Code and Codex.
+
+The Railway template isn't published yet. Until it is, `artifacts setup` needs `ARTIFACTS_RAILWAY_TEMPLATE` set to the template's code, or use Docker below.
 
 **Docker, on a machine you run:**
 
@@ -84,9 +100,21 @@ Invite people with `artifacts org invite sam@example.com`, which prints a link t
 ```sh
 bun install
 bun run dev      # Postgres, SeaweedFS, the server and Vite
-bun run test     # unit, permission and API tests
-bun run e2e      # Playwright in WebKit
+bun run test     # unit, permission and API tests (needs Docker)
+bun run e2e      # Playwright in WebKit (needs Docker)
 bun run lint
 ```
 
 The design lives in [docs/SPEC.md](docs/SPEC.md) and [docs/implementation/](docs/implementation/README.md).
+
+## Security
+
+To report a vulnerability, and for what the design defends against, see [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Commits are Conventional Commits, and they set the release.
+
+## License
+
+[MIT](LICENSE).
