@@ -61,6 +61,17 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
   const listOpen = useSignal(false);
   const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
   const openThread = all.find((thread) => thread.id === openId.value) ?? null;
+
+  // ?c=<n> opens a thread, once.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    const n = Number(new URLSearchParams(location.search).get("c"));
+    if (deepLinked.current || !n || all.length === 0) return;
+    const thread = all.find((entry) => entry.n === n);
+    if (!thread) return;
+    deepLinked.current = true;
+    openId.value = thread.id;
+  });
   const openCount = all.filter((thread) => thread.status === "open").length;
   const canComment = artifact.permissions.comment && latest;
   const where = (key: string) =>

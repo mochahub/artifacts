@@ -2,10 +2,29 @@
 const SHELL = "shell-v1";
 const CONTENT = "content-v1";
 const API = "api-v1";
+const MAX_CONTENT = 1500;
+const MAX_API = 300;
 
-// These change hands with the session, or are a stream, so they never go through the cache.
-const NEVER = /^\/api\/(events|auth|me\/|push|health)/;
-const IMMUTABLE = /^\/(assets\/|api\/artifacts\/[^/]+\/(r\/[0-9a-f]{64}|v\/\d+\/))/;
+// These change with the session, are a stream, or aren't worth keeping.
+const NEVER = /^\/api\/(events|auth|me\/|push|health|search)/;
+const ASSETS = /^\/assets\//;
+const RENDER = /^\/api\/artifacts\/[^/]+\/r\/[0-9a-f]{64}$/;
+const ARTICLE = /^\/api\/artifacts\/[^/]+\/v\/\d+\//;
+// A refusal on these means this device has lost the artifact, so what it kept goes too.
+const ACCESS = /^\/api\/(artifacts\/(by-slug\/[^/]+\/[^/]+|[0-9a-f-]{36})|s\/[^/]+|me)$/;
+
+const forget = () => Promise.all([API, CONTENT].map((name) => caches.delete(name)));
+
+/** Never fails a page: a full disk means something isn't kept, not that it isn't shown. */
+const keep = async (name, request, response, limit) => {
+  try {
+    const cache = await caches.open(name);
+    await cache.put(request, response);
+    if (!limit) return;
+    const keys = await cache.keys();
+    await Promise.all(keys.slice(0, Math.max(0, keys.length - limit)).map((key) => cache.delete(key)));
+  } catch {}
+};
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -18,30 +37,35 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-const cacheFirst = async (request) => {
-  const cache = await caches.open(CONTENT);
-  const hit = await cache.match(request);
+const cacheFirst = async (request, name, limit, fetchFrom = request) => {
+  const hit = await (await caches.open(name)).match(request);
   if (hit) return hit;
-  const response = await fetch(request);
-  // A render redirects to the bucket, so its answer can be opaque; it's still immutable.
-  if (response.ok || response.type === "opaque" || response.type === "opaqueredirect") {
-    await cache.put(request, response.clone());
-  }
+  const response = await fetch(fetchFrom);
+  if (response.ok) keep(name, request, response.clone(), limit);
   return response;
 };
 
-const networkFirst = async (request, name) => {
-  const cache = await caches.open(name);
+const networkFirst = async (request, url) => {
   try {
     const response = await fetch(request);
-    if (response.ok) await cache.put(request, response.clone());
-    // Signed out or removed: nothing kept here is theirs to read any more.
-    if (response.status === 401) await Promise.all([API, CONTENT].map((key) => caches.delete(key)));
+    if (response.ok) keep(API, request, response.clone(), MAX_API);
+    else if ([401, 403, 404, 410].includes(response.status) && ACCESS.test(url.pathname)) await forget();
     return response;
   } catch (error) {
-    const hit = await cache.match(request);
+    const hit = await (await caches.open(API)).match(request);
     if (hit) return hit;
     throw error;
+  }
+};
+
+const page = async (request) => {
+  try {
+    const response = await fetch(request);
+    // The same page for every address, so the offline copy follows each deploy.
+    if (response.ok) keep(SHELL, "/", response.clone());
+    return response;
+  } catch {
+    return (await caches.open(SHELL)).match("/");
   }
 };
 
@@ -49,17 +73,14 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== location.origin) return;
-  if (NEVER.test(url.pathname)) return;
-  if (request.mode === "navigate") {
-    event.respondWith(fetch(request).catch(async () => (await caches.open(SHELL)).match("/")));
-  } else if (IMMUTABLE.test(url.pathname)) event.respondWith(cacheFirst(request));
-  else if (url.pathname.startsWith("/api/")) event.respondWith(networkFirst(request, API));
-});
-
-self.addEventListener("message", (event) => {
-  if (event.data === "clear") {
-    event.waitUntil(Promise.all([API, CONTENT].map((key) => caches.delete(key))));
-  }
+  // Video and audio ask for ranges, which a whole-file cache can't answer.
+  if (request.headers.has("range") || NEVER.test(url.pathname)) return;
+  if (request.mode === "navigate") event.respondWith(page(request));
+  else if (ASSETS.test(url.pathname)) event.respondWith(cacheFirst(request, SHELL));
+  else if (RENDER.test(url.pathname) && request.destination === "image") {
+    event.respondWith(cacheFirst(request, CONTENT, MAX_CONTENT, `${url.pathname}?via=app`));
+  } else if (ARTICLE.test(url.pathname)) event.respondWith(cacheFirst(request, CONTENT, MAX_CONTENT));
+  else if (url.pathname.startsWith("/api/")) event.respondWith(networkFirst(request, url));
 });
 
 self.addEventListener("push", (event) => {

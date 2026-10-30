@@ -52,7 +52,7 @@ export async function turnOffNotifications() {
   await subscription.unsubscribe();
 }
 
-/** Kept pages and answers belong to whoever was signed in. */
-export function clearOffline() {
-  navigator.serviceWorker?.controller?.postMessage("clear");
+/** Kept pages and answers belong to whoever was signed in. From here too: this page may not be controlled. */
+export async function clearOffline() {
+  await Promise.all(["api-v1", "content-v1"].map((name) => caches.delete(name))).catch(() => {});
 }

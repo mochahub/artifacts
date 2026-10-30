@@ -137,7 +137,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. If deleted: 410 `gone` with only `details: { deletedAt }` for a caller who passes the visibility rule in 04 with `deleted_at` ignored, otherwise 404. |
 | `GET /api/artifacts/:id` | `artifact.read` | Same. |
 | `PATCH /api/artifacts/:id` | `artifact.manage` | `{ visibility? }` |
-| `GET /api/search?q=` | `home.read` | Phase 2 (⌘K, Search tab): `{ artifacts, pages, comments }`, 20 each, only what the caller can see. |
+| `GET /api/search?q=` | `home.read` | Phase 2 (⌘K, Search tab): `{ artifacts, pages, comments }`, 20 each, only what the caller can see. 60 a minute per caller. |
 | `GET /api/activity?filter=all\|agents\|people&before=` | `home.read` | Activity rows the caller can see. |
 
 `ArtifactCard` = `{ id, project, slug, title, cover: { renderHash } | { title }, pageCount, latestVersion, status: { kind: "waiting"|"with_agent"|"approved"|"not_reviewed", agent?, version? }, counts: { open, repliesToYou, changedFrames }, publishedBy, agent, publishedAt, archivedAt }`.

@@ -3,6 +3,7 @@ import { Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
+import { callerKey } from "../data/store.ts";
 import {
   artifactAccess,
   artifacts,
@@ -34,6 +35,7 @@ const viewerId = (caller: Caller) =>
       : {};
 
 const RESULTS = 20;
+const SEARCHES_PER_MINUTE = 60;
 
 /** Everything this caller can see, filtered by can() and nothing else. */
 async function visible(deps: Deps, c: ApiContext, projectId?: string): Promise<Loaded[]> {
@@ -253,6 +255,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/search", { action: "home.read" }, async (c) => {
     const q = (c.req.query("q") ?? "").trim().toLowerCase().slice(0, 100);
     if (q.length < 2) return c.json({ artifacts: [], pages: [], comments: [] });
+    deps.limits.hit(`search:${callerKey(c.get("caller")) ?? "token"}`, SEARCHES_PER_MINUTE, 60_000);
     const list = await visible(deps, c as ApiContext);
     const known = new Map(list.map((entry) => [entry.row.id, entry]));
     const ids = [...known.keys()];
@@ -281,6 +284,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
       deps.db
         .select({
           thread: threads.n,
+          pageKey: threads.pageKey,
           artifactId: threads.artifactId,
           body: comments.body,
           author: comments.authorName,
@@ -304,6 +308,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
       comments: commentRows.map((row) => ({
         ...where(known.get(row.artifactId) as Loaded),
         thread: row.thread,
+        pageKey: row.pageKey,
         body: row.body.slice(0, 200),
         author: row.author,
       })),

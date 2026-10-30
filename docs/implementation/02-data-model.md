@@ -41,6 +41,7 @@
 | `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
 | `vapid_public` | text null | Phase 2. Generated on first boot. |
 | `vapid_private` | text null | Phase 2. Stored as is: anyone who can read this table can already read everything else, and tying it to `SESSION_SECRET` would stop that secret being rotated. |
+| `last_digest_at` | timestamptz null | Phase 2. When the daily push digest last went out, so a restart doesn't send it again. |
 | `pseudonym_key` | bytea not null | 32 random bytes generated at setup. Keys the per-artifact caller pseudonyms (08). Separate from `SESSION_SECRET` so that secret can be rotated; never rotated itself, because `me` data is keyed by pseudonym. |
 | `created_at` | timestamptz | |
 
@@ -252,7 +253,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 **`artifact_usage`** (Phase 2): the data store's counters for limits. PK `(artifact_id, scope)` with `scope` in `shared`, `me`, `files`; `org_id`, `keys` int, `bytes` bigint, `updated_at`. Writes lock the row (`SELECT … FOR UPDATE`) for the length of one data write (08). Recounted by the daily job for artifacts written that day; deleted with the artifact on purge.
 
-**`push_subscriptions`** (Phase 2): `id`, `org_id`, `person_id`, `endpoint` text unique, `keys` jsonb, `created_at`, `last_ok_at`.
+**`push_subscriptions`** (Phase 2): `id`, `org_id`, `person_id`, `session_id` (cascades, so ending a session ends its device's pushes), `endpoint` text unique, `keys` jsonb, `created_at`, `last_ok_at`.
 
 **`releases`**: none. The app learns the latest release from GitHub Releases (cached 6 hours) for the admin "new version" notice.
 

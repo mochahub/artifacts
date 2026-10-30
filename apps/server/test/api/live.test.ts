@@ -1,10 +1,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createDecipheriv, createECDH, hkdfSync, randomBytes } from "node:crypto";
+import {
+  createDecipheriv,
+  createECDH,
+  createHash,
+  createPublicKey,
+  createVerify,
+  hkdfSync,
+  randomBytes,
+} from "node:crypto";
 import { eq } from "drizzle-orm";
-import { artifacts, people, pushSubscriptions } from "../../src/db/schema.ts";
+import sharp from "sharp";
+import { sha256 } from "../../src/auth/secrets.ts";
+import { artifacts, comments, people, pushSubscriptions, sessions } from "../../src/db/schema.ts";
 import { isPushEndpoint, sendDigest } from "../../src/push/notify.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import { hash, makePerson, publish } from "../publish-helper.ts";
 
 /** A browser's half of RFC 8291, written apart from the server's. */
 function browser() {
@@ -74,6 +84,32 @@ describe("live review", () => {
       ...by,
       json: { pageKey: "plan", version: 1, anchor: null, body },
     });
+
+  /** A device for someone with only a token, as if they'd subscribed from a browser session. */
+  async function addDevice(personId: string, path: string, keys = browser().keys) {
+    const sessionId = Bun.randomUUIDv7();
+    const now = t.clock.now();
+    await t.server.db.insert(sessions).values({
+      id: sessionId,
+      orgId,
+      personId,
+      tokenHash: sha256(sessionId),
+      domain: "viewer.test",
+      authAt: now,
+      lastSeenAt: now,
+      expiresAt: new Date(now.getTime() + 30 * 24 * 3600_000),
+    });
+    await t.server.db.insert(pushSubscriptions).values({
+      id: Bun.randomUUIDv7(),
+      orgId,
+      personId,
+      sessionId,
+      endpoint: endpoint(path),
+      keys,
+    });
+    return sessionId;
+  }
+  const quietDay = () => t.clock.advance(21 * 3600_000);
 
   async function nextEvents(response: Response, count: number) {
     const reader = (response.body as ReadableStream<Uint8Array>).getReader();
@@ -155,7 +191,7 @@ describe("live review", () => {
       json: { endpoint: endpoint("owner"), keys: device.keys },
     });
     expect(subscribed.status).toBe(200);
-    const thread = (await (await comment("A question")).json()) as { id: string };
+    const thread = (await (await comment("A question")).json()) as { id: string; n: number };
     received.length = 0;
 
     await t.api(`/api/threads/${thread.id}/comments`, {
@@ -180,7 +216,30 @@ describe("live review", () => {
     const opened = device.decrypt(message?.body as Uint8Array);
     expect(opened.title).toBe("Claude replied");
     expect(opened.body).toBe("Fixed it");
-    expect(opened.url).toContain("/live?c=");
+    expect(opened.url).toBe(`/camerabuddy/live/plan?c=${thread.n}`);
+
+    const [, jwt, publicKey] = /^vapid t=(.+), k=(.+)$/.exec(
+      message?.headers.get("authorization") as string,
+    ) as string[];
+    const [header, claims, signature] = (jwt as string).split(".") as [string, string, string];
+    const point = Buffer.from(publicKey as string, "base64url");
+    const key = createPublicKey({
+      format: "jwk",
+      key: {
+        kty: "EC",
+        crv: "P-256",
+        x: point.subarray(1, 33).toString("base64url"),
+        y: point.subarray(33).toString("base64url"),
+      },
+    });
+    const valid = createVerify("sha256")
+      .update(`${header}.${claims}`)
+      .verify({ key, dsaEncoding: "ieee-p1363" }, Buffer.from(signature, "base64url"));
+    expect(valid).toBe(true);
+    const decoded = JSON.parse(Buffer.from(claims, "base64url").toString());
+    expect(decoded.aud).toBe(`http://127.0.0.1:${service.port}`);
+    expect(decoded.exp * 1000).toBeGreaterThan(Date.now());
+    expect(decoded.exp * 1000 - Date.now()).toBeLessThanOrEqual(24 * 3600_000);
   });
 
   test("push: an agent's publish tells its person, and a person's own doesn't", async () => {
@@ -195,16 +254,10 @@ describe("live review", () => {
 
   test("push: someone who can't see the artifact isn't told", async () => {
     received.length = 0;
-    const outsider = await makePerson(t, orgId, "outside");
+    await makePerson(t, orgId, "outside");
     const [row] = await t.server.db.select().from(people).where(eq(people.role, "outside"));
-    expect(outsider).toBeTruthy();
-    await t.server.db.insert(pushSubscriptions).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      personId: row?.id as string,
-      endpoint: endpoint("outsider"),
-      keys: browser().keys,
-    });
+    await addDevice(row?.id as string, "outsider");
+    quietDay();
     await sendDigest(t.server.deps);
     expect(received.filter((entry) => entry.path === "/outsider")).toHaveLength(0);
   });
@@ -214,20 +267,21 @@ describe("live review", () => {
     await makePerson(t, orgId, "member");
     const [other] = await t.server.db.select().from(people).where(eq(people.role, "member"));
     const device = browser();
-    await t.server.db.insert(pushSubscriptions).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      personId: other?.id as string,
-      endpoint: endpoint("gone"),
-      keys: device.keys,
-    });
+    await addDevice(other?.id as string, "gone", device.keys);
+    quietDay();
     await comment("Something new");
     await sendDigest(t.server.deps);
     const digest = received.find((entry) => entry.path === "/gone");
     expect(device.decrypt(digest?.body as Uint8Array).title).toBe("Today in Artifacts");
 
-    answer = 410;
+    // Once a day, however often the job runs.
     received.length = 0;
+    await sendDigest(t.server.deps);
+    expect(received).toHaveLength(0);
+
+    answer = 410;
+    quietDay();
+    await comment("And again");
     await sendDigest(t.server.deps);
     answer = 201;
     const left = await t.server.db
@@ -235,6 +289,76 @@ describe("live review", () => {
       .from(pushSubscriptions)
       .where(eq(pushSubscriptions.endpoint, endpoint("gone")));
     expect(left).toHaveLength(0);
+  });
+
+  test("push: someone who lost the artifact, or whose session ended, hears nothing more", async () => {
+    await makePerson(t, orgId, "member");
+    const [member] = await t.server.db.select().from(people).where(eq(people.role, "member"));
+    const thread = (await (await comment("Private soon")).json()) as { id: string };
+    const session = await addDevice(member?.id as string, "lost");
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
+    const reply = (body: string) =>
+      t.api(`/api/threads/${thread.id}/comments`, {
+        method: "POST",
+        bearer: token,
+        json: { body, agent: "Claude" },
+      });
+    await t.server.db.insert(comments).values({
+      id: Bun.randomUUIDv7(),
+      threadId: thread.id,
+      orgId,
+      authorPersonId: member?.id,
+      authorName: "Member",
+      body: "Me too",
+      version: 1,
+    });
+    received.length = 0;
+    await reply("Heard");
+    for (let i = 0; i < 40 && !received.some((entry) => entry.path === "/lost"); i++) await Bun.sleep(25);
+    expect(received.some((entry) => entry.path === "/lost")).toBe(true);
+
+    await t.server.db.update(artifacts).set({ visibility: "me" }).where(eq(artifacts.id, id));
+    received.length = 0;
+    await reply("Not for you");
+    await Bun.sleep(150);
+    expect(received.some((entry) => entry.path === "/lost")).toBe(false);
+    await t.server.db
+      .update(artifacts)
+      .set({ visibility: row?.visibility as "org" })
+      .where(eq(artifacts.id, id));
+
+    await t.server.db.delete(sessions).where(eq(sessions.id, session));
+    expect(
+      await t.server.db
+        .select()
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.endpoint, endpoint("lost"))),
+    ).toHaveLength(0);
+  });
+
+  test("streams: ten per caller, and closing one frees its place", async () => {
+    const open = await Promise.all(
+      Array.from({ length: 10 }, () => t.api(`/api/events?artifact=${id}`, { cookie })),
+    );
+    expect(open.map((response) => response.status)).toEqual(new Array(10).fill(200));
+    expect((await t.api(`/api/events?artifact=${id}`, { cookie })).status).toBe(429);
+    await open[0]?.body?.cancel();
+    await Bun.sleep(50);
+    const again = await t.api(`/api/events?artifact=${id}`, { cookie });
+    expect(again.status).toBe(200);
+    await Promise.all([again, ...open.slice(1)].map((response) => response.body?.cancel()));
+  });
+
+  test("a render can be fetched through the app, for the service worker", async () => {
+    const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#123456" } })
+      .png()
+      .toBuffer();
+    expect((await publish(t, token, { slug: "bytes", renderBytes: png })).status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bytes"));
+    const hash = createHash("sha256").update(png).digest("hex");
+    const through = await t.api(`/api/artifacts/${row?.id}/r/${hash}?via=app`, { cookie });
+    expect(through.status).toBe(200);
+    expect(new Uint8Array(await through.arrayBuffer())).toEqual(new Uint8Array(png));
   });
 
   test("push: unsubscribing stops it", async () => {
@@ -269,10 +393,23 @@ describe("live review", () => {
   });
 
   test("compare reports the renders and regions of a changed frame", async () => {
-    const compare = await t.api(`/api/artifacts/${id}/compare?from=1&to=2`, { cookie });
+    const picture = (background: string) =>
+      sharp({ create: { width: 400, height: 800, channels: 3, background } })
+        .png()
+        .toBuffer();
+    const version = (frameHash: string, renderBytes: Buffer) =>
+      publish(t, token, { slug: "pixels", frameHash, renderBytes });
+    expect((await version(hash("x"), await picture("#ffffff"))).status).toBe(200);
+    expect((await version(hash("y"), await picture("#000000"))).status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "pixels"));
+    const compare = await t.api(`/api/artifacts/${row?.id}/compare?from=1&to=2`, { cookie });
     expect(compare.status).toBe(200);
-    const body = (await compare.json()) as { frames: { regions: Record<string, unknown> } };
-    expect(body.frames.regions).toEqual(expect.any(Object));
+    const body = (await compare.json()) as {
+      frames: { regions: Record<string, { before: string; after: string; regions: unknown[] }> };
+    };
+    const frame = body.frames.regions["mocks/live-view"];
+    expect(frame?.before).not.toBe(frame?.after);
+    expect(frame?.regions).toEqual([{ x: 0, y: 0, w: 1, h: 1 }]);
   });
 
   test("admins hear about a newer release, and nothing else breaks when GitHub can't say", async () => {

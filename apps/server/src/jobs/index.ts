@@ -143,13 +143,14 @@ export const jobsFor = (deps: Deps): Record<string, () => Promise<unknown>> => (
 
 /** Once a day, on one replica at a time (05). */
 export function startJobs(deps: Deps) {
-  const jobs = jobsFor(deps);
+  // Sent after the lock's transaction: it waits on push services, and holds nothing shared.
+  const { digest, ...jobs } = jobsFor(deps);
   const run = async () => {
     const reserved = await deps.db.transaction(async (tx) => {
       const [{ locked } = { locked: false }] = (await tx.execute(
         sql`select pg_try_advisory_xact_lock(${JOB_LOCK}) as locked`,
       )) as unknown as { locked: boolean }[];
-      if (!locked) return;
+      if (!locked) return false;
       for (const [name, job] of Object.entries(jobs)) {
         try {
           await job();
@@ -157,7 +158,9 @@ export function startJobs(deps: Deps) {
           deps.log.error("job failed", { name, error: String(error) });
         }
       }
+      return true;
     });
+    if (reserved) await digest?.();
     return reserved;
   };
   const tick = () => run().catch((error) => deps.log.error("jobs failed", { error: String(error) }));

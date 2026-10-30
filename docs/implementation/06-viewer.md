@@ -190,8 +190,10 @@ See [08-micro-apps.md](08-micro-apps.md#try-it). Phase 2.
 - **MVP polling:** poll with ETags: the open artifact's threads and versions every 10 seconds while the tab is visible; home and lists every 60 seconds.
 - **Phase 2 realtime:** an open artifact uses `GET /api/events` (SSE) and refreshes on each event. With a stream open, its fast polls drop to one a minute as a safety net.
 - **Service worker** (Phase 2, with the install prompt):
-  - caches the app shell, plus renders and article HTML of versions you've opened (cache-first, since they're immutable)
-  - fetches API calls network-first, with the last response kept for offline reading
+  - caches the app shell, plus renders and article HTML of versions you've opened (cache-first, since they're immutable). Renders are fetched with `?via=app`, because a bucket's answer can't be read without CORS. Video and audio aren't kept.
+  - fetches API calls network-first, with the last response kept for offline reading. Search, sessions and sign-in answers are never kept.
+  - keeps at most 1,500 files and 300 API answers, oldest out first
+  - forgets everything but the app when the artifact or the session says this device has no access (401, 403, 404, 410), and at sign-out. A revoked device keeps its copies only until it next reaches the server.
   - handles Web Push
 
 ## Accessibility and Safari specifics

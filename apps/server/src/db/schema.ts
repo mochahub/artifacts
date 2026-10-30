@@ -73,6 +73,7 @@ export const org = pgTable("org", {
   settings: jsonb("settings").notNull(),
   vapidPublic: text("vapid_public"),
   vapidPrivate: text("vapid_private"),
+  lastDigestAt: time("last_digest_at"),
   pseudonymKey: bytea("pseudonym_key").notNull(),
   createdAt: createdAt(),
 });
@@ -655,6 +656,9 @@ export const pushSubscriptions = pgTable(
     personId: uuid("person_id")
       .notNull()
       .references(() => people.id),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
     endpoint: text("endpoint").notNull().unique(),
     keys: jsonb("keys").notNull(),
     createdAt: createdAt(),

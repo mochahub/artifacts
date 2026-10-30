@@ -11,7 +11,11 @@ import { NotFound } from "./not-found.tsx";
 type Region = { x: number; y: number; w: number; h: number };
 type Change = { added: string[]; removed: string[]; changed: string[] };
 type FrameChange = { before: string; after: string; regions: Region[] };
-type Compare = { frames: Change & { regions: Record<string, FrameChange> }; blocks: Change };
+type Compare = {
+  frames: Change & { regions: Record<string, FrameChange> };
+  blocks: Change;
+  notes: Record<string, string>;
+};
 type Mode = "side" | "swipe" | "changes";
 
 const MODES: [Mode, string][] = [
@@ -25,18 +29,23 @@ function FrameDiff({
   name,
   frame,
   mode,
+  note,
 }: {
   artifactId: string;
   name: string;
   frame: FrameChange;
   mode: Mode;
+  note?: string;
 }) {
   const split = useSignal(50);
   const before = renderUrl(artifactId, frame.before);
   const after = renderUrl(artifactId, frame.after);
   return (
     <figure class="diff">
-      <figcaption>{name}</figcaption>
+      <figcaption>
+        {name}
+        {note && <p class="note">{note}</p>}
+      </figcaption>
       {mode === "side" && (
         <div class="pair">
           <img src={before} alt={`${name}, before`} />
@@ -133,6 +142,7 @@ export function ComparePage() {
     [compare.data.value.frames, compare.data.value.blocks].every(
       (c) => c.added.length + c.removed.length + c.changed.length === 0,
     );
+  const notes = compare.data.value?.notes ?? {};
   const changed = Object.entries(compare.data.value?.frames.regions ?? {});
   return (
     <main class="main">
@@ -161,7 +171,14 @@ export function ComparePage() {
         </div>
       )}
       {changed.map(([name, frame]) => (
-        <FrameDiff key={name} artifactId={artifact.id} name={name} frame={frame} mode={mode.value} />
+        <FrameDiff
+          key={name}
+          artifactId={artifact.id}
+          name={name}
+          frame={frame}
+          mode={mode.value}
+          note={notes[name] ?? notes[name.split("/").at(-1) as string]}
+        />
       ))}
       {compare.data.value && <Rows title="Frames" change={compare.data.value.frames} />}
       {compare.data.value && <Rows title="Sections" change={compare.data.value.blocks} />}

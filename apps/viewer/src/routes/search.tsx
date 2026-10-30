@@ -9,15 +9,23 @@ type Hit = { id: string; project: string; slug: string; title: string };
 type Results = {
   artifacts: Hit[];
   pages: (Hit & { pageKey: string; pageTitle: string | null })[];
-  comments: (Hit & { thread: number; body: string; author: string })[];
+  comments: (Hit & { thread: number; pageKey: string; body: string; author: string })[];
 };
 
 /** The results list, shared by the Search tab and ⌘K. */
 export function SearchBox({ onPick }: { onPick?(): void }) {
   const q = useSignal("");
+  const settled = useSignal("");
+  // A pause, not every key: each search reads everything this person can see.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      settled.value = q.value;
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [q.value]);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
-  const query = q.value.trim();
+  const query = settled.value.trim();
   const { data } = usePoll<Results>(
     query.length >= 2 ? `/api/search?q=${encodeURIComponent(query)}` : null,
     3_600_000,
@@ -78,7 +86,7 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
           <div class="group">
             {results.comments.map((hit) =>
               row(
-                `/${hit.project}/${hit.slug}?c=${hit.thread}`,
+                `/${hit.project}/${hit.slug}/${hit.pageKey}?c=${hit.thread}`,
                 hit.body,
                 `${hit.author} on ${hit.title}`,
                 `${hit.id}/${hit.thread}/${hit.body}`,

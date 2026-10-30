@@ -121,8 +121,10 @@ function Index() {
         type="button"
         class="btn soft"
         onClick={async () => {
+          // Before the session ends: the next person on this device shouldn't get these.
+          await turnOffNotifications().catch(() => {});
           await post("/api/auth/logout");
-          clearOffline();
+          await clearOffline();
           location.href = "/sign-in";
         }}
       >
