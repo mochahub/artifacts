@@ -69,13 +69,14 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | Method, path | Auth | Notes |
 |---|---|---|
 | `POST /api/auth/password` | none | `{ email, password }` → sets `art_session`; `{ person }`. Rate limits in 04. |
-| `POST /api/auth/passkey/options` | none | → WebAuthn authentication options (`rpId`, `challengeId`). Empty `allowCredentials` (discoverable). |
+| `POST /api/auth/passkey/options` | none | `{ local?: bool }` → WebAuthn authentication options (`rpId`, `challengeId`). Empty `allowCredentials` (discoverable). `local` asks for this domain instead of the home domain, for browsers without Related Origin Requests. |
 | `POST /api/auth/passkey/verify` | none | `{ challengeId, response }` → sets cookie; `{ person }` |
 | `POST /api/auth/logout` | session or CLI token | Ends this session, or revokes the token that called it, so `artifacts logout` leaves nothing valid behind. |
 | `GET /api/me` | any person caller | `{ person: { id, name, email, role }, org: { name }, recentAuth: bool }` |
 | `GET /api/me/sessions` | session | Sessions and CLI tokens: `[{ id, kind: "session"\|"cli", name, userAgent, lastSeenAt, current }]` |
 | `DELETE /api/me/sessions/:id` | session | Ends a session or revokes a CLI token. |
 | `POST /api/me/password` | session, recent auth | `{ password }` (12+ chars) → ends other sessions. |
+| `GET /api/me/passkeys` | session | `{ passkeys: [{ id, name, rpId, createdAt, lastUsedAt }], passwordSetAt }` |
 | `POST /api/me/passkeys/options` | session, recent auth | → registration options for `rpId` = home domain (or the current domain when the client says it lacks Related Origin Requests). |
 | `POST /api/me/passkeys/verify` | session, recent auth | `{ challengeId, response, name? }` → `{ passkey }` |
 | `PATCH /api/me/passkeys/:id` | session | `{ name }` |
@@ -120,7 +121,8 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }` |
 | `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |
-| `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ token }` shown once. |
+| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. |
+| `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ id, token }`, shown once. |
 | `GET /api/shares` | `org.manage` | Every outside share (people and links) across artifacts. |
 
 ## Projects, artifacts and lists

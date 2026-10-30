@@ -12,12 +12,13 @@
     "@artifacts/schema": "workspace:*",
     "@aws-sdk/client-s3": "^3.1160.0",
     "@aws-sdk/s3-request-presigner": "^3.1160.0",
+    "@simplewebauthn/server": "14.0.3",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",
     "postgres": "^4.0.0",
+    "sharp": "0.35.5",
     "tldts": "^7.4.19",
-    "zod": "^4.6.7",
-    "sharp": "0.35.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"

@@ -19,6 +19,7 @@
   "dependencies": {
     "@artifacts/schema": "workspace:*",
     "@preact/signals": "^2.11.4",
+    "@simplewebauthn/browser": "14.0.0",
     "lucide-preact": "^1.65.0",
     "preact": "^11.1.0",
     "preact-iso": "^2.12.2"

@@ -13,6 +13,12 @@ const PUBLIC_ROUTES = [
   "POST /api/reset/:token",
   "POST /api/device/start",
   "POST /api/device/poll",
+  "POST /api/auth/passkey/options",
+  "POST /api/auth/passkey/verify",
+  "GET /api/invites/:token",
+  "POST /api/invites/:token/accept",
+  "GET /api/s/:token",
+  "POST /api/s/:token/guest",
 ].sort();
 
 describe("the route list", () => {

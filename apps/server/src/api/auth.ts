@@ -21,7 +21,11 @@ const sessionOf = (caller: Caller) => {
   return caller;
 };
 
-export function authRoutes(routes: Routes, deps: Deps) {
+export function authRoutes(
+  routes: Routes,
+  deps: Deps,
+  passkeys: { reauth(c: ApiContext, challengeId: string, response: unknown): Promise<void> },
+) {
   const { db, clock, limits } = deps;
 
   async function checkPassword(orgId: string, email: string, password: string) {
@@ -66,8 +70,10 @@ export function authRoutes(routes: Routes, deps: Deps) {
   routes.post("/api/auth/reauth", { action: "account.manage" }, async (c) => {
     const caller = sessionOf(c.get("caller"));
     const body = await parseBody(c, Reauth);
-    if (!("password" in body))
-      throw new ApiError("invalid", "Passkey re-authentication arrives with passkeys.");
+    if (!("password" in body)) {
+      await passkeys.reauth(c as ApiContext, body.challengeId, body.response);
+      return c.json({ ok: true });
+    }
     const account = caller.person.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
     const person = await checkPassword(c.get("org").id, caller.person.email, body.password);
