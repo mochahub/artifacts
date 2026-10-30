@@ -17,6 +17,7 @@ import {
   pseudonym,
   putFile,
   putValue,
+  readLimited,
   recountUsage,
   type Scope,
   scopePath,
@@ -58,6 +59,21 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     }
   };
   const usageScope = (c: ApiContext) => scopeOf(c);
+  /** `parseBody` for a data PUT, but never reading more than a value may be (plus the envelope). */
+  const boundedPut = async (c: ApiContext) => {
+    const bytes = await readLimited(c.req.raw, c.get("org").settings.limits.dataValueBytes + 1024);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      throw new ApiError("invalid", "The body must be JSON.");
+    }
+    const parsed = DataPut.safeParse(raw);
+    if (!parsed.success) {
+      throw new ApiError("invalid", "The request isn't valid.", { issues: parsed.error.issues });
+    }
+    return parsed.data;
+  };
 
   routes.get("/api/artifacts/:id/data/:scope", { action: "data.read", resource: artifact }, async (c) => {
     const base = prefix(c as ApiContext);
@@ -87,7 +103,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     async (c) => {
       const key = checkKey(c.req.param("key") as string);
       limited(c as ApiContext);
-      const { value } = await parseBody(c, DataPut);
+      const { value } = await boundedPut(c as ApiContext);
       const ifMatch = c.req.header("if-match");
       const result = await precondition(() =>
         putValue(deps, {
@@ -141,14 +157,11 @@ export function dataRoutes(routes: Routes, deps: Deps) {
       const name = checkKey(c.req.param("name") as string);
       limited(c as ApiContext);
       const limits = c.get("org").settings.limits;
-      if (Number(c.req.header("content-length") ?? 0) > limits.fileBytes) {
-        throw new ApiError("too_large", "That file is too big.", { limit: limits.fileBytes });
-      }
       const result = await putFile(deps, {
         orgId: c.get("org").id,
         artifactId: c.req.param("id") as string,
         objectKey: `${prefix(c as ApiContext, true)}${name}`,
-        body: new Uint8Array(await c.req.arrayBuffer()),
+        body: await readLimited(c.req.raw, limits.fileBytes),
         contentType: c.req.header("content-type") ?? "application/octet-stream",
         limits,
       });
