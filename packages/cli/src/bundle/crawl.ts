@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, sep } from "node:path";
 import type { Manifest } from "@artifacts/schema";
 import { init, parse as parseModule } from "es-module-lexer";
@@ -65,7 +65,15 @@ function classify(reference: string): "skip" | "absolute" | "relative" {
   return "relative";
 }
 
-const cleanUrl = (url: string) => decodeURI(url.trim().split(/[?#]/)[0] as string);
+/** A stray `%` ("100%.png") isn't valid percent-encoding; it stays as written and fails as a missing file. */
+const cleanUrl = (url: string) => {
+  const bare = url.trim().split(/[?#]/)[0] as string;
+  try {
+    return decodeURI(bare);
+  } catch {
+    return bare;
+  }
+};
 
 export function htmlRefs(html: string) {
   const refs: string[] = [];
@@ -161,6 +169,7 @@ export function markdownRefs(markdown: string): string[] {
 /** Every file the manifest reaches, and what's wrong with the references on the way (05). */
 export async function crawl(root: string, manifest: Manifest): Promise<Crawled> {
   await init;
+  const realRoot = realpathSync(root) + sep;
   const files = new Map<string, string>();
   const problems: Problem[] = [];
   const queue: { path: string; from: string }[] = [];
@@ -213,6 +222,17 @@ export async function crawl(root: string, manifest: Manifest): Promise<Crawled> 
         severity: "error",
         file: from,
         message: `${from} refers to ${path}, which doesn't exist.`,
+      });
+      continue;
+    }
+    // A symlink in a cloned repo could point at ~/.ssh or .env, and publishing would upload what it reaches.
+    const real = realpathSync(absolute);
+    if (!real.startsWith(realRoot)) {
+      problems.push({
+        rule: "files/outside",
+        severity: "error",
+        file: from,
+        message: `${path} is a link to a file outside the folder artifact.json is in. Copy the file in instead.`,
       });
       continue;
     }
