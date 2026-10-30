@@ -231,6 +231,20 @@ describe("the backend sandbox", () => {
     expect((await call("x")).headers.get("cache-control")).toBe("no-store");
   });
 
+  test("a backend over a code limit set after it was published is refused without being fetched", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { backendCodeBytes: number } };
+    const { call } = await deploy(POLL);
+    expect((await call("votes")).status).toBe(200);
+    const original = settings.limits.backendCodeBytes;
+    settings.limits.backendCodeBytes = 10;
+    await t.server.db.update(org).set({ settings });
+    expect((await call("votes")).status).toBe(413);
+    settings.limits.backendCodeBytes = original;
+    await t.server.db.update(org).set({ settings });
+  });
+
   test("a loop in top-level code times out, and doesn't hold other backends", async () => {
     const { org } = await import("../../src/db/schema.ts");
     const [row] = await t.server.db.select().from(org);

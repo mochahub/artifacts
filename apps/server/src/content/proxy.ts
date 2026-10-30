@@ -16,7 +16,7 @@ import {
 import { findOrg } from "../db/index.ts";
 import { backendLogs, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
-import { blobKey } from "../publish/blobs.ts";
+import { blobKey, knownBlobs } from "../publish/blobs.ts";
 import { PreconditionFailed } from "../s3.ts";
 import type { SandboxPool } from "../sandbox/pool.ts";
 import type { ContentPayload } from "./token.ts";
@@ -164,12 +164,14 @@ export async function runBackend(
   }
   const body = await readBody(c, limits.backendRequestBytes);
 
+  // The size was proved at publish. Looking it up first keeps a limit lowered since then from loading a huge file.
+  const size = (await knownBlobs(deps, org.id, [hash])).get(hash);
+  if (size === undefined || size > limits.backendCodeBytes) {
+    throw new ApiError("too_large", "This backend is too big.", { limit: limits.backendCodeBytes });
+  }
   const object = await deps.bucket.get(blobKey(hash));
   if (!object) throw new ApiError("not_found", "This version has no backend.");
   const code = new TextDecoder().decode(object.body);
-  if (Buffer.byteLength(code) > limits.backendCodeBytes) {
-    throw new ApiError("too_large", "This backend is too big.", { limit: limits.backendCodeBytes });
-  }
 
   // Everything about who may do what stays here, in the app, for the length of this request.
   const canComment = can(caller, "artifact.comment", artifact);

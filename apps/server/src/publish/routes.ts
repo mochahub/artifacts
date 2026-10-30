@@ -207,6 +207,15 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       throw new ApiError("invalid", "The backend module isn't in the bundle.");
     }
     await verifyBlobs(deps, org.id, wanted);
+    // The sandbox fetches this module on every request, so a huge one must never get in (08).
+    if (body.backendHash) {
+      const size = (await knownBlobs(deps, org.id, [body.backendHash])).get(body.backendHash) ?? 0;
+      if (size > org.settings.limits.backendCodeBytes) {
+        throw new ApiError("too_large", "The backend is too big.", {
+          limit: org.settings.limits.backendCodeBytes,
+        });
+      }
+    }
 
     // The CLI's article HTML can't be trusted: it goes into the viewer's own page (05).
     const safePages: PageRecord[] = await mapLimit(body.pages, 4, async (page) => {
