@@ -15,6 +15,8 @@ export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
     "connect-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "base-uri 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
     "frame-ancestors 'none'",
   ].join("; ");
   return async (c, next) => {
@@ -22,6 +24,7 @@ export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
     c.header("Content-Security-Policy", csp);
     c.header("Strict-Transport-Security", "max-age=31536000");
     c.header("X-Frame-Options", "DENY");
+    c.header("Cross-Origin-Opener-Policy", "same-origin");
     c.header("Referrer-Policy", "same-origin");
     c.header("X-Content-Type-Options", "nosniff");
   };
