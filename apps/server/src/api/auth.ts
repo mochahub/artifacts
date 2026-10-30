@@ -83,7 +83,8 @@ export function authRoutes(
     }
     const account = caller.person.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
-    if (body.password.length > MAX_PASSWORD) throw new ApiError("unauthenticated", "That password isn't right.");
+    if (body.password.length > MAX_PASSWORD)
+      throw new ApiError("unauthenticated", "That password isn't right.");
     const person = await checkPassword(c.get("org").id, caller.person.email, body.password);
     if (!person) {
       limits.passwordFailed(account);

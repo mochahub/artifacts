@@ -187,7 +187,11 @@ describe("signing in", () => {
     // A real token needs no Origin: it carries no cookie, so it reaches the route (which wants a browser).
     const bearer = await fetch(`http://127.0.0.1:${t.server.ports.viewer}/api/auth/reauth`, {
       method: "POST",
-      headers: { Host: "viewer.test", Authorization: `Bearer ${owner.token}`, "Content-Type": "application/json" },
+      headers: {
+        Host: "viewer.test",
+        Authorization: `Bearer ${owner.token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ password: OWNER.password }),
     });
     expect(await error(bearer)).toBe("forbidden");

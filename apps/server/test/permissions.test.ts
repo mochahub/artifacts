@@ -27,11 +27,11 @@ const guest = (permission: "view" | "comment", active: boolean): Caller => ({
   guestId: "g",
   links: [{ artifactId: ARTIFACT, shareLinkId: "l", permission, name: "Guest", active }],
 });
-const orgToken = (projectIds: string[]): Caller => ({
+const orgToken = (projectIds: string[], scopes = ALL_SCOPES): Caller => ({
   kind: "orgToken",
   tokenId: "t",
   createdBy: OTHER,
-  scopes: ALL_SCOPES,
+  scopes,
   projectIds,
 });
 
@@ -73,7 +73,10 @@ const CALLERS = {
   "cliToken (publisher, read only)": cliToken(PUBLISHER, "member", ["read"]),
   "orgToken (allowed project)": orgToken([PROJECT]),
   "orgToken (other project)": orgToken([OTHER_PROJECT]),
-  "orgToken (no read scope)": { ...orgToken([PROJECT]), scopes: ALL_SCOPES.filter((s) => s !== "read") },
+  "orgToken (no read scope)": orgToken(
+    [PROJECT],
+    ALL_SCOPES.filter((scope) => scope !== "read"),
+  ),
   anonymous: { kind: "anonymous" },
 } satisfies Record<string, Caller>;
 
