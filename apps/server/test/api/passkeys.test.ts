@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { passkeys, passwords } from "../../src/db/schema.ts";
+import { passkeys, passwords, people } from "../../src/db/schema.ts";
 import { softAuthenticator } from "../authenticator.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 
@@ -174,6 +174,26 @@ describe("passkeys", () => {
     expect(refused.status).toBe(409);
     await t.server.db.insert(passwords).values(backup);
     expect((await t.api(url, { method: "DELETE", cookie })).status).toBe(200);
+  });
+
+  test("a passkey-only account has no password, not even the dummy one", async () => {
+    const [row] = await t.server.db.select().from(people);
+    const backup = await t.server.db.select().from(passwords);
+    await t.server.db.delete(passwords).where(eq(passwords.personId, row?.id as string));
+    const attempt = await t.api("/api/auth/password", {
+      method: "POST",
+      json: { email: OWNER.email, password: "not a real password" },
+    });
+    expect(attempt.status).toBe(401);
+    const reauth = await t.api("/api/auth/reauth", {
+      method: "POST",
+      cookie,
+      json: { password: "not a real password" },
+    });
+    expect(reauth.status).toBe(401);
+    await t.server.db.insert(passwords).values(backup);
+    t.clock.advance(3600_000 * 2);
+    cookie = await signIn(t, OWNER.email, OWNER.password);
   });
 
   test("tokens can't touch passkeys", async () => {

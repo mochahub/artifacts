@@ -49,13 +49,13 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
   routes.post("/api/device/poll", { public: true }, async (c) => {
     const { deviceCode } = await parseBody(c, DevicePoll);
     const hash = sha256(deviceCode);
-    limits.hit(`device-poll:${hash}`, 1, INTERVAL * 1000);
     const [row] = await db
       .select()
       .from(deviceCodes)
       .where(and(eq(deviceCodes.orgId, c.get("org").id), eq(deviceCodes.deviceCodeHash, hash)))
       .limit(1);
     if (!row) throw new ApiError("not_found", "Not found.");
+    limits.hit(`device-poll:${hash}`, 1, INTERVAL * 1000);
     if (row.status === "denied") return c.json({ status: "denied" });
     if (row.status === "used" || row.expiresAt <= clock.now()) {
       throw new ApiError("gone", "This sign-in expired. Run artifacts login again.");

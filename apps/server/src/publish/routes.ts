@@ -61,6 +61,13 @@ const diff = (before: Map<string, string>, after: Map<string, string>) => ({
   changed: [...after.keys()].filter((key) => before.has(key) && before.get(key) !== after.get(key)),
 });
 
+/** Frame keys are per page in the database; the change summary names them as authors wrote them. */
+const frameKeys = (change: ReturnType<typeof diff>) => ({
+  added: change.added.map((key) => key.slice(key.indexOf("/") + 1)),
+  removed: change.removed.map((key) => key.slice(key.indexOf("/") + 1)),
+  changed: change.changed.map((key) => key.slice(key.indexOf("/") + 1)),
+});
+
 async function insertChunks<T>(rows: T[], insert: (chunk: T[]) => Promise<unknown>) {
   for (let i = 0; i < rows.length; i += 500) await insert(rows.slice(i, i + 500));
 }
@@ -250,6 +257,10 @@ export function publishRoutes(routes: Routes, deps: Deps) {
           .returning({ id: artifacts.id });
         if (created.length === 0) throw new ApiError("conflict", "That slug was just taken. Publish again.");
       }
+      // Checked again under the lock: it may have been archived or deleted during the uploads above.
+      if (current?.archivedAt)
+        throw new ApiError("read_only", "This artifact is archived, so it's read-only.");
+      if (current?.deletedAt) throw new ApiError("conflict", "That artifact was just deleted.");
 
       const n = (current?.latestVersion ?? 0) + 1;
       const [previous] = current
@@ -282,7 +293,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
         ? await hashesOf(tx, previous.id)
         : { frames: new Map<string, string>(), blocks: new Map<string, string>() };
       const after = {
-        frames: new Map(body.frames.map((f) => [f.frameKey, f.contentHash])),
+        frames: new Map(body.frames.map((f) => [`${f.pageKey}/${f.frameKey}`, f.contentHash])),
         blocks: new Map(body.blocks.map((b) => [`${b.pageKey}/${b.blockKey}`, b.contentHash])),
       };
 
@@ -304,7 +315,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       });
       return {
         version: n,
-        frames: diff(before.frames, after.frames),
+        frames: frameKeys(diff(before.frames, after.frames)),
         blocks: diff(before.blocks, after.blocks),
         ...reanchored,
       };
@@ -362,7 +373,7 @@ export async function reanchorThreads(
       );
     const result = reanchor(
       thread.anchor as Anchor,
-      { frames: then.frames, blocks: unprefix(then.blocks) },
+      { frames: unprefix(then.frames), blocks: unprefix(then.blocks) },
       {
         frames: new Map(
           frameRows.filter((f) => f.pageKey === thread.pageKey).map((f) => [f.frameKey, f.contentHash]),
@@ -419,7 +430,7 @@ export async function writeContent(
 async function hashesOf(tx: Tx, versionId: string) {
   const [frameRows, blockRows] = await Promise.all([
     tx
-      .select({ key: frames.frameKey, hash: frames.contentHash })
+      .select({ page: frames.pageKey, key: frames.frameKey, hash: frames.contentHash })
       .from(frames)
       .where(eq(frames.versionId, versionId)),
     tx
@@ -428,7 +439,7 @@ async function hashesOf(tx: Tx, versionId: string) {
       .where(eq(blocks.versionId, versionId)),
   ]);
   return {
-    frames: new Map(frameRows.map((row) => [row.key, row.hash])),
+    frames: new Map(frameRows.map((row) => [`${row.page}/${row.key}`, row.hash])),
     blocks: new Map(blockRows.map((row) => [`${row.page}/${row.key}`, row.hash])),
   };
 }

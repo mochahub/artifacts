@@ -144,6 +144,12 @@ describe("lists and artifacts", () => {
     expect((await t.api("/api/artifacts/by-slug/camerabuddy/roadmap")).status).toBe(401);
   });
 
+  test("no caller can't tell a real id from an unknown one", async () => {
+    const real = await t.api(`/api/artifacts/${id}/versions`);
+    const unknown = await t.api("/api/artifacts/00000000-0000-7000-8000-000000000000/versions");
+    expect([real.status, unknown.status]).toEqual([401, 401]);
+  });
+
   test("GETs carry an ETag, and a match answers 304", async () => {
     const first = await get(`/api/artifacts/${id}`);
     const etag = first.headers.get("etag") as string;

@@ -138,8 +138,14 @@ describe("the review loop", () => {
     );
     expect(invite.url).toContain("/join/");
     expect((await cli(["org", "invite", "x@example.com", "--role", "owner"], agent())).code).toBe(1);
-    const reset = JSON.parse((await cli(["org", "reset-link", OWNER.email, "--json"], agent())).stdout);
+    const joined = await t.api(`/api/invites/${invite.url.split("/join/")[1]}/accept`, {
+      method: "POST",
+      json: { name: "Sam", password: "a perfectly long password" },
+    });
+    expect(joined.status).toBe(200);
+    const reset = JSON.parse((await cli(["org", "reset-link", "sam@example.com", "--json"], agent())).stdout);
     expect(reset.url).toContain("/reset/");
+    expect((await cli(["org", "reset-link", OWNER.email], agent())).code).toBe(1);
     expect((await cli(["org", "reset-link", "nobody@example.com"], agent())).code).toBe(1);
 
     expect((await cli(["visibility", "me"], agent(), dir)).code).toBe(0);

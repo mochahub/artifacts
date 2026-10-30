@@ -10,6 +10,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
+import type { Db } from "../db/index.ts";
 import {
   activity,
   artifactAccess,
@@ -31,6 +32,7 @@ import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
 const HOUR = 3600_000;
+const OWNER_LOCK = 7_316_003;
 const INVITE_DAYS = 7;
 const ORG_SCOPES_NEED = ["publish", "comment", "read", "manage", "data", "org"];
 
@@ -56,13 +58,26 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     return row;
   }
 
-  const ownerCount = async (orgId: string) => {
-    const [row] = await db
+  const ownerCount = async (tx: Pick<Db, "select">, orgId: string) => {
+    const [row] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(people)
       .where(and(eq(people.orgId, orgId), eq(people.role, "owner"), isNull(people.removedAt)));
     return row?.n ?? 0;
   };
+
+  /** A token mustn't mint itself a browser session, which can do what no token may (04). */
+  function guardTokenInvite(c: ApiContext, role: string) {
+    if (c.get("caller").kind !== "person" && role !== "member" && role !== "reviewer") {
+      throw new ApiError("forbidden", "Invite admins from the viewer, not with a token.");
+    }
+  }
+  function guardTokenReset(c: ApiContext, target: { id: string; role: string }) {
+    const caller = c.get("caller");
+    if (caller.kind !== "person" && (target.role === "admin" || target.id === actorOf(caller).id)) {
+      throw new ApiError("forbidden", "Issue this reset link from the viewer, not with a token.");
+    }
+  }
 
   /** Only an owner touches an owner, or an admin could take the deployment over (03). */
   function guardOwner(c: ApiContext, role: string) {
@@ -176,27 +191,40 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     if (role === "outside" || person.role === "outside") {
       throw new ApiError("invalid", "Outside people get access per artifact, not a role.");
     }
-    if (person.role === "owner" && role !== "owner" && (await ownerCount(person.orgId)) <= 1) {
-      throw new ApiError("conflict", "There must always be an owner.");
-    }
-    await db.update(people).set({ role }).where(eq(people.id, person.id));
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${OWNER_LOCK})`);
+      if (person.role === "owner" && role !== "owner" && (await ownerCount(tx, person.orgId)) <= 1) {
+        throw new ApiError("conflict", "There must always be an owner.");
+      }
+      await tx.update(people).set({ role }).where(eq(people.id, person.id));
+    });
     return c.json({ person: personView({ ...person, role }) });
   });
 
   routes.delete("/api/people/:id", { action: "people.manage" }, async (c) => {
     const person = await target(c as ApiContext);
     guardOwner(c as ApiContext, person.role);
-    if (person.role === "owner" && (await ownerCount(person.orgId)) <= 1) {
-      throw new ApiError("conflict", "There must always be an owner.");
-    }
     const now = clock.now();
     await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${OWNER_LOCK})`);
+      if (person.role === "owner" && (await ownerCount(tx, person.orgId)) <= 1) {
+        throw new ApiError("conflict", "There must always be an owner.");
+      }
       await tx.update(people).set({ removedAt: now }).where(eq(people.id, person.id));
       await tx.delete(sessions).where(eq(sessions.personId, person.id));
       await tx
         .update(tokens)
         .set({ revokedAt: now })
         .where(and(eq(tokens.personId, person.id), isNull(tokens.revokedAt)));
+      // What they issued goes too, or an invite to a throwaway address would bring them straight back.
+      await tx
+        .update(invites)
+        .set({ revokedAt: now })
+        .where(and(eq(invites.createdBy, person.id), isNull(invites.acceptedAt), isNull(invites.revokedAt)));
+      await tx
+        .update(resetLinks)
+        .set({ usedAt: now })
+        .where(and(eq(resetLinks.createdBy, person.id), isNull(resetLinks.usedAt)));
     });
     return c.json({ ok: true });
   });
@@ -204,6 +232,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   routes.post("/api/people/:id/reset-link", { action: "people.invite" }, async (c) => {
     const person = await target(c as ApiContext);
     guardOwner(c as ApiContext, person.role);
+    guardTokenReset(c as ApiContext, person);
     const secret = randomSecret();
     const now = clock.now();
     const expiresAt = new Date(now.getTime() + HOUR);
@@ -221,6 +250,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
 
   routes.post("/api/invites", { action: "people.invite" }, async (c) => {
     const body = await parseBody(c, CreateInvite);
+    guardTokenInvite(c as ApiContext, body.role);
     const orgId = c.get("org").id;
     const [taken] = await db
       .select({ id: people.id })
@@ -314,6 +344,14 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       .limit(1);
     if (!row || row.acceptedAt || row.revokedAt || row.expiresAt <= clock.now()) {
       throw new ApiError("gone", "This invite has expired or was already used. Ask for a new one.");
+    }
+    if (row.artifactId) {
+      const [target] = await db
+        .select({ deletedAt: artifacts.deletedAt })
+        .from(artifacts)
+        .where(eq(artifacts.id, row.artifactId))
+        .limit(1);
+      if (!target || target.deletedAt) throw new ApiError("gone", "This invite no longer works.");
     }
     return row;
   }

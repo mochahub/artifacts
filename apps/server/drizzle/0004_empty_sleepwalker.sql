@@ -1,0 +1,1 @@
+ALTER TABLE "artifacts" ADD COLUMN "thread_counter" integer DEFAULT 0 NOT NULL;

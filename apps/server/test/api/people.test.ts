@@ -29,7 +29,7 @@ describe("people, invites and tokens", () => {
     return (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
   };
   const invited = async (email: string, role: string) => {
-    const body = (await (await invite(email, role)).json()) as { url: string };
+    const body = (await (await invite(email, role, { cookie: owner })).json()) as { url: string };
     return { cookie: await join(body.url, email.split("@")[0] as string), url: body.url };
   };
 
@@ -102,6 +102,28 @@ describe("people, invites and tokens", () => {
     ).toBe(403);
     expect((await t.api(`/api/people/${sam?.id}`, { method: "DELETE", bearer: token })).status).toBe(403);
     expect((await t.api("/api/people", { bearer: token })).status).toBe(200);
+  });
+
+  test("a token can't mint itself a browser session", async () => {
+    expect(await code(await invite("adm@example.com", "admin"))).toBe("forbidden");
+    expect((await invite("mem@example.com", "member")).status).toBe(200);
+    const self = await t.api(`/api/people/${ownerId}/reset-link`, { method: "POST", bearer: token });
+    expect(await code(self)).toBe("forbidden");
+  });
+
+  test("removing an admin ends what they issued", async () => {
+    const admin = await invited("issuer@example.com", "admin");
+    const [row] = await t.server.db.select().from(people).where(eq(people.email, "issuer@example.com"));
+    const made = (await (
+      await invite("throwaway@example.com", "admin", { cookie: admin.cookie })
+    ).json()) as { url: string };
+    const [sam] = await t.server.db.select().from(people).where(eq(people.email, "sam@example.com"));
+    const reset = (await (
+      await t.api(`/api/people/${sam?.id}/reset-link`, { method: "POST", cookie: admin.cookie })
+    ).json()) as { url: string };
+    expect((await t.api(`/api/people/${row?.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+    expect((await t.api(`/api/invites/${made.url.split("/join/")[1]}`)).status).toBe(410);
+    expect((await t.api(`/api/reset/${reset.url.split("/reset/")[1]}`)).status).toBe(410);
   });
 
   test("roles: an admin can't touch an owner, and there's always an owner", async () => {

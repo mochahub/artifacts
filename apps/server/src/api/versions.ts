@@ -44,7 +44,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         const [now, then] = await Promise.all([hashes(version.id), hashes(previous.id)]);
         const map = (list: { key: string; hash: string }[]) => new Map(list.map((e) => [e.key, e.hash]));
         const f = (list: typeof now.frameRows) =>
-          map(list.map((e) => ({ key: e.frameKey, hash: e.contentHash })));
+          map(list.map((e) => ({ key: `${e.pageKey}/${e.frameKey}`, hash: e.contentHash })));
         const b = (list: typeof now.blockRows) =>
           map(list.map((e) => ({ key: `${e.pageKey}/${e.blockKey}`, hash: e.contentHash })));
         const fc = changeSet(f(then.frameRows), f(now.frameRows));

@@ -28,7 +28,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
   /** The home domain, or this domain for a browser without Related Origin Requests (04). */
   const rpFor = (c: ApiContext, local?: boolean) => (local ? hostname(c) : c.get("org").homeDomain);
 
-  const expected = async (c: ApiContext) => {
+  const expected = async () => {
     const origins = await deps.origins();
     return { origins, rpIds: [...new Set(origins.map((origin) => new URL(origin).hostname))] };
   };
@@ -84,7 +84,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
       )
       .limit(1);
     if (!row) throw new ApiError("unauthenticated", "That passkey isn't registered here.");
-    const { origins, rpIds } = await expected(c);
+    const { origins, rpIds } = await expected();
     const result = await verifyAuthenticationResponse({
       response: response as Parameters<typeof verifyAuthenticationResponse>[0]["response"],
       expectedChallenge: challenge,
@@ -178,7 +178,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
     const { person } = session(c.get("caller"));
     const body = await parseBody(c, AddPasskeyVerify);
     const challenge = await takeChallenge(c as ApiContext, body.challengeId, "register", person.id);
-    const { origins, rpIds } = await expected(c as ApiContext);
+    const { origins, rpIds } = await expected();
     const result = await verifyRegistrationResponse({
       response: body.response as Parameters<typeof verifyRegistrationResponse>[0]["response"],
       expectedChallenge: challenge,
@@ -189,14 +189,6 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
     if (!result?.verified || !result.registrationInfo)
       throw new ApiError("invalid", "That passkey didn't verify.");
     const { credential } = result.registrationInfo;
-    const clientData = JSON.parse(
-      Buffer.from(
-        (body.response as { response: { clientDataJSON: string } }).response.clientDataJSON,
-        "base64url",
-      ).toString(),
-    ) as { origin: string };
-    const originHost = new URL(clientData.origin).hostname;
-    const home = c.get("org").homeDomain;
     const [row] = await db
       .insert(passkeys)
       .values({
@@ -207,8 +199,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
         publicKey: credential.publicKey,
         counter: credential.counter,
         transports: credential.transports ?? [],
-        // A passkey made for this page's own domain, not the home domain, only works here (SPEC §7.3).
-        rpId: rpIds.includes(home) && originHost === home ? home : originHost,
+        rpId: result.registrationInfo.rpID ?? c.get("org").homeDomain,
         name: body.name ?? "Passkey",
         createdAt: clock.now(),
       })

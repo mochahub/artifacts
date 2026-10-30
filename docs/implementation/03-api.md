@@ -61,7 +61,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/health` | none | `{ ok: true, version, setupMode: bool }` (Railway health check) |
 | `GET /api/meta` | none | `{ version, minCliVersion, orgName, homeDomain, publicUrl, contentUrl, viewerOrigins: [] }`. `orgName` and `homeDomain` are null in setup mode; `contentUrl` is null until `CONTENT_URL` is set. |
 | `POST /api/setup` | `setupToken` in body | `{ setupToken, orgName, name, email, password, clientName, agent? }` → `{ person, token }`. Only in setup mode; creates org (with `home_domain` = request `Host`), owner, password and a CLI token. 403 if the token is wrong (constant-time compare), 409 once set up. |
-| `POST /api/recover` | `setupToken` in body | `{ setupToken, email }` → `{ resetUrl }` for an owner. Rate-limited to 5 per hour. |
+| `POST /api/recover` | `setupToken` in body | `{ setupToken, email }` → `{ resetUrl }` for an owner. Rate-limited to 5 per IP per hour. |
 | `GET /.well-known/webauthn` | none | Only on the home domain: `{ "origins": [<other viewer origins>] }` (never the content origin). |
 
 ## Sign-in and account
