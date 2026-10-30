@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
 import { parseEnv } from "../src/env.ts";
+import { startServer } from "../src/server.ts";
 
 // docker-compose.test.yml; `bun run test` starts it.
 const ADMIN_URL =
@@ -58,3 +59,82 @@ export function viewerFixture(): string {
 }
 
 export const silent = { debug() {}, info() {}, warn() {}, error() {} };
+
+/** A clock tests can move, for expiry, sessions and purge. */
+export function testClock(start = new Date()) {
+  let now = start.getTime();
+  return {
+    now: () => new Date(now),
+    advance(ms: number) {
+      now += ms;
+    },
+  };
+}
+
+const hitsFile = process.env.ARTIFACTS_ROUTE_HITS;
+
+/** A real server on a fresh database, with helpers for calling it as a browser or a CLI. */
+export async function startTestServer(overrides: Record<string, string> = {}) {
+  const database = await createDatabase();
+  const clock = testClock();
+  const server = await startServer(testEnv(database.url, overrides), {
+    log: silent,
+    clock,
+    viewerDir: viewerFixture(),
+    onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
+  });
+  const base = `http://127.0.0.1:${server.ports.viewer}`;
+
+  const api = (
+    path: string,
+    init: RequestInit & { json?: unknown; cookie?: string; bearer?: string } = {},
+  ) => {
+    const { json, cookie, bearer, ...rest } = init;
+    const headers: Record<string, string> = {
+      Host: "viewer.test",
+      ...(rest.headers as Record<string, string>),
+    };
+    if (json !== undefined) headers["Content-Type"] = "application/json";
+    if (cookie) {
+      headers.Cookie = cookie;
+      if (rest.method && rest.method !== "GET") headers.Origin ??= "http://viewer.test";
+    }
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    return fetch(`${base}${path}`, {
+      ...rest,
+      headers,
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  };
+
+  return {
+    server,
+    clock,
+    api,
+    async stop() {
+      await server.stop();
+      await database.drop();
+    },
+  };
+}
+
+export type TestServer = Awaited<ReturnType<typeof startTestServer>>;
+
+export const OWNER = { name: "Zahin", email: "zahin@example.com", password: "correct horse battery" };
+
+/** Claims the server, and returns the owner's token. */
+export async function claim(t: TestServer) {
+  const response = await t.api("/api/setup", {
+    method: "POST",
+    json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "Test", ...OWNER },
+  });
+  if (response.status !== 200) throw new Error(`setup failed: ${await response.text()}`);
+  return (await response.json()) as { person: { id: string }; token: string };
+}
+
+/** Signs in with a password and returns the cookie to send. */
+export async function signIn(t: TestServer, email: string, password: string) {
+  const response = await t.api("/api/auth/password", { method: "POST", json: { email, password } });
+  if (response.status !== 200) throw new Error(`sign-in failed: ${await response.text()}`);
+  return (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+}
