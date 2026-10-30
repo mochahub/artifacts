@@ -28,8 +28,10 @@ const CORS = {
   "Access-Control-Max-Age": "600",
 };
 const MINUTE = 60_000;
+const LOG_BYTES_PER_MINUTE = 1024 * 1024;
+const MAX_LOG_LINE = 8192;
 /** Only these reach the browser: a backend can't set cookies, or anything else on the content origin. */
-const SAFE_HEADERS = new Set(["content-type", "cache-control", "etag", "last-modified"]);
+const SAFE_HEADERS = new Set(["content-type", "etag", "last-modified"]);
 
 export const corsPreflight = () => new Response(null, { status: 204, headers: CORS });
 
@@ -37,6 +39,7 @@ type Op = {
   op: "get" | "put" | "delete" | "list";
   key?: string;
   prefix?: string;
+  cursor?: string;
   value?: unknown;
   ifMatch?: string;
 };
@@ -57,6 +60,7 @@ async function applyData(
   scope: {
     orgId: string;
     artifactId: string;
+    callerId: string;
     readOnly: boolean;
     limits: Awaited<ReturnType<typeof orgOf>>["settings"]["limits"];
   },
@@ -65,32 +69,39 @@ async function applyData(
   const op = JSON.parse(raw) as Op;
   if (op.op === "get") {
     const object = await deps.bucket.get(objectPath(scope.artifactId, op.key ?? "").key);
-    return { value: object ? JSON.parse(new TextDecoder().decode(object.body)) : null };
+    if (!object) return { value: null };
+    return { value: { value: JSON.parse(new TextDecoder().decode(object.body)), etag: object.etag } };
   }
   if (op.op === "list") {
-    const base = `${dataPrefix(scope.artifactId)}shared/`;
-    const page = await listKeys(deps, `${base}${op.prefix ? checkKey(op.prefix) : ""}`);
-    return { value: page.keys.map((entry) => `${op.prefix ?? ""}${entry.key}`) };
+    const prefix = op.prefix ?? "";
+    const base = prefix ? objectPath(scope.artifactId, prefix).key : `${dataPrefix(scope.artifactId)}shared/`;
+    const page = await listKeys(deps, base, op.cursor);
+    return {
+      value: { keys: page.keys.map((entry) => `${prefix}${entry.key}`), nextCursor: page.nextCursor },
+    };
   }
   if (scope.readOnly) throw new ApiError("read_only", "This caller can only read.");
+  deps.limits.hit(`data:${scope.artifactId}:${scope.callerId}`, scope.limits.writesPerSecond, 1000);
   const path = objectPath(scope.artifactId, op.key ?? "");
   if (op.op === "put") {
-    await putValue(deps, {
+    const written = await putValue(deps, {
       orgId: scope.orgId,
       artifactId: scope.artifactId,
       scope: path.scope,
       objectKey: path.key,
       value: op.value,
       limits: scope.limits,
-      ifMatch: op.ifMatch,
+      ifMatch: op.ifMatch === "*" ? undefined : op.ifMatch,
+      ifNoneMatch: op.ifMatch === "*",
     });
-    return { value: true };
+    return { value: written };
   }
   await deleteValue(deps, {
     orgId: scope.orgId,
     artifactId: scope.artifactId,
     scope: path.scope,
     objectKey: path.key,
+    ifMatch: op.ifMatch,
   });
   return { value: true };
 }
@@ -100,6 +111,22 @@ const orgOf = async (deps: Deps) => {
   if (!org) throw new ApiError("not_found", "Not found.");
   return org;
 };
+
+/** Reads a body with no Content-Length without taking more of it than the limit. */
+async function readBody(c: Context, limit: number) {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of (c.req.raw.body ?? []) as AsyncIterable<Uint8Array>) {
+    size += chunk.length;
+    if (size > limit) throw new ApiError("too_large", "That request is too big.", { limit });
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString();
+}
+
+/** One line for backend_logs: no NUL, which Postgres refuses, and capped in bytes. */
+const logLine = (message: string) =>
+  Buffer.from(message.replaceAll("\0", "")).subarray(0, MAX_LOG_LINE).toString();
 
 /** Runs a version's backend (08, "Request flow"). The content port has already checked the token. */
 export async function runBackend(
@@ -129,10 +156,7 @@ export async function runBackend(
   if (declared > limits.backendRequestBytes) {
     throw new ApiError("too_large", "That request is too big.", { limit: limits.backendRequestBytes });
   }
-  const body = await c.req.text();
-  if (Buffer.byteLength(body) > limits.backendRequestBytes) {
-    throw new ApiError("too_large", "That request is too big.", { limit: limits.backendRequestBytes });
-  }
+  const body = await readBody(c, limits.backendRequestBytes);
 
   const object = await deps.bucket.get(blobKey(hash));
   if (!object) throw new ApiError("not_found", "This version has no backend.");
@@ -146,6 +170,7 @@ export async function runBackend(
   const scope = {
     orgId: org.id,
     artifactId: payload.a,
+    callerId: key,
     readOnly: artifact.archivedAt !== null || !canComment,
     limits,
   };
@@ -159,9 +184,14 @@ export async function runBackend(
   };
   const url = new URL(c.req.url);
   const { response, logs } = await pool.run({
+    artifactId: payload.a,
     hash,
     code: () => code,
-    limits: { timeoutMs: limits.backendTimeoutMs, memoryMb: limits.backendMemoryMb },
+    limits: {
+      timeoutMs: limits.backendTimeoutMs,
+      memoryMb: limits.backendMemoryMb,
+      dataOpBytes: limits.dataValueBytes + 1024,
+    },
     request: {
       url: `https://backend.invalid/api/${path}${url.search}`,
       method: c.req.method,
@@ -184,19 +214,24 @@ export async function runBackend(
     },
   });
 
-  if (logs.length > 0) {
-    await deps.db.insert(backendLogs).values(
-      logs.slice(0, 100).map((line) => ({
-        id: Bun.randomUUIDv7(),
-        orgId: org.id,
-        artifactId: payload.a,
-        version: payload.v,
-        level: line.level,
-        message: line.message.slice(0, 8192),
-        requestId: c.get("requestId" as never) as string,
-        createdAt: deps.clock.now(),
-      })),
-    );
+  const lines = logs.slice(0, 100).map((line) => ({ level: line.level, message: logLine(line.message) }));
+  const bytes = lines.reduce((sum, line) => sum + Buffer.byteLength(line.message), 0);
+  if (lines.length > 0 && deps.limits.spend(`logs:${payload.a}`, bytes, LOG_BYTES_PER_MINUTE, MINUTE)) {
+    // A log that can't be saved isn't this request's failure.
+    await deps.db
+      .insert(backendLogs)
+      .values(
+        lines.map((line) => ({
+          ...line,
+          id: Bun.randomUUIDv7(),
+          orgId: org.id,
+          artifactId: payload.a,
+          version: payload.v,
+          requestId: c.get("requestId" as never) as string,
+          createdAt: deps.clock.now(),
+        })),
+      )
+      .catch((error) => deps.log.warn(`couldn't save backend logs: ${error}`));
   }
 
   if (Buffer.byteLength(response.body) > limits.backendResponseBytes) {
@@ -205,7 +240,8 @@ export async function runBackend(
       headers: { ...CORS, "Content-Type": "application/json" },
     });
   }
-  const headers = new Headers(CORS);
+  // A caller's own answer, so nothing between here and them may keep it.
+  const headers = new Headers({ ...CORS, "Cache-Control": "no-store" });
   for (const [name, value] of response.headers)
     if (SAFE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
   return new Response(response.body, { status: response.status, headers });

@@ -22,7 +22,8 @@ test("archive shows the banner and stops comments; unarchive undoes it", async (
   await expect(page.locator(".vbar").getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
   await page.goto("/camerabuddy");
   await page.getByRole("button", { name: "Archived" }).click();
-  await expect(page.locator(".tile")).toHaveCount(1);
+  // The iPhone and desktop runs share a project, so this looks for its own.
+  await expect(page.locator(".tile").filter({ hasText: slug })).toHaveCount(1);
   await shot(page, info.project.name, "07-4-archived-filter");
   await page.goto(`/camerabuddy/${slug}`);
   await page.getByRole("button", { name: "Unarchive" }).click();

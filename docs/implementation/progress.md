@@ -82,6 +82,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 30. **M10, backend bodies are text.** Binary request and response bodies aren't supported, for the same reason.
 31. **M9, `artifacts dev` is read-only for review.** Comments need a server. It runs pages, live frames, the data store and backends.
 
+32. **M10 review, `env.DATA` caps:** 8 calls at once and 200 per request, in the child, plus `writesPerSecond`. 08 asked for the write limit; the rest is new. Logs get 1 MB per artifact per minute.
+33. **M10 review, inline files are a list:** PNG, JPEG, GIF, WebP, AVIF, any audio or video, and PDF. Everything else downloads.
+
 ## Needs you
 
 Gathered as each milestone is reached. So far, from the brief:

@@ -229,10 +229,11 @@
   };
   const env = {
     DATA: {
-      get: (key) => call({ op: "get", key }),
+      get: async (key) => (await call({ op: "get", key }))?.value ?? null,
+      getWithEtag: (key) => call({ op: "get", key }),
       put: (key, value, options = {}) => call({ op: "put", key, value, ifMatch: options.ifMatch }),
-      delete: (key) => call({ op: "delete", key }),
-      list: (prefix) => call({ op: "list", prefix }),
+      delete: (key, options = {}) => call({ op: "delete", key, ifMatch: options.ifMatch }),
+      list: (prefix, options = {}) => call({ op: "list", prefix, cursor: options.cursor }),
     },
   };
 

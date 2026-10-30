@@ -2,7 +2,7 @@ import type { Artifact, VersionRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check, FileText, Images, X } from "lucide-preact";
 import type { ComponentChildren } from "preact";
-import { useEffect } from "preact/hooks";
+import { useEffect, useLayoutEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
 import { agentShort, ago } from "../format.ts";
@@ -19,7 +19,8 @@ export function Sheet({
   children: ComponentChildren;
   extra?: ComponentChildren;
 }) {
-  useEffect(() => {
+  // As the sheet appears, not a frame later, so a quick Escape still closes it.
+  useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };

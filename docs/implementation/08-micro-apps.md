@@ -147,15 +147,23 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 - If a child exits, its in-flight requests answer 502 and the app starts a new one.
 
 **Instances:**
-- **One WebAssembly instance per backend hash**, created with its own `WebAssembly.Memory` whose maximum is `backendMemoryMb`; QuickJS's own limit is set 8 MB below that, and the stack to 512 KB. Never the shared `getQuickJS()` instance: a QuickJS bug in one backend must not be able to read another's memory.
+- **One WebAssembly instance per artifact and backend hash**, so two artifacts with the same code share nothing, created with its own `WebAssembly.Memory` whose maximum is `backendMemoryMb`; QuickJS's own limit is set 8 MB below that, and the stack to 512 KB. Never the shared `getQuickJS()` instance: a QuickJS bug in one backend must not be able to read another's memory.
 - **The code** is the bundled backend: one ES module with no imports, built by the CLI (05). The sandbox evaluates it as a module and refuses any `import`. The app sends it to the child by hash on first use.
-- **What the sandbox has:** the JavaScript language, small `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `TextEncoder` and `TextDecoder` (`packages/sandbox/src/prelude.js`, loaded before the backend), `console`, and `env.DATA` (`get`, `put`, `delete`, `list`). A key with no scope means `shared/<key>`. No `fetch`, sockets, timers, file system, environment or module loading.
+- **What the sandbox has:** the JavaScript language, small `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `TextEncoder` and `TextDecoder` (`packages/sandbox/src/prelude.js`, loaded before the backend), `console`, and `env.DATA`:
+  - `get(key)` → the value or `null`; `getWithEtag(key)` → `{ value, etag } | null`
+  - `put(key, value, { ifMatch })` → `{ etag }`; `ifMatch: "*"` means only if new
+  - `delete(key, { ifMatch })`; `list(prefix, { cursor })` → `{ keys, nextCursor }`
+  - A key with no scope means `shared/<key>`.
+  - At most 8 calls run at once and the rest wait, 200 per request. Writes also count against `writesPerSecond`. Calls after the response are refused, and an instance that answers with calls still out is replaced, so its work can't carry on under the next caller.
+  No `fetch`, sockets, timers, file system, environment or module loading.
 - **Warm cache:** up to 16 instances per child (least recently used), and an instance idle for 10 minutes is discarded.
 
 **Limits, enforced per request:**
-- **Time:** a wall-clock deadline of `backendTimeoutMs` from when the request starts running (queue time doesn't count). QuickJS's interrupt handler enforces it while code runs; the app enforces it while the backend awaits `env.DATA`. On timeout: 504, and the instance is discarded.
+- **Time:** a wall-clock deadline of `backendTimeoutMs` from when the request starts running (queue time doesn't count). QuickJS's interrupt handler enforces it while code runs, top-level code on load included; the app enforces it while the backend awaits `env.DATA`. On timeout: 504, and the instance is discarded.
 - **Memory:** an allocation past the limit throws "out of memory" inside the backend. The request answers 500 and the instance is discarded. **After every request**, an instance whose WebAssembly memory has grown past half of `backendMemoryMb` is discarded too, because WebAssembly memory never shrinks.
-- **One at a time:** each backend hash is pinned to one child, and its requests run one at a time (QuickJS is synchronous, and one instance has one deadline). At most 4 requests wait per backend and 32 per child; beyond that, 503 `busy`.
+- **Logs:** 100 lines per request, 8 KB per line, and 1 MB per artifact per minute. Past that, lines are dropped.
+- **Headers:** only `content-type`, `etag` and `last-modified` pass, and `Cache-Control` is always `no-store`, because an answer can hold one caller's data.
+- **One at a time:** each backend is pinned to one child by its hash, and its requests run one at a time (QuickJS is synchronous, and one instance has one deadline). At most 4 requests wait per backend and 32 per child; beyond that, 503 `busy`.
 - **Sizes:** request bodies over `backendRequestBytes` get 413 before reaching the sandbox; responses over `backendResponseBytes` get 502.
 - **Teardown:** freeing an instance with `env.DATA` calls in flight makes emscripten abort, which is catchable and leaves only that instance dead (checked in M10, `spikes/s10/`). So freeing is tried, a failure is ignored, and the instance is dropped; its own `WebAssembly.Memory` goes with it. Late `env.DATA` answers for it are ignored.
 
