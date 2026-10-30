@@ -39,6 +39,7 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
     MORE_URLS: "https://art.example.org",
     CONTENT_URL: "http://content.test",
     SETUP_TOKEN: "s".repeat(48),
+    GITHUB_RELEASES_REPO: "none",
     SESSION_SECRET: "x".repeat(64),
     OPS_SECRET: "o".repeat(64),
     PORT: "0",

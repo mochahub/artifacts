@@ -61,7 +61,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 | `OPS_SECRET` | yes | 64 random chars | For `/internal/jobs/*` |
 | `PORT`, `CONTENT_PORT`, `INTERNAL_PORT` | no | 8080, 8081, 8082 | |
 | `LOG_LEVEL` | no | `info` | JSON logs to stdout |
-| `GITHUB_RELEASES_REPO` | no | none | `<org>/artifacts`, for the "new version available" notice in Settings. Unset, or a private repo: no notice. |
+| `GITHUB_RELEASES_REPO` | no | `mochahub/artifacts` | For the "new version available" notice in Settings. `none` turns it off. A private repo: no notice. |
 
 
 **Rotating `SESSION_SECRET`** signs everyone out and invalidates open content tokens (short-lived). Nothing stored depends on it, so it's safe to rotate after a suspected leak. `org.pseudonym_key`, in Postgres, is never rotated, because `me` data is keyed by pseudonym.
@@ -99,11 +99,16 @@ Put a reverse proxy (Caddy example in the README) in front for HTTPS. Passkeys a
    - API tests against Postgres and SeaweedFS, started from `docker-compose.test.yml` (SeaweedFS needs a command and a mounted key file, which `services:` can't give it)
    - viewer size budget
    - Playwright WebKit e2e at iPhone size
-2. **`release.yml`, on a `v*` tag:**
-   - build and push the image (multi-arch) to GHCR
+2. **`release.yml`, by itself after green CI on `main`, or by hand for a minor or major:**
+   - skip if only docs or workflows changed since the last release (automatic runs only)
+   - next version from the latest tag, stamped at build time; nothing is committed
    - build CLI binaries for 5 targets, with SHA-256 sums
-   - publish `@artifacts/cli` to npm
-   - create the GitHub Release with `install.sh`
+   - run `artifacts setup --docker` with the new binary against the new image
+   - build and push the image (multi-arch) to GHCR
+   - create the GitHub Release and its tag, with `install.sh`
+   - publish `@artifacts/cli` to npm if the repo has an `NPM_TOKEN` secret
+
+   A push to any other branch that changes the workflow runs it all without publishing.
 3. **Manual:** bump the template's image tags and republish the template. `artifacts upgrade --server` already works without it; the template only matters for new deploys.
 
 Semver; the server declares `minCliVersion`. Breaking API changes bump the minor version while below 1.0, the major after.

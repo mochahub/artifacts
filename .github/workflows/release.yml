@@ -1,42 +1,150 @@
 name: Release
 
+# Green CI on main releases the next patch by itself. Run this by hand for a minor or a major.
+# A push elsewhere that changes this file does everything except publish, to test it.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        type: choice
+        options: [patch, minor, major]
+        default: minor
   push:
-    tags: ["v*"]
+    branches-ignore: [main]
+    paths: [.github/workflows/release.yml, packages/cli/src/release-version.ts]
+
+# Queued, not cancelled: a release half published has to finish.
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || 'main' }}
 
 jobs:
+  prepare:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      go: ${{ steps.decide.outputs.go }}
+      publish: ${{ steps.decide.outputs.publish }}
+      sha: ${{ steps.decide.outputs.sha }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          BUMP: ${{ inputs.bump || 'patch' }}
+        run: |
+          stop() {
+            echo "::notice::No release: $1"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
+          publish=true
+          if [ "$EVENT" = push ]; then
+            publish=false
+          else
+            if [ "$GITHUB_REF_NAME" != main ]; then
+              echo "::error::Releases come from main."
+              exit 1
+            fi
+            if [ "$EVENT" = workflow_dispatch ]; then
+              green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --status success --json databaseId --jq length)
+              [ "$green" -gt 0 ] || stop "CI hasn't passed on $SHA."
+            fi
+            if [ -n "$latest" ]; then
+              # Also catches CI runs finishing out of order.
+              if git merge-base --is-ancestor "$SHA" "$latest"; then stop "$latest already has $SHA."; fi
+              if [ "$EVENT" = workflow_run ] && git diff --quiet "$latest" "$SHA" -- . ':!docs' ':!*.md' ':!.github'; then
+                stop "nothing that ships has changed since $latest."
+              fi
+            fi
+          fi
+          {
+            echo "go=true"
+            echo "publish=$publish"
+            echo "sha=$SHA"
+            echo "version=$(bun packages/cli/src/release-version.ts next "$BUMP")"
+          } >> "$GITHUB_OUTPUT"
+
   binaries:
+    needs: prepare
+    if: needs.prepare.outputs.go == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - name: The tag must match the packages
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          test "$(jq -r .version packages/cli/package.json)" = "$version"
-          test "$(jq -r .version apps/server/package.json)" = "$version"
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
+      - run: bun packages/cli/src/release-version.ts stamp "${{ needs.prepare.outputs.version }}"
       - run: bun scripts/build-cli.ts dist/release
+      - name: The binary reports this version
+        run: test "$(dist/release/artifacts-linux-x64 --version)" = "${{ needs.prepare.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           name: binaries
           path: dist/release
 
   image:
+    needs: [prepare, binaries]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/mochahub/artifacts:${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Image tags have no leading v, which is what the CLI pulls
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-        id: tag
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun packages/cli/src/release-version.ts stamp "${{ needs.prepare.outputs.version }}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist/release
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+      - name: Build an image to try
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          load: true
+          tags: artifacts:candidate
+      # Nobody is watching an automatic release, so this binary sets up this image first.
+      - name: A real setup works
+        env:
+          ARTIFACTS_IMAGE: artifacts:candidate
+          ARTIFACTS_PASSWORD: correct horse battery
+        run: |
+          chmod +x dist/release/artifacts-linux-x64
+          cli=dist/release/artifacts-linux-x64
+          "$cli" setup --docker --dir "$RUNNER_TEMP/srv" --org Release --name Release --email release@example.com --no-skill </dev/null
+          "$cli" whoami
+          "$cli" doctor
       - uses: docker/login-action@v3
+        if: needs.prepare.outputs.publish == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -46,36 +154,65 @@ jobs:
           context: .
           file: apps/server/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/mochahub/artifacts:${{ steps.tag.outputs.version }}
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          tags: ${{ env.IMAGE }}
 
   release:
-    needs: [binaries, image]
+    needs: [prepare, image]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: binaries
           path: dist/release
-      - name: Create the GitHub Release
+      - name: Create the GitHub Release, which creates the tag
+        if: needs.prepare.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/release/* scripts/install.sh
+          TAG: v${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --target "$SHA" --generate-notes dist/release/* scripts/install.sh
+      - name: Say if people can't reach the image
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          IMAGE: ghcr.io/mochahub/artifacts:${{ needs.prepare.outputs.version }}
+        run: |
+          docker logout ghcr.io || true
+          docker manifest inspect "$IMAGE" >/dev/null 2>&1 ||
+            echo "::warning::$IMAGE needs a sign-in. Make the package public, or artifacts setup --docker can't pull it."
 
   npm:
-    needs: [release]
+    needs: [prepare, release]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
-      - name: Publish @artifacts/cli
+      - run: bun packages/cli/src/release-version.ts stamp "${{ needs.prepare.outputs.version }}"
+      - name: Publish @artifacts/cli, once there's an NPM_TOKEN
         working-directory: packages/cli
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: bun publish --access public
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if [ "$PUBLISH" != true ]; then
+            bun publish --dry-run --access public
+          elif [ -z "$NPM_CONFIG_TOKEN" ]; then
+            echo "::notice::Skipped npm: the repo has no NPM_TOKEN secret."
+          elif [ "$(npm view "@artifacts/cli@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "::notice::npm already has $VERSION."
+          else
+            bun publish --access public
+          fi
