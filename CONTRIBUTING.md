@@ -74,14 +74,14 @@ feat(cli): add artifacts versions name
 docs: explain the content domain
 ```
 
-| Type | Use it for | Release |
-|---|---|---|
-| `feat` | A new feature | minor |
-| `fix` | A bug fix | patch |
-| `perf` | A change that makes something faster | patch |
-| `docs`, `test`, `refactor`, `chore`, `ci` | What the name says | none |
-| `revert` | Undoing an earlier commit | patch |
-| `build`, `style` | Also accepted by CI | none |
+| Type                                      | Use it for                           | Release |
+| ----------------------------------------- | ------------------------------------ | ------- |
+| `feat`                                    | A new feature                        | minor   |
+| `fix`                                     | A bug fix                            | patch   |
+| `perf`                                    | A change that makes something faster | patch   |
+| `docs`, `test`, `refactor`, `chore`, `ci` | What the name says                   | none    |
+| `revert`                                  | Undoing an earlier commit            | patch   |
+| `build`, `style`                          | Also accepted by CI                  | none    |
 
 Scopes are `server`, `viewer`, `cli`, `schema`, `sandbox`, `kit`, `deploy` and `docs`. A scope is optional, and CI doesn't check which one you use.
 
@@ -97,15 +97,15 @@ Don't edit version numbers. They are stamped at build time, and `package.json` s
 
 [docs/implementation/](docs/implementation/README.md) holds the documents the code is built from. Seven of them are contracts, which own names and shapes:
 
-| Document | Owns |
-|---|---|
-| [02 Data model](docs/implementation/02-data-model.md) | Tables, columns, enums, bucket prefixes |
-| [03 HTTP API](docs/implementation/03-api.md) | Ports, paths, shapes, headers, error codes |
+| Document                                                                     | Owns                                                                 |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| [02 Data model](docs/implementation/02-data-model.md)                        | Tables, columns, enums, bucket prefixes                              |
+| [03 HTTP API](docs/implementation/03-api.md)                                 | Ports, paths, shapes, headers, error codes                           |
 | [04 Sign-in and permissions](docs/implementation/04-auth-and-permissions.md) | Callers, cookies, tokens, scopes, the permission matrix, rate limits |
-| [05 Publishing and storage](docs/implementation/05-publish-and-storage.md) | The manifest, renders, block ids, re-anchoring, clean-up |
-| [07 The CLI and the skill](docs/implementation/07-cli-and-skill.md) | Commands, flags, config, lint rule ids |
-| [08 Micro apps](docs/implementation/08-micro-apps.md) | Bridge messages, data store limits, the sandbox |
-| [09 Deploying](docs/implementation/09-deploy.md) | Images, environment variables, the template, releases |
+| [05 Publishing and storage](docs/implementation/05-publish-and-storage.md)   | The manifest, renders, block ids, re-anchoring, clean-up             |
+| [07 The CLI and the skill](docs/implementation/07-cli-and-skill.md)          | Commands, flags, config, lint rule ids                               |
+| [08 Micro apps](docs/implementation/08-micro-apps.md)                        | Bridge messages, data store limits, the sandbox                      |
+| [09 Deploying](docs/implementation/09-deploy.md)                             | Images, environment variables, the template, releases                |
 
 **A change to code that a contract describes changes the contract in the same commit.** That covers a route, a flag, an environment variable, a table or a column, a lint rule id or a limit. If the two disagree, a reader can't tell which is right. [SPEC.md](docs/SPEC.md) wins on behaviour, and the contract wins on names. If you need to change behaviour that the spec states, say so in the pull request.
 
