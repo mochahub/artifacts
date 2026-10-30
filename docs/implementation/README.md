@@ -18,6 +18,7 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 | 10 | [Testing and acceptance](10-testing-and-acceptance.md) | Guide | Test layers, fixtures, what the agent verifies versus the user |
 | 11 | [Build order](11-milestones.md) | Guide | Spikes S1–S8, milestones M0–M11 |
 | — | [Spike results](spikes.md) | Record | What each M0 spike found, and the design changes it caused |
+| — | [Load notes](load-notes.md) | Record | Local measurements of the app under load |
 | — | [HANDOFF.md](HANDOFF.md) | Prompt | The brief for the building agent |
 | — | [HANDOFF-M2-M11.md](HANDOFF-M2-M11.md) | Prompt | The brief for building M2–M11 autonomously |
 
