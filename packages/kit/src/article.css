@@ -1,0 +1,12 @@
+/* Article components for use inside a page's own HTML. The viewer styles published articles itself. */
+.art-callout {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(120, 120, 128, 0.12);
+}
+.art-stat {
+  font: 700 34px / 1.1 var(--art-serif);
+}
+.art-verdict {
+  font-weight: 600;
+}

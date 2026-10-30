@@ -1,0 +1,81 @@
+/* Theme tokens for artifacts. A project overrides them in its own CSS or through the manifest's theme. */
+:root {
+  --art-accent: #0a84ff;
+  --art-bg: #f5f6f8;
+  --art-card: #fff;
+  --art-tx: #121418;
+  --art-tx2: #5e6470;
+  --art-sep: #e4e6ea;
+  --art-radius: 14px;
+  --art-ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --art-serif: ui-serif, "New York", "Iowan Old Style", Charter, Georgia, serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --art-bg: #15171c;
+    --art-card: #20232a;
+    --art-tx: #f2f3f5;
+    --art-tx2: #a0a6b1;
+    --art-sep: rgba(255, 255, 255, 0.08);
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: var(--art-tx);
+  font: 16px / 1.4 var(--art-ui);
+}
+
+/* iOS-style primitives. `.safe` keeps content clear of the status bar and home indicator. */
+.art-safe {
+  padding-top: 59px;
+  padding-bottom: 34px;
+}
+.art-list {
+  background: var(--art-card);
+  border-radius: var(--art-radius);
+  overflow: hidden;
+}
+.art-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-top: 0.5px solid var(--art-sep);
+}
+.art-row:first-child {
+  border-top: 0;
+}
+.art-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--art-accent);
+  color: #fff;
+  font: 600 17px var(--art-ui);
+}
+.art-title {
+  font: 700 34px / 1.12 var(--art-ui);
+  letter-spacing: -0.01em;
+}
+.art-seg {
+  display: flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgba(120, 120, 128, 0.16);
+}
+.art-seg > * {
+  flex: 1;
+  padding: 6px 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 7px;
+}

@@ -6,7 +6,7 @@ jobs:
   check:
     # Blacksmith, as in Perpetua. It only serves organizations, so this repo must live under one.
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -20,6 +20,10 @@ jobs:
           bun run db:generate
           git diff --exit-code apps/server/drizzle
           test -z "$(git status --porcelain apps/server/drizzle)"
+      # Before the tests: the CLI's render tests drive WebKit too.
+      - name: Install WebKit
+        run: bunx playwright install --with-deps webkit
+        working-directory: apps/viewer
       # SeaweedFS needs a command and a mounted key file, which `services:` can't give it.
       - name: Unit, data-model and API tests against Postgres and SeaweedFS
         run: bun run test
@@ -27,9 +31,6 @@ jobs:
         run: bun run build
       - name: Viewer size budget
         run: bun run size
-      - name: Install WebKit
-        run: bunx playwright install --with-deps webkit
-        working-directory: apps/viewer
       - name: Playwright WebKit at iPhone size and desktop
         run: bun run e2e
       - uses: actions/upload-artifact@v4

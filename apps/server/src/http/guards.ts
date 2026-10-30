@@ -3,7 +3,7 @@ import type { Deps } from "../api/deps.ts";
 import type { ApiVars } from "../api/routes.ts";
 import { resolveCaller } from "../auth/resolve.ts";
 import { GUEST_COOKIE, SESSION_COOKIE } from "../auth/sessions.ts";
-import { findOrg, type OrgRow } from "../db/index.ts";
+import { findOrg } from "../db/index.ts";
 import { MIN_CLI_VERSION } from "../version.ts";
 import { ApiError } from "./errors.ts";
 

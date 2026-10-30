@@ -1,0 +1,14 @@
+{
+  "project": "demo",
+  "slug": "refs",
+  "title": "refs",
+  "pages": [
+    {
+      "id": "mocks",
+      "kind": "canvas",
+      "boards": [{ "id": "main", "title": "Main", "src": "board.html" }],
+      "styles": [],
+      "scripts": []
+    }
+  ]
+}

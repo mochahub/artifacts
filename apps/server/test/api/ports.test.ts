@@ -120,8 +120,12 @@ describe("the three ports", () => {
       }
     });
 
-    test("/t/ on the content host is 404 until M3", async () => {
-      expect((await content("/t/abc/v1/index.html")).status).toBe(404);
+    test("/t/ fails closed: no Sec-Fetch-Dest is refused, and so is a forged token", async () => {
+      expect((await content("/t/abc/v1/index.html")).status).toBe(403);
+      const forged = await content("/t/abc/v1/index.html", "content.test", {
+        headers: { "Sec-Fetch-Dest": "iframe" },
+      });
+      expect(forged.status).toBe(403);
     });
 
     test("/t/ on another Host is 421", async () => {

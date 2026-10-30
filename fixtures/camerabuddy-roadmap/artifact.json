@@ -1,0 +1,96 @@
+{
+  "project": "camerabuddy",
+  "projectName": "Camera Buddy",
+  "slug": "roadmap",
+  "title": "Camera Buddy roadmap",
+  "pages": [
+    {
+      "id": "plan",
+      "kind": "article",
+      "src": "README.md",
+      "title": "Plan"
+    },
+    {
+      "id": "research-01",
+      "kind": "article",
+      "src": "research/01.md",
+      "group": "Research",
+      "title": "Wi-Fi camera remote API"
+    },
+    {
+      "id": "research-02",
+      "kind": "article",
+      "src": "research/02.md",
+      "group": "Research",
+      "title": "Live view latency"
+    },
+    {
+      "id": "research-03",
+      "kind": "article",
+      "src": "research/03.md",
+      "group": "Research",
+      "title": "Exposure metering"
+    },
+    {
+      "id": "research-04",
+      "kind": "article",
+      "src": "research/04.md",
+      "group": "Research",
+      "title": "Focus peaking"
+    },
+    {
+      "id": "research-05",
+      "kind": "article",
+      "src": "research/05.md",
+      "group": "Research",
+      "title": "Culling heuristics"
+    },
+    {
+      "id": "research-06",
+      "kind": "article",
+      "src": "research/06.md",
+      "group": "Research",
+      "title": "Battery budgets"
+    },
+    {
+      "id": "research-07",
+      "kind": "article",
+      "src": "research/07.md",
+      "group": "Research",
+      "title": "Competing apps"
+    },
+    {
+      "id": "mocks",
+      "kind": "canvas",
+      "title": "Mocks",
+      "boards": [
+        {
+          "id": "onboarding",
+          "title": "Onboarding",
+          "subtitle": "First run and pairing",
+          "src": "boards/01-onboarding.html"
+        },
+        {
+          "id": "shoot",
+          "title": "Shoot",
+          "subtitle": "Taking the picture",
+          "src": "boards/02-shoot.html"
+        },
+        {
+          "id": "import-cull",
+          "title": "Import and cull",
+          "subtitle": "From card to keepers",
+          "src": "boards/03-import-cull.html"
+        },
+        {
+          "id": "assist",
+          "title": "Assist",
+          "subtitle": "Help while you shoot",
+          "src": "boards/04-assist.html"
+        }
+      ],
+      "styles": [],
+      "scripts": []
+    }
+  ]
+}

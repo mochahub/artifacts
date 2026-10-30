@@ -1,0 +1,5 @@
+{
+  "type": "bar",
+  "labels": ["Idle", "Live view", "Burst"],
+  "series": [{ "name": "Battery use, % per hour", "values": [3, 18, 30] }]
+}

@@ -53,21 +53,21 @@ Files are collected by a crawler that parses HTML (htmlparser2), CSS (postcss) a
 ## Rendering canvases (CLI, Playwright WebKit)
 
 For each canvas page and each board:
-1. **Build the board page.** Start from a minimal HTML shell, add the page's `styles` and `scripts` with the bundle's relative paths, then the board's HTML. Load it with `page.setContent` under a local static server rooted at the bundle (`http://127.0.0.1:<port>/`). All other network requests are blocked (`page.route("**", …)`), so a missing file fails here rather than in the viewer.
+1. **Build the board page.** Start from a minimal HTML shell, add the page's `styles` and `scripts`, then the board's HTML. A local static server rooted at the bundle (`http://127.0.0.1:<port>/`) serves it beside the board's own file, as `__board-<id>.html`, so the board's relative paths work. All other network requests are blocked (`page.route("**", …)`), so a missing file fails here rather than in the viewer.
 2. **Make it deterministic:**
    - inject the fixtures in place of the data API (`window.__ARTIFACTS_FIXTURES__`)
    - freeze `Date` to `2026-01-01T09:41:00` local
-   - seed `Math.random` from the frame id
+   - seed `Math.random` from the board id
    - disable animations (`prefers-reduced-motion`, and a stylesheet that zeroes durations)
    - wait for `document.fonts.ready` and every image's `decode()`
 3. **Capture frames.** For every element with `data-frame`, record its id, `data-device`, title (`data-title`, or the nearest heading) and its box on the board. Screenshot the element at device scale factors 1, 2 and 3 (one browser context per factor), plus a thumbnail (1x, max 320 px wide).
 4. **Encode and hash.** Encode each image as WebP with sharp (quality 82, effort 4). `content_hash` is the SHA-256 of the 1x **raw RGBA pixels** (decoded from the PNG Playwright returns), not of any encoded file, so encoder differences can't change it.
 5. **Check determinism.** For `lint`, the 1x render is taken twice in fresh contexts; differing pixels are a lint error (§9 of the spec).
-6. **Live frames.** If `data-live` is set on a frame, or the page kind is `prototype`, record `live_path`. For canvas frames, `render` writes a standalone `__live/<frame>.html` that loads the page's styles and scripts and just that frame, and adds it to the bundle.
+6. **Live frames.** If `data-live` is set on a frame, or the page kind is `prototype`, record `live_path`. For canvas frames, `render` writes a standalone `__live-<frame>.html` beside the board's file, so its relative paths work (the content host's CSP forbids `<base>`). It loads the page's styles and scripts and just that frame, and is added to the bundle.
 
 The **contact sheet** `.artifacts/contact-sheet.png` tiles every 1x render with its id, for the agent to look at before publishing (the skill requires it).
 
-**OG image:** a 1200×630 composite of the first three frames (or the article title set in the kit's article type), as `og.webp` in the bundle.
+**OG image:** a 1200×630 composite of the first three frames (or the article title set in the kit's article type), as `__og.webp` in the bundle.
 
 ## Building articles (CLI)
 
@@ -94,7 +94,7 @@ Images referenced by articles are bundle files; the viewer loads them through `G
 
 ## Publish protocol (CLI side)
 
-1. **Gate.** Run `lint` and stop on errors. Then `render`, unless the cached renders in `.artifacts/cache/` (keyed by input hashes) are current.
+1. **Gate.** Run `lint`, which renders, and stop on errors.
 2. **Hash.** SHA-256 every bundle file and render.
 3. **Prepare.** `POST /api/publish/prepare` with all `{ path, sha256, size, type }`. The response lists only missing hashes, each with a presigned PUT.
 4. **Upload.** Upload missing blobs with 6 parallel PUTs, sending `Content-Type` and `Cache-Control: public, max-age=31536000, immutable` as signed headers. Retry 3 times with backoff.
