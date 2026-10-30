@@ -13,6 +13,8 @@ const onHome = () => location.hostname === meta.value?.homeDomain;
 /** Whether this browser can use a passkey made for the home domain from here (04). */
 export async function canUseHomePasskey(): Promise<boolean> {
   if (onHome()) return true;
+  // Without WebAuthn at all (an old browser, an insecure address) there is nothing to ask.
+  if (typeof PublicKeyCredential === "undefined") return false;
   const capabilities = await (
     PublicKeyCredential as unknown as { getClientCapabilities?(): Promise<Record<string, boolean>> }
   ).getClientCapabilities?.();
