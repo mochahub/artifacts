@@ -27,7 +27,7 @@ export function Sheet({
   return (
     <>
       <div class="dim" onClick={onClose} aria-hidden="true" />
-      <div class="sheet top" role="dialog" aria-label={title}>
+      <div class="sheet" role="dialog" aria-label={title}>
         <div class="grabber" />
         <div class="shead">
           <div class="t">{title}</div>

@@ -76,8 +76,9 @@ test("the comment sheet sits on the keyboard, and a thread opens from ?c=", asyn
   await tapFrame(page);
   const sheet = page.getByRole("dialog", { name: "New comment" });
   await expect(sheet).toBeVisible();
-  const bottom = await sheet.evaluate((el) => el.getBoundingClientRect().bottom);
-  expect(bottom).toBeLessThanOrEqual(852 - 336);
+  await expect
+    .poll(() => sheet.evaluate((el) => el.getBoundingClientRect().bottom))
+    .toBeLessThanOrEqual(852 - 336);
   await sheet.getByRole("button", { name: "Close" }).click();
 });
 
