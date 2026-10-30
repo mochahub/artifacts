@@ -6,6 +6,7 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 
 | # | Document | Kind | Owns |
 |---|---|---|---|
+| — | [Architecture](../ARCHITECTURE.md) | Guide | How the pieces fit, with diagrams: context, server, publish, review, micro apps, data model, trust boundaries, lifecycle |
 | 01 | [Repo and tooling](01-repo-and-tooling.md) | Guide | Layout, libraries, conventions, scripts, how to view the mocks |
 | 02 | [Data model](02-data-model.md) | **Contract** | Table and column names, enums, derived status, bucket prefixes |
 | 03 | [HTTP API](03-api.md) | **Contract** | Ports, paths, request and response shapes, headers, error codes, internal API |
