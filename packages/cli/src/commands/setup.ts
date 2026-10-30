@@ -1,6 +1,8 @@
+import qrcode from "qrcode-terminal";
 import { setupDocker } from "../docker/setup.ts";
-import { CliError, type Output } from "../output.ts";
+import type { Output } from "../output.ts";
 import { ask, confirm } from "../prompt.ts";
+import { setupRailway } from "../railway/setup.ts";
 import { installSkill } from "../skill/install.ts";
 import { type ClaimAnswers, setupExisting } from "./account.ts";
 
@@ -32,7 +34,9 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
       target = await ask("Server URL:");
       person = await setupExisting(target, flags, out);
     } else {
-      throw new CliError("Railway setup isn't available in this build yet. Use --docker or a URL.");
+      const result = await setupRailway(flags, out);
+      person = result.person;
+      target = result.url;
     }
   }
   if (
@@ -43,7 +47,11 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
   }
   out.result({ server: target, person }, () => {
     out.say(`Signed in as ${person.name}.`);
-    out.say(`  Add a passkey     open ${target}/settings/sign-in`);
+    out.say("  Add a passkey     scan with your phone, or open the link:");
+    if (process.stdout.isTTY)
+      qrcode.generate(`${target}/settings/sign-in`, { small: true }, (code) => out.say(code));
+    out.say(`                    ${target}/settings/sign-in`);
     out.say("  Invite someone    artifacts org invite sam@example.com");
+    out.say("  Your own domain   artifacts domain add art.example.com");
   });
 }
