@@ -45,7 +45,7 @@ Build **Phase 1 (M0–M8)**, then **Phase 2 (M9–M11)**, as vertical slices. Ev
   - keep every version forever
   - Preact
   - skip the Claude Code artifacts comparison test
-  - publishers and admins can read people's `me` data, with a notice (**awaiting the user's confirmation**)
+  - publishers and admins can read people's `me` data, with a notice (confirmed 2026-10-30)
   - install via script plus npm
 
 ## Design rules (the user cares about these)

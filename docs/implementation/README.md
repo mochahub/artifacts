@@ -19,6 +19,7 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 | 11 | [Build order](11-milestones.md) | Guide | Spikes S1–S8, milestones M0–M11 |
 | — | [Spike results](spikes.md) | Record | What each M0 spike found, and the design changes it caused |
 | — | [HANDOFF.md](HANDOFF.md) | Prompt | The brief for the building agent |
+| — | [HANDOFF-M2-M11.md](HANDOFF-M2-M11.md) | Prompt | The brief for building M2–M11 autonomously |
 
 Also in `docs/`:
 - [hosting-evaluation.md](../hosting-evaluation.md): self-hosted versus a hosted service

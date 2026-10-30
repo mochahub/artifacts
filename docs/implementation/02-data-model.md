@@ -5,7 +5,7 @@
 ## Conventions
 
 - **Ids** are UUIDv7 (`uuid` columns), generated in the app with `Bun.randomUUIDv7()`. They're time-ordered, so they index well and sort by creation.
-- **Every row carries `org_id`** (SPEC §14), even though one deployment is one organization, so multi-tenancy never needs a migration. Every query filters on it.
+- **Every table has `org_id`**, not null and referencing `org`, except `org` itself (SPEC §14), even though one deployment is one organization, so multi-tenancy never needs a migration. That includes child tables that could reach it through a parent. Every query filters on it. The test in `apps/server/test/data-model.test.ts` enforces this.
 - **Timestamps** are `timestamptz`. Soft-delete and lifecycle columns are nullable timestamps (`archived_at`, `deleted_at`, `revoked_at`).
 - **Secrets are stored hashed.** Session tokens, invite tokens, reset tokens, CLI tokens, share-link tokens and device codes are stored as SHA-256 hex of the secret (`*_hash`); the secret itself appears only once, in the response that creates it. Passwords use argon2id via `Bun.password`.
 - **Migrations** are Drizzle (`apps/server/src/db/schema.ts` → `apps/server/drizzle/`), run at boot. They only add: new tables, new nullable columns, new indexes. A column is dropped only two releases after the code stops reading it, so `artifacts upgrade --to <previous>` keeps working (SPEC §7.4).
@@ -57,13 +57,14 @@
 
 Index: unique `(org_id, lower(email)) where removed_at is null`.
 
-**`passwords`**: `person_id` uuid PK FK people, `hash` text (argon2id PHC string), `updated_at`.
+**`passwords`**: `person_id` uuid PK FK people, `org_id`, `hash` text (argon2id PHC string), `updated_at`.
 
 **`passkeys`**
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
+| `org_id` | uuid | |
 | `person_id` | uuid FK | |
 | `credential_id` | bytea unique | |
 | `public_key` | bytea | COSE key from `@simplewebauthn/server`. |
@@ -73,13 +74,14 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `name` | text | "iCloud Keychain", editable. |
 | `created_at`, `last_used_at` | timestamptz | |
 
-**`webauthn_challenges`**: `id` uuid PK, `challenge` text, `kind` text (`register` \| `authenticate`), `person_id` uuid null, `expires_at` (5 minutes). Deleted when used or expired.
+**`webauthn_challenges`**: `id` uuid PK, `org_id`, `challenge` text, `kind` text (`register` \| `authenticate`), `person_id` uuid null, `expires_at` (5 minutes). Deleted when used or expired.
 
 **`sessions`**
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
+| `org_id` | uuid | |
 | `token_hash` | text unique | Cookie `art_session` holds the secret. |
 | `person_id` | uuid FK | |
 | `domain` | text | Viewer hostname the cookie was set on. |
@@ -96,7 +98,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `token_hash` | text unique | |
 | `created_at`, `last_seen_at` | timestamptz | |
 
-**`guest_links`**: a guest's name and access per share link. PK `(guest_id, share_link_id)`, `name` text not null (what they typed), `created_at`, `expires_at` (90 days from first use, never past the link's own expiry). Revoking or expiring the link ends access at once (checked on every request).
+**`guest_links`**: a guest's name and access per share link. PK `(guest_id, share_link_id)`, `org_id`, `name` text not null (what they typed), `created_at`, `expires_at` (90 days from first use, never past the link's own expiry). Revoking or expiring the link ends access at once (checked on every request).
 
 **`invites`**
 
@@ -120,6 +122,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
+| `org_id` | uuid | |
 | `device_code_hash` | text unique | The CLI polls with the secret device code. |
 | `user_code` | text unique | `WDJB-MJHT`: 8 characters from `BCDFGHJKLMNPQRSTVWXZ`, shown in the terminal and on the approval page. |
 | `client_name` | text | "Sam's MacBook Pro". |
@@ -165,7 +168,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 
 Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_at is null`; `(purge_after) where deleted_at is not null`.
 
-**`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `permission`, `granted_by`, `created_at`. Used for "Only me plus people I add", and for outside people.
+**`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `org_id`, `permission`, `granted_by`, `created_at`. Used for "Only me plus people I add", and for outside people.
 
 **`share_links`**: `id`, `org_id`, `artifact_id`, `token_hash` unique (URL `/s/<secret>`), `permission`, `created_by`, `created_at`, `expires_at` null, `revoked_at` null.
 
@@ -189,13 +192,14 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `published_at` | timestamptz | |
 | `deleted_at`, `deleted_by`, `purge_after` | | Removing one version (SPEC §5.5). The latest and the only version can't be removed. |
 
-**`pages`**: `id`, `version_id`, `page_key` text (manifest page `id`), `kind` `page_kind`, `title`, `group` text null, `position` int, `meta` jsonb (article: `{ readingMinutes, htmlHash, outline: [{ id, title, level }] }`; canvas: `{ boards: [{ key, title, subtitle, x, y, w, h }] }`). Unique `(version_id, page_key)`.
+**`pages`**: `id`, `org_id`, `version_id`, `page_key` text (manifest page `id`), `kind` `page_kind`, `title`, `group` text null, `position` int, `meta` jsonb (article: `{ readingMinutes, htmlHash, outline: [{ id, title, level }] }`; canvas: `{ boards: [{ key, title, subtitle, x, y, w, h }] }`). Unique `(version_id, page_key)`.
 
 **`frames`**: canvas frames, one row per frame per version.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
+| `org_id` | uuid | |
 | `version_id` | uuid | |
 | `page_key`, `board_key`, `frame_key` | text | `frame_key` = the author's `data-frame` id. Unique `(version_id, page_key, frame_key)`. |
 | `title`, `device` | text | `device` from `data-device`. |
@@ -204,7 +208,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `renders` | jsonb | `{ "1x": "<sha256>", "2x": "<sha256>", "3x": "<sha256>", "thumb": "<sha256>" }`, WebP blobs. |
 | `live_path` | text null | Path of the frame's live HTML inside the bundle, for Try it. |
 
-**`blocks`**: article blocks. `id`, `version_id`, `page_key`, `block_key` text (heading slug or `<heading slug>/p<n>`), `content_hash` text, `text` text (plain text, for quote re-anchoring and search). Unique `(version_id, page_key, block_key)`.
+**`blocks`**: article blocks. `id`, `org_id`, `version_id`, `page_key`, `block_key` text (heading slug or `<heading slug>/p<n>`), `content_hash` text, `text` text (plain text, for quote re-anchoring and search). Unique `(version_id, page_key, block_key)`.
 
 ### Review
 
@@ -231,7 +235,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 **`decisions`**: `id`, `org_id`, `artifact_id`, `version` int, `person_id`, `kind` `decision_kind`, `note` text, `created_at`. The latest row per artifact is the current decision.
 
-**`views`**: per person per artifact. PK `(person_id, artifact_id)`, `last_seen_version` int, `last_seen_at`, `positions` jsonb (`{ "<pageKey>": { scrollY | blockKey } }`). Guests: PK `(guest_id, artifact_id)` in **`guest_views`** with the same columns.
+**`views`**: per person per artifact. PK `(person_id, artifact_id)`, `org_id`, `last_seen_version` int, `last_seen_at`, `positions` jsonb (`{ "<pageKey>": { scrollY | blockKey } }`). Guests: PK `(guest_id, artifact_id)` in **`guest_views`** with the same columns.
 
 ### Activity, lifecycle and operations
 
@@ -239,11 +243,11 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 **`tombstones`**: one line left by a purge. `id`, `org_id`, `kind` (`artifact` \| `version`), `project_slug`, `slug`, `title`, `version` int null, `deleted_by`, `purged_at`. No content.
 
-**`backend_logs`** (Phase 2): `id`, `artifact_id`, `version` int, `level` text (`log`, `warn`, `error`), `message` text (8 KB max), `request_id` text, `created_at`. At most 100 rows per request. A job deletes rows older than 24 hours.
+**`backend_logs`** (Phase 2): `id`, `org_id`, `artifact_id`, `version` int, `level` text (`log`, `warn`, `error`), `message` text (8 KB max), `request_id` text, `created_at`. At most 100 rows per request. A job deletes rows older than 24 hours.
 
-**`artifact_usage`** (Phase 2): the data store's counters for limits. PK `(artifact_id, scope)` with `scope` in `shared`, `me`, `files`; `keys` int, `bytes` bigint, `updated_at`. Writes lock the row (`SELECT … FOR UPDATE`) for the length of one data write (08). Recounted by the daily job for artifacts written that day; deleted with the artifact on purge.
+**`artifact_usage`** (Phase 2): the data store's counters for limits. PK `(artifact_id, scope)` with `scope` in `shared`, `me`, `files`; `org_id`, `keys` int, `bytes` bigint, `updated_at`. Writes lock the row (`SELECT … FOR UPDATE`) for the length of one data write (08). Recounted by the daily job for artifacts written that day; deleted with the artifact on purge.
 
-**`push_subscriptions`** (Phase 2): `id`, `person_id`, `endpoint` text unique, `keys` jsonb, `created_at`, `last_ok_at`.
+**`push_subscriptions`** (Phase 2): `id`, `org_id`, `person_id`, `endpoint` text unique, `keys` jsonb, `created_at`, `last_ok_at`.
 
 **`releases`**: none. The app learns the latest release from GitHub Releases (cached 6 hours) for the admin "new version" notice.
 

@@ -56,7 +56,8 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 - **Browser capability:** the viewer calls `PublicKeyCredential.getClientCapabilities?.()`. If `relatedOrigins` is false or missing and the page isn't on the home domain:
   - Sign-in shows "Sign in on <home domain>", which opens the home domain.
   - Registration offers to create the passkey for the current domain instead.
-- **Discoverable credentials** (`residentKey: "required"`, `userVerification: "preferred"`), so sign-in needs no email first.
+- **Discoverable credentials** (`residentKey: "required"`), so sign-in needs no email first.
+- **User verification is required** (`userVerification: "required"` in options, and `requireUserVerification: true` when verifying, for registration and sign-in). A passkey can be someone's only credential, so it has to prove the person and not just the device.
 - **Challenges** live in `webauthn_challenges` for 5 minutes and are single use.
 
 ## Sessions and "recent sign-in"
@@ -121,7 +122,7 @@ Can the caller see an artifact at all (`artifact.read`)?
 | orgToken | `visibility = org` and the project is in its `project_ids` (or all), and it has `read` |
 | content | The token's artifact and version |
 
-Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /api/deleted` and undelete/purge, for their deleter and admins.
+Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /api/deleted` and undelete/purge, for their deleter and admins. The only other trace is for a caller who passes the table above with `deleted_at` ignored: they get 410 `gone` on its page and `slug_deleted` on its slug (03). Everyone else gets 404 and plain `conflict`, as if it had never existed.
 
 ### Actions
 
@@ -163,6 +164,7 @@ The expected result is computed from a second, deliberately simple table in the 
   - `Strict-Transport-Security: max-age=31536000`
   - `X-Frame-Options: DENY`
   - `Referrer-Policy: same-origin`
+  - `X-Content-Type-Options: nosniff`
 - **The live preview iframe:** `sandbox="allow-scripts"` (never `allow-same-origin`), `allow="fullscreen"`, `referrerpolicy="no-referrer"`.
 
 ## Rate limits (in memory, per process)
