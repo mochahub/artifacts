@@ -109,6 +109,42 @@ describe("the data store", () => {
     expect(list.keys.map((entry) => entry.key)).toEqual(["todos/1"]);
   });
 
+  test("no spelling of a dot segment, nor a look-alike dot, gets past the key checks", async () => {
+    await fresh();
+    const climbs = [
+      "..%2Fx",
+      "%2e%2e%2fx",
+      "%2E%2E%2Fx",
+      "a%2F..%2Fx",
+      "a%2F%2E%2E",
+      "a%2F.%2Fx",
+      "%2Fabs",
+      "a%5C..%5Cx", // A backslash.
+      "%EF%BC%8E%EF%BC%8E%2Fx", // U+FF0E, a full-width full stop.
+      "%E2%80%A4%E2%80%A4%2Fx", // U+2024, a one-dot leader.
+      "%E2%80%A5%2Fx", // U+2025, a two-dot leader.
+      "a%00b",
+      "%C0%AE%C0%AE%2Fx", // An overlong dot.
+    ];
+    for (const key of climbs) {
+      for (const scope of ["shared", "me"]) {
+        expect([key, (await put(scope, key, 1)).status]).toEqual([key, 400]);
+        expect([key, (await get(scope, key)).status]).toEqual([key, 400]);
+        const files = await t.api(`/api/artifacts/${id}/files/${scope}/${key}`, {
+          method: "PUT",
+          bearer: token,
+          body: "x",
+        });
+        expect([key, files.status]).toEqual([key, 400]);
+      }
+      const list = await t.api(`/api/artifacts/${id}/data/shared?prefix=${key}`, { bearer: token });
+      expect([key, list.status]).toEqual([key, 400]);
+    }
+    // And nothing was written beside the scopes.
+    const stray = (await t.server.bucket.list(`data/${id}/`)).objects.map((object) => object.key);
+    expect(stray).toEqual([]);
+  });
+
   test("limits: value size, key count, bytes per scope, and writes per second", async () => {
     await fresh();
     expect((await put("shared", "big", "x".repeat(70_000))).status).toBe(413);

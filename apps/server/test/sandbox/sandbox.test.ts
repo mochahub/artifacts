@@ -158,6 +158,42 @@ describe("the backend sandbox", () => {
     expect(writes).toEqual({ ok: 10, rate_limited: 40 });
   });
 
+  test("env.DATA: no dot segment, look-alike dot or odd character gets past the key checks", async () => {
+    // Writes are rate-limited before their keys are looked at, and this makes many.
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { writesPerSecond: number } };
+    const original = settings.limits.writesPerSecond;
+    settings.limits.writesPerSecond = 1000;
+    await t.server.db.update(org).set({ settings });
+    const { call, id } = await deploy(`export default { async fetch(r, env) {
+      const code = (p) => p.then(() => "ok", (e) => e.code);
+      const keys = ["../x", "a/../x", "a/..", "./x", "a/./x", "/abs", "me/../x", "files/../../x", "",
+        "\\uFF0E\\uFF0E/x", "\\u2024\\u2024/x", "\\u2025/x", "a\\u0000b", "a b", "a\\\\..\\\\x", "%2e%2e/x", "k".repeat(201)];
+      const out = {};
+      for (const key of keys) {
+        out[key] = [
+          await code(env.DATA.put(key, 1)),
+          await code(env.DATA.get(key)),
+          await code(env.DATA.delete(key)),
+          await code(env.DATA.list(key)),
+        ].join();
+      }
+      return Response.json(out);
+    } };`);
+    const body = (await (await call("x")).json()) as Record<string, string>;
+    for (const [key, codes] of Object.entries(body)) {
+      // An empty prefix means "everything in shared", which is allowed; the other three refuse an empty key.
+      expect([JSON.stringify(key), codes]).toEqual([
+        JSON.stringify(key),
+        key === "" ? "invalid,invalid,invalid,ok" : "invalid,invalid,invalid,invalid",
+      ]);
+    }
+    expect((await t.server.bucket.list(`data/${id}/`)).objects).toEqual([]);
+    settings.limits.writesPerSecond = original;
+    await t.server.db.update(org).set({ settings });
+  });
+
   test("env.DATA: etags, only-if-new, listing every scope, and bad keys", async () => {
     const { call } = await deploy(`export default { async fetch(r, env) {
       const code = (p) => p.then(() => "ok", (e) => e.code);
