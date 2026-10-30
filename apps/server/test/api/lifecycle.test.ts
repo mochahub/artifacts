@@ -74,6 +74,35 @@ describe("lifecycle", () => {
     expect((await publish(t, token, { slug: row.slug })).status).toBe(200);
   });
 
+  test("through the app, only pictures come out, as downloads (?via=app)", async () => {
+    // A publisher chooses each file's type, so a page of theirs must never be served from this origin.
+    const page = file("page.html", "<script src=/x.js></script>", "text/html");
+    expect((await publish(t, token, { slug: "via-app", extra: [page] })).status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "via-app"));
+    const read = (blob: string) =>
+      t.api(`/api/artifacts/${row?.id}/r/${blob}?via=app`, { cookie, redirect: "manual" });
+    expect((await read(page.sha256)).status).toBe(302);
+
+    const [made] = await t.server.db
+      .select()
+      .from(versions)
+      .where(eq(versions.artifactId, row?.id as string));
+    const [frame] = await t.server.db
+      .select()
+      .from(frames)
+      .where(eq(frames.versionId, made?.id as string));
+    const render = (frame as { renders: { "2x": string } }).renders["2x"];
+    const image = await read(render);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/webp");
+    expect(image.headers.get("content-disposition")).toBe("attachment");
+    expect(image.headers.get("x-content-type-options")).toBe("nosniff");
+
+    // A picture whose stored type says otherwise goes by the redirect too.
+    await t.server.bucket.put(`blobs/${render}`, "<script>1</script>", { contentType: "text/html" });
+    expect((await read(render)).status).toBe(302);
+  });
+
   test("delete: links stop, the slug stays taken, and an agent can undo it", async () => {
     const row = await fresh("me");
     const { url } = (await (
