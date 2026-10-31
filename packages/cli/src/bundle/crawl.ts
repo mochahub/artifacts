@@ -142,7 +142,11 @@ export function jsRefs(js: string): string[] {
   const refs: string[] = [];
   try {
     const [imports] = parseModule(js);
-    for (const entry of imports) if (entry.n) refs.push(entry.n);
+    for (const entry of imports) {
+      // A template literal comes back as a glob, which names no one file.
+      if ("glob" in entry && entry.glob) continue;
+      if (entry.specifier) refs.push(entry.specifier);
+    }
   } catch {}
   for (const match of js.matchAll(/\bfetch\(\s*(['"`])([^'"`$]+)\1/g)) {
     // `api/…` is the artifact's backend, not a file in the bundle (05).
