@@ -1,6 +1,7 @@
 import type { Artifact, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { lazy, useLocation, useRoute } from "preact-iso";
+import { isMissing } from "../api.ts";
 import type { ArticlePage } from "../article/view.tsx";
 import type { CanvasPage } from "../canvas/view.tsx";
 import { PageSwitcher, VersionSheet } from "../components/sheets.tsx";
@@ -44,7 +45,7 @@ function Page() {
   if (remote.error.value?.status === 410)
     return <Deleted at={remote.error.value.details.deletedAt as string} />;
   if (remote.error.value?.status === 401) return null;
-  if (remote.error.value || detail.error.value) return <NotFound />;
+  if (isMissing(remote.error.value) || isMissing(detail.error.value)) return <NotFound />;
   if (!artifact || !detail.data.value || !version) return null;
   const key = params.page ?? artifact.pages[0]?.key;
   const page = detail.data.value.pages.find((entry) => entry.key === key);

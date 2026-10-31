@@ -36,6 +36,7 @@ const viewerId = (caller: Caller) =>
 
 const RESULTS = 20;
 const SEARCHES_PER_MINUTE = 60;
+const MAX_POSITION_CHARS = 2000;
 
 /** Everything this caller can see, filtered by can() and nothing else. */
 async function visible(deps: Deps, c: ApiContext, projectId?: string): Promise<Loaded[]> {
@@ -255,7 +256,10 @@ export function listRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/search", { action: "home.read" }, async (c) => {
     const q = (c.req.query("q") ?? "").trim().toLowerCase().slice(0, 100);
     if (q.length < 2) return c.json({ artifacts: [], pages: [], comments: [] });
-    deps.limits.hit(`search:${callerKey(c.get("caller")) ?? "token"}`, SEARCHES_PER_MINUTE, 60_000);
+    const caller = c.get("caller");
+    // An org token has no person, so its own id keeps one integration from using up everyone's searches.
+    const who = callerKey(caller) ?? ("tokenId" in caller ? caller.tokenId : "none");
+    deps.limits.hit(`search:${who}`, SEARCHES_PER_MINUTE, 60_000);
     const list = await visible(deps, c as ApiContext);
     const known = new Map(list.map((entry) => [entry.row.id, entry]));
     const ids = [...known.keys()];
@@ -472,6 +476,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
         : null,
       permissions: {
         comment: can(caller, "artifact.comment", resource),
+        decide: can(caller, "artifact.decide", resource),
         manage: can(caller, "artifact.manage", resource),
         share: can(caller, "artifact.share", resource),
         delete: can(caller, "artifact.delete", resource),
@@ -536,7 +541,21 @@ export function listRoutes(routes: Routes, deps: Deps) {
     const orgId = c.get("org").id;
     const who = viewerId(c.get("caller"));
     const now = clock.now();
-    const position = body.pageKey ? { [body.pageKey]: body.position ?? null } : {};
+    // Nobody has seen a version that doesn't exist yet, so it can't be marked seen in advance.
+    const version = Math.min(body.version, (await artifactById(c as ApiContext)).row.latestVersion);
+    // A position is kept only for a page the artifact has, and small, so the row can't be filled with junk.
+    const [page] = body.pageKey
+      ? await db
+          .select({ key: pages.pageKey })
+          .from(pages)
+          .innerJoin(versions, eq(versions.id, pages.versionId))
+          .where(and(eq(versions.artifactId, artifactId), eq(pages.pageKey, body.pageKey)))
+          .limit(1)
+      : [];
+    const position =
+      page && JSON.stringify(body.position ?? null).length <= MAX_POSITION_CHARS
+        ? { [page.key]: body.position ?? null }
+        : {};
     const merge = (column: unknown) => sql`${column} || ${JSON.stringify(position)}::jsonb`;
     if (who.person) {
       await db
@@ -545,14 +564,14 @@ export function listRoutes(routes: Routes, deps: Deps) {
           personId: who.person,
           orgId,
           artifactId,
-          lastSeenVersion: body.version,
+          lastSeenVersion: version,
           lastSeenAt: now,
           positions: position,
         })
         .onConflictDoUpdate({
           target: [views.personId, views.artifactId],
           set: {
-            lastSeenVersion: sql`greatest(${views.lastSeenVersion}, ${body.version})`,
+            lastSeenVersion: sql`greatest(${views.lastSeenVersion}, ${version})`,
             lastSeenAt: now,
             positions: merge(views.positions),
           },
@@ -564,14 +583,14 @@ export function listRoutes(routes: Routes, deps: Deps) {
           guestId: who.guest,
           orgId,
           artifactId,
-          lastSeenVersion: body.version,
+          lastSeenVersion: version,
           lastSeenAt: now,
           positions: position,
         })
         .onConflictDoUpdate({
           target: [guestViews.guestId, guestViews.artifactId],
           set: {
-            lastSeenVersion: sql`greatest(${guestViews.lastSeenVersion}, ${body.version})`,
+            lastSeenVersion: sql`greatest(${guestViews.lastSeenVersion}, ${version})`,
             lastSeenAt: now,
             positions: merge(guestViews.positions),
           },

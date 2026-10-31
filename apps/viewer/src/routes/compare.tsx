@@ -2,6 +2,7 @@ import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ChevronLeft } from "lucide-preact";
 import { useLocation, useRoute } from "preact-iso";
+import { isMissing } from "../api.ts";
 import { renderUrl } from "../format.ts";
 import { usePoll } from "../poll.ts";
 import { artifactPath } from "./artifact.tsx";
@@ -135,7 +136,7 @@ export function ComparePage() {
       : null,
     3_600_000,
   );
-  if (compare.error.value || (remote.error.value && remote.error.value.status !== 401)) return <NotFound />;
+  if (isMissing(compare.error.value) || isMissing(remote.error.value)) return <NotFound />;
   if (!artifact) return null;
   const nothing =
     compare.data.value &&

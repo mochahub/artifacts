@@ -39,7 +39,7 @@
 | `name` | text | "Mochahub" |
 | `home_domain` | text not null | Hostname that `artifacts setup` ran against; the passkey RP ID. Never changes (SPEC §7.3). |
 | `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
-| `vapid_public` | text null | Phase 2. Generated on first boot. |
+| `vapid_public` | text null | Phase 2. Generated the first time push needs it, not at boot, because there's no `org` row on first boot. |
 | `vapid_private` | text null | Phase 2. Stored as is: anyone who can read this table can already read everything else, and tying it to `SESSION_SECRET` would stop that secret being rotated. |
 | `last_digest_at` | timestamptz null | Phase 2. When the daily push digest last went out, so a restart doesn't send it again. |
 | `pseudonym_key` | bytea not null | 32 random bytes generated at setup. Keys the per-artifact caller pseudonyms (08). Separate from `SESSION_SECRET` so that secret can be rotated; never rotated itself, because `me` data is keyed by pseudonym. |
@@ -54,7 +54,7 @@
 | `email` | citext not null | Sign-in name; unique per org among rows where `removed_at is null`. Never verified (SPEC §7.3). |
 | `name` | text not null | Display name. |
 | `role` | `role` | `outside` = account created by an artifact invite; sees only artifacts in `artifact_access`. |
-| `created_at`, `removed_at` | timestamptz | Removing a person sets `removed_at`, ends their sessions and tokens, keeps their comments with their name. |
+| `created_at`, `removed_at` | timestamptz | Removing a person sets `removed_at`, ends their sessions and tokens, revokes the organization tokens and share links they created, keeps their comments with their name. |
 
 Index: unique `(org_id, lower(email)) where removed_at is null`.
 
@@ -112,6 +112,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `role` | `role` | For `org` invites: `admin`, `member` or `reviewer`. For `artifact` invites: `outside`. |
 | `artifact_id` | uuid null | For `artifact` invites. |
 | `permission` | `permission` null | For `artifact` invites. |
+| `via_token` | boolean not null default false | True when a token made the invite (`artifacts share --invite`). The `artifact_access` row it becomes carries it over (04). |
 | `token_hash` | text unique | |
 | `created_by` | uuid FK people | |
 | `created_at`, `expires_at`, `accepted_at`, `revoked_at` | timestamptz | Expires in 7 days; single use. |
@@ -171,7 +172,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 
 Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_at is null`; `(purge_after) where deleted_at is not null`.
 
-**`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `org_id`, `permission`, `granted_by`, `created_at`. Used for "Only me plus people I add", and for outside people.
+**`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `org_id`, `permission`, `granted_by`, `via_token` (boolean not null default false), `created_at`. Used for "Only me plus people I add", and for outside people. `via_token` is true while the access was granted by a token and no person has granted it again: the person can comment (when the permission allows) but can't approve, request changes or resolve threads (04). A person creating or changing the row sets it to false; a token creating it, or changing its permission, sets it to true.
 
 **`share_links`**: `id`, `org_id`, `artifact_id`, `token_hash` unique (URL `/s/<secret>`), `permission`, `created_by`, `created_at`, `expires_at` null, `revoked_at` null.
 

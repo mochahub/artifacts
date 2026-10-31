@@ -38,6 +38,8 @@ const OWNER_LOCK = 7_316_003;
 const INVITE_DAYS = 7;
 const ORG_SCOPES_NEED = ["publish", "comment", "read", "manage", "data", "org"];
 
+const isAboveMember = (role: string) => role === "owner" || role === "admin";
+
 const actorOf = (caller: Caller) => {
   if (caller.kind === "person" || caller.kind === "cliToken") return caller.person;
   throw new ApiError("forbidden", "You can't do that.");
@@ -76,9 +78,22 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   }
   function guardTokenReset(c: ApiContext, target: { id: string; role: string }) {
     const caller = c.get("caller");
-    if (caller.kind !== "person" && (target.role === "admin" || target.id === actorOf(caller).id)) {
+    const above = target.role === "admin" || target.role === "owner";
+    if (caller.kind !== "person" && (above || target.id === actorOf(caller).id)) {
       throw new ApiError("forbidden", "Issue this reset link from the viewer, not with a token.");
     }
+  }
+
+  /** What they issued goes too, or an invite to a throwaway address would bring them straight back. */
+  async function revokeIssued(tx: Pick<Db, "update">, personId: string, now: Date) {
+    await tx
+      .update(invites)
+      .set({ revokedAt: now })
+      .where(and(eq(invites.createdBy, personId), isNull(invites.acceptedAt), isNull(invites.revokedAt)));
+    await tx
+      .update(resetLinks)
+      .set({ usedAt: now })
+      .where(and(eq(resetLinks.createdBy, personId), isNull(resetLinks.usedAt)));
   }
 
   /** Only an owner touches an owner, or an admin could take the deployment over (03). */
@@ -201,6 +216,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         throw new ApiError("conflict", "There must always be an owner.");
       }
       await tx.update(people).set({ role }).where(eq(people.id, person.id));
+      // Losing admin ends what they issued, as removal does: an admin invite or a reset link
+      // from before would otherwise hand the same power straight back.
+      if (isAboveMember(person.role) && !isAboveMember(role)) await revokeIssued(tx, person.id, clock.now());
     });
     return c.json({ person: personView({ ...person, role }) });
   });
@@ -220,15 +238,18 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         .update(tokens)
         .set({ revokedAt: now })
         .where(and(eq(tokens.personId, person.id), isNull(tokens.revokedAt)));
-      // What they issued goes too, or an invite to a throwaway address would bring them straight back.
+      await revokeIssued(tx, person.id, now);
+      // What they created for others outlives their account unless it ends with it: an organization
+      // token keeps acting as the organization, and a share link keeps admitting guests (04).
       await tx
-        .update(invites)
+        .update(tokens)
         .set({ revokedAt: now })
-        .where(and(eq(invites.createdBy, person.id), isNull(invites.acceptedAt), isNull(invites.revokedAt)));
+        .where(and(eq(tokens.kind, "org"), eq(tokens.createdBy, person.id), isNull(tokens.revokedAt)));
+      // A guest's access is read from the link on every request, so this ends theirs too (02).
       await tx
-        .update(resetLinks)
-        .set({ usedAt: now })
-        .where(and(eq(resetLinks.createdBy, person.id), isNull(resetLinks.usedAt)));
+        .update(shareLinks)
+        .set({ revokedAt: now })
+        .where(and(eq(shareLinks.createdBy, person.id), isNull(shareLinks.revokedAt)));
     });
     return c.json({ ok: true });
   });
@@ -324,6 +345,8 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   // Secrets are stored hashed, so "copy it again" means a new link; the old one stops (02).
   routes.post("/api/invites/:id/link", { action: "people.invite" }, async (c) => {
     const row = await pendingInvite(c as ApiContext);
+    // A new link is a new way in, so a token gets no more here than when it makes the invite.
+    guardTokenInvite(c as ApiContext, row.role);
     const secret = randomSecret();
     await db
       .update(invites)
@@ -427,6 +450,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           personId: row.id,
           permission: invite.permission,
           grantedBy: invite.createdBy,
+          viaToken: invite.viaToken,
         });
       }
       await tx.insert(activity).values({

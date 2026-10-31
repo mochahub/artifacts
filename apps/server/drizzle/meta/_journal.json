@@ -71,6 +71,13 @@
       "when": 1793383097531,
       "tag": "0009_safe_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793418794799,
+      "tag": "0010_silly_saracen",
+      "breakpoints": true
     }
   ]
 }

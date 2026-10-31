@@ -13,6 +13,7 @@ import {
 import { Sheet } from "../components/sheets.tsx";
 import { plural } from "../format.ts";
 import type { Remote } from "../poll.ts";
+import { readStored, writeStored } from "../storage.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
 
 export type ArticlePage = {
@@ -34,7 +35,7 @@ type Props = {
 };
 
 const SIZES = [17, 19, 21];
-const stored = (key: string, fallback: string) => localStorage.getItem(`artifacts.read.${key}`) ?? fallback;
+const stored = (key: string, fallback: string) => readStored(`artifacts.read.${key}`) ?? fallback;
 
 export function ArticleView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
   const body = useRef<HTMLDivElement>(null);
@@ -111,12 +112,23 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
   });
 
   useEffect(() => {
-    localStorage.setItem("artifacts.read.size", String(size.value));
-    localStorage.setItem("artifacts.read.font", font.value);
-    localStorage.setItem("artifacts.read.theme", theme.value);
-    if (theme.value === "auto") document.documentElement.style.removeProperty("color-scheme");
-    else document.documentElement.style.colorScheme = theme.value;
+    writeStored("artifacts.read.size", String(size.value));
+    writeStored("artifacts.read.font", font.value);
+    writeStored("artifacts.read.theme", theme.value);
   }, [size.value, font.value, theme.value]);
+
+  // Light or Dark is the reader's, for this page only: the colours follow data-theme (tokens.css), and
+  // leaving the article gives the rest of the app back to the system.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme.value === "auto") return;
+    root.dataset.theme = theme.value;
+    root.style.colorScheme = theme.value;
+    return () => {
+      delete root.dataset.theme;
+      root.style.removeProperty("color-scheme");
+    };
+  }, [theme.value]);
 
   useEffect(() => {
     let live = true;

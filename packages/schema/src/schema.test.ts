@@ -3,6 +3,8 @@ import {
   BridgeRequest,
   BridgeResponse,
   DEFAULT_ORG_SETTINGS,
+  EditComment,
+  GuestName,
   Manifest,
   OrgSettings,
   Permission,
@@ -160,5 +162,26 @@ describe("the article allowlist", () => {
       '<h2 id="a" data-block="a">T</h2><table><tr><td align="left">x</td></tr></table>',
     );
     expect(sanitizeArticle(once)).toBe(once);
+  });
+});
+
+describe("names that routes would swallow", () => {
+  test("refuses the word search as a project, and compare as a page", () => {
+    expect(Slug.safeParse("search").success).toBe(false);
+    const page = (id: string) => ({ ...spec, pages: [{ id, kind: "article", src: "a.md" }] });
+    expect(Manifest.safeParse(page("compare")).success).toBe(false);
+    expect(Manifest.safeParse(page("compare-2")).success).toBe(true);
+  });
+});
+
+describe("blank text", () => {
+  test("a comment of whitespace is refused", () => {
+    expect(EditComment.safeParse({ body: "   \n" }).success).toBe(false);
+    expect(EditComment.safeParse({ body: "Looks right" }).success).toBe(true);
+  });
+
+  test("a guest name is trimmed, and spaces are no name", () => {
+    expect(GuestName.parse({ name: "  Riley " })).toEqual({ name: "Riley" });
+    expect(GuestName.safeParse({ name: "   " }).success).toBe(false);
   });
 });

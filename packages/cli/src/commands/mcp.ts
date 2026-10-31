@@ -82,6 +82,13 @@ export function toolCommand(name: string, input: Record<string, unknown>) {
   return ["--json", ...tool.args(input)];
 }
 
+/** A model reads everything a tool prints, so one big answer (a data export) can't fill its context. */
+const MAX_OUTPUT = 100_000;
+export function capOutput(text: string) {
+  if (text.length <= MAX_OUTPUT) return text;
+  return `${text.slice(0, MAX_OUTPUT)}\n… cut off, ${text.length - MAX_OUTPUT} more characters. Run the command in a shell to read it all.`;
+}
+
 async function callTool(args: string[]) {
   // Run from a script, this needs Bun and the script; a compiled binary is the whole command.
   const script = process.argv[1] ?? "";
@@ -100,7 +107,7 @@ async function callTool(args: string[]) {
     child.exited,
   ]);
   return {
-    content: [{ type: "text", text: (out || err).trim() }],
+    content: [{ type: "text", text: capOutput((out || err).trim()) }],
     ...(code === 0 ? {} : { isError: true }),
   };
 }
@@ -150,6 +157,11 @@ export async function mcpCommand() {
     pending += Buffer.from(chunk).toString();
     const lines = pending.split("\n");
     pending = lines.pop() ?? "";
+    // No message is anywhere near this long; a line that never ends would otherwise grow without bound.
+    if (pending.length > 10_000_000) {
+      pending = "";
+      send({ id: null, error: { code: -32600, message: "That message is too long." } });
+    }
     for (const line of lines) {
       if (!line.trim()) continue;
       let request: Parameters<typeof answer>[0];

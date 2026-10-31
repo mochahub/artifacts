@@ -14,6 +14,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { cleanUrl } from "../bundle/crawl.ts";
 import { chartSvg } from "./chart.ts";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -116,7 +117,8 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       if (node.tagName === "img") {
         const src = String(node.properties.src ?? "");
         if (!/^[a-z]+:/i.test(src)) {
-          const path = normalize(join(dirname(input.path), src))
+          // Percent-encoded, as Markdown writes it ("my%20pic.png"); the bundle has the file's own name.
+          const path = normalize(join(dirname(input.path), cleanUrl(src)))
             .split(sep)
             .join("/");
           const hash = input.blobHash(path);
@@ -146,12 +148,19 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
           element("img", { src: `artifacts:blob/${hash}`, alt: ref.split("/").at(-1) ?? ref }, []),
         ]);
       } else {
-        const svg =
-          embed === "chart"
-            ? chartSvg(
-                JSON.parse(readFileSync(join(input.root, normalize(join(dirname(input.path), ref))), "utf8")),
-              )
-            : input.mermaid.get(hastText(node));
+        let svg: string | undefined;
+        if (embed === "chart") {
+          // Only a file the crawl let into the bundle (inside the folder, links checked) is read.
+          const path = normalize(join(dirname(input.path), cleanUrl(ref)))
+            .split(sep)
+            .join("/");
+          try {
+            if (input.blobHash(path))
+              svg = chartSvg(JSON.parse(readFileSync(join(input.root, path), "utf8")));
+          } catch {
+            // A chart file that isn't the shape ::chart wants is reported below, not a crash.
+          }
+        } else svg = input.mermaid.get(hastText(node));
         if (!svg) {
           problems.push({
             rule: "files/missing",

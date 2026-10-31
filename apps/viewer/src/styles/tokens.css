@@ -31,8 +31,9 @@
   color-scheme: light dark;
 }
 
+/* The system's dark, unless Settings in the reader says Light. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --mark-hl: rgba(255, 216, 77, 0.3);
     --mark-word: var(--mark);
     --agent-word: var(--agent);
@@ -50,6 +51,26 @@
     --tx3: #6b717c;
     --sep: rgba(255, 255, 255, 0.08);
   }
+}
+
+/* The reader's own choice of Dark, whatever the system is. */
+:root[data-theme="dark"] {
+  --mark-hl: rgba(255, 216, 77, 0.3);
+  --mark-word: var(--mark);
+  --agent-word: var(--agent);
+  --ok-word: var(--ok);
+  --warn-word: var(--warn);
+  --soft: rgba(255, 255, 255, 0.1);
+  --sheet: rgba(34, 36, 42, 0.96);
+  --glass: rgba(36, 38, 44, 0.72);
+  --glass-line: rgba(255, 255, 255, 0.16);
+
+  --bg: #15171c;
+  --card: #20232a;
+  --tx: #f2f3f5;
+  --tx2: #a0a6b1;
+  --tx3: #6b717c;
+  --sep: rgba(255, 255, 255, 0.08);
 }
 
 /* The canvas is dark whatever the theme, and so is what floats on it. */

@@ -623,7 +623,7 @@ The live frame has no origin of its own, so the app answers `api/` requests with
 
 **Sandboxing and limits.** Agent-written code runs on your server, so there are two layers of defence:
 - **The engine:** each backend runs in its own QuickJS instance compiled to WebAssembly, with its own capped memory, and no file system, environment, timers or network. Its only binding is `env.DATA`.
-- **The process:** sandboxes run in child processes of the app with an empty environment: no database URL, bucket keys or secrets. Their only channel is to the app, which checks every `env.DATA` call against the request in flight. `env.DATA` writes are refused for people who can only view, and on archived artifacts.
+- **The process:** sandboxes run in child processes of the app with nothing secret in their environment: no database URL, bucket keys or secrets. Their only channel is to the app, which checks every `env.DATA` call against the request in flight. `env.DATA` writes are refused for people who can only view, and on archived artifacts.
 - **Default limits:** 1 MB of bundled code, 10 seconds per request and 64 MB of memory per backend, all enforced per backend: a stuck or greedy backend fails alone, without slowing others. Admins can change them.
 - **Threat model:** a self-hosted deployment where everyone who can publish is invited. A hosted, multi-tenant version would need a VM-level sandbox per tenant (§14).
 
@@ -717,6 +717,7 @@ artifacts data ls | get <key> | export | clear [--scope shared|me]   # an artifa
 artifacts logs [--follow]         # the artifact backend's console output and errors
 ```
 - **Which artifact a command acts on:** commands about one artifact (`publish`, `open`, `comments`, `status`, `reply`, `visibility`, `share`, `versions`, `restore`, `archive`, `delete`, `undelete`, `data`, `logs`) act on the artifact named by the `artifact.json` in the current folder or its nearest parent. An optional `<project>/<slug>` argument overrides that, for example `artifacts archive camerabuddy/onboarding-v1`. Every command accepts `--json` for agents.
+- **`share --invite` from a CLI token** gives access that can comment but not approve, request changes or resolve, until a person confirms it by granting the same person access in the viewer.
 - The CLI is agent-agnostic, so Claude Code, Codex, CI and you can all use the same contract. The full command reference, with flags and output, is in [implementation/07-cli-and-skill.md](implementation/07-cli-and-skill.md).
 - An **MCP server** (Phase 2) is a thin wrapper over the same API, for tools without a shell.
 

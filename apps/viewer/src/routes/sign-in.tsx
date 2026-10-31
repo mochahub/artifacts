@@ -4,13 +4,9 @@ import { ScanFace } from "lucide-preact";
 import { useEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { ApiFailure, post } from "../api.ts";
+import { safeNext } from "../next.ts";
 import { canUseHomePasskey, signInWithPasskey } from "../passkey.ts";
 import { me, meta } from "../session.ts";
-
-/** Only same-site paths, so a crafted link can't send someone elsewhere after signing in. */
-export function safeNext(value: string | undefined) {
-  return value?.startsWith("/") && !value.startsWith("//") && !value.includes("\\") ? value : "/";
-}
 
 export function SignIn() {
   const { route, query } = useLocation();

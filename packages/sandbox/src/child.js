@@ -116,6 +116,9 @@ async function load(hash, code, prelude, limits) {
 
 async function run(message) {
   const { id, hash, limits, request } = message;
+  // The parent's backstop clock starts here, not when it sent the message: the queue below runs one
+  // request at a time, so a request can wait behind another backend's loop without having done anything wrong.
+  process.send({ t: "started", id });
   const logs = [];
   const answer = (body) => process.send({ t: "done", id, logs, ...body });
   let instance = instances.get(hash);
@@ -208,8 +211,12 @@ async function run(message) {
 // Without a parent nobody can use this process, and nothing else would stop it.
 process.on("disconnect", () => process.exit(0));
 
+// One request at a time (08). A run yields while it loads or awaits env.DATA, so without this queue two
+// could interleave, "started" could go out for a request that then waits behind another's loop, and the
+// parent's backstop would kill the child for it.
+let queue = Promise.resolve();
 process.on("message", (message) => {
-  if (message.t === "run") run(message);
+  if (message.t === "run") queue = queue.then(() => run(message)).catch(() => {});
   if (message.t === "data-result") calls.get(message.call)?.(message.answer);
   if (message.t === "ping") process.send({ t: "pong", env: Object.keys(process.env) });
   if (message.t === "evict") discard(message.hash);

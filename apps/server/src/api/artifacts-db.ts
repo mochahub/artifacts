@@ -13,7 +13,11 @@ export const isUuid = (value: string | undefined): value is string => !!value &&
 
 export async function toResource(deps: Deps, row: ArtifactRow): Promise<LoadedArtifact> {
   const access = await deps.db
-    .select({ personId: artifactAccess.personId, permission: artifactAccess.permission })
+    .select({
+      personId: artifactAccess.personId,
+      permission: artifactAccess.permission,
+      viaToken: artifactAccess.viaToken,
+    })
     .from(artifactAccess)
     .where(and(eq(artifactAccess.orgId, row.orgId), eq(artifactAccess.artifactId, row.id)));
   return {

@@ -5,8 +5,11 @@ const API = "api-v1";
 const MAX_CONTENT = 1500;
 const MAX_API = 300;
 
-// These change with the session, are a stream, or aren't worth keeping.
-const NEVER = /^\/api\/(events|auth|me\/|push|health|search)/;
+// These change with the session, are a stream, or aren't worth keeping. The lists of people, tokens,
+// invites and who an artifact is shared with are never kept: they name other people, and a worker's
+// answer isn't tied to whoever asked.
+const NEVER =
+  /^\/api\/(?:events|auth|me\/|push|health|search|tokens|people|shares|org|invites|reset|device|recover|setup|publish|deleted|artifacts\/[^/]+\/(?:access|data|data-export|files|logs|content-token)(?:\/|$))/;
 const ASSETS = /^\/assets\//;
 const RENDER = /^\/api\/artifacts\/[^/]+\/r\/[0-9a-f]{64}$/;
 const ARTICLE = /^\/api\/artifacts\/[^/]+\/v\/\d+\//;
@@ -83,21 +86,36 @@ self.addEventListener("fetch", (event) => {
   else if (url.pathname.startsWith("/api/")) event.respondWith(networkFirst(request, url));
 });
 
+// Safari drops a subscription whose push shows nothing, so even an unreadable one shows something.
+const readPush = (event) => {
+  try {
+    return event.data?.json() ?? {};
+  } catch {
+    return {};
+  }
+};
+
+// Only a path on this site: the address came over the network, and openWindow would follow any.
+const ownPath = (value) =>
+  typeof value === "string" && value.startsWith("/") && !value.startsWith("//") && !/[\\\s]/.test(value)
+    ? value
+    : "/";
+
 self.addEventListener("push", (event) => {
-  const message = event.data?.json() ?? {};
+  const message = readPush(event);
   event.waitUntil(
     self.registration.showNotification(message.title ?? "Artifacts", {
       body: message.body,
       tag: message.tag,
       icon: "/icon-192.png",
-      data: { url: message.url },
+      data: { url: ownPath(message.url) },
     }),
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url ?? "/";
+  const url = ownPath(event.notification.data?.url);
   event.waitUntil(
     self.clients.matchAll({ type: "window" }).then((windows) => {
       const open = windows.find((client) => "navigate" in client);

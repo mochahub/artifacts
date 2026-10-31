@@ -234,6 +234,8 @@ export const artifactAccess = pgTable(
     grantedBy: uuid("granted_by")
       .notNull()
       .references(() => people.id),
+    /** Granted by a token and not yet confirmed by a person: may comment, can't decide or resolve (04). */
+    viaToken: boolean("via_token").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.artifactId, t.personId] })],
@@ -286,6 +288,8 @@ export const invites = pgTable("invites", {
   role: role("role").notNull(),
   artifactId: uuid("artifact_id").references(() => artifacts.id),
   permission: permission("permission"),
+  /** Created by a token; the `artifact_access` row it becomes carries the flag over. */
+  viaToken: boolean("via_token").notNull().default(false),
   tokenHash: text("token_hash").notNull().unique(),
   createdBy: uuid("created_by")
     .notNull()

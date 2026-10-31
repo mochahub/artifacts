@@ -131,7 +131,12 @@ export async function startServer(env: Env, options: StartOptions) {
   const servers = [
     Bun.serve({ port: env.port, fetch: viewer.fetch }),
     Bun.serve({ port: env.contentPort, fetch: createContentApp(deps).fetch }),
-    Bun.serve({ port: env.internalPort, fetch: createInternalApp(env, log, jobsFor(deps)).fetch }),
+    // It takes no body at all, so a large one isn't read, whoever sends it.
+    Bun.serve({
+      port: env.internalPort,
+      maxRequestBodySize: 1024,
+      fetch: createInternalApp(env, log, jobsFor(deps)).fetch,
+    }),
   ] as const;
   const [viewerServer, contentServer, internalServer] = servers;
   const stopJobs = options.jobs === false ? () => {} : startJobs(deps);
