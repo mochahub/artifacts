@@ -72,6 +72,24 @@ export function testClock(start = new Date()) {
   };
 }
 
+let nextPort = 20_000 + Math.floor(Math.random() * 10_000);
+
+/**
+ * For a server that has to know its address before it starts. Below the ports Linux (from 32768) and
+ * macOS (from 49152) give outgoing connections: a closed one holds its port for a minute in TIME_WAIT,
+ * and Bun then can't listen there. These tests make thousands.
+ */
+export function testPort() {
+  for (;;) {
+    const port = nextPort++;
+    if (nextPort > 32_000) nextPort = 20_000;
+    try {
+      Bun.listen({ hostname: "0.0.0.0", port, socket: { data() {} } }).stop(true);
+      return port;
+    } catch {}
+  }
+}
+
 const hitsFile = process.env.ARTIFACTS_ROUTE_HITS;
 
 /** A real server on a fresh database, with helpers for calling it as a browser or a CLI. */

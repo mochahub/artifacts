@@ -3,7 +3,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { artifacts, blocks, frames, pages, versions } from "../../../apps/server/src/db/schema.ts";
-import { OWNER, signIn, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import {
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+  testPort,
+} from "../../../apps/server/test/helpers.ts";
 import { camerabuddy, cli, copyFixture, fixture, sandbox } from "./sandbox.ts";
 
 const lint = async (name: string, env: Record<string, string>) => {
@@ -80,7 +86,7 @@ describe("publishing with the real CLI", () => {
   let token: string;
 
   beforeAll(async () => {
-    const port = 47500 + Math.floor(Math.random() * 2000);
+    const port = testPort();
     url = `http://127.0.0.1:${port}`;
     t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
     const setup = await t.api("/api/setup", {
