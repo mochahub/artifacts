@@ -164,6 +164,8 @@ export function ThreadSheet({
   const reply = useSignal("");
   const error = useSignal<string | null>(null);
   const canAct = artifact.permissions.comment;
+  // Resolving and reopening are decisions: people only, and not on access a token granted (04).
+  const canDecide = canAct && artifact.permissions.decide !== false;
 
   async function run(work: () => Promise<unknown>) {
     error.value = null;
@@ -221,15 +223,18 @@ export function ThreadSheet({
               Send
             </button>
           ) : thread.status === "resolved" ? (
-            <button
-              type="button"
-              class="btn soft fit"
-              onClick={() => run(() => post(`/api/threads/${thread.id}/reopen`))}
-            >
-              Reopen
-            </button>
+            canDecide && (
+              <button
+                type="button"
+                class="btn soft fit"
+                onClick={() => run(() => post(`/api/threads/${thread.id}/reopen`))}
+              >
+                Reopen
+              </button>
+            )
           ) : (
-            me.value && (
+            me.value &&
+            canDecide && (
               <button
                 type="button"
                 class="btn mark fit"
