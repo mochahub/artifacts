@@ -1,6 +1,7 @@
 // Spike S4 harness: a mock app internal API (:18082), workerd with the loader (:18090), and the tests.
 // Run: bun run.ts [--experimental]
 import { spawn } from "bun";
+import { relative } from "node:path";
 
 const SECRET = "runner-secret-spike";
 const here = import.meta.dir;
@@ -72,7 +73,8 @@ const app = Bun.serve({
   },
 });
 
-const CONFIG = process.env.CONFIG ?? `${here}/config.capnp`;
+// Relative, because args end up in spikes/results, which is public.
+const CONFIG = process.env.CONFIG ?? relative(process.cwd(), `${here}/config.capnp`);
 const args = ["serve", CONFIG, ...(process.argv.includes("--experimental") ? ["--experimental"] : [])];
 const wd = spawn([WORKERD, ...args], { env: { ...process.env, RUNNER_SECRET: SECRET }, stdout: "pipe", stderr: "pipe" });
 const stderr: string[] = [];
