@@ -1,9 +1,36 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configDir, normalizeUrl, readConfig, writePrivateFile } from "../config.ts";
+import { CliError } from "../output.ts";
 
 const SERVICE = "artifacts";
 const filePath = () => join(configDir(), "credentials.json");
+const KEYCHAIN_WAIT_MS = 30_000;
+
+/** The keychain is there, but it's waiting on a person. The file fallback can't help with that. */
+export class KeychainBlocked extends CliError {
+  override name = "KeychainBlocked";
+}
+
+/**
+ * macOS ties a keychain item to the binary that wrote it, so a replaced CLI opens a dialog, and the
+ * call waits for an answer however long that takes. An agent can't answer it.
+ */
+export function waitForKeychain<T>(work: Promise<T>, ms = KEYCHAIN_WAIT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const blocked = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new KeychainBlocked(
+            `The system keychain is waiting for permission to use your Artifacts token, and nobody answered in ${Math.round(ms / 1000)} seconds. This happens once after the CLI is replaced.\nChoose Always Allow in the keychain dialog and run this again, or run artifacts login.`,
+          ),
+        ),
+      ms,
+    );
+  });
+  return Promise.race([work, blocked]).finally(() => clearTimeout(timer));
+}
 
 type Backend = {
   get(url: string): Promise<string | null>;
@@ -32,10 +59,14 @@ const fileBackend: Backend = {
 };
 
 const keychain: Backend = {
-  get: (url) => Bun.secrets.get({ service: SERVICE, name: url }),
-  set: (url, token) => Bun.secrets.set({ service: SERVICE, name: url, value: token }),
+  get: (url) => waitForKeychain(Bun.secrets.get({ service: SERVICE, name: url })),
+  // An item an earlier binary wrote can't be updated without a dialog, so replace it.
+  async set(url, token) {
+    await waitForKeychain(Bun.secrets.delete({ service: SERVICE, name: url }));
+    await waitForKeychain(Bun.secrets.set({ service: SERVICE, name: url, value: token }));
+  },
   async remove(url) {
-    await Bun.secrets.delete({ service: SERVICE, name: url });
+    await waitForKeychain(Bun.secrets.delete({ service: SERVICE, name: url }));
   },
 };
 
@@ -44,7 +75,8 @@ async function withFallback<T>(use: (backend: Backend) => Promise<T>): Promise<T
   if (process.env.ARTIFACTS_CREDENTIALS === "file") return use(fileBackend);
   try {
     return await use(keychain);
-  } catch {
+  } catch (error) {
+    if (error instanceof KeychainBlocked) throw error;
     console.error(`No system keychain here, so the token is in ${filePath()} (mode 0600).`);
     return use(fileBackend);
   }

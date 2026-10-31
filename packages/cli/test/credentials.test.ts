@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { KeychainBlocked, waitForKeychain } from "../src/credentials/index.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
 /** A server that only writes down who called it, and with what. */
@@ -59,5 +60,18 @@ describe("a token goes only to the server it is for", () => {
     const box = sandbox();
     await cli(["whoami", "--server", other.url], { ...box.env, ARTIFACTS_TOKEN: "art_secret" });
     expect(other.seen.at(-1)?.authorization).toBe("Bearer art_secret");
+  });
+});
+
+describe("a keychain nobody answers", () => {
+  test("gives up with instructions", async () => {
+    const dialog = new Promise<string>(() => {});
+    const failure = await waitForKeychain(dialog, 10).catch((error) => error);
+    expect(failure).toBeInstanceOf(KeychainBlocked);
+    expect(failure.message).toContain("artifacts login");
+  });
+
+  test("an answer in time comes straight back", async () => {
+    expect(await waitForKeychain(Promise.resolve("art_token"), 1000)).toBe("art_token");
   });
 });
