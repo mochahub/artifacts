@@ -44,7 +44,7 @@ artifacts setup --docker --dir ~/artifacts-server
 
 This writes `docker-compose.yml` and `.env` with generated secrets, starts everything, and claims it. Ports: 8080 (viewer), 8081 (Live previews), 8333 (bucket), published on `127.0.0.1` only, for a reverse proxy on the same machine. To reach them from elsewhere without a proxy, set `BIND_ADDRESS=0.0.0.0` in `.env` (see [deploy/compose/README.md](deploy/compose/README.md)).
 
-**An existing server:** `artifacts setup https://art.example.com` claims it if it's new, and signs you in if it isn't.
+**An existing server:** `artifacts setup https://art.example.com` claims it if it's new, and signs you in if it isn't. The CLI only signs in over HTTPS (plain `http://` is accepted only for `localhost`), so a server needs the proxy below first.
 
 ### HTTPS
 

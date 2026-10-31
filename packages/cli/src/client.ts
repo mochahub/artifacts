@@ -1,4 +1,5 @@
 import { detectAgent } from "./agent.ts";
+import { requireHttps } from "./config.ts";
 import { CliError } from "./output.ts";
 import { VERSION } from "./version.ts";
 
@@ -34,6 +35,8 @@ export class Client {
   ) {}
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    // Whatever built this client, nothing goes to a plain http server that isn't this machine.
+    requireHttps(this.url);
     let response: Response;
     try {
       response = await fetch(`${this.url}${path}`, {
