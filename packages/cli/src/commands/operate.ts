@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { dirname, join } from "node:path";
 import { Meta } from "@artifacts/schema";
 import { Client } from "../client.ts";
-import { pickServer, readConfig, type ServerEntry } from "../config.ts";
+import { InsecureServerError, pickServer, readConfig, type ServerEntry } from "../config.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { confirm } from "../prompt.ts";
 import { railway, railwayDir, railwayJson, SERVICE, variables } from "../railway/cli.ts";
@@ -105,19 +105,21 @@ export async function upgradeCommand(flags: { server?: boolean; to?: string; tar
   if (flags.to !== undefined && !VERSION_NUMBER.test(flags.to)) {
     throw new UsageError(`--to wants a version like 0.2.0, not "${flags.to}".`);
   }
+  // Looked up first, so a server address the CLI won't use is refused before anything changes.
+  const url = (() => {
+    try {
+      return pickServer(flags.target);
+    } catch (error) {
+      if (error instanceof InsecureServerError) throw error;
+      return null;
+    }
+  })();
   const version = flags.to ?? (await latestVersion());
   if (!flags.server) await replaceBinary(version, out);
   // The skill is compiled in, so the new binary is the one that has the new skill.
   if (process.execPath.endsWith("/bun") || flags.server) installSkill({}, out);
   else Bun.spawnSync([process.execPath, "skill", "install"], { stdout: "ignore", stderr: "inherit" });
 
-  const url = (() => {
-    try {
-      return pickServer(flags.target);
-    } catch {
-      return null;
-    }
-  })();
   const entry = url ? readConfig().servers.find((server) => server.url === url) : undefined;
   if (!entry || !url) return out.result({ cli: version, server: null }, () => {});
   const meta = Meta.parse(await new Client(url).get("/api/meta"));
