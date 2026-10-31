@@ -71,7 +71,13 @@ export const ManifestPage = z.discriminatedUnion("kind", [
     styles: z.array(RelPath).default([]),
     scripts: z.array(RelPath).default([]),
   }),
-  z.object({ id: PageId, kind: z.literal("prototype"), src: RelPath, device: Device.default("iphone") }),
+  z.object({
+    id: PageId,
+    kind: z.literal("prototype"),
+    title: z.string().optional(),
+    src: RelPath,
+    device: Device.default("iphone"),
+  }),
   z.object({
     id: PageId,
     kind: z.literal("gallery"),

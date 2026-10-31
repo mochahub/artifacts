@@ -52,6 +52,14 @@ describe("manifest", () => {
     expect(parsed.pages[1]).toMatchObject({ device: "iphone" });
   });
 
+  test("keeps a prototype's title", () => {
+    const parsed = Manifest.parse({
+      ...spec,
+      pages: [{ id: "p", kind: "prototype", title: "Live page", src: "index.html" }],
+    });
+    expect(parsed.pages[0]).toMatchObject({ title: "Live page" });
+  });
+
   test.each(["/etc/passwd", "../up.md", "a/../../b.md", "a\\..\\b.md", ""])("refuses the path %p", (src) => {
     expect(Manifest.safeParse({ ...spec, pages: [{ id: "p", kind: "article", src }] }).success).toBe(false);
   });
