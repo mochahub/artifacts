@@ -1,6 +1,6 @@
 # The Railway template
 
-`artifacts setup` deploys this with `railway deploy --template <code>`. It isn't published yet, so `artifacts setup` needs `ARTIFACTS_RAILWAY_TEMPLATE` until then.
+`artifacts setup` deploys this with `railway deploy --template <code>`, using `TEMPLATE` in `packages/cli/src/railway/setup.ts`. A template doesn't need to be published for that. `ARTIFACTS_RAILWAY_TEMPLATE` overrides it.
 
 ## What it holds
 

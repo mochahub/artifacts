@@ -38,8 +38,6 @@ artifacts setup
 
 This deploys to Railway (app, Postgres and a bucket), claims the server, makes you the owner, signs this machine in and installs the skill for Claude Code and Codex.
 
-The Railway template isn't published yet. Until it is, `artifacts setup` needs `ARTIFACTS_RAILWAY_TEMPLATE` set to the template's code, or use Docker below.
-
 **Docker, on a machine you run:**
 
 ```sh

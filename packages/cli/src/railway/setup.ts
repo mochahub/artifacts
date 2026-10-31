@@ -21,6 +21,7 @@ const CONTENT_PORT = 8081;
 const TIMEOUT_MS = 10 * 60_000;
 const POLL_MS = () => Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000);
 
+const TEMPLATE = "yaznvG";
 /** Railway drops plain values from a generated template and then asks for them, which needs a terminal. */
 const TEMPLATE_VALUES = [
   `${SERVICE}.S3_FORCE_PATH_STYLE=false`,
@@ -45,12 +46,7 @@ const until = async (what: string, check: () => boolean | Promise<boolean>) => {
 
 /** The Railway path in 07. Every step drives the Railway CLI. */
 export async function setupRailway(flags: ClaimAnswers & { projectName?: string }, out: Output) {
-  const template = process.env.ARTIFACTS_RAILWAY_TEMPLATE;
-  if (!template) {
-    throw new CliError(
-      "The Artifacts Railway template isn't published yet. Set ARTIFACTS_RAILWAY_TEMPLATE to its code, or use --docker.",
-    );
-  }
+  const template = process.env.ARTIFACTS_RAILWAY_TEMPLATE || TEMPLATE;
   if (!hasRailway()) {
     throw new CliError(
       "The Railway CLI isn't installed. Run: brew install railway (or npm i -g @railway/cli)",
@@ -77,8 +73,19 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
 
   const init = ["init", "--name", name, ...(workspace ? ["--workspace", workspace.id] : [])];
   const project = railwayJson<{ id?: string; projectId?: string }>(init, dir);
+  const projectId = project.id ?? project.projectId ?? "";
   out.say(`✓ Created Railway project "${name}"`);
-  railway(["deploy", "--template", template, ...TEMPLATE_VALUES.flatMap((v) => ["--variable", v])], dir);
+  try {
+    railway(["deploy", "--template", template, ...TEMPLATE_VALUES.flatMap((v) => ["--variable", v])], dir);
+  } catch (error) {
+    // Nothing is in it yet, and a project left behind would only be billed for and confuse the next try.
+    try {
+      railway(["delete", "--project", projectId, "--yes"], dir);
+    } catch {
+      out.warn(`Railway project "${name}" is empty. Delete it in the Railway dashboard.`);
+    }
+    throw error;
+  }
   out.say("✓ Deployed the Artifacts template: app, Postgres, storage bucket");
 
   await until("the deploy", () => isDeployed(dir));
@@ -105,7 +112,7 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
   saveServer({
     url,
     name,
-    railway: { projectId: project.id ?? project.projectId ?? "", service: SERVICE },
+    railway: { projectId, service: SERVICE },
   });
   return { url, person };
 }
