@@ -145,6 +145,10 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     });
     expect(result.stderr).not.toContain("failed");
     expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout.slice(result.stdout.indexOf("{")))).toEqual({
+      cli: VERSION,
+      server: "0.1.0",
+    });
     expect(readFileSync(log, "utf8")).toContain(
       "service source connect --image ghcr.io/mochahub/artifacts:0.1.0 --service artifacts",
     );
