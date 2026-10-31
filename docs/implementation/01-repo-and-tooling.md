@@ -21,7 +21,7 @@ deploy/
 fixtures/           camerabuddy-roadmap/, micro-app-poll/, micro-app-poll-backend/, gallery/
 docs/               SPEC.md, evaluations, implementation/, mocks/, review/
 .github/workflows/  ci.yml, release.yml
-scripts/            dev.ts, test.ts, e2e.ts (behind the root scripts); build-cli.ts, stamp-version.ts, route-coverage.ts, install.sh, clean-install-test.sh
+scripts/            dev.ts, test.ts, e2e.ts (behind the root scripts); build-cli.ts, route-coverage.ts, install.sh, clean-install-test.sh
 ```
 
 ## Tooling

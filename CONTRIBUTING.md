@@ -74,22 +74,22 @@ feat(cli): add artifacts versions name
 docs: explain the content domain
 ```
 
-| Type                                      | Use it for                           | Release |
-| ----------------------------------------- | ------------------------------------ | ------- |
-| `feat`                                    | A new feature                        | minor   |
-| `fix`                                     | A bug fix                            | patch   |
-| `perf`                                    | A change that makes something faster | patch   |
-| `docs`, `test`, `refactor`, `chore`, `ci` | What the name says                   | none    |
-| `revert`                                  | Undoing an earlier commit            | patch   |
-| `build`, `style`                          | Also accepted by CI                  | none    |
+| Type                                      | Use it for                           |
+| ----------------------------------------- | ------------------------------------ |
+| `feat`                                    | A new feature                        |
+| `fix`                                     | A bug fix                            |
+| `perf`                                    | A change that makes something faster |
+| `docs`, `test`, `refactor`, `chore`, `ci` | What the name says                   |
+| `revert`                                  | Undoing an earlier commit            |
+| `build`, `style`                          | Also fine                            |
 
-Scopes are `server`, `viewer`, `cli`, `schema`, `sandbox`, `kit`, `deploy` and `docs`. A scope is optional, and CI doesn't check which one you use.
+Scopes are `server`, `viewer`, `cli`, `schema`, `sandbox`, `kit`, `deploy` and `docs`. A scope is optional.
 
-Releases are automatic. After green CI on `main`, semantic-release reads the commits since the last tag, picks the version and writes the release notes from them. A commit that isn't Conventional is left out of the notes, and CI refuses it on every branch except `main`. So:
+Releases are automatic. After green CI on `main`, [`release.yml`](.github/workflows/release.yml) releases the next patch, with notes generated from the merged pull requests. So:
 
-- A `fix` or `perf` commit releases a patch, and a `feat` commit a minor.
-- A `!` after the type (`feat(cli)!: drop --follow`) or a `BREAKING CHANGE:` footer marks a breaking change. While the version is below 1.0 that releases a minor. From 1.0 it should release a major, and then the `breaking` rule comes out of [`.releaserc.json`](.releaserc.json) (see [09](docs/implementation/09-deploy.md#releases-githubworkflows)).
-- A release happens only when at least one such commit has landed since the last tag. `docs`, `test`, `refactor`, `chore` and `ci` commits alone release nothing.
+- A merge that only changes `docs`, Markdown files or `.github` releases nothing. Any other merge releases a patch, whatever its commit type.
+- For a minor or a major, run the Release workflow by hand and pick the bump.
+- CI doesn't check commit messages, so the conventions above are yours to keep.
 
 Don't edit version numbers. They are stamped at build time, and `package.json` stays as it is.
 
