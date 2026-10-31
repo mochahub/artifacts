@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
 import { checksumFor } from "../src/commands/operate.ts";
+import { VERSION } from "../src/version.ts";
 import { fakeRailway } from "./fake-railway.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
@@ -73,7 +74,13 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
         "--email",
         OWNER.email,
       ],
-      { env: { ...e, ARTIFACTS_RAILWAY_HTTP: "1" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+      {
+        // Stands in for a released CLI, which has an image of its own.
+        env: { ...e, ARTIFACTS_RAILWAY_HTTP: "1", ARTIFACTS_IMAGE: `ghcr.io/mochahub/artifacts:${VERSION}` },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      },
     );
     child.stdin.write("railway\n");
     child.stdin.end();
@@ -86,7 +93,8 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
       "deploy --template abc123 --variable artifacts.S3_FORCE_PATH_STYLE=false --variable Postgres.PGDATA=/var/lib/postgresql/data/pgdata --variable Postgres.PGPORT=5432 --variable Postgres.POSTGRES_DB=railway --variable Postgres.POSTGRES_USER=postgres --variable Postgres.RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60 --variable Postgres.SSL_CERT_DAYS=820",
       "service status --service artifacts --json",
       "domain list --service artifacts --json",
-      "variable set CONTENT_URL=https://content.up.railway.app --service artifacts",
+      "variable set CONTENT_URL=https://content.up.railway.app --service artifacts --skip-deploys",
+      `service source connect --image ghcr.io/mochahub/artifacts:${VERSION} --service artifacts`,
       "variable list --service artifacts --json",
     ];
     let at = -1;
