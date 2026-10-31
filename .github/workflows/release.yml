@@ -150,24 +150,31 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Under the version itself, so a release never waits on arm64. Railway runs this one.
       - uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/server/Dockerfile
           platforms: linux/amd64
           push: ${{ needs.prepare.outputs.publish == 'true' }}
-          tags: ${{ env.IMAGE }}-amd64
+          tags: |
+            ${{ env.IMAGE }}
+            ${{ env.IMAGE }}-amd64
 
-  # On a real arm64 machine: Bun hangs under QEMU building this, so emulating it never finishes.
+  # On a real arm64 machine: this build hung under QEMU, though why was never proven.
+  # A failure here costs arm64 its image and nothing else.
   image-arm64:
     needs: [prepare, binaries]
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 5
+    continue-on-error: true
     permissions:
       contents: read
       packages: write
     env:
       IMAGE: ghcr.io/mochahub/artifacts:${{ needs.prepare.outputs.version }}
+    outputs:
+      built: ${{ steps.built.outputs.built }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -190,9 +197,13 @@ jobs:
           platforms: linux/arm64
           push: ${{ needs.prepare.outputs.publish == 'true' }}
           tags: ${{ env.IMAGE }}-arm64
+      - id: built
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
 
+  # Adds arm64 to the version tag, which already works for amd64.
   manifest:
     needs: [prepare, image, image-arm64]
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -201,19 +212,23 @@ jobs:
     env:
       IMAGE: ghcr.io/mochahub/artifacts:${{ needs.prepare.outputs.version }}
     steps:
+      - name: Say if this release has no arm64 image
+        if: needs.image-arm64.outputs.built != 'true'
+        run: echo "::warning::No arm64 image for $IMAGE, so it runs on amd64 only."
       - uses: docker/setup-buildx-action@v4
+        if: needs.image-arm64.outputs.built == 'true'
       - uses: docker/login-action@v3
-        if: needs.prepare.outputs.publish == 'true'
+        if: needs.image-arm64.outputs.built == 'true' && needs.prepare.outputs.publish == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: One name for both machines
-        if: needs.prepare.outputs.publish == 'true'
+        if: needs.image-arm64.outputs.built == 'true' && needs.prepare.outputs.publish == 'true'
         run: docker buildx imagetools create --tag "$IMAGE" "$IMAGE-amd64" "$IMAGE-arm64"
 
   release:
-    needs: [prepare, manifest]
+    needs: [prepare, image]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
