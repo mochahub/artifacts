@@ -1,6 +1,6 @@
 # Bases are pinned by digest (the tag says which release the digest is). Dependabot's docker ecosystem bumps both
 # together. Keep the tag in step with .bun-version and the root package.json's packageManager.
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS build
+FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS build
 WORKDIR /src
 COPY . .
 RUN bun install --frozen-lockfile && bun run build
@@ -41,7 +41,7 @@ console.log([...found].map(([name, version]) => `${name}@${version}`).join("\n")
 EOF
 RUN bun /opt/runtime-deps.js
 
-FROM oven/bun:1.4.2-slim@sha256:cb3bbbb08e13a4a2ff400f24c7a2a1d5efa83f6ef8544d52d95a519631e2fc61
+FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4
 WORKDIR /app
 # Everything stays owned by root, so a compromised server can't rewrite its own code. It writes nothing to disk.
 COPY --from=build /src/apps/server/dist/ ./
