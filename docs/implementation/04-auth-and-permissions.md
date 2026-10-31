@@ -43,6 +43,17 @@ Precedence when several are present: Bearer token, then session cookie, then gue
 - Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
 - A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
 
+## Removing a person
+
+`DELETE /api/people/:id` sets `removed_at` and, in the same transaction, ends everything that person could still act through:
+
+- their sessions and their own tokens (`tokens.person_id`), as `revoked_at`
+- the invites and reset links they issued that are still unused
+- the **organization tokens they created** (`tokens` with `kind = org` and `created_by` = them), as `revoked_at`, so a token an admin made can't outlive the admin
+- the **share links they created** (`share_links.created_by` = them), as `revoked_at`, the same as revoking the link from the Share sheet. A guest's access is read from the link on every request, so guests who came in by those links lose access at once; nothing else is needed.
+
+Links and tokens made by other people are untouched.
+
 ## Passkeys (WebAuthn)
 
 Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.

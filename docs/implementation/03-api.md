@@ -119,7 +119,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `PATCH /api/org` | `org.manage` | `{ name?, settings? }` |
 | `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. |
 | `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. An admin or owner who becomes a member or reviewer also loses the invites and reset links they issued that are still unused. |
-| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens. |
+| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
 | `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner or itself. |
 | `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |

@@ -239,6 +239,17 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         .set({ revokedAt: now })
         .where(and(eq(tokens.personId, person.id), isNull(tokens.revokedAt)));
       await revokeIssued(tx, person.id, now);
+      // What they created for others outlives their account unless it ends with it: an organization
+      // token keeps acting as the organization, and a share link keeps admitting guests (04).
+      await tx
+        .update(tokens)
+        .set({ revokedAt: now })
+        .where(and(eq(tokens.kind, "org"), eq(tokens.createdBy, person.id), isNull(tokens.revokedAt)));
+      // A guest's access is read from the link on every request, so this ends theirs too (02).
+      await tx
+        .update(shareLinks)
+        .set({ revokedAt: now })
+        .where(and(eq(shareLinks.createdBy, person.id), isNull(shareLinks.revokedAt)));
     });
     return c.json({ ok: true });
   });

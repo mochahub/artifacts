@@ -54,7 +54,7 @@
 | `email` | citext not null | Sign-in name; unique per org among rows where `removed_at is null`. Never verified (SPEC §7.3). |
 | `name` | text not null | Display name. |
 | `role` | `role` | `outside` = account created by an artifact invite; sees only artifacts in `artifact_access`. |
-| `created_at`, `removed_at` | timestamptz | Removing a person sets `removed_at`, ends their sessions and tokens, keeps their comments with their name. |
+| `created_at`, `removed_at` | timestamptz | Removing a person sets `removed_at`, ends their sessions and tokens, revokes the organization tokens and share links they created, keeps their comments with their name. |
 
 Index: unique `(org_id, lower(email)) where removed_at is null`.
 
