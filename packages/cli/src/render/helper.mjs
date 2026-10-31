@@ -395,12 +395,16 @@ async function renderMermaid(browser, sources) {
         "opacity",
         "text-anchor",
       ];
-      for (const el of holder.querySelectorAll("svg *")) {
+      const elements = [...holder.querySelectorAll("svg *")];
+      // Read everything first: Mermaid's rules select through ancestors' classes, which go below.
+      for (const el of elements) {
         const style = getComputedStyle(el);
         for (const prop of PROPS) {
           const value = style.getPropertyValue(prop);
           if (value) el.setAttribute(prop, value);
         }
+      }
+      for (const el of elements) {
         el.removeAttribute("style");
         el.removeAttribute("class");
       }

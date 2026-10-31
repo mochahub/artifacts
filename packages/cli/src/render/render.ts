@@ -306,7 +306,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
       pages.push({
         key: page.id,
         kind: "prototype",
-        title: page.id,
+        title: title ?? page.id,
         group: null,
         position,
         meta: { device: page.device, livePath: page.src },

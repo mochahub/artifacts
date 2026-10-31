@@ -27,6 +27,14 @@ import { NotFound } from "./not-found.tsx";
 export const artifactPath = (project: string, slug: string) =>
   `/api/artifacts/by-slug/${encodeURIComponent(project)}/${encodeURIComponent(slug)}`;
 
+const KIND_LABELS: Record<Artifact["pages"][number]["kind"], string> = {
+  article: "Article",
+  canvas: "Canvas",
+  prototype: "Prototype",
+  gallery: "Gallery",
+  deck: "Deck",
+};
+
 function Detail() {
   const { params } = useRoute();
   const project = params.project ?? "";
@@ -110,7 +118,7 @@ function Detail() {
             <span class="kind">{page.kind === "article" ? <FileText /> : <Images />}</span>
             <div class="grow">
               <div class="tt">{page.title ?? page.key}</div>
-              <div class="ss">{page.group ?? (page.kind === "article" ? "Article" : "Canvas")}</div>
+              <div class="ss">{page.group ?? KIND_LABELS[page.kind]}</div>
             </div>
             {page.changed && <span class="dot" title="Changed" />}
             {page.open > 0 && <b class="count">{page.open}</b>}

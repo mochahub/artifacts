@@ -1,6 +1,6 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { ApiFailure, post } from "../api.ts";
 import { startBridge } from "./bridge.ts";
 
@@ -29,7 +29,9 @@ export function LiveFrame({ artifact, version, path, width, height, onUse }: Pro
       });
   }, [artifact.id, version, path, src, error]);
 
-  useEffect(() => {
+  // Before paint: a cached page can run and post while a plain effect is still waiting, and a request
+  // nobody heard is never answered.
+  useLayoutEffect(() => {
     if (!iframe.current || !src.value) return;
     return startBridge({
       iframe: iframe.current,

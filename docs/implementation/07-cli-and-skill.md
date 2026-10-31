@@ -24,6 +24,7 @@
 ## Credentials
 
 - **Where:** tokens go in the OS keychain via `Bun.secrets`, which works on macOS (spike S5). On Linux without a desktop session it throws `ERR_SECRETS_PLATFORM_ERROR` (no D-Bus), so the CLI falls back to the file below. Windows is untested. If `Bun.secrets` is missing or throws, the CLI uses the fallback.
+- **A replaced binary:** macOS ties an item to the binary that wrote it, so a new build opens a dialog on its first read. Keychain calls give up after 30 seconds with instructions, and don't fall back to the file. Unsigned builds show that dialog once per upgrade.
 - **Fallback:** `~/.config/artifacts/credentials.json` with mode 0600, and a warning.
 - **CI:** `ARTIFACTS_TOKEN` and `ARTIFACTS_URL` environment variables override everything. The token is for one server: `ARTIFACTS_URL`, or the default server in config if that isn't set. A command aimed at any other server with `--server` doesn't get it (it looks in the keychain for that server's own token). Only when no server is known at all does `--server` receive it.
 - **Tests:** `ARTIFACTS_CREDENTIALS=file` forces the file, and config honours `HOME` and `XDG_CONFIG_HOME`, so tests never touch the real keychain.

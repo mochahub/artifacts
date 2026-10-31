@@ -22,6 +22,7 @@ import {
 import { setup } from "./commands/setup.ts";
 import { initCommand, lintCommand, openCommand, publishCommand, renderCommand } from "./commands/write.ts";
 import { normalizeUrl, pickServer } from "./config.ts";
+import { KeychainBlocked } from "./credentials/index.ts";
 import { CliError, createOutput, UsageError } from "./output.ts";
 import { closePrompts } from "./prompt.ts";
 import { installSkill } from "./skill/install.ts";
@@ -263,6 +264,10 @@ try {
   } else if (error instanceof ApiCallError && process.argv.includes("--json")) {
     console.error(JSON.stringify({ error: error.failure }));
     process.exitCode = 1;
+  } else if (error instanceof KeychainBlocked) {
+    console.error(error.message);
+    // The dialog still holds a thread open, so the process wouldn't end by itself.
+    process.exit(1);
   } else if (error instanceof CliError) {
     console.error(error.message);
     process.exitCode = 1;
