@@ -41,6 +41,7 @@ Precedence when several are present: Bearer token, then session cookie, then gue
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
 - Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
+- A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
 
 ## Passkeys (WebAuthn)
 
