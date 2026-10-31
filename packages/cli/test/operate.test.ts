@@ -82,7 +82,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(code).toBe(0);
     const expected = [
       "init --name artifacts --workspace w1 --json",
-      "deploy --template abc123",
+      "deploy --template abc123 --variable artifacts.S3_FORCE_PATH_STYLE=false --variable Postgres.PGDATA=/var/lib/postgresql/data/pgdata --variable Postgres.PGPORT=5432 --variable Postgres.POSTGRES_DB=railway --variable Postgres.POSTGRES_USER=postgres --variable Postgres.RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60 --variable Postgres.SSL_CERT_DAYS=820",
       "service status --service artifacts --json",
       "domain list --service artifacts --json",
       "variable set CONTENT_URL=https://content.up.railway.app --service artifacts",
