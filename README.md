@@ -2,11 +2,15 @@
 
 Self-hosted publishing and review for what coding agents make: plans, research, design mocks and small apps. An agent publishes with one command and gets a permanent link. People review it on a phone or desktop and pin comments to screens or passages. The agent reads those comments, fixes the work, publishes again and replies.
 
+![The Artifacts viewer on desktop and phone. A pinned comment on a mock of a camera app, with the agent's reply marking it fixed in v2.](docs/images/hero.jpg)
+
 MIT licensed. It needs a container host, Postgres and an S3-compatible bucket.
 
 ## How it works
 
 An agent runs `artifacts publish`. The CLI checks the work, renders each screen in WebKit, and uploads only the files the server doesn't have. The server stores them by hash in a bucket and records a new version in Postgres. People open the link in a viewer made for phones, and pin comments to a screen or a passage. The agent reads the open comments with `artifacts comments`, fixes the work, publishes again and replies. Comments follow the work across versions. Artifact code runs on a separate domain, in a sandbox, so it can't read anyone's sign-in. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the diagrams.
+
+![Four phone screens from one review: a new version waiting in the inbox, a comment pinned to a screen, a quoted passage in a research page, and a compare view outlining the two regions that changed.](docs/images/review-loop.jpg)
 
 ## Requirements
 
