@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { crawl } from "../src/bundle/crawl.ts";
+import { init } from "es-module-lexer";
+import { crawl, jsRefs } from "../src/bundle/crawl.ts";
 import { loadManifest } from "../src/bundle/manifest.ts";
 import { copyFixture, fixture } from "./sandbox.ts";
 
@@ -42,5 +43,14 @@ describe("what a bundle may reach", () => {
   test("a stray % in a reference is a missing file, not a crash", async () => {
     const { problems } = await crawlWith('<div data-frame="one"><img src="../100%.png"></div>');
     expect(problems.map((problem) => problem.rule)).toEqual(["files/missing"]);
+  });
+});
+
+describe("the references in a script", () => {
+  test("named files count, and an import worked out at run time doesn't", async () => {
+    await init;
+    const js =
+      'import a from "./a.js"; export * from "./b.js"; import("./c.js"); import(`./d/${x}.js`); import(x); import.meta.url;';
+    expect(jsRefs(js)).toEqual(["./a.js", "./b.js", "./c.js"]);
   });
 });
