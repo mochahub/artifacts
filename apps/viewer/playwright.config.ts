@@ -14,7 +14,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: "line",
-  use: { baseURL: "http://localhost:18080", browserName: "webkit", trace: "retain-on-failure" },
+  use: {
+    baseURL: "http://localhost:18080",
+    browserName: "webkit",
+    trace: "retain-on-failure",
+    // A document that gets no answer has hung CI until the test's own limit. Say so sooner.
+    navigationTimeout: 30_000,
+  },
   // Viewports from 10, "Test layers".
   // `claim` sees the server in setup mode, then claims it for every other test.
   projects: [
@@ -38,6 +44,9 @@ export default defineConfig({
     command: "bun ../server/src/index.ts",
     url: "http://localhost:18080/api/health",
     reuseExistingServer: false,
+    // The server's warnings belong next to a test that failed because of them.
+    stdout: "pipe",
+    stderr: "pipe",
     env: {
       DATABASE_URL: "postgres://artifacts:artifacts@127.0.0.1:55432/artifacts_test",
       S3_ENDPOINT: "http://127.0.0.1:18333",
