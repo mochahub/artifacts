@@ -4,7 +4,8 @@ import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { RateLimits } from "../../src/auth/rate-limit.ts";
 import { sha256 } from "../../src/auth/secrets.ts";
-import { deviceCodes, org, people, resetLinks, sessions, tokens } from "../../src/db/schema.ts";
+import { deviceCodes, org, passkeys, people, resetLinks, sessions, tokens } from "../../src/db/schema.ts";
+import { softAuthenticator } from "../authenticator.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer, testClock } from "../helpers.ts";
 
 const error = async (response: Response) =>
@@ -583,6 +584,101 @@ describe("reset links after a password is set", () => {
     });
     expect(changed.status).toBe(200);
     expect((await t.api(`/api/reset/${pending}`)).status).toBe(410);
+  });
+});
+
+describe("what a reset ends", () => {
+  let t: TestServer;
+  let cliToken: string;
+  const ORIGIN = "http://viewer.test";
+  const key = softAuthenticator();
+  type Challenge = { challenge: string; challengeId: string };
+
+  beforeAll(async () => {
+    t = await startTestServer();
+    cliToken = (await claim(t)).token;
+  });
+  afterAll(() => t.stop());
+
+  const addPasskey = async (cookie: string) => {
+    const options = (await (
+      await t.api("/api/me/passkeys/options", { method: "POST", cookie, json: {} })
+    ).json()) as Challenge;
+    const verified = await t.api("/api/me/passkeys/verify", {
+      method: "POST",
+      cookie,
+      json: { challengeId: options.challengeId, response: key.register(options as never, ORIGIN) },
+    });
+    expect(verified.status).toBe(200);
+  };
+  const passkeySignIn = async () => {
+    const options = (await (
+      await t.api("/api/auth/passkey/options", { method: "POST", json: {} })
+    ).json()) as Challenge;
+    return t.api("/api/auth/passkey/verify", {
+      method: "POST",
+      json: { challengeId: options.challengeId, response: key.assert(options as never, ORIGIN) },
+    });
+  };
+  const recoverToken = async () => {
+    const { resetUrl } = (await (
+      await t.api("/api/recover", { method: "POST", json: { setupToken: SETUP, email: OWNER.email } })
+    ).json()) as { resetUrl: string };
+    return resetUrl.split("/reset/")[1] as string;
+  };
+
+  test("a password change by a signed-in person leaves their CLI token and passkeys alone", async () => {
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    await addPasskey(cookie);
+    const changed = await t.api("/api/me/password", {
+      method: "POST",
+      cookie,
+      json: { password: "a changed long password" },
+    });
+    expect(changed.status).toBe(200);
+    expect((await t.api("/api/me", { bearer: cliToken })).status).toBe(200);
+    expect(await t.server.db.select().from(passkeys)).toHaveLength(1);
+    expect((await passkeySignIn()).status).toBe(200);
+  });
+
+  test("a reset ends the person's CLI tokens, but not an organization token", async () => {
+    const cookie = await signIn(t, OWNER.email, "a changed long password");
+    const org = (await (
+      await t.api("/api/tokens", { method: "POST", cookie, json: { name: "ci", scopes: ["read"] } })
+    ).json()) as { token: string };
+    expect((await t.api("/api/me", { bearer: cliToken })).status).toBe(200);
+
+    const reset = await t.api(`/api/reset/${await recoverToken()}`, {
+      method: "POST",
+      json: { password: "a reset long password" },
+    });
+    expect(reset.status).toBe(200);
+    expect((await t.api("/api/me", { bearer: cliToken })).status).toBe(401);
+    const rows = await t.server.db.select().from(tokens).where(eq(tokens.kind, "cli"));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.revokedAt !== null)).toBe(true);
+    expect((await t.api("/api/me/passkeys", { bearer: org.token })).status).not.toBe(401);
+  });
+
+  test("a reset deletes the person's passkeys, so signing in with one fails", async () => {
+    const cookie = await signIn(t, OWNER.email, "a reset long password");
+    await addPasskey(cookie);
+    expect(await t.server.db.select().from(passkeys)).toHaveLength(1);
+    expect((await passkeySignIn()).status).toBe(200);
+
+    const reset = await t.api(`/api/reset/${await recoverToken()}`, {
+      method: "POST",
+      json: { password: "a second reset password" },
+    });
+    expect(reset.status).toBe(200);
+    expect(await t.server.db.select().from(passkeys)).toHaveLength(0);
+    const fresh = (reset.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    const list = (await (await t.api("/api/me/passkeys", { cookie: fresh })).json()) as {
+      passkeys: unknown[];
+    };
+    expect(list.passkeys).toEqual([]);
+    expect((await passkeySignIn()).status).toBe(401);
+    expect((await t.api("/api/me", { cookie })).status).toBe(401);
   });
 });
 

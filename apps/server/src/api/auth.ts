@@ -3,7 +3,7 @@ import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { sha256 } from "../auth/secrets.ts";
 import { clearCookie, personView, SESSION_COOKIE, startSession } from "../auth/sessions.ts";
-import { passwords, people, resetLinks, sessions, tokens } from "../db/schema.ts";
+import { passkeys as passkeyRows, passwords, people, resetLinks, sessions, tokens } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
@@ -224,7 +224,18 @@ export function authRoutes(
       .limit(1);
     if (!person) throw new ApiError("gone", "This reset link no longer works.");
     await setPassword(link.orgId, person.id, password);
-    await db.delete(sessions).where(eq(sessions.personId, person.id));
+    // A reset is the way back from a suspected takeover, so nothing the attacker holds may outlive it:
+    // sessions, CLI tokens and passkeys all end. (A routine password change leaves the last two alone.)
+    // Org tokens aren't personal, so they stay.
+    const now = clock.now();
+    await db.transaction(async (tx) => {
+      await tx.delete(sessions).where(eq(sessions.personId, person.id));
+      await tx
+        .update(tokens)
+        .set({ revokedAt: now })
+        .where(and(eq(tokens.personId, person.id), eq(tokens.kind, "cli"), isNull(tokens.revokedAt)));
+      await tx.delete(passkeyRows).where(eq(passkeyRows.personId, person.id));
+    });
     await startSession(c, deps, link.orgId, person.id);
     return c.json({ person: personView(person) });
   });
