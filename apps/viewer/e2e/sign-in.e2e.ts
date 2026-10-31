@@ -9,8 +9,16 @@ test("sign in, and stay signed in across a reload", async ({ page }, info) => {
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   if (info.project.name === "iphone")
     await page.screenshot({ path: "../../docs/mocks/shots/06-2-sign-in.png" });
+  // The heading paints before the effects that fetch, and WebKit reports a fetch begun while the page
+  // unloads as an access control failure. Once the page has its data, those effects have run.
+  const loaded = Promise.all(
+    ["/api/home", "/api/projects"].map((path) =>
+      page.waitForResponse((response) => new URL(response.url()).pathname === path && response.ok()),
+    ),
+  );
   await signIn(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
+  await loaded;
   await page.reload();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
   expect(errors).toEqual([]);
