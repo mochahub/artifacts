@@ -259,6 +259,8 @@ export const Artifact = ArtifactCard.extend({
   decision: Decision.nullable(),
   permissions: z.object({
     comment: z.boolean(),
+    /** Approve, request changes or resolve: people only, and not on access a token granted. Absent from older servers. */
+    decide: z.boolean().optional(),
     manage: z.boolean(),
     share: z.boolean(),
     delete: z.boolean(),

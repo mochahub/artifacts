@@ -133,6 +133,7 @@ describe("lists and artifacts", () => {
     ]);
     expect(body.permissions).toEqual({
       comment: true,
+      decide: false, // This caller is a CLI token, and tokens never decide.
       manage: true,
       share: true,
       delete: true,

@@ -112,6 +112,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `role` | `role` | For `org` invites: `admin`, `member` or `reviewer`. For `artifact` invites: `outside`. |
 | `artifact_id` | uuid null | For `artifact` invites. |
 | `permission` | `permission` null | For `artifact` invites. |
+| `via_token` | boolean not null default false | True when a token made the invite (`artifacts share --invite`). The `artifact_access` row it becomes carries it over (04). |
 | `token_hash` | text unique | |
 | `created_by` | uuid FK people | |
 | `created_at`, `expires_at`, `accepted_at`, `revoked_at` | timestamptz | Expires in 7 days; single use. |
@@ -171,7 +172,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 
 Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_at is null`; `(purge_after) where deleted_at is not null`.
 
-**`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `org_id`, `permission`, `granted_by`, `created_at`. Used for "Only me plus people I add", and for outside people.
+**`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `org_id`, `permission`, `granted_by`, `via_token` (boolean not null default false), `created_at`. Used for "Only me plus people I add", and for outside people. `via_token` is true while the access was granted by a token and no person has granted it again: the person can comment (when the permission allows) but can't approve, request changes or resolve threads (04). A person creating or changing the row sets it to false; a token creating it, or changing its permission, sets it to true.
 
 **`share_links`**: `id`, `org_id`, `artifact_id`, `token_hash` unique (URL `/s/<secret>`), `permission`, `created_by`, `created_at`, `expires_at` null, `revoked_at` null.
 

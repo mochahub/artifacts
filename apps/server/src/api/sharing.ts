@@ -108,13 +108,30 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       payload: { permission },
       createdAt: now,
     });
+    // Access a token hands out can comment but not decide or resolve, until a person grants it
+    // again (04). A person's grant, new or a change in the Share sheet, is that confirmation.
+    const viaToken = c.get("caller").kind !== "person";
     if (person) {
       await db
         .insert(artifactAccess)
-        .values({ artifactId: resource.id, orgId, personId: person.id, permission, grantedBy: me.id })
+        .values({
+          artifactId: resource.id,
+          orgId,
+          personId: person.id,
+          permission,
+          grantedBy: me.id,
+          viaToken,
+        })
         .onConflictDoUpdate({
           target: [artifactAccess.artifactId, artifactAccess.personId],
-          set: { permission, grantedBy: me.id },
+          set: {
+            permission,
+            grantedBy: me.id,
+            // A token repeating the grant leaves a person's confirmation alone; changing it is unconfirmed.
+            viaToken: viaToken
+              ? sql`case when ${artifactAccess.permission} = ${permission} then ${artifactAccess.viaToken} else true end`
+              : false,
+          },
         });
       return c.json({ added: { id: person.id, name: person.name, permission } });
     }
@@ -127,6 +144,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       role: "outside",
       artifactId: resource.id,
       permission,
+      viaToken,
       tokenHash: sha256(secret),
       createdBy: me.id,
       createdAt: now,

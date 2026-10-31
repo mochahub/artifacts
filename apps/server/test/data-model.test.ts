@@ -54,7 +54,15 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "used_at",
   ],
   projects: ["id", "org_id", "slug", "name", "repo", "created_at", "updated_at"],
-  artifact_access: ["artifact_id", "org_id", "person_id", "permission", "granted_by", "created_at"],
+  artifact_access: [
+    "artifact_id",
+    "org_id",
+    "person_id",
+    "permission",
+    "granted_by",
+    "via_token",
+    "created_at",
+  ],
   share_links: [
     "id",
     "org_id",

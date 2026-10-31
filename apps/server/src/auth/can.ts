@@ -39,8 +39,8 @@ export type ArtifactResource = {
   archivedAt: Date | null;
   deletedAt: Date | null;
   deletedBy: string | null;
-  /** artifact_access rows for this artifact. */
-  access: { personId: string; permission: "view" | "comment" | "publish" }[];
+  /** artifact_access rows for this artifact. `viaToken`: a token granted it and no person has confirmed it. */
+  access: { personId: string; permission: "view" | "comment" | "publish"; viaToken: boolean }[];
 };
 export type Resource = ArtifactResource | { type: "org" };
 
@@ -97,6 +97,18 @@ function mayComment(caller: Caller, artifact: ArtifactResource): boolean {
   return person.role !== "outside" && artifact.visibility === "org";
 }
 
+/**
+ * Deciding and resolving are for people, so access an agent's token handed out (`share --invite`,
+ * `--add`) doesn't carry them until a person grants it again (04). It only matters when the row is
+ * all they have: a reviewer who may comment on an org-visible artifact by role is unaffected.
+ */
+function commentOnlyFromTokenGrant(caller: Caller, artifact: ArtifactResource): boolean {
+  const person = personOf(caller);
+  if (!person || isAdmin(person) || artifact.publisherId === person.id) return false;
+  if (person.role !== "outside" && artifact.visibility === "org") return false;
+  return artifact.access.some((row) => row.personId === person.id && row.viaToken);
+}
+
 function mayPublish(caller: Caller, artifact: ArtifactResource): boolean {
   if (!hasScope(caller, "publish")) return false;
   if (caller.kind === "orgToken") return true; // seesArtifact already checked its projects.
@@ -149,7 +161,12 @@ function canOnArtifact(caller: Caller, action: Action, artifact: ArtifactResourc
       return writable && mayComment(caller, artifact);
     case "thread.resolve":
     case "artifact.decide":
-      return writable && caller.kind === "person" && mayComment(caller, artifact);
+      return (
+        writable &&
+        caller.kind === "person" &&
+        mayComment(caller, artifact) &&
+        !commentOnlyFromTokenGrant(caller, artifact)
+      );
     case "artifact.publish":
       return writable && mayPublish(caller, artifact);
     case "artifact.manage":

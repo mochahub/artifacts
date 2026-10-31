@@ -10,6 +10,8 @@ const PUBLISHER = "00000000-0000-7000-8000-00000000000a";
 const OTHER = "00000000-0000-7000-8000-00000000000b";
 const ADDED = "00000000-0000-7000-8000-00000000000c";
 const OUTSIDE_ADDED = "00000000-0000-7000-8000-00000000000d";
+const OUTSIDE_BY_TOKEN = "00000000-0000-7000-8000-000000000010";
+const MEMBER_BY_TOKEN = "00000000-0000-7000-8000-000000000011";
 const ARTIFACT = "00000000-0000-7000-8000-0000000000f0";
 const PROJECT = "00000000-0000-7000-8000-0000000000e0";
 const OTHER_PROJECT = "00000000-0000-7000-8000-0000000000e1";
@@ -57,6 +59,8 @@ const CALLERS = {
   reviewer: person(OTHER, "reviewer"),
   "outside (added)": person(OUTSIDE_ADDED, "outside"),
   "outside (not added)": person(OTHER, "outside"),
+  "outside (added by a token)": person(OUTSIDE_BY_TOKEN, "outside"),
+  "member (added by a token)": person(MEMBER_BY_TOKEN, "member"),
   "guest (view link)": guest("view", true),
   "guest (comment link)": guest("comment", true),
   "guest (revoked link)": guest("comment", false),
@@ -90,8 +94,10 @@ const artifact = (visibility: "me" | "org", lifecycle: Lifecycle): ArtifactResou
   deletedAt: lifecycle === "deleted" ? new Date() : null,
   deletedBy: lifecycle === "deleted" ? PUBLISHER : null,
   access: [
-    { personId: ADDED, permission: "publish" },
-    { personId: OUTSIDE_ADDED, permission: "comment" },
+    { personId: ADDED, permission: "publish", viaToken: false },
+    { personId: OUTSIDE_ADDED, permission: "comment", viaToken: false },
+    { personId: OUTSIDE_BY_TOKEN, permission: "comment", viaToken: true },
+    { personId: MEMBER_BY_TOKEN, permission: "comment", viaToken: true },
   ],
 });
 
@@ -106,6 +112,7 @@ function sees(name: Name, visibility: "me" | "org"): boolean {
     return true;
   if (ADMINS.includes(name) || name === "member (added with publish)" || name === "outside (added)")
     return true;
+  if (name === "outside (added by a token)" || name === "member (added by a token)") return true;
   if (name === "cliToken (outside, added)") return true;
   if (GUESTS_OK.includes(name) || name === "guest (comment link)") return true;
   if (name === "member (other)" || name === "reviewer" || name === "cliToken (reviewer)")
@@ -123,6 +130,8 @@ const commenters: Name[] = [
   "member (other)",
   "reviewer",
   "outside (added)",
+  "outside (added by a token)",
+  "member (added by a token)",
   "guest (comment link)",
   "cliToken (publisher)",
   "cliToken (admin, not the publisher)",
@@ -137,6 +146,8 @@ const people: Name[] = [
   "member (other)",
   "reviewer",
   "outside (added)",
+  "outside (added by a token)",
+  "member (added by a token)",
 ];
 const publishers: Name[] = [
   "owner",
@@ -152,6 +163,15 @@ const managers: Name[] = ["owner", "admin", "member (publisher)", "cliToken (pub
 // The one place an admin's token acts as the admin on others' artifacts: "people or cliToken with data".
 const exporters: Name[] = [...managers, "cliToken (admin, not the publisher)"];
 const tokenAdmins: Name[] = ["cliToken (admin, not the publisher)"];
+
+/**
+ * Access a token granted lets someone comment but not decide or resolve, unless their role already lets
+ * them comment: a member on an org-visible artifact. An outside person has only the row.
+ */
+function commentOnlyFromTokenGrant(name: Name, visibility: "me" | "org"): boolean {
+  if (name === "outside (added by a token)") return true;
+  return name === "member (added by a token)" && visibility === "me";
+}
 
 function expected(name: Name, action: Action, visibility: "me" | "org", lifecycle: Lifecycle): boolean {
   const seen = sees(name, visibility);
@@ -173,9 +193,14 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "project.create":
       // Members and up. A token also needs publish (cli) or org (org token); reviewers and outside people never.
       return (
-        ["owner", "admin", "member (publisher)", "member (added with publish)", "member (other)"].includes(
-          name,
-        ) ||
+        [
+          "owner",
+          "admin",
+          "member (publisher)",
+          "member (added with publish)",
+          "member (other)",
+          "member (added by a token)",
+        ].includes(name) ||
         ["cliToken (publisher)", "cliToken (admin, not the publisher)"].includes(name) ||
         name.startsWith("orgToken")
       );
@@ -188,7 +213,13 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
       return unarchived && seen && commenters.includes(name);
     case "thread.resolve":
     case "artifact.decide":
-      return unarchived && seen && commenters.includes(name) && people.includes(name);
+      return (
+        unarchived &&
+        seen &&
+        commenters.includes(name) &&
+        people.includes(name) &&
+        !commentOnlyFromTokenGrant(name, visibility)
+      );
     case "artifact.publish":
       return unarchived && seen && publishers.includes(name);
     case "artifact.manage":
@@ -261,7 +292,7 @@ describe("rules the matrix can't express", () => {
 
   test("a member added with view can read a private artifact but not comment on it", () => {
     const viewer = artifact("me", "active");
-    viewer.access = [{ personId: OTHER, permission: "view" }];
+    viewer.access = [{ personId: OTHER, permission: "view", viaToken: false }];
     expect(can(CALLERS["member (other)"], "artifact.read", viewer)).toBe(true);
     expect(can(CALLERS["member (other)"], "artifact.comment", viewer)).toBe(false);
   });
