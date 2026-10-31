@@ -92,11 +92,18 @@ function upgradeDocker(server: ServerEntry, version: string, out: Output) {
   const dir = server.docker?.dir as string;
   const path = join(dir, ".env");
   if (!existsSync(path)) throw new CliError(`There's no deployment in ${dir}.`);
+  const image = `${IMAGE}:${version}`;
   writeFileSync(
     path,
-    readFileSync(path, "utf8").replace(/^ARTIFACTS_IMAGE=.*$/m, () => `ARTIFACTS_IMAGE=${IMAGE}:${version}`),
+    readFileSync(path, "utf8").replace(/^ARTIFACTS_IMAGE=.*$/m, () => `ARTIFACTS_IMAGE=${image}`),
   );
-  const up = Bun.spawnSync(["docker", "compose", "up", "-d"], { cwd: dir, stdout: "ignore", stderr: "pipe" });
+  // Compose prefers the environment to .env, so an ARTIFACTS_IMAGE there would quietly keep the old server.
+  const up = Bun.spawnSync(["docker", "compose", "up", "-d"], {
+    cwd: dir,
+    env: { ...process.env, ARTIFACTS_IMAGE: image },
+    stdout: "ignore",
+    stderr: "pipe",
+  });
   if (!up.success) throw new CliError(`docker compose failed:\n${up.stderr.toString()}`);
   out.say(`Moved the server to ${IMAGE}:${version}`);
 }
