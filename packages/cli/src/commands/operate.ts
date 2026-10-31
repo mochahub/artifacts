@@ -120,18 +120,20 @@ export async function upgradeCommand(flags: { server?: boolean; to?: string; tar
   if (process.execPath.endsWith("/bun") || flags.server) installSkill({}, out);
   else Bun.spawnSync([process.execPath, "skill", "install"], { stdout: "ignore", stderr: "inherit" });
 
+  // --server leaves the binary alone.
+  const cli = flags.server ? VERSION : version;
   const entry = url ? readConfig().servers.find((server) => server.url === url) : undefined;
-  if (!entry || !url) return out.result({ cli: version, server: null }, () => {});
+  if (!entry || !url) return out.result({ cli, server: null }, () => {});
   const meta = Meta.parse(await new Client(url).get("/api/meta"));
   // Without --server, only ever move an older server forward (07).
   const older = meta.version.localeCompare(version, undefined, { numeric: true }) < 0;
-  if (!flags.server && !older) return out.result({ cli: version, server: meta.version }, () => {});
+  if (!flags.server && !older) return out.result({ cli, server: meta.version }, () => {});
   if (entry.railway) upgradeRailway(entry, version, out);
   else if (entry.docker) upgradeDocker(entry, version, out);
   else {
     if (flags.server)
       throw new CliError("This server wasn't set up from here, so it can't be upgraded from here.");
-    return out.result({ cli: version, server: meta.version }, () => {});
+    return out.result({ cli, server: meta.version }, () => {});
   }
   const deadline = Date.now() + 10 * 60_000;
   for (;;) {
@@ -140,9 +142,7 @@ export async function upgradeCommand(flags: { server?: boolean; to?: string; tar
     if (Date.now() > deadline) throw new CliError("The server didn't come back on the new version.");
     await Bun.sleep(Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000));
   }
-  out.result({ cli: version, server: version }, () =>
-    out.say(`✓ Server ${meta.version} to ${version}, healthy`),
-  );
+  out.result({ cli, server: version }, () => out.say(`✓ Server ${meta.version} to ${version}, healthy`));
 }
 
 export async function domainCommand(

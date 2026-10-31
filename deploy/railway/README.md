@@ -26,7 +26,7 @@ OPS_SECRET=${{secret(64)}}
 
 Railway drops plain values when it makes a template, so `S3_FORCE_PATH_STYLE` and six Postgres variables arrive blank and required. `artifacts setup` passes them to `railway deploy` (`TEMPLATE_VALUES` in `setup.ts`). Set the same defaults in the template editor so the Deploy button works too.
 
-`SETUP_TOKEN` must not be sealed, because `artifacts setup` reads it. `CONTENT_URL` isn't here: no variable holds the second domain (spike S1), so `artifacts setup` sets it.
+`SETUP_TOKEN` must not be sealed, because `artifacts setup` reads it. `CONTENT_URL` isn't here: no variable holds the second domain (spike S1), so `artifacts setup` sets it. With two domains, `RAILWAY_PUBLIC_DOMAIN` can be either one, and the server won't start with `PUBLIC_URL` and `CONTENT_URL` the same. So `artifacts setup` also rewrites `PUBLIC_URL` to the port 8080 domain. After the Deploy button, set both by hand.
 
 ## Publishing it
 
