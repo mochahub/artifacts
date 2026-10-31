@@ -185,3 +185,62 @@ Plus the re-anchoring unit tests.
 - **An MCP server** wrapping the CLI's API calls.
 - **OG unfurls.**
 - **Phase 2 acceptance** ([10](10-testing-and-acceptance.md#phase-2-acceptance)).
+
+## M12 · The hosted library
+
+**Build:**
+- **Frontmatter:** optional `summary` and `tags` in the manifest, stored per version, with the new `manifest/summary` lint error and a fallback for old versions.
+- **Search:** Postgres full-text search over article text, frame titles, summaries, tags, version notes and comments, on each artifact's latest version, with body matches in ⌘K.
+- **Disclosure tiers:** compact cards from `search` and `list`, paged `read`, and `view` with a thumbnail by default. `outcome` shows how the review ended.
+- **Tools:** `search`, `list`, `read` and `view` in the CLI and the local MCP, which work without `artifact.json`.
+- **Project matching:** normalized git remotes, and an optional `repo` on every tool.
+- **Discovery:** a wider skill description, a step in `SKILL.md`, and `instructions` from the MCP.
+- **Server-first storage:** `init` writes to the gitignored `.artifacts/work/<slug>/`, `--in-repo` keeps today's layout, and `artifacts pull` and `artifacts export` ship in the same stack.
+
+**Agent checks:**
+- An art style fixture of image-only frames: found by search from another folder, read as a card, viewed and pulled.
+- Pull, then publish unchanged, makes no content change.
+- Search permissions for hits, snippets and counts, across member, reviewer, outside, guest, organization token and CLI token.
+- Search in a fresh clone with no `artifact.json`.
+- A fixed maximum size per card, and 100 results across pages under a fixed budget.
+
+## M13 · Templates, guides and theme
+
+**Build:**
+- **Kit:** navigation, tab bar, sheet, toggle and icons, plus article callouts, stats and comparisons that work from Markdown.
+- **Templates:** design review, presentation, case study, PRD, RFC, research report and weekly status under `packages/kit/src/templates/`, copied by `artifacts init --template <name>`.
+- **Guides:** one in `skill/references/templates/` per template.
+- **Theme:** validated accent, neutrals, radius and type. The CLI turns them into tokens at render, and the viewer applies allowed values only inside the article body.
+
+**Agent checks:** every template initializes, lints with no errors or warnings, renders and publishes; one accent change reaches every template; a malicious theme value can't inject CSS into the viewer; contact sheets in the pull request, looked at by the agent.
+**User checks:** a taste review of the contact sheets on a phone.
+
+## M14 · Brand setup
+
+**Build:**
+- `artifacts setup` ends with a prompt for fitting Artifacts to a brand guide.
+- `artifacts brand` reads, previews and proposes an org brand, and publishes a sample artifact for review.
+- A person applies a proposal in Settings. Tokens can't.
+- The CLI fetches and caches the org brand for rendering, and a project's `theme` wins over it.
+- Brand fonts ship in the bundle.
+
+**Agent checks:** brand precedence, a stale cache, permissions, and an agent-driven run from a sample design guide to a reviewed sample.
+
+## M15 · OAuth, hosted MCP and publishing
+
+**Build:**
+- **OAuth 2.1:** our server as its own authorization server, on the existing sign-in, with a consent screen, PKCE, audience-bound tokens, rotation and revocation.
+- **Hosted MCP:** Streamable HTTP on `/api/mcp`, with the same server functions and `can()` as the API, and templates and guides as resources.
+- **`artifacts mcp install`:** opt-in, for Claude Code and Codex.
+- **Publishing through MCP:** `artifacts pack` renders on the client, files go straight to the bucket, and a commit payload is uploaded as a blob and committed by hash.
+
+**Agent checks:** a scripted OAuth client, with the negative cases; the full loop through the hosted MCP on a box with no login; metadata per origin; guest text marked untrusted.
+**User checks:** real Claude Code and Codex, connectors in remote sessions, and passkey consent on an iPhone.
+
+## M16 · Articles without the CLI
+
+**Build:**
+- Article building moves to code the server shares.
+- An MCP tool publishes Markdown with a required `summary`, with no CLI and no renderer.
+
+**Agent checks:** publish from a client with no filesystem or shell, then read it through the viewer and `read`; an XSS payload is sanitized the same way as a CLI publish.
