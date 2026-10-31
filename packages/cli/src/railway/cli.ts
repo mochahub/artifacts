@@ -71,10 +71,19 @@ export function domainsByPort(cwd: string): Map<number, string> {
 export const variables = (cwd: string) =>
   railwayJson<Record<string, string>>(["variable", "list", "--service", SERVICE], cwd);
 
+/** Stops the wait: Railway won't try this deploy again. */
+export class DeployFailed extends CliError {
+  override name = "DeployFailed";
+}
+
 export function isDeployed(cwd: string) {
   const status = railwayJson<{ status?: string; deployment?: { status?: string } }>(
     ["service", "status", "--service", SERVICE],
     cwd,
   );
-  return (status.status ?? status.deployment?.status ?? "").toUpperCase() === "SUCCESS";
+  const state = (status.status ?? status.deployment?.status ?? "").toUpperCase();
+  if (state === "FAILED" || state === "CRASHED") {
+    throw new DeployFailed(`The deploy ended as ${state}. See its logs in the Railway dashboard.`);
+  }
+  return state === "SUCCESS";
 }

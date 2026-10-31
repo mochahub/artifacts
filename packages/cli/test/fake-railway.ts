@@ -7,7 +7,7 @@ import { join } from "node:path";
  */
 export function fakeRailway(
   home: string,
-  state: { viewerUrl: string; signedIn?: boolean; deployFails?: boolean },
+  state: { viewerUrl: string; signedIn?: boolean; deployFails?: boolean; status?: string },
 ) {
   const bin = join(home, "bin");
   mkdirSync(bin, { recursive: true });
@@ -23,7 +23,7 @@ case "$1 $2" in
   "init "*) echo '{"id":"proj-1"}' ;;
   "deploy "*) ${state.deployFails ? 'echo "not a TTY" >&2; exit 1' : 'echo "deployed"'} ;;
   "delete "*) echo "deleted" ;;
-  "service status") echo '{"status":"SUCCESS"}' ;;
+  "service status") echo '{"status":"${state.status ?? "SUCCESS"}"}' ;;
   "domain list") echo '[{"domain":"${viewer}","targetPort":8080},{"domain":"content.up.railway.app","targetPort":8081}]' ;;
   "variable list") echo '{"SETUP_TOKEN":"${"s".repeat(48)}","MORE_URLS":""}' ;;
   "variable set") echo "set" ;;

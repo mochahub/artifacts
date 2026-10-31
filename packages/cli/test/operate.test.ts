@@ -26,8 +26,8 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
   });
   afterAll(() => t.stop());
 
-  const env = (extra: Record<string, string> = {}, deployFails = false) => {
-    const fake = fakeRailway(box.home, { viewerUrl: url, deployFails });
+  const env = (extra: Record<string, string> = {}, deployFails = false, status = "SUCCESS") => {
+    const fake = fakeRailway(box.home, { viewerUrl: url, deployFails, status });
     return {
       env: {
         ...box.env,
@@ -54,6 +54,20 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(await child.exited).toBe(1);
     expect(await new Response(child.stderr).text()).toContain("railway deploy failed");
     expect(readFileSync(log, "utf8")).toContain("delete --project proj-1 --yes");
+  });
+
+  test("a deploy that fails stops the wait, rather than sitting out the timeout", async () => {
+    const { env: e } = env({}, false, "FAILED");
+    const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {
+      env: e,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    child.stdin.write("railway\n");
+    child.stdin.end();
+    expect(await child.exited).toBe(1);
+    expect(await new Response(child.stderr).text()).toContain("The deploy ended as FAILED");
   });
 
   test("the whole path: project, template, domains, CONTENT_URL, claim", async () => {
@@ -93,7 +107,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
       "deploy --template abc123 --variable artifacts.S3_FORCE_PATH_STYLE=false --variable Postgres.PGDATA=/var/lib/postgresql/data/pgdata --variable Postgres.PGPORT=5432 --variable Postgres.POSTGRES_DB=railway --variable Postgres.POSTGRES_USER=postgres --variable Postgres.RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60 --variable Postgres.SSL_CERT_DAYS=820",
       "service status --service artifacts --json",
       "domain list --service artifacts --json",
-      "variable set CONTENT_URL=https://content.up.railway.app --service artifacts --skip-deploys",
+      `variable set PUBLIC_URL=https://${new URL(url).host} CONTENT_URL=https://content.up.railway.app --service artifacts --skip-deploys`,
       `service source connect --image ghcr.io/mochahub/artifacts:${VERSION} --service artifacts`,
       "variable list --service artifacts --json",
     ];
@@ -119,7 +133,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     const calls = readFileSync(log, "utf8");
     expect(calls).toContain("domain art.example.com --service artifacts --port 8080");
     expect(calls).toContain("variable set MORE_URLS=https://art.example.com --service artifacts");
-    expect(calls).not.toContain("PUBLIC_URL");
+    expect(calls).not.toContain("PUBLIC_URL=https://art.example.com");
     expect((await cli(["domain", "nonsense"], e)).code).toBe(2);
   });
 

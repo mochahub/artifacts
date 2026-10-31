@@ -7,6 +7,7 @@ import { CliError, type Output } from "../output.ts";
 import { ask } from "../prompt.ts";
 import { VERSION } from "../version.ts";
 import {
+  DeployFailed,
   domainsByPort,
   hasRailway,
   isDeployed,
@@ -23,7 +24,7 @@ const CONTENT_PORT = 8081;
 const TIMEOUT_MS = 10 * 60_000;
 const POLL_MS = () => Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000);
 
-const TEMPLATE = "yaznvG";
+const TEMPLATE = "kQtqf4";
 /** Railway drops plain values from a generated template and then asks for them, which needs a terminal. */
 const TEMPLATE_VALUES = [
   `${SERVICE}.S3_FORCE_PATH_STYLE=false`,
@@ -44,7 +45,9 @@ const until = async (what: string, check: () => boolean | Promise<boolean>) => {
   for (;;) {
     try {
       if (await check()) return;
-    } catch {}
+    } catch (error) {
+      if (error instanceof DeployFailed) throw error;
+    }
     if (Date.now() > deadline) throw new CliError(`Timed out waiting for ${what}.`);
     await Bun.sleep(POLL_MS());
   }
@@ -103,13 +106,14 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
 
   const image = ownImage();
   const version = image?.split(":").at(-1);
-  // Railway has no variable for the second domain, so setup writes it (spike S1).
-  const contentUrl = `CONTENT_URL=https://${content}`;
+  // Railway has no variable for the second domain (spike S1), and with two domains the template's
+  // RAILWAY_PUBLIC_DOMAIN can be either one, so setup says which is which.
+  const urls = [`PUBLIC_URL=https://${viewer}`, `CONTENT_URL=https://${content}`];
   if (image) {
-    railway(["variable", "set", contentUrl, "--service", SERVICE, "--skip-deploys"], dir);
+    railway(["variable", "set", ...urls, "--service", SERVICE, "--skip-deploys"], dir);
     railway(["service", "source", "connect", "--image", image, "--service", SERVICE], dir);
   } else {
-    railway(["variable", "set", contentUrl, "--service", SERVICE], dir);
+    railway(["variable", "set", ...urls, "--service", SERVICE], dir);
   }
   // Until it reports the new values, what answers may still be the deploy before this one.
   await until("the server to come back", async () => {
