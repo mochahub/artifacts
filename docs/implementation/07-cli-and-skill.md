@@ -105,7 +105,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 |---|---|
 | `artifacts visibility org\|me` | |
 | `artifacts share --link [--comment] [--expires 1d\|7d\|30d]` | Prints the link. |
-| `artifacts share --invite <email> [--comment\|--publish]` | Prints the invite link for an outside person, or adds an existing member. `--publish` lets a member publish new versions of this artifact (members only; 04). |
+| `artifacts share --invite <email> [--comment\|--publish]` | Prints the invite link for an outside person, or adds an existing member. `--publish` lets a member publish new versions of this artifact (members only; 04). Access the CLI grants this way can comment but can't approve, request changes or resolve threads until a person confirms it in the viewer's Share sheet (04). |
 | `artifacts archive [<project>/<slug>] [--undo]` | |
 | `artifacts delete [<project>/<slug>] [--version <n>]` | To Recently deleted; prints the purge date and the undo command. |
 | `artifacts undelete [<project>/<slug>] [--version <n>]` | |

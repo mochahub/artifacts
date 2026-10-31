@@ -148,6 +148,98 @@ describe("sharing", () => {
     expect(shares.people.map((p) => p.email)).toContain("out@example.com");
   });
 
+  describe("access a token granted can comment but not decide or resolve (04)", () => {
+    const join = async (url: string, name: string) => {
+      const accepted = await t.api(`/api/invites/${url.split("/join/")[1]}/accept`, {
+        method: "POST",
+        json: { name, password: "a perfectly long password" },
+      });
+      expect(accepted.status).toBe(200);
+      return cookieOf(accepted);
+    };
+    const invitedBy = async (auth: { bearer?: string; cookie?: string }, email: string) => {
+      const response = await t.api(`/api/artifacts/${id}/access`, {
+        method: "POST",
+        json: { email, permission: "comment" },
+        ...auth,
+      });
+      expect(response.status).toBe(200);
+      return join(((await response.json()) as { url: string }).url, email.split("@")[0] as string);
+    };
+    const comment = async (cookie: string) => {
+      const made = await t.api(`/api/artifacts/${id}/threads`, {
+        method: "POST",
+        cookie,
+        json: { pageKey: "plan", anchor: null, body: "A note", version: 1 },
+      });
+      expect(made.status).toBe(200);
+      return ((await made.json()) as { id: string }).id;
+    };
+    const decide = (cookie: string) =>
+      t.api(`/api/artifacts/${id}/decisions`, {
+        method: "POST",
+        cookie,
+        json: { version: 1, kind: "approved" },
+      });
+    const resolve = (cookie: string, thread: string) =>
+      t.api(`/api/threads/${thread}/resolve`, { method: "POST", cookie });
+    const reopen = (cookie: string, thread: string) =>
+      t.api(`/api/threads/${thread}/reopen`, { method: "POST", cookie });
+    const regrant = (email: string) =>
+      t.api(`/api/artifacts/${id}/access`, {
+        method: "POST",
+        cookie: owner,
+        json: { email, permission: "comment" },
+      });
+
+    test("a person invited by a token can comment, then a person confirming the access lets them decide", async () => {
+      const cookie = await invitedBy({ bearer: token }, "bytoken@example.com");
+      const thread = await comment(cookie);
+      expect(await code(await decide(cookie))).toBe("forbidden");
+      expect(await code(await resolve(cookie, thread))).toBe("forbidden");
+      expect(await code(await reopen(cookie, thread))).toBe("forbidden");
+      await comment(cookie); // Commenting is unaffected.
+
+      // The Share sheet's path: a person grants the same address again.
+      expect((await regrant("bytoken@example.com")).status).toBe(200);
+      expect((await resolve(cookie, thread)).status).toBe(200);
+      expect((await decide(cookie)).status).toBe(200);
+    });
+
+    test("a token running the same grant again doesn't take a person's confirmation away", async () => {
+      const cookie = await invitedBy({ bearer: token }, "confirmed@example.com");
+      await regrant("confirmed@example.com");
+      expect((await decide(cookie)).status).toBe(200);
+      const again = { email: "confirmed@example.com", permission: "comment" };
+      expect((await access(again)).status).toBe(200);
+      expect((await decide(cookie)).status).toBe(200);
+      // A token changing the permission is a new, unconfirmed grant.
+      await access({ ...again, permission: "view" });
+      await access(again);
+      expect(await code(await decide(cookie))).toBe("forbidden");
+    });
+
+    test("a person invited by a person can decide and resolve", async () => {
+      const cookie = await invitedBy({ cookie: owner }, "bypeople@example.com");
+      const thread = await comment(cookie);
+      expect((await resolve(cookie, thread)).status).toBe(200);
+      expect((await decide(cookie)).status).toBe(200);
+    });
+
+    test("the artifact reports whether the caller may decide", async () => {
+      const cookie = await invitedBy({ bearer: token }, "reports@example.com");
+      const permissions = async () =>
+        (
+          (await (await t.api(`/api/artifacts/${id}`, { cookie })).json()) as {
+            permissions: { decide: boolean; comment: boolean };
+          }
+        ).permissions;
+      expect(await permissions()).toMatchObject({ comment: true, decide: false });
+      await regrant("reports@example.com");
+      expect(await permissions()).toMatchObject({ comment: true, decide: true });
+    });
+  });
+
   test("a guest on a comment link: preview, name, read, comment", async () => {
     const { url } = await link("comment");
     const preview = (await (await t.api(`/api/s/${secretOf(url)}`)).json()) as Record<string, unknown>;

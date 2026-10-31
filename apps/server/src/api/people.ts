@@ -450,6 +450,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           personId: row.id,
           permission: invite.permission,
           grantedBy: invite.createdBy,
+          viaToken: invite.viaToken,
         });
       }
       await tx.insert(activity).values({

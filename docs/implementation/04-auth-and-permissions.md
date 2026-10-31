@@ -134,6 +134,8 @@ Can the caller see an artifact at all (`artifact.read`)?
 | orgToken | `visibility = org` and the project is in its `project_ids` (or all), and it has `read` |
 | content | The token's artifact and version |
 
+**Access a token granted** (`artifacts share --invite` or `--add` run with a CLI token) is stored with `via_token = true`, on the invite and on the `artifact_access` row it becomes. An agent could otherwise invite an address it controls, open the link itself, and approve its own version. Such a person can read and comment as the permission allows, but `artifact.decide` and `thread.resolve` (which includes reopening) are refused with `forbidden` while the row is all their right to comment rests on. A person who may comment by role (owner, admin, the publisher, or a member or reviewer on an org-visible artifact) is unaffected. A person creating or changing the row (the Share sheet adding the address again, with any permission) sets `via_token = false`, which is the confirmation. A token repeating a grant with the same permission leaves the flag as it is; a token changing the permission sets it. The artifact answer reports `permissions.decide` so the viewer can hide the buttons.
+
 Someone in `artifact_access` with `view` can only view, whatever their role: on a `me` artifact, a member added with `view` can't comment.
 
 Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /api/deleted` and undelete/purge, for their deleter and admins. The only other trace is for a caller who passes the table above with `deleted_at` ignored: they get 410 `gone` on its page and `slug_deleted` on its slug (03). Everyone else gets 404 and plain `conflict`, as if it had never existed.
@@ -147,7 +149,7 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `home.read`, `project.list`, `project.read` | Any person caller; tokens with `read` |
 | `artifact.read` | Visibility rule above |
 | `artifact.comment` | owner, admin, member, reviewer; outside and guests with `comment` permission; cliToken with `comment`. Not on archived artifacts. |
-| `thread.resolve`, `artifact.decide` | People only (not guests, not tokens) who can comment |
+| `thread.resolve`, `artifact.decide` | People only (not guests, not tokens) who can comment, except someone whose only right to comment is access a token granted (`via_token`, below) |
 | `artifact.publish` | The publisher, admins, owner; members the publisher or an admin added with `publish` in `artifact_access`; cliToken (`publish`) as its person, when that person may publish; orgToken (`publish`, project allowed). Reviewers and outside people never. Not on archived artifacts. Publishing a backend can read every person's `me` data, which is why this isn't open to every member. |
 | `project.create` | Members and up; tokens with `publish` (cli) or `org` (org token) |
 | `artifact.manage`, `artifact.share` | The publisher, admins, owner; cliToken with `manage` as the publisher. `share` also requires `org.settings.linkSharing` for links. Only these callers can add someone with `publish`, and only organization members can receive it. |
@@ -165,7 +167,7 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 ### Test matrix
 
 `apps/server/test/permissions.test.ts` generates every combination of:
-- caller: owner, admin, member (publisher), member (added with `publish`), member (other), reviewer, outside (added), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous
+- caller: owner, admin, member (publisher), member (added with `publish`), member (other), member (added by a token), reviewer, outside (added), outside (added by a token), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous
 - visibility: `me`, `org`
 - lifecycle: active, archived, deleted
 - every action in the table above

@@ -476,6 +476,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
         : null,
       permissions: {
         comment: can(caller, "artifact.comment", resource),
+        decide: can(caller, "artifact.decide", resource),
         manage: can(caller, "artifact.manage", resource),
         share: can(caller, "artifact.share", resource),
         delete: can(caller, "artifact.delete", resource),

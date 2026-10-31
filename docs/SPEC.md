@@ -717,6 +717,7 @@ artifacts data ls | get <key> | export | clear [--scope shared|me]   # an artifa
 artifacts logs [--follow]         # the artifact backend's console output and errors
 ```
 - **Which artifact a command acts on:** commands about one artifact (`publish`, `open`, `comments`, `status`, `reply`, `visibility`, `share`, `versions`, `restore`, `archive`, `delete`, `undelete`, `data`, `logs`) act on the artifact named by the `artifact.json` in the current folder or its nearest parent. An optional `<project>/<slug>` argument overrides that, for example `artifacts archive camerabuddy/onboarding-v1`. Every command accepts `--json` for agents.
+- **`share --invite` from a CLI token** gives access that can comment but not approve, request changes or resolve, until a person confirms it by granting the same person access in the viewer.
 - The CLI is agent-agnostic, so Claude Code, Codex, CI and you can all use the same contract. The full command reference, with flags and output, is in [implementation/07-cli-and-skill.md](implementation/07-cli-and-skill.md).
 - An **MCP server** (Phase 2) is a thin wrapper over the same API, for tools without a shell.
 

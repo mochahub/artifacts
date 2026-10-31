@@ -142,7 +142,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 
 `ArtifactCard` = `{ id, project, slug, title, cover: { renderHash } | { title }, pageCount, latestVersion, status: { kind: "waiting"|"with_agent"|"approved"|"not_reviewed", agent?, version? }, counts: { open, repliesToYou, changedFrames }, publishedBy, agent, publishedAt, archivedAt }`.
 
-`Artifact` = the card plus `{ visibility, publisherId, hasBackend, pages: [{ key, kind, title, group, changed: bool, open: int }], decision: { kind, note, version, by, at } | null, permissions: { comment, manage, share, delete, purge } }`.
+`Artifact` = the card plus `{ visibility, publisherId, hasBackend, pages: [{ key, kind, title, group, changed: bool, open: int }], decision: { kind, note, version, by, at } | null, permissions: { comment, decide, manage, share, delete, purge } }`. `decide` is whether the caller may approve, request changes or resolve threads (`artifact.decide`); a viewer can hide those buttons with it. Older servers omit it.
 
 ## Lifecycle: archive and delete
 
@@ -163,7 +163,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/access` | `artifact.share` | People added and links. |
-| `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. `publish` is refused (400) for people outside the organization. |
+| `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. `publish` is refused (400) for people outside the organization. Called with a token, the access or invite is marked `via_token`, so that person can comment but not decide or resolve; the same call by a person clears the mark (04). |
 | `DELETE /api/artifacts/:id/access/:personId` | `artifact.share` | |
 | `POST /api/artifacts/:id/links` | `artifact.share` (and `org.settings.linkSharing`) | `{ permission, expiresIn?: "1d"\|"7d"\|"30d"\|null }` → `{ link, url }` |
 | `DELETE /api/artifacts/:id/links/:linkId` | `artifact.share` | Revoke; guests lose access at once. |
