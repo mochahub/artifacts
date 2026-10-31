@@ -142,9 +142,7 @@ export async function upgradeCommand(flags: { server?: boolean; to?: string; tar
     if (Date.now() > deadline) throw new CliError("The server didn't come back on the new version.");
     await Bun.sleep(Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000));
   }
-  out.result({ cli, server: version }, () =>
-    out.say(`✓ Server ${meta.version} to ${version}, healthy`),
-  );
+  out.result({ cli, server: version }, () => out.say(`✓ Server ${meta.version} to ${version}, healthy`));
 }
 
 export async function domainCommand(
