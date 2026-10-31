@@ -33,6 +33,12 @@ jobs:
         run: |
           bun scripts/build-cli.ts dist/ci linux-x64
           dist/ci/artifacts-linux-x64 --version
+      - name: The compiled CLI ignores the .env where it runs
+        run: |
+          cli=$PWD/dist/ci/artifacts-linux-x64
+          cd "$(mktemp -d)"
+          echo 'ARTIFACTS_URL=http://from-dotenv.invalid' > .env
+          if "$cli" whoami 2>&1 | grep -F from-dotenv; then exit 1; fi
       - name: Viewer size budget
         run: bun run size
       - name: Playwright WebKit at iPhone size and desktop

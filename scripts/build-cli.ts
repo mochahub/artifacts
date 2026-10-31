@@ -41,6 +41,9 @@ try {
         "build",
         "packages/cli/src/index.ts",
         "--compile",
+        // The folder a person runs the CLI in isn't configuration. A repo's .env could point it elsewhere.
+        "--no-compile-autoload-dotenv",
+        "--no-compile-autoload-bunfig",
         `--target=bun-${target}`,
         `--outfile=${path}`,
       ],
