@@ -17,6 +17,8 @@ test("the poll works with no backend; shared counts add up and me stays personal
   publishFixture("micro-app-poll", slug, token());
   await page.goto(`/demo/${slug}/poll`);
   const frame = live(page);
+  // The buttons are in the HTML before app.js has wired them up; its first read means it has.
+  await expect(page.getByText("Saved for")).toBeVisible();
   await frame.getByRole("button", { name: /^A/ }).click();
   await expect(frame.getByText("You picked A")).toBeVisible();
   await expect(frame.locator("#count-a")).toHaveText("1");
