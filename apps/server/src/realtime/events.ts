@@ -59,10 +59,14 @@ export class Events {
 
   private async reconnect() {
     const old = this.client;
-    this.client = this.connect();
+    const client = this.connect();
+    this.client = client;
     this.heard = Date.now();
     old.end({ timeout: 1 }).catch(() => {});
     await this.listen();
+    // Every few pings of an outage starts another attempt, and when it ends several can land at once.
+    if (client !== this.client) return;
+    this.heard = Date.now();
     for (const close of [...this.streams]) close();
   }
 

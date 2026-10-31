@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { OWNER, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
 import { checksumFor } from "../src/commands/operate.ts";
 import { fakeRailway } from "./fake-railway.ts";
 import { cli, sandbox } from "./sandbox.ts";
@@ -14,7 +14,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
 
   // The fake domain must be reachable over https by health checks, so the viewer URL here is http.
   beforeAll(async () => {
-    const port = 51600 + Math.floor(Math.random() * 2000);
+    const port = testPort();
     url = `http://127.0.0.1:${port}`;
     t = await startTestServer({
       PUBLIC_URL: url,

@@ -92,6 +92,8 @@ describe("the event listener", () => {
     await Bun.sleep(1000);
     tunnel.restore();
     for (let i = 0; i < 80 && closed === 0; i++) await Bun.sleep(50);
+    // Past a few pings, in case another attempt was still under way.
+    await Bun.sleep(500);
     expect(closed).toBe(1);
 
     await direct.emit("a", "version");

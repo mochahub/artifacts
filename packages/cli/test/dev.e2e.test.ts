@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { testPort } from "../../../apps/server/test/helpers.ts";
 import { copyFixture, sandbox, start } from "./sandbox.ts";
 
 describe("artifacts dev", () => {
   const box = sandbox();
   const dir = copyFixture(join(import.meta.dir, "../../../fixtures/micro-app-poll-backend"));
-  const port = 53600 + Math.floor(Math.random() * 1000);
+  const port = testPort();
   const viewer = `http://localhost:${port}`;
   const origin = `http://127.0.0.1:${port + 1}`;
   const ID = "00000000-0000-7000-8000-00000000d0d0";

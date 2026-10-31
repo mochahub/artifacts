@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { OWNER, signIn, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import {
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+  testPort,
+} from "../../../apps/server/test/helpers.ts";
 import { cli, sandbox, start } from "./sandbox.ts";
 
 const SETUP_TOKEN = "s".repeat(48);
@@ -12,7 +18,7 @@ describe("the account commands against a real server", () => {
   const box = sandbox();
 
   beforeAll(async () => {
-    const port = 42000 + Math.floor(Math.random() * 5000);
+    const port = testPort();
     url = `http://127.0.0.1:${port}`;
     t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
   });

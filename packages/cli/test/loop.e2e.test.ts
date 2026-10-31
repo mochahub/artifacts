@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { Thread } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { artifacts } from "../../../apps/server/src/db/schema.ts";
-import { OWNER, signIn, startTestServer, type TestServer } from "../../../apps/server/test/helpers.ts";
+import {
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+  testPort,
+} from "../../../apps/server/test/helpers.ts";
 import { camerabuddy, cli, copyFixture, sandbox } from "./sandbox.ts";
 
 /** The round trip in M5: a person comments, an agent session fixes and replies, the person resolves. */
@@ -22,7 +28,7 @@ describe("the review loop", () => {
   });
 
   beforeAll(async () => {
-    const port = 49600 + Math.floor(Math.random() * 2000);
+    const port = testPort();
     url = `http://127.0.0.1:${port}`;
     t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
     const setup = await t.api("/api/setup", {

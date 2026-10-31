@@ -365,6 +365,9 @@ describe("limits, with an org that's lowered them", () => {
     return { body, taken: () => pulled };
   };
 
+  // What the client has sent, which is past what the server read by whatever the sockets hold.
+  const LEFT_UNREAD = 16 * 1024 * 1024;
+
   test("a body with no length is cut off at the limit, not read to the end", async () => {
     const file = endless();
     const upload = await t
@@ -377,7 +380,7 @@ describe("limits, with an org that's lowered them", () => {
       })
       .catch(() => null);
     expect(upload?.status ?? 413).toBe(413);
-    expect(file.taken()).toBeLessThan(4 * 1024 * 1024);
+    expect(file.taken()).toBeLessThan(LEFT_UNREAD);
 
     const json = endless();
     const value = await t
@@ -390,7 +393,7 @@ describe("limits, with an org that's lowered them", () => {
       })
       .catch(() => null);
     expect(value?.status ?? 413).toBe(413);
-    expect(json.taken()).toBeLessThan(4 * 1024 * 1024);
+    expect(json.taken()).toBeLessThan(LEFT_UNREAD);
   });
 
   test("deleting files counts against the write limit like every other write", async () => {
