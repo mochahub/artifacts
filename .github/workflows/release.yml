@@ -106,7 +106,7 @@ jobs:
   image:
     needs: [prepare, binaries]
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
       packages: write
@@ -162,7 +162,7 @@ jobs:
   image-arm64:
     needs: [prepare, binaries]
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
       packages: write
