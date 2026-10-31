@@ -106,6 +106,7 @@ jobs:
   image:
     needs: [prepare, binaries]
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
     permissions:
       contents: read
       packages: write
@@ -123,7 +124,6 @@ jobs:
         with:
           name: binaries
           path: dist/release
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Build an image to try
         uses: docker/build-push-action@v6
@@ -154,12 +154,66 @@ jobs:
         with:
           context: .
           file: apps/server/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ needs.prepare.outputs.publish == 'true' }}
-          tags: ${{ env.IMAGE }}
+          tags: ${{ env.IMAGE }}-amd64
+
+  # On a real arm64 machine: Bun hangs under QEMU building this, so emulating it never finishes.
+  image-arm64:
+    needs: [prepare, binaries]
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/mochahub/artifacts:${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun packages/cli/src/release-version.ts stamp "${{ needs.prepare.outputs.version }}"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: needs.prepare.outputs.publish == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/arm64
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          tags: ${{ env.IMAGE }}-arm64
+
+  manifest:
+    needs: [prepare, image, image-arm64]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/mochahub/artifacts:${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: needs.prepare.outputs.publish == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: One name for both machines
+        if: needs.prepare.outputs.publish == 'true'
+        run: docker buildx imagetools create --tag "$IMAGE" "$IMAGE-amd64" "$IMAGE-arm64"
 
   release:
-    needs: [prepare, image]
+    needs: [prepare, manifest]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
@@ -209,7 +263,8 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           if [ "$PUBLISH" != true ]; then
-            bun publish --dry-run --access public
+            # bun publish --dry-run still wants a login.
+            bun pm pack --destination "$RUNNER_TEMP"
           elif [ -z "$NPM_CONFIG_TOKEN" ]; then
             echo "::notice::Skipped npm: the repo has no NPM_TOKEN secret."
           elif [ "$(npm view "@artifacts/cli@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then

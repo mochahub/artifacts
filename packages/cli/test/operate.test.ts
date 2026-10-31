@@ -25,8 +25,8 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
   });
   afterAll(() => t.stop());
 
-  const env = (extra: Record<string, string> = {}) => {
-    const fake = fakeRailway(box.home, { viewerUrl: url });
+  const env = (extra: Record<string, string> = {}, deployFails = false) => {
+    const fake = fakeRailway(box.home, { viewerUrl: url, deployFails });
     return {
       env: {
         ...box.env,
@@ -40,8 +40,8 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     };
   };
 
-  test("without a template, it says so plainly", async () => {
-    const { env: e } = env({ ARTIFACTS_RAILWAY_TEMPLATE: "" });
+  test("a deploy that fails takes its empty project with it", async () => {
+    const { env: e, log } = env({}, true);
     const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {
       env: e,
       stdin: "pipe",
@@ -51,7 +51,8 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     child.stdin.write("railway\n");
     child.stdin.end();
     expect(await child.exited).toBe(1);
-    expect(await new Response(child.stderr).text()).toContain("isn't published yet");
+    expect(await new Response(child.stderr).text()).toContain("railway deploy failed");
+    expect(readFileSync(log, "utf8")).toContain("delete --project proj-1 --yes");
   });
 
   test("the whole path: project, template, domains, CONTENT_URL, claim", async () => {
