@@ -132,7 +132,7 @@ function Detail() {
             {changed.length > 0 ? "Review changes" : "Start reviewing"}
           </a>
         )}
-        {artifact.permissions.comment && me.value && (
+        {artifact.permissions.comment && artifact.permissions.decide !== false && me.value && (
           <button
             type="button"
             class="round"
