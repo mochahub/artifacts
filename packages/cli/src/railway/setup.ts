@@ -21,6 +21,17 @@ const CONTENT_PORT = 8081;
 const TIMEOUT_MS = 10 * 60_000;
 const POLL_MS = () => Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000);
 
+/** Railway drops plain values from a generated template and then asks for them, which needs a terminal. */
+const TEMPLATE_VALUES = [
+  `${SERVICE}.S3_FORCE_PATH_STYLE=false`,
+  "Postgres.PGDATA=/var/lib/postgresql/data/pgdata",
+  "Postgres.PGPORT=5432",
+  "Postgres.POSTGRES_DB=railway",
+  "Postgres.POSTGRES_USER=postgres",
+  "Postgres.RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60",
+  "Postgres.SSL_CERT_DAYS=820",
+];
+
 const until = async (what: string, check: () => boolean | Promise<boolean>) => {
   const deadline = Date.now() + TIMEOUT_MS;
   for (;;) {
@@ -67,7 +78,7 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
   const init = ["init", "--name", name, ...(workspace ? ["--workspace", workspace.id] : [])];
   const project = railwayJson<{ id?: string; projectId?: string }>(init, dir);
   out.say(`✓ Created Railway project "${name}"`);
-  railway(["deploy", "--template", template], dir);
+  railway(["deploy", "--template", template, ...TEMPLATE_VALUES.flatMap((v) => ["--variable", v])], dir);
   out.say("✓ Deployed the Artifacts template: app, Postgres, storage bucket");
 
   await until("the deploy", () => isDeployed(dir));
