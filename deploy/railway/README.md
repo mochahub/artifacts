@@ -36,4 +36,4 @@ Railway drops plain values when it makes a template, so `S3_FORCE_PATH_STYLE` an
 4. Test it: `railway init --name test`, then `railway deploy --template <code>`.
 5. `railway templates publish`, then set the template's code as the default in `packages/cli/src/railway/setup.ts`.
 
-For a release, bump the image tag and republish. `artifacts upgrade --server` works without this; the template only matters for new deploys.
+A template stays on the image it was made from. `artifacts setup` moves a new server to the CLI's own version straight after deploying, so the template doesn't need remaking for each release. The Deploy button gives you the pinned image, and `artifacts upgrade --server` moves it on.

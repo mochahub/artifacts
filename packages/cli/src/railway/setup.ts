@@ -1,9 +1,11 @@
 import { Meta } from "@artifacts/schema";
 import { Client } from "../client.ts";
 import { type ClaimAnswers, claim } from "../commands/account.ts";
+import { IMAGE } from "../commands/operate.ts";
 import { saveServer } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
 import { ask } from "../prompt.ts";
+import { VERSION } from "../version.ts";
 import {
   domainsByPort,
   hasRailway,
@@ -32,6 +34,10 @@ const TEMPLATE_VALUES = [
   "Postgres.RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60",
   "Postgres.SSL_CERT_DAYS=820",
 ];
+
+/** The template pins whatever image it was made from, so a newer CLI moves the server to its own. From source, there's no such image. */
+const ownImage = () =>
+  process.env.ARTIFACTS_IMAGE ?? (process.execPath.endsWith("/bun") ? null : `${IMAGE}:${VERSION}`);
 
 const until = async (what: string, check: () => boolean | Promise<boolean>) => {
   const deadline = Date.now() + TIMEOUT_MS;
@@ -95,12 +101,21 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
   if (!viewer || !content) throw new CliError("The template didn't create the viewer and content domains.");
   const url = `${process.env.ARTIFACTS_RAILWAY_HTTP ? "http" : "https"}://${viewer}`;
 
+  const image = ownImage();
+  const version = image?.split(":").at(-1);
   // Railway has no variable for the second domain, so setup writes it (spike S1).
-  railway(["variable", "set", `CONTENT_URL=https://${content}`, "--service", SERVICE], dir);
-  // Until it reports the new value, what answers may still be the deploy before this one.
+  const contentUrl = `CONTENT_URL=https://${content}`;
+  if (image) {
+    railway(["variable", "set", contentUrl, "--service", SERVICE, "--skip-deploys"], dir);
+    railway(["service", "source", "connect", "--image", image, "--service", SERVICE], dir);
+  } else {
+    railway(["variable", "set", contentUrl, "--service", SERVICE], dir);
+  }
+  // Until it reports the new values, what answers may still be the deploy before this one.
   await until("the server to come back", async () => {
     const meta = Meta.parse(await new Client(url).get("/api/meta"));
-    return meta.contentUrl === `https://${content}` && isDeployed(dir);
+    const current = !version || meta.version === version;
+    return current && meta.contentUrl === `https://${content}` && isDeployed(dir);
   });
   out.say(`✓ Running: ${url}   (home domain for passkeys)`);
 
