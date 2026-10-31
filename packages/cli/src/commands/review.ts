@@ -10,12 +10,21 @@ import { signedIn } from "./account.ts";
 export function artifactRef(target: string | undefined) {
   if (target) {
     const [project, slug, extra] = target.split("/");
-    if (!project || !slug || extra) throw new UsageError(`Use <project>/<slug>, not "${target}".`);
+    // Slugs are a-z, 0-9 and -, so ".." can't climb out of /api/artifacts/by-slug/ in the URL below.
+    if (!project || !slug || extra || ![project, slug].every((part) => /^[a-z0-9-]{1,40}$/.test(part))) {
+      throw new UsageError(`Use <project>/<slug>, not "${target}".`);
+    }
     return { project, slug };
   }
   const { manifest } = loadManifest(findRoot());
   if (!manifest) throw new CliError("artifact.json isn't valid. Run artifacts lint.");
   return { project: manifest.project, slug: manifest.slug };
+}
+
+/** A version number from the command line. It lands in a URL, so only digits pass. */
+export function versionNumber(value: string, what = "A version") {
+  if (!/^\d+$/.test(value)) throw new UsageError(`${what} must be a number, not "${value}".`);
+  return value;
 }
 
 export async function resolveArtifact(client: Client, target: string | undefined) {
@@ -188,6 +197,7 @@ export async function versionsCommand(
   flags: { server?: string },
   out: Output,
 ) {
+  if (sub === "name" && args[0]) versionNumber(args[0]);
   const client = await signedIn(flags.server);
   if (sub === "name") {
     const [n, label] = args;
@@ -216,6 +226,8 @@ export async function diffCommand(
 ) {
   const number = (value: string | undefined) => value?.replace(/^v/, "");
   if (!number(a) || !number(b)) throw new UsageError("Usage: artifacts diff <a> <b>");
+  versionNumber(number(a) as string);
+  versionNumber(number(b) as string);
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
   type Change = { added: string[]; removed: string[]; changed: string[] };
@@ -269,6 +281,7 @@ export async function deleteCommand(
   flags: { version?: string; server?: string },
   out: Output,
 ) {
+  if (flags.version) versionNumber(flags.version, "--version");
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, target);
   const path = flags.version
@@ -287,6 +300,7 @@ export async function undeleteCommand(
   flags: { version?: string; server?: string },
   out: Output,
 ) {
+  if (flags.version) versionNumber(flags.version, "--version");
   const client = await signedIn(flags.server);
   const { project, slug } = artifactRef(target);
   const list = await client.get<DeletedRow[]>("/api/deleted");

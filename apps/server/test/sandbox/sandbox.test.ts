@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import { hash, makePerson, publish } from "../publish-helper.ts";
 
 const POLL = `
 export default {
@@ -158,6 +158,42 @@ describe("the backend sandbox", () => {
     expect(writes).toEqual({ ok: 10, rate_limited: 40 });
   });
 
+  test("env.DATA: no dot segment, look-alike dot or odd character gets past the key checks", async () => {
+    // Writes are rate-limited before their keys are looked at, and this makes many.
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { writesPerSecond: number } };
+    const original = settings.limits.writesPerSecond;
+    settings.limits.writesPerSecond = 1000;
+    await t.server.db.update(org).set({ settings });
+    const { call, id } = await deploy(`export default { async fetch(r, env) {
+      const code = (p) => p.then(() => "ok", (e) => e.code);
+      const keys = ["../x", "a/../x", "a/..", "./x", "a/./x", "/abs", "me/../x", "files/../../x", "",
+        "\\uFF0E\\uFF0E/x", "\\u2024\\u2024/x", "\\u2025/x", "a\\u0000b", "a b", "a\\\\..\\\\x", "%2e%2e/x", "k".repeat(201)];
+      const out = {};
+      for (const key of keys) {
+        out[key] = [
+          await code(env.DATA.put(key, 1)),
+          await code(env.DATA.get(key)),
+          await code(env.DATA.delete(key)),
+          await code(env.DATA.list(key)),
+        ].join();
+      }
+      return Response.json(out);
+    } };`);
+    const body = (await (await call("x")).json()) as Record<string, string>;
+    for (const [key, codes] of Object.entries(body)) {
+      // An empty prefix means "everything in shared", which is allowed; the other three refuse an empty key.
+      expect([JSON.stringify(key), codes]).toEqual([
+        JSON.stringify(key),
+        key === "" ? "invalid,invalid,invalid,ok" : "invalid,invalid,invalid,invalid",
+      ]);
+    }
+    expect((await t.server.bucket.list(`data/${id}/`)).objects).toEqual([]);
+    settings.limits.writesPerSecond = original;
+    await t.server.db.update(org).set({ settings });
+  });
+
   test("env.DATA: etags, only-if-new, listing every scope, and bad keys", async () => {
     const { call } = await deploy(`export default { async fetch(r, env) {
       const code = (p) => p.then(() => "ok", (e) => e.code);
@@ -231,6 +267,50 @@ describe("the backend sandbox", () => {
     expect((await call("x")).headers.get("cache-control")).toBe("no-store");
   });
 
+  test("a backend over a code limit set after it was published is refused without being fetched", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { backendCodeBytes: number } };
+    const { call } = await deploy(POLL);
+    expect((await call("votes")).status).toBe(200);
+    const original = settings.limits.backendCodeBytes;
+    settings.limits.backendCodeBytes = 10;
+    await t.server.db.update(org).set({ settings });
+    expect((await call("votes")).status).toBe(413);
+    settings.limits.backendCodeBytes = original;
+    await t.server.db.update(org).set({ settings });
+  });
+
+  test("query strings are read as the URL standard reads them, so a backend sees what the client sent", async () => {
+    const { call } = await deploy(`export default { fetch(request) {
+      const q = new URL(request.url).searchParams;
+      return Response.json({ token: q.get("token"), bad: q.get("bad"), good: q.get("good"), all: q.getAll("a"), n: [...q].length });
+    } };`);
+    // "=" inside a value, a lone "%", empty parts, and "+" and escapes together.
+    const response = await call("x?token=abc==&bad=100%&&a=1&a=2&good=a%2Bb+c");
+    expect(await response.json()).toEqual({
+      token: "abc==",
+      bad: "100%",
+      good: "a+b c",
+      all: ["1", "2"],
+      n: 5,
+    });
+  });
+
+  test("an answer the browser can't be sent is a 502, not an unhandled error", async () => {
+    for (const answer of [
+      `new Response("x", { status: 99 })`,
+      `new Response("x", { headers: { etag: "a\\r\\nSet-Cookie: x=1" } })`,
+      `Object.defineProperty(new Response("x"), "_text", { value: { not: "text" } })`,
+    ]) {
+      const { call } = await deploy(`export default { fetch() { return ${answer}; } };`);
+      const response = await call("x");
+      expect(response.status).toBe(502);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    }
+  });
+
   test("a loop in top-level code times out, and doesn't hold other backends", async () => {
     const { org } = await import("../../src/db/schema.ts");
     const [row] = await t.server.db.select().from(org);
@@ -263,6 +343,33 @@ describe("the backend sandbox", () => {
     settings.limits.backendTimeoutMs = 10_000;
     await t.server.db.update(org).set({ settings });
   });
+
+  test("busy loops on a child can't get a waiting backend on it killed", async () => {
+    const { org } = await import("../../src/db/schema.ts");
+    const [row] = await t.server.db.select().from(org);
+    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
+    settings.limits.backendTimeoutMs = 500;
+    await t.server.db.update(org).set({ settings });
+    // A child runs one request at a time, and an author can pick which child a backend lands on.
+    const onFirstChild = (make: (i: number) => string) => {
+      for (let i = 0; ; i++) if (Number.parseInt(hash(make(i)).slice(0, 8), 16) % 2 === 0) return make(i);
+    };
+    const looper = (seed: number) =>
+      onFirstChild((i) => `// loop ${seed}.${i}\nexport default { fetch() { while (true) {} } };`);
+    const victim = await deploy(
+      onFirstChild((i) => `// v${i}\nexport default { fetch() { return Response.json("alive"); } };`),
+    );
+    const loops = await Promise.all(Array.from({ length: 8 }, (_, i) => deploy(looper(i))));
+    expect((await victim.call("x")).status).toBe(200); // Warm.
+    const running = loops.map((loop) => loop.call("x"));
+    await Bun.sleep(150);
+    // It waits behind eight loops of half a second each, which is longer than the child's backstop.
+    const answer = await victim.call("x");
+    expect(answer.status).toBe(200);
+    expect(await Promise.all(running.map(async (r) => (await r).status))).toEqual(Array(8).fill(504));
+    settings.limits.backendTimeoutMs = 10_000;
+    await t.server.db.update(org).set({ settings });
+  }, 30_000);
 
   for (const [name, source] of [
     ["typed arrays", "const k = []; while (true) k.push(new Uint8Array(1 << 20));"],

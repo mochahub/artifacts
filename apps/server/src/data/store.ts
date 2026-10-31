@@ -47,6 +47,24 @@ export const callerKey = (caller: Caller): string | null => {
   return null;
 };
 
+/**
+ * Reads a request body without taking more than `limit` bytes, whether or not it declares a length. Bun
+ * would otherwise buffer up to 128 MB of a chunked body before anyone could say no.
+ */
+export async function readLimited(request: Request, limit: number): Promise<Uint8Array> {
+  if (Number(request.headers.get("content-length") ?? 0) > limit) throw tooBig(limit);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of (request.body ?? []) as AsyncIterable<Uint8Array>) {
+    size += chunk.length;
+    if (size > limit) throw tooBig(limit);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+const tooBig = (limit: number) => new ApiError("too_large", "That request is too big.", { limit });
+
 export const dataPrefix = (artifactId: string) => `data/${artifactId}/`;
 
 /** Where a scope lives. `me` needs the caller's pseudonym; nobody reads another person's space here. */

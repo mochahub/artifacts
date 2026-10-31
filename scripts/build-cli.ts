@@ -30,16 +30,32 @@ writeFileSync(generated, `export const VIEWER: Record<string, string> = ${JSON.s
 
 mkdirSync(out, { recursive: true });
 const sums: string[] = [];
-for (const [target, name] of TARGETS) {
-  if (only && only !== target) continue;
-  const path = join(out, name);
-  const compile = Bun.spawnSync(
-    ["bun", "build", "packages/cli/src/index.ts", "--compile", `--target=bun-${target}`, `--outfile=${path}`],
-    { stdout: "ignore", stderr: "inherit" },
-  );
-  if (!compile.success) process.exit(compile.exitCode ?? 1);
-  sums.push(`${createHash("sha256").update(readFileSync(path)).digest("hex")}  ${name}`);
-  console.log(`built ${name}`);
+let failed = 0;
+try {
+  for (const [target, name] of TARGETS) {
+    if (only && only !== target) continue;
+    const path = join(out, name);
+    const compile = Bun.spawnSync(
+      [
+        "bun",
+        "build",
+        "packages/cli/src/index.ts",
+        "--compile",
+        `--target=bun-${target}`,
+        `--outfile=${path}`,
+      ],
+      { stdout: "ignore", stderr: "inherit" },
+    );
+    if (!compile.success) {
+      failed = compile.exitCode ?? 1;
+      break;
+    }
+    sums.push(`${createHash("sha256").update(readFileSync(path)).digest("hex")}  ${name}`);
+    console.log(`built ${name}`);
+  }
+} finally {
+  // Put back even when a build fails, so the multi-megabyte generated file is never left in the tree.
+  writeFileSync(generated, STUB);
 }
-writeFileSync(generated, STUB);
+if (failed) process.exit(failed);
 writeFileSync(join(out, "SHA256SUMS"), `${sums.join("\n")}\n`);

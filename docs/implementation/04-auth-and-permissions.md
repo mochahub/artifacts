@@ -30,17 +30,29 @@ Precedence when several are present: Bearer token, then session cookie, then gue
   - **Not a grant on its own:** every content-port request re-checks that the artifact and version are live and that the caller still has access (cached at most 5 seconds; [03](03-api.md#content-host-live-previews)). Deleting an artifact, removing a person or revoking a link stops open frames within seconds.
   - **Scope:** only valid on `/t/<token>/v<v>/` for that artifact.
 - **`OPS_SECRET`**: a template-generated random string on the app only, for `/internal/jobs/*`.
-- **Backend sandboxes** hold no secrets: they run in child processes with an empty environment, and their `env.DATA` calls are scoped by the app to the request in flight ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
+- **Backend sandboxes** hold no secrets: they run in child processes with no secrets in their environment (just `BUN_BE_BUN=1`), and their `env.DATA` calls are scoped by the app to the request in flight ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
 - **Rotating `SESSION_SECRET`** signs everyone out and invalidates open content tokens, and nothing else. Caller pseudonyms use `org.pseudonym_key` (02).
 
 ## Passwords
 
 - argon2id with `Bun.password.hash(password, { algorithm: "argon2id" })`. Bun's defaults are 64 MiB of memory and 2 passes.
-- At least 12 characters and at most 256. No other composition rules.
+- At least 12 characters and at most 256. No other composition rules. At sign-in and re-authentication a longer password is refused as wrong without being hashed or counted against the account.
 - Rate limits, kept in memory per process:
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
-- Changing or resetting a password ends every other session of that person.
+- Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
+- A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
+
+## Removing a person
+
+`DELETE /api/people/:id` sets `removed_at` and, in the same transaction, ends everything that person could still act through:
+
+- their sessions and their own tokens (`tokens.person_id`), as `revoked_at`
+- the invites and reset links they issued that are still unused
+- the **organization tokens they created** (`tokens` with `kind = org` and `created_by` = them), as `revoked_at`, so a token an admin made can't outlive the admin
+- the **share links they created** (`share_links.created_by` = them), as `revoked_at`, the same as revoking the link from the Share sheet. A guest's access is read from the link on every request, so guests who came in by those links lose access at once; nothing else is needed.
+
+Links and tokens made by other people are untouched.
 
 ## Passkeys (WebAuthn)
 
@@ -77,7 +89,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
   2. In one transaction, creates `org` (with `home_domain` = request host), the owner, their password and a CLI token.
   3. Leaves setup mode.
 
-  It answers 409 once an owner exists.
+  It answers 409 once an owner exists, before it looks at the token, so it can't be used to test guesses; in setup mode, wrong tokens are limited to 20 per IP per hour.
 - **`POST /api/recover`:** with a valid `SETUP_TOKEN`, issues a one-hour reset link for an existing owner. It's written to activity as `recovered`.
 
 ## Device flow (`artifacts login` and `artifacts setup <url>` for teammates)
@@ -100,7 +112,7 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 
 - **CLI tokens** from the device flow or setup get `publish comment read manage data`.
 - **Org tokens:** the admin picks scopes and projects.
-- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6).
+- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner or itself. Those come from the viewer.
 
 ## The permission function
 
@@ -122,6 +134,8 @@ Can the caller see an artifact at all (`artifact.read`)?
 | orgToken | `visibility = org` and the project is in its `project_ids` (or all), and it has `read` |
 | content | The token's artifact and version |
 
+**Access a token granted** (`artifacts share --invite` or `--add` run with a CLI token) is stored with `via_token = true`, on the invite and on the `artifact_access` row it becomes. An agent could otherwise invite an address it controls, open the link itself, and approve its own version. Such a person can read and comment as the permission allows, but `artifact.decide` and `thread.resolve` (which includes reopening) are refused with `forbidden` while the row is all their right to comment rests on. A person who may comment by role (owner, admin, the publisher, or a member or reviewer on an org-visible artifact) is unaffected. A person creating or changing the row (the Share sheet adding the address again, with any permission) sets `via_token = false`, which is the confirmation. A token repeating a grant with the same permission leaves the flag as it is; a token changing the permission sets it. The artifact answer reports `permissions.decide` so the viewer can hide the buttons.
+
 Someone in `artifact_access` with `view` can only view, whatever their role: on a `me` artifact, a member added with `view` can't comment.
 
 Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /api/deleted` and undelete/purge, for their deleter and admins. The only other trace is for a caller who passes the table above with `deleted_at` ignored: they get 410 `gone` on its page and `slug_deleted` on its slug (03). Everyone else gets 404 and plain `conflict`, as if it had never existed.
@@ -135,7 +149,7 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `home.read`, `project.list`, `project.read` | Any person caller; tokens with `read` |
 | `artifact.read` | Visibility rule above |
 | `artifact.comment` | owner, admin, member, reviewer; outside and guests with `comment` permission; cliToken with `comment`. Not on archived artifacts. |
-| `thread.resolve`, `artifact.decide` | People only (not guests, not tokens) who can comment |
+| `thread.resolve`, `artifact.decide` | People only (not guests, not tokens) who can comment, except someone whose only right to comment is access a token granted (`via_token`, below) |
 | `artifact.publish` | The publisher, admins, owner; members the publisher or an admin added with `publish` in `artifact_access`; cliToken (`publish`) as its person, when that person may publish; orgToken (`publish`, project allowed). Reviewers and outside people never. Not on archived artifacts. Publishing a backend can read every person's `me` data, which is why this isn't open to every member. |
 | `project.create` | Members and up; tokens with `publish` (cli) or `org` (org token) |
 | `artifact.manage`, `artifact.share` | The publisher, admins, owner; cliToken with `manage` as the publisher. `share` also requires `org.settings.linkSharing` for links. Only these callers can add someone with `publish`, and only organization members can receive it. |
@@ -153,7 +167,7 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 ### Test matrix
 
 `apps/server/test/permissions.test.ts` generates every combination of:
-- caller: owner, admin, member (publisher), member (added with `publish`), member (other), reviewer, outside (added), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous
+- caller: owner, admin, member (publisher), member (added with `publish`), member (other), member (added by a token), reviewer, outside (added), outside (added by a token), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous
 - visibility: `me`, `org`
 - lifecycle: active, archived, deleted
 - every action in the table above
@@ -162,14 +176,16 @@ The expected result is computed from a second, deliberately simple table in the 
 
 ## CSRF, hosts and headers
 
-- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Token-authenticated requests are exempt, since they carry no cookies.
+- **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Requests with `Authorization: Bearer …` are exempt, since they carry no cookies and the server ignores cookies for them. Any other `Authorization` header gets no exemption.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
-  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`
+  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; media-src 'self' <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'` (`frame-src` is sent only when `CONTENT_URL` is set)
   - `Strict-Transport-Security: max-age=31536000`
   - `X-Frame-Options: DENY`
+  - `Cross-Origin-Opener-Policy: same-origin`
   - `Referrer-Policy: same-origin`
   - `X-Content-Type-Options: nosniff`
+  - `Cache-Control: no-store` on any `/api/` answer whose route set none
 - **The live preview iframe:** `sandbox="allow-scripts"` (never `allow-same-origin`), `allow="fullscreen"`, `referrerpolicy="no-referrer"`.
 
 ## Rate limits (in memory, per process)
@@ -179,10 +195,18 @@ The expected result is computed from a second, deliberately simple table in the 
 | Password sign-in | Per account and per IP, above |
 | `POST /api/device/start` | 10 per IP per hour |
 | `POST /api/device/poll` | 1 per `interval` per code |
+| Looking up, approving or denying a device code (`/api/device/:userCode…`) | 30 per signed-in person per 15 minutes |
 | `POST /api/s/:token/guest` | 20 per IP per hour |
+| `POST /api/auth/passkey/options` | 60 per IP per 15 minutes (each call stores a challenge for 5 minutes) |
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
 | `POST /api/recover` | 5 per IP per hour |
+| `POST /api/setup` | 20 per IP per hour, while in setup mode |
+| Search (`GET /api/search`) | 60 per caller per minute |
+| Compare (`GET /api/artifacts/:id/compare`) | 30 per caller per minute, for diffs not yet made |
+| Event streams (`GET /api/events`) | 10 open per caller |
+
+Each map holds at most 50,000 keys; past that, expired keys go first and then the oldest tenth, so random addresses can't grow memory without bound or wipe every limit at once.
 
 With more than one replica, limits are per replica. That's acceptable for a self-hosted deployment.

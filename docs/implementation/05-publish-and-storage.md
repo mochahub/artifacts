@@ -4,7 +4,7 @@
 
 ## The manifest (`artifact.json`)
 
-Defined with zod in `packages/schema/manifest.ts`; `artifacts lint` reports schema errors with paths.
+Defined with zod in `packages/schema/src/manifest.ts`; `artifacts lint` reports schema errors with paths.
 
 ```ts
 const Manifest = z.object({
@@ -90,7 +90,7 @@ It then runs `remark-rehype`, `rehype-slug` and `rehype-sanitize`. Sanitizing us
 
 **The server re-sanitizes at commit.** The CLI's output can't be trusted (any token with `publish` could upload anything), and article HTML is inserted into the viewer's own page. So `commit` re-runs `rehype-sanitize` with the same allowlist (`@artifacts/schema/sanitize`) over every article's HTML blob, including inline SVG from Mermaid and charts (no `script`, `foreignObject`, `style` elements or attributes, or event attributes). Mermaid's styles are copied onto presentation attributes in the render helper, because a `<style>` in an article would apply to the whole viewer page. It stores the result as a new blob and records that hash in `pages.meta.htmlHash`. The viewer only ever loads that hash.
 
-Images referenced by articles are bundle files; the viewer loads them through `GET /api/artifacts/:id/r/:hash`. The CLI rewrites `src` to `artifacts:blob/<hash>` and the viewer maps that.
+Images referenced by articles are bundle files; the viewer loads them through `GET /api/artifacts/:id/r/:hash`. The CLI rewrites `src` to `artifacts:blob/<hash>` and the viewer maps that. The allowlist accepts no other `img` `src`: a relative, protocol-relative or absolute address is dropped, because it would load from the viewer's own origin or tell a third party who is reading. In inline SVG, `fill` and `stroke` take a colour or a `url(#id)` reference inside the same SVG, and nothing else.
 
 ## Publish protocol (CLI side)
 
@@ -134,6 +134,8 @@ When a canvas thread is created:
 3. It draws the pin's position as a 6 px yellow ring.
 4. It writes `crops/<thread id>.webp`.
 
+The render is the author's upload, so sharp is given a limit of 64 million input pixels and only WebP, PNG and JPEG are accepted. A render over either gets no crop; the comment is saved anyway.
+
 Article threads have no crop; their quote is the context.
 
 ## Presigned URLs
@@ -146,7 +148,7 @@ Article threads have no crop; their quote is the context.
 
 ## Clean-up
 
-A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_advisory_lock(<constant>)` so only one replica runs it:
+A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_advisory_xact_lock(<constant>)` so only one replica runs it. The first run is a minute after boot, so a server redeployed daily still reaches it. The jobs, each also available as `POST /internal/jobs/:name`, are:
 
 1. **Purge expired deletions.** Artifacts with `purge_after < now()`, then removed versions with `purge_after < now()`. Artifact purge:
    - In one transaction, delete threads, comments, decisions, views, access, links, invites, versions, pages, frames, blocks and activity for the artifact.
@@ -156,7 +158,12 @@ A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_adviso
    - **`blobs` rows** are deleted with their objects.
    - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders` and `pages.meta.htmlHash` of non-purged versions.
    - **Sweep:** list `blobs/` (paginated `ListObjectsV2`) and delete objects not in the set whose `LastModified` is more than 24 hours old. The age check protects uploads from a publish that hasn't committed yet.
+   - **Orphans:** objects under `crops/` and `data/` whose thread or artifact row no longer exists, and are more than 24 hours old, are deleted too. That catches a purge whose bucket step failed after its rows were gone.
    - **Log:** record counts and bytes freed.
-3. **Expire leftovers:** `webauthn_challenges`, `device_codes`, used or expired `invites` and `reset_links` older than 30 days, and `backend_logs` older than 24 hours.
+3. **Expire leftovers** (`expire`): `webauthn_challenges`, `device_codes`, ended `sessions` (with their push subscriptions), used or expired `invites` and `reset_links` older than 30 days, and `backend_logs` older than 24 hours.
+4. **Recount usage** (`usage`): recounts `artifact_usage` for artifacts written in the last two days (08).
+5. **Send the digest** (`digest`): one Web Push a day with a count of what happened, claimed through `org.last_digest_at` so a second replica or a restart doesn't send it twice. It runs after the others, outside the lock's transaction.
+
+Steps 1 and 2 are named `purge` and `gc`.
 
 A manual trigger exists for testing and operators: `POST /internal/jobs/:name` on the internal port, with `OPS_SECRET`.

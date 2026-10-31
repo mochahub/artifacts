@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a change or something new.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The problem, not the solution. Say who is doing it, an agent or a person, and on what device.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How it could work. A rough sketch is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today
+      description: Any workaround, or other options you considered.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Before you send
+      options:
+        - label: I checked SPEC.md, which lists what is out of scope for now (email, outside sign-in providers, a hosted service).
+          required: true

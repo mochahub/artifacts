@@ -8,23 +8,11 @@
 |---|---|---|
 | `ghcr.io/<org>/artifacts:<semver>` | `apps/server/Dockerfile` | Bun runtime, the server, the built viewer (`apps/viewer/dist`), Drizzle migrations, sharp |
 
-`apps/server/Dockerfile` (sketch):
-```dockerfile
-FROM oven/bun:1.4.2 AS build
-WORKDIR /src
-COPY . .
-RUN bun install --frozen-lockfile && bun run build
-FROM oven/bun:1.4.2-slim
-WORKDIR /app
-COPY --from=build /src/apps/server/dist ./ 
-COPY --from=build /src/apps/viewer/dist ./public
-COPY --from=build /src/apps/server/drizzle ./drizzle
-RUN echo '{"private":true}' > package.json && bun add sharp@0.35.5 quickjs-emscripten@0.32.0   # loaded at runtime, so not bundled
-ENV NODE_ENV=production PORT=8080 CONTENT_PORT=8081 INTERNAL_PORT=8082
-EXPOSE 8080 8081 8082
-HEALTHCHECK CMD bun -e "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1))"
-CMD ["bun", "server.js"]
-```
+`apps/server/Dockerfile`, in two stages:
+- **build:** `bun install --frozen-lockfile && bun run build`. Then a short script copies `sharp` and `quickjs-emscripten`, with everything they depend on, out of that install into `/runtime/node_modules`. They are loaded at runtime, so they aren't bundled, and they resolve from `bun.lock` like everything else: no `bun add` in the image, so no lockless install.
+- **runtime:** `oven/bun:<version>-slim` with `server.js`, the sandbox files, `public/` (the viewer), `drizzle/` and that `node_modules`. A `RUN` imports both packages, so a build without sharp's native part fails. It runs as the image's `bun` user; everything under `/app` stays owned by root, and the server writes nothing to disk, so the root filesystem can be read-only (Compose does that, with a tmpfs `/tmp`).
+
+Both base images are pinned by tag and digest. Keep the tag equal to `.bun-version` and the `packageManager` field; Dependabot's `docker` ecosystem bumps the digest, and whoever merges a Bun bump changes all three. `EXPOSE` lists 8080 and 8081. 8082 (`INTERNAL_PORT`, protected by `OPS_SECRET`) is for operators: Compose doesn't publish it, and on Railway nothing gives it a domain. The health check is `GET /api/health` every 30s, with a 30s start period.
 
 Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the lockfile). Images are multi-arch (amd64, arm64).
 
@@ -35,7 +23,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
    - the content host equal to a viewer host
    - the content host sharing a registrable domain with a viewer host (a warning, not an error)
 2. **Migrate:** run Drizzle migrations under `pg_advisory_lock`, so only one replica migrates.
-3. **First boot only:** if `org` is absent, enter setup mode. Generate VAPID keys if missing (Phase 2). If `org` exists, exit if `CONTENT_URL`'s host is the home domain.
+3. **First boot only:** if `org` is absent, enter setup mode. (The VAPID keys are made the first time push needs them, not here: there's no `org` row to hold them yet.) If `org` exists, exit if `CONTENT_URL`'s host is the home domain.
 4. **Bucket:** `HeadBucket`, and create the bucket only on a 404 (Compose). Any other failure logs a warning and boot continues, so a key that can't call `HeadBucket` doesn't stop the app.
 5. **Listen** on the three ports (03).
 6. **Start jobs** (05 clean-up, usage recount, log expiry) on timers, guarded by advisory locks.
@@ -59,7 +47,7 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 | `SETUP_TOKEN` | yes | 32+ random chars | Template variable function; not sealed (SPEC §7.4) |
 | `SESSION_SECRET` | yes | 64 random chars | Keys for content tokens (HKDF, info `"content"`). Caller pseudonyms use `org.pseudonym_key` instead (02). |
 | `OPS_SECRET` | yes | 64 random chars | For `/internal/jobs/*` |
-| `PORT`, `CONTENT_PORT`, `INTERNAL_PORT` | no | 8080, 8081, 8082 | |
+| `PORT`, `CONTENT_PORT`, `INTERNAL_PORT` | no | 8080, 8081, 8082 | Must differ (boot refuses otherwise). A viewer URL that is plain http away from localhost, or an `OPS_SECRET` reused as another secret, is logged as a warning. |
 | `LOG_LEVEL` | no | `info` | JSON logs to stdout |
 | `GITHUB_RELEASES_REPO` | no | `mochahub/artifacts` | For the "new version available" notice in Settings. `none` turns it off. A private repo: no notice. |
 
@@ -84,12 +72,24 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 
 ## Docker Compose (`deploy/compose/`)
 
-`docker-compose.yml`: `artifacts`, `postgres:17`, `chrislusf/seaweedfs:4.50` (pinned; `weed server -s3` with an `s3.json` of keys generated into the folder, plus explicit `-master.volumeSizeLimitMB` and `-volume.max`, because weed otherwise derives the volume count from free disk and a small disk gets none; the app creates its bucket at boot if missing). `artifacts setup --docker` writes it with `.env`. Ports:
-- `8080`: the viewer
-- `8081`: content
-- `8333`: the bucket, because presigned URLs go straight to it (`S3_PUBLIC_ENDPOINT`). On a remote machine, change `S3_PUBLIC_ENDPOINT` in `.env` to an address clients can reach.
+`docker-compose.yml`: `artifacts`, `postgres:17`, `chrislusf/seaweedfs:4.50` (pinned; `weed server -s3`, plus explicit `-master.volumeSizeLimitMB` and `-volume.max`, because weed otherwise derives the volume count from free disk and a small disk gets none; the app creates its bucket at boot if missing). `artifacts setup --docker` writes it, embedded in the CLI, with `.env` (mode 0600), the only file that holds secrets. Run it from the folder it was written to; `deploy/compose/README.md` is the checklist for a real deployment.
+
+SeaweedFS gets its key pair from `.env` as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, which weed turns into an admin identity. There is no `s3.json` in a new deployment (older ones keep theirs and keep working). Without those variables weed's S3 is open to anyone, so Compose uses `${…:?}` to refuse to start without them.
+
+Hardening on every service: `no-new-privileges`, `cap_drop: ALL` (Postgres and SeaweedFS add back what their entrypoints need to own their data folders and drop to their own user), a read-only root filesystem with tmpfs where the image writes, memory, CPU and pid limits, and `json-file` logs capped at 3 × 10 MB. SeaweedFS has `init: true`: as PID 1 weed ignores SIGTERM, so a stop took ten seconds and ended in SIGKILL.
+
+Ports, all published on `BIND_ADDRESS` (default `127.0.0.1`, written to `.env`), for a reverse proxy on the same machine:
+- `VIEWER_PORT` (8080): the viewer
+- `LIVE_PORT` (8081): content
+- `S3_PORT` (8333): the bucket, because presigned URLs go straight to it (`S3_PUBLIC_ENDPOINT`). On a remote machine, change `S3_PUBLIC_ENDPOINT` in `.env` to the proxy's address for it.
+
+Not published: Postgres, and the app's 8082. To reach the ports from another machine without a proxy, set `BIND_ADDRESS=0.0.0.0` (over plain HTTP, passkeys won't work).
+
+Compose reads `ARTIFACTS_IMAGE`, `BIND_ADDRESS`, `VIEWER_PORT`, `LIVE_PORT`, `S3_PORT`, `POSTGRES_PASSWORD` and `MORE_URLS` from `.env` on top of the app variables above.
 
 Put a reverse proxy (Caddy example in the README) in front for HTTPS. Passkeys and `Secure` cookies need HTTPS, except on `localhost`.
+
+`docker-compose.dev.yml` and `docker-compose.test.yml` are for development and CI only: fixed, public credentials, ports bound to `127.0.0.1`, and in the test stack throwaway tmpfs storage.
 
 ## Releases (`.github/workflows/`)
 

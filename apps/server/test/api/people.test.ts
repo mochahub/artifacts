@@ -177,6 +177,53 @@ describe("people, invites and tokens", () => {
     expect((await invite("gone@example.com", "member")).status).toBe(200);
   });
 
+  test("removing someone ends the organization tokens and share links they created", async () => {
+    await publish(t, token, { slug: "removal-target", visibility: "org" });
+    const [target] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "removal-target"));
+    const artifactId = target?.id as string;
+    const leaving = await invited("leaving@example.com", "admin");
+    const [row] = await t.server.db.select().from(people).where(eq(people.email, "leaving@example.com"));
+    const makeToken = async (cookie: string, name: string) =>
+      (await (
+        await t.api("/api/tokens", { method: "POST", cookie, json: { name, scopes: ["read"] } })
+      ).json()) as { token: string };
+    const makeLink = async (cookie: string) => {
+      const made = await t.api(`/api/artifacts/${artifactId}/links`, {
+        method: "POST",
+        cookie,
+        json: { permission: "comment" },
+      });
+      expect(made.status).toBe(200);
+      return ((await made.json()) as { url: string }).url.split("/s/")[1] as string;
+    };
+    const theirToken = await makeToken(leaving.cookie, "leaving's");
+    const ownersToken = await makeToken(owner, "owner's");
+    const theirLink = await makeLink(leaving.cookie);
+    const ownersLink = await makeLink(owner);
+    const guestOn = async (secret: string) => {
+      const response = await t.api(`/api/s/${secret}/guest`, { method: "POST", json: { name: "Riley" } });
+      expect(response.status).toBe(200);
+      return (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    };
+    const theirGuest = await guestOn(theirLink);
+    const ownersGuest = await guestOn(ownersLink);
+    expect((await t.api("/api/home", { bearer: theirToken.token })).status).toBe(200);
+    expect((await t.api(`/api/artifacts/${artifactId}`, { cookie: theirGuest })).status).toBe(200);
+
+    expect((await t.api(`/api/people/${row?.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+
+    expect((await t.api("/api/home", { bearer: theirToken.token })).status).toBe(401);
+    expect(await code(await t.api(`/api/s/${theirLink}`))).toBe("gone");
+    expect(
+      await code(await t.api(`/api/s/${theirLink}/guest`, { method: "POST", json: { name: "Again" } })),
+    ).toBe("gone");
+    expect((await t.api(`/api/artifacts/${artifactId}`, { cookie: theirGuest })).status).toBe(404);
+    // Only what the removed person made: the owner's token and link carry on.
+    expect((await t.api("/api/home", { bearer: ownersToken.token })).status).toBe(200);
+    expect((await t.api(`/api/s/${ownersLink}`)).status).toBe(200);
+    expect((await t.api(`/api/artifacts/${artifactId}`, { cookie: ownersGuest })).status).toBe(200);
+  });
+
   test("a reset link works once and is only for this person", async () => {
     const { cookie } = await invited("reset@example.com", "member");
     const [row] = await t.server.db.select().from(people).where(eq(people.email, "reset@example.com"));
@@ -262,5 +309,68 @@ describe("people, invites and tokens", () => {
     expect(results.filter((r) => r.status === 200)).toHaveLength(1);
     const rows = await t.server.db.select().from(invites).where(eq(invites.email, "race@example.com"));
     expect(rows).toHaveLength(1);
+  });
+
+  test("a token can't get a fresh link for an admin invite either", async () => {
+    const made = (await (await invite("fresh-admin@example.com", "admin", { cookie: owner })).json()) as {
+      invite: { id: string };
+      url: string;
+    };
+    const asToken = await t.api(`/api/invites/${made.invite.id}/link`, { method: "POST", bearer: token });
+    expect(await code(asToken)).toBe("forbidden");
+    // The old link is untouched, and the viewer can still copy a new one.
+    expect((await t.api(`/api/invites/${made.url.split("/join/")[1]}`)).status).toBe(200);
+    expect(
+      (await t.api(`/api/invites/${made.invite.id}/link`, { method: "POST", cookie: owner })).status,
+    ).toBe(200);
+    // A token still gets a link for what it may invite.
+    const member = (await (await invite("fresh-member@example.com", "member")).json()) as {
+      invite: { id: string };
+    };
+    expect(
+      (await t.api(`/api/invites/${member.invite.id}/link`, { method: "POST", bearer: token })).status,
+    ).toBe(200);
+  });
+
+  test("a token can't issue a reset link for another owner", async () => {
+    const second = await invited("second-owner@example.com", "admin");
+    const [row] = await t.server.db.select().from(people).where(eq(people.email, "second-owner@example.com"));
+    const promoted = await t.api(`/api/people/${row?.id}`, {
+      method: "PATCH",
+      cookie: owner,
+      json: { role: "owner" },
+    });
+    expect(promoted.status).toBe(200);
+    const asToken = await t.api(`/api/people/${row?.id}/reset-link`, { method: "POST", bearer: token });
+    expect(await code(asToken)).toBe("forbidden");
+    // An owner in the viewer still can.
+    const asPerson = await t.api(`/api/people/${row?.id}/reset-link`, { method: "POST", cookie: owner });
+    expect(asPerson.status).toBe(200);
+    expect((await t.api("/api/me", { cookie: second.cookie })).status).toBe(200);
+  });
+
+  test("losing admin ends what they issued, like removal does", async () => {
+    const admin = await invited("demoted@example.com", "admin");
+    const [row] = await t.server.db.select().from(people).where(eq(people.email, "demoted@example.com"));
+    const [sam] = await t.server.db.select().from(people).where(eq(people.email, "sam@example.com"));
+    const made = (await (
+      await invite("comes-back@example.com", "admin", { cookie: admin.cookie })
+    ).json()) as { url: string };
+    const reset = (await (
+      await t.api(`/api/people/${sam?.id}/reset-link`, { method: "POST", cookie: admin.cookie })
+    ).json()) as { url: string };
+    const inviteUrl = `/api/invites/${made.url.split("/join/")[1]}`;
+    const resetUrl = `/api/reset/${reset.url.split("/reset/")[1]}`;
+    expect((await t.api(inviteUrl)).status).toBe(200);
+
+    // Losing admin takes the invite and the reset link back, so they can't hand the power over again.
+    const demote = await t.api(`/api/people/${row?.id}`, {
+      method: "PATCH",
+      cookie: owner,
+      json: { role: "member" },
+    });
+    expect(demote.status).toBe(200);
+    expect((await t.api(inviteUrl)).status).toBe(410);
+    expect((await t.api(resetUrl)).status).toBe(410);
   });
 });

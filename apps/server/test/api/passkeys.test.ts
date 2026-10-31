@@ -203,3 +203,20 @@ describe("passkeys", () => {
     expect((await t.api("/api/me/passkeys", { bearer: token })).status).toBe(403);
   });
 });
+
+describe("passkey sign-in options", () => {
+  let t: TestServer;
+  beforeAll(async () => {
+    t = await startTestServer();
+    await claim(t);
+  });
+  afterAll(() => t.stop());
+
+  test("each call stores a challenge, so a client gets 60 per 15 minutes", async () => {
+    const options = () => t.api("/api/auth/passkey/options", { method: "POST", json: {} });
+    for (let i = 0; i < 60; i++) expect((await options()).status).toBe(200);
+    expect((await options()).status).toBe(429);
+    t.clock.advance(15 * 60_000 + 1000);
+    expect((await options()).status).toBe(200);
+  });
+});

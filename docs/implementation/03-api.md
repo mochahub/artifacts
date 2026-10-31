@@ -36,7 +36,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 
 | HTTP | `code` | When |
 |---|---|---|
-| 400 | `invalid` | Body fails validation; `details` has zod issues |
+| 400 | `invalid` | Body fails validation; `details` has zod issues. Also a number or text Postgres refuses (a version past 2,147,483,647, a NUL byte), with empty `details`. |
 | 401 | `unauthenticated` | No valid caller |
 | 401 | `recent_auth_required` | The action needs a sign-in within 10 minutes; the viewer re-prompts |
 | 403 | `forbidden` | Caller can't do this |
@@ -118,12 +118,12 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/org` | `org.read` | Name, settings, domains (read-only view of `PUBLIC_URL`, `MORE_URLS`, `CONTENT_URL`, home domain). |
 | `PATCH /api/org` | `org.manage` | `{ name?, settings? }` |
 | `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. |
-| `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. |
-| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens. |
-| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }` |
+| `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. An admin or owner who becomes a member or reviewer also loses the invites and reset links they issued that are still unused. |
+| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
+| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner or itself. |
 | `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |
-| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. |
+| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. A token gets 403 unless the invite is for a member or reviewer. |
 | `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ id, token }`, shown once. |
 | `GET /api/shares` | `org.manage` | Every outside share (people and links) across artifacts. |
 
@@ -142,7 +142,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 
 `ArtifactCard` = `{ id, project, slug, title, cover: { renderHash } | { title }, pageCount, latestVersion, status: { kind: "waiting"|"with_agent"|"approved"|"not_reviewed", agent?, version? }, counts: { open, repliesToYou, changedFrames }, publishedBy, agent, publishedAt, archivedAt }`.
 
-`Artifact` = the card plus `{ visibility, publisherId, hasBackend, pages: [{ key, kind, title, group, changed: bool, open: int }], decision: { kind, note, version, by, at } | null, permissions: { comment, manage, share, delete, purge } }`.
+`Artifact` = the card plus `{ visibility, publisherId, hasBackend, pages: [{ key, kind, title, group, changed: bool, open: int }], decision: { kind, note, version, by, at } | null, permissions: { comment, decide, manage, share, delete, purge } }`. `decide` is whether the caller may approve, request changes or resolve threads (`artifact.decide`); a viewer can hide those buttons with it. Older servers omit it.
 
 ## Lifecycle: archive and delete
 
@@ -163,7 +163,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/access` | `artifact.share` | People added and links. |
-| `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. `publish` is refused (400) for people outside the organization. |
+| `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. `publish` is refused (400) for people outside the organization. Called with a token, the access or invite is marked `via_token`, so that person can comment but not decide or resolve; the same call by a person clears the mark (04). |
 | `DELETE /api/artifacts/:id/access/:personId` | `artifact.share` | |
 | `POST /api/artifacts/:id/links` | `artifact.share` (and `org.settings.linkSharing`) | `{ permission, expiresIn?: "1d"\|"7d"\|"30d"\|null }` → `{ link, url }` |
 | `DELETE /api/artifacts/:id/links/:linkId` | `artifact.share` | Revoke; guests lose access at once. |
@@ -182,7 +182,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 | Method, path | Action | Notes |
 |---|---|---|
-| `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. |
+| `GET /api/artifacts/:id/r/:hash` | `artifact.read` | A render or embed image. Checks the hash belongs to one of the artifact's live versions, then 302 to a presigned GET URL. With `?via=app` (the service worker, 06) an `image/*` file up to 64 MB comes through the app instead, as an `attachment` with `nosniff`, never as a page; anything else still gets the 302. |
 | `GET /api/artifacts/:id/v/:n/article/:pageKey` | `artifact.read` | The article's HTML as re-sanitized by the server at commit ([05](05-publish-and-storage.md#building-articles-cli)), fetched as text and never navigated to. Served as `Content-Type: text/plain; charset=utf-8` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so a browser opening the URL directly can never render it on the viewer's origin. |
 | `GET /api/threads/:id/crop` | `artifact.read` | 302 to the crop. |
 
@@ -215,20 +215,20 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
   "threadsOnChanged": [3, 4, 6, 8], "orphaned": [], "uploaded": { "files": 7, "bytes": 421888 }, "reused": 214 }
 ```
 
-Commit checks: every hash in `files` and every render hash exists in the bucket with the declared size (`HEAD`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
+Commit checks: every hash in `files` and every render hash is proved, either by a `blobs` row or by downloading the object, hashing it and comparing it with the declared hash and size (05, "Presigned URLs"; a mismatch deletes the object and answers 400 `invalid`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
 
 ## Review
 
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/threads?status=open\|fixed\|resolved\|all&page=&version=` | `artifact.read` | `[Thread]`, with comments. |
-| `POST /api/artifacts/:id/threads` | `artifact.comment` | `{ pageKey, anchor, body, version }` → `Thread`. Canvas anchors trigger crop generation (05). |
+| `POST /api/artifacts/:id/threads` | `artifact.comment` | `{ pageKey, anchor, body, version }` → `Thread`. Canvas anchors trigger crop generation (05). A page key is up to 500 characters, a quote up to 10,000 and its prefix and suffix 500 each. |
 | `POST /api/threads/:id/comments` | `artifact.comment` | `{ body, marksFixed?: bool, agent? }`. `agent` is the CLI's detected agent, kept only for CLI tokens. `marksFixed` is allowed for CLI tokens and the publisher: sets `status = fixed`, `fixed_version` = latest. A comment on a `fixed` thread by anyone but the fixer sets it back to `open`. |
 | `POST /api/threads/:id/resolve` / `reopen` | `thread.resolve` (people only, never tokens) | |
 | `PATCH /api/comments/:id` / `DELETE` | author only | Edit or delete your own comment within 24 hours. |
-| `POST /api/artifacts/:id/decisions` | `artifact.decide` (people only) | `{ version, kind, note }` |
+| `POST /api/artifacts/:id/decisions` | `artifact.decide` (people only) | `{ version, kind, note }` (note up to 10,000 characters) |
 | `GET /api/artifacts/:id/status` | `artifact.read` | For `artifacts status`: `{ version, decision, decisionVersion, note, open: [Thread], fixedAwaiting: [Thread] }` |
-| `POST /api/artifacts/:id/seen` | `artifact.read` | `{ version, pageKey?, position? }` updates `views` or `guest_views`. |
+| `POST /api/artifacts/:id/seen` | `artifact.read` | `{ version, pageKey?, position? }` updates `views` or `guest_views`. `version` is capped at the latest; a position is kept only for a page the artifact has, up to 2,000 characters. |
 
 `Thread` = `{ id, n, pageKey, anchor, anchorState, status, createdVersion, fixedVersion, author: { name, kind: "person"|"guest"|"agent" }, crop: url|null, comments: [{ id, author, agent, body, version, marksFixed, createdAt }], createdAt, resolvedAt }`.
 
@@ -257,7 +257,7 @@ The viewer calls these on behalf of a live frame (protocol in [08-micro-apps.md]
 | Method, path | Notes |
 |---|---|
 | `POST /api/artifacts/:id/content-token` (viewer port) | Action `artifact.read`. `{ version }` → `{ base: "<CONTENT_URL>/t/<token>/v5/", expiresAt }`. Token format in 04. |
-| `GET /t/:token/v:n/*` (content port) | Serves bundle files of version n by path: reads the blob (cached in memory by hash, LRU 64 MB) and returns it with its type. Checks: valid token for this artifact and version; `Sec-Fetch-Dest` is `iframe` (or `empty`/`script`/`style`/`image`/`font` for sub-resources, and `audio`/`video`/`track` for media), never `document`, so it can't be opened as a top-level page. Spike S8 confirmed WebKit sends these values ([spikes.md](spikes.md#s8--live-frames-in-webkit)). |
+| `GET /t/:token/v:n/*` (content port) | Serves bundle files of version n by path: reads the blob (cached in memory by hash, LRU 64 MB) and returns it with its type. A file over 8 MB isn't loaded whole when a `Range` is asked for: the app reads only that range from the bucket, and an open-ended range (`bytes=0-`) gets one 8 MB piece as a 206, which the browser follows up. Checks: valid token for this artifact and version; `Sec-Fetch-Dest` is `iframe` (or `empty`/`script`/`style`/`image`/`font` for sub-resources, and `audio`/`video`/`track` for media), never `document`, so it can't be opened as a top-level page. Spike S8 confirmed WebKit sends these values ([spikes.md](spikes.md#s8--live-frames-in-webkit)). |
 | `ANY /t/:token/v:n/api/*` (content port, Phase 2) | Runs that version's backend in the sandbox ([08](08-micro-apps.md#request-flow)). Rate-limited per caller (04); bodies over `backendRequestBytes` get 413. `Access-Control-Allow-Origin: *`, no credentials, `OPTIONS` preflight answered. 404 if the version has no backend. |
 
 **Access is re-checked on every content-port request,** not just when the token is minted. The token proves who the caller is; it doesn't grant access on its own. On each request the app checks, with a cache of at most 5 seconds:
@@ -281,7 +281,7 @@ The CSP's `sandbox allow-scripts` forces an opaque origin on any document from t
 
 | Method, path | Caller | Notes |
 |---|---|---|
-| `POST /internal/jobs/:name` | `Authorization: Bearer <OPS_SECRET>` (operators and tests) | Run a job now: `purge`, `gc`, `expire`, `usage` ([05](05-publish-and-storage.md#clean-up)) |
+| `POST /internal/jobs/:name` | `Authorization: Bearer <OPS_SECRET>` (operators and tests) | Run a job now: `purge`, `gc`, `expire`, `usage`, `digest` ([05](05-publish-and-storage.md#clean-up)) |
 
 Backends don't use the internal API: they run in sandbox processes that talk to the app over IPC ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
 
@@ -290,5 +290,5 @@ Backends don't use the internal API: they run in sandbox processes that talk to 
 | Method, path | Notes |
 |---|---|
 | `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. A stream closes after 5 minutes and the browser reconnects, which rechecks access. 10 streams per caller. |
-| `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. 10 devices per person. |
+| `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. `keys.p256dh` must be an uncompressed P-256 point (65 bytes) and `keys.auth` 16 bytes, base64url. 10 devices per person; ended sessions' devices are removed daily. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |

@@ -34,6 +34,28 @@ const MAX_SCALE = 8;
 const DOUBLE_TAP_MS = 300;
 const TAP_SLOP = 8;
 
+/** Keeps a scale inside the zoom limits. NaN (a 0/0 somewhere in a gesture) keeps `fallback` instead of spreading. */
+export function clampScale(s: number, fallback: number) {
+  return Number.isNaN(s) ? fallback : Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+}
+
+/**
+ * The scale at which a rectangle fits a box between the insets. Never zero or negative, which a box
+ * shorter than its insets (a phone in landscape with the keyboard up) would otherwise give: the
+ * canvas would flip over.
+ */
+export function fitScale(
+  box: { width: number; height: number },
+  rect: { w: number; h: number },
+  insets: { top: number; bottom: number; side: number },
+) {
+  const fit = Math.min(
+    (box.width - insets.side * 2) / rect.w,
+    (box.height - insets.top - insets.bottom) / rect.h,
+  );
+  return clampScale(fit, 1);
+}
+
 /**
  * Boards come left to right (06). A tall screen wraps them into two columns, as board 02 draws it,
  * or four boards in a row come out tiny on a phone. Only positions on screen change, never anchors.
@@ -170,9 +192,9 @@ export class CanvasEngine {
   }
 
   private target(rect: Rect) {
-    const { top, bottom, side } = this.insets();
+    const { top, bottom } = this.insets();
     const box = this.root.getBoundingClientRect();
-    const s = Math.min((box.width - side * 2) / rect.w, (box.height - top - bottom) / rect.h, MAX_SCALE);
+    const s = fitScale(box, rect, this.insets());
     return {
       s,
       x: (box.width - rect.w * s) / 2 - rect.x * s,
@@ -231,7 +253,7 @@ export class CanvasEngine {
   }
 
   private zoomAround(s: number, sx: number, sy: number) {
-    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+    const next = clampScale(s, this.s);
     const box = this.root.getBoundingClientRect();
     const ratio = next / this.s;
     this.x = sx - box.left - (sx - box.left - this.x) * ratio;
@@ -370,7 +392,13 @@ export class CanvasEngine {
       this.y += my - this.pinch.my;
       this.pinch.mx = mx;
       this.pinch.my = my;
-      this.zoomAround((this.pinch.s * Math.hypot(a.x - b.x, a.y - b.y)) / this.pinch.dist, mx, my);
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      // Two touches that began on one point have no distance to scale by: wait for them to part.
+      if (this.pinch.dist < 1) {
+        this.pinch.dist = dist;
+        this.pinch.s = this.s;
+      }
+      if (this.pinch.dist >= 1) this.zoomAround((this.pinch.s * dist) / this.pinch.dist, mx, my);
       return;
     }
     if (this.down && Math.hypot(point.x - this.down.x, point.y - this.down.y) > TAP_SLOP)

@@ -13,3 +13,10 @@ playwright-report/
 docs/review/comments.json
 apps/viewer/e2e/.auth.json
 apps/viewer/e2e/.token
+
+# Agent worktrees used by Claude Code
+.claude/
+
+# Keys and certificates
+*.pem
+*.key

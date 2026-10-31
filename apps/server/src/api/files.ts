@@ -10,6 +10,9 @@ import type { Deps } from "./deps.ts";
 import { parseBody, type Routes } from "./routes.ts";
 
 const CONTENT_TOKEN_MS = 2 * 3600_000;
+const IMAGE = /^image\//;
+/** A picture bigger than this goes by the redirect, rather than through the app's memory. */
+const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
 
 export function fileRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock, bucket } = deps;
@@ -42,14 +45,21 @@ export function fileRoutes(routes: Routes, deps: Deps) {
     if (!found) throw new ApiError("not_found", "Not found.");
     // The service worker can't read a bucket's answer without CORS, so it asks for the bytes (06).
     if (c.req.query("via") === "app") {
-      const object = await bucket.get(blobKey(hash));
-      if (!object) throw new ApiError("not_found", "Not found.");
-      return new Response(object.body, {
-        headers: {
-          "Content-Type": object.contentType ?? "application/octet-stream",
-          "Cache-Control": "private, max-age=86400",
-        },
-      });
+      // This is the viewer's own origin, and a publisher chooses every file's type. So only pictures come
+      // out this way, and as a download that can't be opened as a page; anything else gets the redirect.
+      const head = await bucket.head(blobKey(hash));
+      if (head && IMAGE.test(head.contentType ?? "") && head.size <= MAX_IMAGE_BYTES) {
+        const object = await bucket.get(blobKey(hash));
+        if (!object) throw new ApiError("not_found", "Not found.");
+        return new Response(object.body, {
+          headers: {
+            "Content-Type": head.contentType as string,
+            "Content-Disposition": "attachment",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=86400",
+          },
+        });
+      }
     }
     return c.redirect(await bucket.presignGet(blobKey(hash)), 302);
   });

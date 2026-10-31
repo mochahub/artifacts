@@ -1,20 +1,22 @@
 import type { Thread } from "@artifacts/schema";
+import { findQuote, type Quote } from "./quote.ts";
 
 const CONTEXT = 32;
 const collapse = (text: string) => text.replace(/\s+/g, " ");
 
-/** Wraps a block's first occurrence of `exact` in a <mark>, across inline elements. */
-function wrap(block: HTMLElement, exact: string, id: string) {
+/** Wraps the quoted passage in a <mark>, across inline elements. */
+function wrap(block: HTMLElement, quote: Quote, id: string) {
   const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   let text = "";
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node as Text).parentElement?.closest(".mm")) continue; // The margin tabs aren't the author's words.
     nodes.push(node as Text);
     text += (node as Text).data;
   }
-  const start = text.indexOf(exact);
-  if (start < 0) return;
-  const end = start + exact.length;
+  const found = findQuote(text, quote);
+  if (!found) return;
+  const [start, end] = found;
   let offset = 0;
   for (const node of nodes) {
     const from = Math.max(start - offset, 0);
@@ -48,7 +50,7 @@ export function decorate(root: HTMLElement, threads: Thread[], open: (id: string
       continue;
     const block = root.querySelector<HTMLElement>(`[data-block="${CSS.escape(anchor.blockKey)}"]`);
     if (!block) continue;
-    if (anchor.type === "text") wrap(block, anchor.quote.exact, thread.id);
+    if (anchor.type === "text") wrap(block, anchor.quote, thread.id);
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "mm";

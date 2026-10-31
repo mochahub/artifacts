@@ -1,5 +1,6 @@
 import { signal } from "@preact/signals";
 import { api, del, post } from "./api.ts";
+import { readStored, writeStored } from "./storage.ts";
 
 /** Set after a first comment; the app shows the sheet. */
 export const askInstall = signal(false);
@@ -17,9 +18,9 @@ export const needsInstall = () => iPhone() && !standalone();
 
 /** Asked once, after your first comment (06). */
 export function shouldAsk() {
-  if (localStorage.getItem(ASKED)) return false;
+  if (readStored(ASKED)) return false;
   if (!needsInstall() && (!canPush() || Notification.permission !== "default")) return false;
-  localStorage.setItem(ASKED, "1");
+  writeStored(ASKED, "1");
   return true;
 }
 

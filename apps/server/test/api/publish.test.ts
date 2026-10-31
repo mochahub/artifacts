@@ -176,4 +176,89 @@ describe("publishing", () => {
     expect((await t.api(`/api/artifacts/${row?.id}/r/${render}`)).status).toBe(401);
     expect((await t.api(`/api/artifacts/not-a-uuid/r/${render}`, { bearer: owner.token })).status).toBe(404);
   });
+
+  test("a content type that isn't a plain media type is refused at prepare and at commit", async () => {
+    const files = (type: string) => [{ path: "a.txt", sha256: hash("a"), size: 1, type }];
+    const prepare = (type: string) =>
+      t.api("/api/publish/prepare", {
+        method: "POST",
+        bearer: owner.token,
+        json: { project: "camerabuddy", slug: "types", title: "Types", files: files(type) },
+      });
+    for (const bad of [
+      "text/plain\r\nSet-Cookie: a=b",
+      "html",
+      "text/html\u0000",
+      `text/${"x".repeat(300)}`,
+    ]) {
+      expect(await error(await prepare(bad))).toBe("invalid");
+    }
+    const ok = await prepare("text/html; charset=utf-8");
+    expect(ok.status).toBe(200);
+    const { uploadId } = PublishPrepared.parse(await ok.json());
+    const commit = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: {
+        uploadId,
+        files: { "a.txt": { hash: hash("a"), size: 1, type: "text/plain\r\nSet-Cookie: a=b" } },
+        pages: [],
+        frames: [],
+        blocks: [],
+      },
+    });
+    expect(await error(commit)).toBe("invalid");
+  });
+
+  test("commit takes no more files than prepare does", async () => {
+    const prepared = await t.api("/api/publish/prepare", {
+      method: "POST",
+      bearer: owner.token,
+      json: { project: "camerabuddy", slug: "many", title: "Many", files: [] },
+    });
+    const { uploadId } = PublishPrepared.parse(await prepared.json());
+    const files = Object.fromEntries(
+      Array.from({ length: 20_001 }, (_, i) => [
+        `f${i}.txt`,
+        { hash: hash(`f${i}`), size: 1, type: "text/plain" },
+      ]),
+    );
+    const commit = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: { uploadId, files, pages: [], frames: [], blocks: [] },
+    });
+    expect(await error(commit)).toBe("too_large");
+
+    // Renders count too: each is looked up, and downloaded if it's new.
+    const frames = Array.from({ length: 5001 }, (_, i) => ({
+      pageKey: "mocks",
+      boardKey: "main",
+      frameKey: `f${i}`,
+      title: null,
+      device: null,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      contentHash: hash(`c${i}`),
+      renders: Object.fromEntries(["1x", "2x", "3x", "thumb"].map((size) => [size, hash(`${size}${i}`)])),
+      livePath: null,
+    }));
+    const withRenders = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: { uploadId, files: {}, pages: [], frames, blocks: [] },
+    });
+    expect(await error(withRenders)).toBe("too_large");
+  });
+
+  test("a backend module over the code limit is refused at commit, before it can be fetched per request", async () => {
+    const big = `export default { fetch() { return new Response("x"); } };//${"x".repeat(1024 * 1024)}`;
+    const response = await publish(t, owner.token, { slug: "bigbackend", backend: big });
+    expect(await error(response)).toBe("too_large");
+    expect((await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bigbackend"))).length).toBe(
+      0,
+    );
+  });
 });

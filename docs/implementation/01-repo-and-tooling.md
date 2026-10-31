@@ -6,21 +6,22 @@ The SPEC §11 layout, in more detail:
 
 ```
 apps/
-  server/           Bun + Hono. src/{index.ts, server.ts, env.ts, s3.ts, http/, auth/, api/, content/, internal/, publish/, review/, data/, sandbox/, jobs/, db/}
+  server/           Bun + Hono. src/{index.ts, server.ts, env.ts, s3.ts, http/, auth/, api/, content/, internal/, publish/, review/, data/, sandbox/, realtime/, push/, jobs/, db/}
                     drizzle/ (generated migrations), test/
   viewer/           Preact + Vite. src/{routes/, components/, canvas/, article/, live/, styles/}, e2e/
 packages/
-  schema/           zod: manifest.ts, api.ts, messages.ts; exported types
-  cli/              src/{commands/, railway/, docker/, publish/, render/, lint/, dev/, credentials/}, test/
+  schema/           zod: src/{manifest.ts, api.ts, messages.ts, sanitize.ts}; exported types
+  cli/              src/{commands/, railway/, docker/, bundle/, article/, render/, lint/, dev/, credentials/, skill/}, test/
   kit/              src/{frames/, tokens.css, article.css, data.js, backend.js}: plain JavaScript and CSS, vendored as they are by `artifacts init`
+  sandbox/          src/{host.js, child.js, prelude.js}: the backend sandbox (08), shared by the server, `artifacts dev` and `render`
 skill/              SKILL.md, references/
 deploy/
   railway/          README.md, template notes
   compose/          docker-compose.yml (prod), docker-compose.dev.yml, docker-compose.test.yml
-fixtures/           camerabuddy-roadmap/, micro-app-poll/
+fixtures/           camerabuddy-roadmap/, micro-app-poll/, micro-app-poll-backend/, gallery/
 docs/               SPEC.md, evaluations, implementation/, mocks/, review/
 .github/workflows/  ci.yml, release.yml
-scripts/            dev.ts, test.ts, e2e.ts (behind the root scripts)
+scripts/            dev.ts, test.ts, e2e.ts (behind the root scripts); build-cli.ts, stamp-version.ts, route-coverage.ts, install.sh, clean-install-test.sh
 ```
 
 ## Tooling
@@ -29,7 +30,8 @@ scripts/            dev.ts, test.ts, e2e.ts (behind the root scripts)
 |---|---|
 | Runtime and package manager | Bun (pinned in `.bun-version`), with workspaces in the root `package.json` |
 | Language | TypeScript, `strict: true`, project references per package |
-| Lint and format | Biome (one config at the root) |
+| Lint and format | Biome (one config at the root; it skips ignored files, like Playwright's `.auth.json`) |
+| Dependency updates | Dependabot: bun, Docker, Compose and Actions, weekly, minor and patch grouped |
 | Server framework | Hono on `Bun.serve`, one app per port |
 | Database | Postgres 17 (Railway Postgres in production), Drizzle ORM and drizzle-kit, the `postgres` driver |
 | Object storage | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` |
@@ -65,6 +67,7 @@ Keep dependencies few and well known. A new dependency needs a reason in the PR 
 | `bun run lint` | Biome and typecheck |
 | `bun run build` | Builds every package and app |
 | `bun run size` | Checks the viewer size budget |
+| `bun run format` | Biome, writing the fixes it can make |
 | `bun run db:generate` | Generates a migration from `apps/server/src/db/schema.ts` |
 | `bun run cli -- <args>` | Runs the CLI from source (from M2) |
 

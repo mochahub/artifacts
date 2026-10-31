@@ -48,7 +48,7 @@ type Res = { artifacts: 1, id: string, ok: true, result: unknown }
 ```
 
 **Viewer rules:**
-1. **Check the sender:** accept a message only if `event.source === liveIframe.contentWindow` for the iframe it created, and `event.data.artifacts === 1`. `event.origin` is the string `"null"` for opaque origins, so the source check is what matters.
+1. **Check the sender:** accept a message only if `event.source` is set and `=== liveIframe.contentWindow` for the iframe it created (a closed sender has a null source, and a detached iframe a null window, which would otherwise match), and `event.data.artifacts === 1`. `event.origin` is the string `"null"` for opaque origins, so the source check is what matters.
 2. **Bind to the iframe:** the artifact id and version come from the iframe's own record in the viewer, never from the message.
 3. **Map to the API:** translate the op to the data API (03) with the viewer's own credentials (session or guest cookie), and post the result back to `event.source` with `targetOrigin "*"`. The data is the frame's own, so nothing leaks.
 4. **Limit:** cap in-flight requests at 8 per frame and drop the rest with `rate_limited`.
@@ -104,7 +104,7 @@ Conditional writes are required of the bucket. Railway's bucket and SeaweedFS bo
 | `backendRequestsPerMinute` | 120 per caller per artifact |
 
 **Files:**
-- **Uploads:** the app streams the body to `PutObject` with the declared `Content-Type`.
+- **Uploads:** the app streams the body to `PutObject` with the declared `Content-Type`. It never reads more than `fileBytes` of a body, whether or not the request declares a length, and the same goes for a JSON value (`dataValueBytes` plus a little for the envelope). File deletes count against `writesPerSecond` like other writes.
 - **Downloads:** presigned GET with `response-content-type`. Types other than `image/*`, `audio/*`, `video/*` and `application/pdf` are also given `response-content-disposition=attachment`.
 
 **Export and clear:**
@@ -140,10 +140,11 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 | File | Runs in | Does |
 |---|---|---|
 | `pool.ts` | The app | Starts and supervises the sandbox processes, routes requests, answers `env.DATA` calls and writes logs |
+| `packages/sandbox/src/host.js` | The app, `artifacts dev` and `artifacts render` | Starts one child and speaks the IPC protocol with it |
 | `packages/sandbox/src/child.js` | Each sandbox process | Holds QuickJS instances and runs requests |
 
 **Processes:**
-- The app starts `sandboxProcesses` children (default 2) with `Bun.spawn([process.execPath, child.js], { env: {}, ipc })`. The environment is **empty**: a child never has the database URL, bucket keys, `SESSION_SECRET` or `OPS_SECRET`. Its only channel is IPC to the app.
+- The app starts `sandboxProcesses` children (default 2) with `Bun.spawn([process.execPath, child.js], { env: { BUN_BE_BUN: "1" }, ipc })` (`packages/sandbox/src/host.js`). The environment holds **nothing but `BUN_BE_BUN=1`**, which lets a compiled CLI binary run itself as Bun: a child never has the database URL, bucket keys, `SESSION_SECRET` or `OPS_SECRET`. Its only channel is IPC to the app.
 - If a child exits, its in-flight requests answer 502 and the app starts a new one.
 
 **Instances:**
@@ -159,12 +160,12 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 - **Warm cache:** up to 16 instances per child (least recently used), and an instance idle for 10 minutes is discarded.
 
 **Limits, enforced per request:**
-- **Time:** a wall-clock deadline of `backendTimeoutMs` from when the request starts running (queue time doesn't count). QuickJS's interrupt handler enforces it while code runs, top-level code on load included; the app enforces it while the backend awaits `env.DATA`. On timeout: 504, and the instance is discarded.
+- **Time:** a wall-clock deadline of `backendTimeoutMs` from when the request starts running (queue time doesn't count). QuickJS's interrupt handler enforces it while code runs, top-level code on load included; the app enforces it while the backend awaits `env.DATA`. On timeout: 504, and the instance is discarded. As a backstop the app kills a child that is still on a request 2 seconds after its deadline; that clock starts when the child picks the request up (it tells the app), not when the app sent it, because a child runs one request at a time and a request can wait behind another backend's loop.
 - **Memory:** an allocation past the limit throws "out of memory" inside the backend. The request answers 500 and the instance is discarded. **After every request**, an instance whose WebAssembly memory has grown past half of `backendMemoryMb` is discarded too, because WebAssembly memory never shrinks.
 - **Logs:** 100 lines per request, 8 KB per line, and 1 MB per artifact per minute. Past that, lines are dropped.
 - **Headers:** only `content-type`, `etag` and `last-modified` pass, and `Cache-Control` is always `no-store`, because an answer can hold one caller's data.
 - **One at a time:** each backend is pinned to one child by its hash, and its requests run one at a time (QuickJS is synchronous, and one instance has one deadline). At most 4 requests wait per backend and 32 per child; beyond that, 503 `busy`.
-- **Sizes:** request bodies over `backendRequestBytes` get 413 before reaching the sandbox; responses over `backendResponseBytes` get 502.
+- **Sizes:** request bodies over `backendRequestBytes` get 413 before reaching the sandbox; responses over `backendResponseBytes` get 502. A module over `backendCodeBytes` is refused at publish with `too_large`, and checked again by its recorded size before each request fetches it.
 - **Teardown:** freeing an instance with `env.DATA` calls in flight makes emscripten abort, which is catchable and leaves only that instance dead (checked in M10, `spikes/s10/`). So freeing is tried, a failure is ignored, and the instance is dropped; its own `WebAssembly.Memory` goes with it. Late `env.DATA` answers for it are ignored.
 
 Checked before building (M10, `spikes/s10/`): `Bun.spawn` with `ipc` and an empty environment works, and the child sees no variables; a second child answers in 37 ms while the first runs a busy loop, which is then interrupted on time; freeing mid-call aborts emscripten, the abort is catchable, and the same child runs the next request; typed-array, string and heap floods and deep recursion all fail inside the backend and leave the child alive; a crashed child's exit reaches the parent.

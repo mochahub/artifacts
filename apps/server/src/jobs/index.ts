@@ -11,6 +11,7 @@ import {
   invites,
   pages,
   resetLinks,
+  sessions,
   threads,
   versions,
   webauthnChallenges,
@@ -86,24 +87,32 @@ const UUID_AT = /^(?:crops|data)\/([0-9a-f-]{36})/;
 
 /** What a purge's bucket step left behind, if the bucket failed after the rows were gone. */
 async function sweepOrphans(deps: Deps, cutoff: number) {
-  for (const [prefix, table] of [
-    ["crops/", threads],
-    ["data/", artifacts],
-  ] as const) {
+  for (const prefix of ["crops/", "data/"]) {
     let cursor: string | undefined;
     do {
       const page = await deps.bucket.list(prefix, { cursor });
       const ids = [...new Set(page.objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
-      const alive = ids.length
-        ? new Set(
-            (await deps.db.select({ id: table.id }).from(table).where(inArray(table.id, ids))).map(
-              (row) => row.id,
-            ),
-          )
-        : new Set<string>();
+      // A crop lives while a thread names it as its crop: a purged version clears that, and the thread stays.
+      // Data lives while its artifact does.
+      const alive = new Set<string>();
+      if (ids.length && prefix === "crops/") {
+        const keys = page.objects.map((object) => object.key);
+        const rows = await deps.db
+          .select({ key: threads.cropKey })
+          .from(threads)
+          .where(inArray(threads.cropKey, keys));
+        for (const row of rows) if (row.key) alive.add(row.key);
+      } else if (ids.length) {
+        const rows = await deps.db
+          .select({ id: artifacts.id })
+          .from(artifacts)
+          .where(inArray(artifacts.id, ids));
+        for (const row of rows) alive.add(row.id);
+      }
       const dead = page.objects.filter((object) => {
         const id = UUID_AT.exec(object.key)?.[1];
-        return id && !alive.has(id) && object.updatedAt.getTime() < cutoff;
+        const name = prefix === "crops/" ? object.key : id;
+        return id && name && !alive.has(name) && object.updatedAt.getTime() < cutoff;
       });
       await Promise.all(dead.map((object) => deps.bucket.delete(object.key)));
       cursor = page.nextCursor ?? undefined;
@@ -117,6 +126,8 @@ export async function expireLeftovers(deps: Deps) {
   const old = new Date(now.getTime() - 30 * DAY);
   await deps.db.delete(webauthnChallenges).where(lt(webauthnChallenges.expiresAt, now));
   await deps.db.delete(deviceCodes).where(lt(deviceCodes.expiresAt, now));
+  // Their push subscriptions go with them (cascade): a dead device would otherwise count toward a person's ten.
+  await deps.db.delete(sessions).where(lt(sessions.expiresAt, now));
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
   await expireLogs(deps);

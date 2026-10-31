@@ -48,13 +48,23 @@
   class URLSearchParams {
     #pairs = [];
     constructor(init = "") {
+      // As the URL standard has it: split at the first "=" only, skip empty parts, and leave a stray
+      // "%" as it is. A backend that reads a token or a signature from the query must see what was sent.
+      const decode = (text) =>
+        text.replace(/\+/g, " ").replace(/(%[0-9a-f]{2})+/gi, (run) => {
+          try {
+            return decodeURIComponent(run);
+          } catch {
+            return run;
+          }
+        });
       const text = String(init).replace(/^\?/, "");
-      for (const part of text ? text.split("&") : []) {
-        const [key, value = ""] = part.split("=");
-        this.#pairs.push([
-          decodeURIComponent(key.replace(/\+/g, " ")),
-          decodeURIComponent(value.replace(/\+/g, " ")),
-        ]);
+      for (const part of text.split("&")) {
+        if (part === "") continue;
+        const at = part.indexOf("=");
+        this.#pairs.push(
+          at < 0 ? [decode(part), ""] : [decode(part.slice(0, at)), decode(part.slice(at + 1))],
+        );
       }
     }
     get(name) {

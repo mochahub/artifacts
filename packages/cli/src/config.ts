@@ -41,17 +41,55 @@ export function saveServer(entry: ServerEntry) {
   writeConfig({
     servers: [
       ...rest.map((server) => ({ ...server, default: false })),
-      { ...previous, ...entry, default: true },
+      // A server set up here names itself (setup saves the hostname first, then "artifacts" with its
+      // Railway details). After that the name stays: railwayDir is named after it, so a later `login`
+      // saving the hostname mustn't rename it and point domain and upgrade at an unlinked folder.
+      {
+        ...previous,
+        ...entry,
+        name: entry.railway || entry.docker ? entry.name : (previous?.name ?? entry.name),
+        default: true,
+      },
     ],
   });
 }
 
+/** The hosts where plain http is still fine: this machine itself, where nothing crosses a network. */
+const isLoopback = (hostname: string) =>
+  hostname === "localhost" ||
+  hostname === "127.0.0.1" ||
+  hostname === "[::1]" ||
+  hostname.endsWith(".localhost");
+
+/** Raised for a server address the CLI won't send a password or token to. */
+export class InsecureServerError extends CliError {}
+
+/**
+ * A password or token only ever goes over HTTPS, or to this machine. Every server address passes
+ * through here, whether it was typed, set in the environment, or stored in the config by an older CLI.
+ */
+export function requireHttps(url: string): string {
+  const parsed = new URL(url);
+  if (parsed.protocol === "http:" && !isLoopback(parsed.hostname)) {
+    throw new InsecureServerError(
+      `The CLI only signs in over HTTPS, and ${parsed.origin} is plain http: put a reverse proxy in front of the server (the README's HTTPS section shows how) and use its https:// address.`,
+    );
+  }
+  return url;
+}
+
 export const normalizeUrl = (url: string) => {
+  let parsed: URL;
   try {
-    return new URL(url.includes("://") ? url : `https://${url}`).origin;
+    parsed = new URL(url.includes("://") ? url : `https://${url}`);
   } catch {
     throw new CliError(`"${url}" isn't a URL.`);
   }
+  // A file: or custom scheme has the origin "null", which is not a server.
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new CliError(`"${url}" isn't a web address. Use https://.`);
+  }
+  return requireHttps(parsed.origin);
 };
 
 /** --server, then ARTIFACTS_URL, then the default server in config (07). */
@@ -59,10 +97,10 @@ export function pickServer(option?: string): string {
   const servers = readConfig().servers;
   if (option) {
     const named = servers.find((server) => server.name === option || server.url === option);
-    return named?.url ?? normalizeUrl(option);
+    return named ? requireHttps(named.url) : normalizeUrl(option);
   }
   if (process.env.ARTIFACTS_URL) return normalizeUrl(process.env.ARTIFACTS_URL);
   const chosen = servers.find((server) => server.default) ?? servers[0];
   if (!chosen) throw new CliError("No server yet. Run artifacts setup.");
-  return chosen.url;
+  return requireHttps(chosen.url);
 }

@@ -14,6 +14,10 @@ import { cropAround } from "./crop.ts";
 
 const MINUTE = 60_000;
 const DAY = 24 * 3600_000;
+/** The same limit as a comment's body. */
+const MAX_COMMENT_CHARS = 10_000;
+/** A page key, or the words around a quote. */
+const MAX_KEY_CHARS = 500;
 
 type ThreadRow = typeof threads.$inferSelect;
 type CommentRow = typeof comments.$inferSelect;
@@ -172,6 +176,17 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
 
   routes.post("/api/artifacts/:id/threads", { action: "artifact.comment", resource: artifact }, async (c) => {
     const body = await parseBody(c, CreateThread);
+    // The schema leaves these open, and anyone who may comment, a guest included, can send them.
+    const { anchor } = body;
+    if (
+      body.pageKey.length > MAX_KEY_CHARS ||
+      (anchor?.type === "text" &&
+        (anchor.quote.exact.length > MAX_COMMENT_CHARS ||
+          anchor.quote.prefix.length > MAX_KEY_CHARS ||
+          anchor.quote.suffix.length > MAX_KEY_CHARS))
+    ) {
+      throw new ApiError("invalid", "That page or quote is too long.");
+    }
     const caller = c.get("caller");
     const artifactId = c.req.param("id") as string;
     const orgId = c.get("org").id;
@@ -457,6 +472,8 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     { action: "artifact.decide", resource: artifact },
     async (c) => {
       const body = await parseBody(c, CreateDecision);
+      if ((body.note?.length ?? 0) > MAX_COMMENT_CHARS)
+        throw new ApiError("invalid", "That note is too long.");
       const caller = c.get("caller");
       if (caller.kind !== "person") throw new ApiError("forbidden", "Only people decide.");
       const artifactId = c.req.param("id") as string;
