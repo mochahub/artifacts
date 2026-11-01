@@ -135,6 +135,11 @@ export function Join() {
             <ScanFace />
             Create a passkey
           </button>
+          {meta.value?.google && (
+            <a class="btn soft" href={`/api/auth/google/start?intent=invite&invite=${token}`}>
+              Continue with Google
+            </a>
+          )}
           <button
             type="button"
             class="btn"

@@ -231,6 +231,8 @@ export function ShareSheet({
   const adding = useSignal<Level>("comment");
   const error = useSignal<string | null>(null);
   const data = access.data.value;
+  // The sheet's own answer: the page's copy comes from a poll, and an older one can land after this.
+  const visibility = useSignal(artifact.visibility);
 
   async function run(work: () => Promise<void>) {
     error.value = null;
@@ -278,10 +280,11 @@ export function ShareSheet({
           <button
             type="button"
             key={value}
-            aria-pressed={artifact.visibility === value}
+            aria-pressed={visibility.value === value}
             onClick={() =>
               run(async () => {
                 await api(`/api/artifacts/${artifact.id}`, { method: "PATCH", json: { visibility: value } });
+                visibility.value = value;
                 onChanged();
               })
             }

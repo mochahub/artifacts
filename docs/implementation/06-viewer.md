@@ -55,7 +55,9 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/device/connect` | Connect an app: the OAuth consent screen, under an already reserved word |
 | `/sign-in` | Sign in (06·2) |
 | `/settings` | Settings index |
-| `/settings/sign-in` | Passkeys, password, sessions (06·3) |
+| `/settings/sign-in` | Passkeys, Google, password, sessions (06·3) |
+| `/settings/google` | Google sign-in, for admins: redirect URIs, client, Test, on or off, Workspace auto-join |
+
 | `/settings/notifications` | Web Push on this device |
 | `/settings/people` | People and invites (06·4, 06·5, 06·8) |
 | `/settings/teams`, `/settings/teams/:slug` | Teams: the list, and one team's members, leads and what's shared with it. Members and up. |
@@ -129,14 +131,16 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 
 ### 06 · Setup, sign-in and people
 1. **Setup mode:** "Almost ready" with the `artifacts setup <url>` command and Copy.
-2. **Sign in:** "Sign in with a passkey" first, then email and password. No sign-up. "Forgot your password? Ask an admin for a reset link."
+2. **Sign in:** "Sign in with a passkey" first, then Continue with Google when it's on, then email and password. No sign-up. "Forgot your password? Ask an admin for a reset link." Google is a link, not a form, and the result comes back as `?google=`.
+
 3. **Sign-in settings:** passkeys (name, added, last used), Add a passkey (recent auth), Change password, "Signed in on" (sessions and CLI tokens, with End).
 4. **People:**
    - **Tabs:** Organization N / Outside N.
    - **Rows:** members with role.
    - **Invited:** pending invites, each with Copy (the link again) and revoke.
 5. **Invite:** email, role (Member / Reviewer / Admin), then "Copy invite link" (no email is sent).
-6. **Accept:** "<name> invited you as a reviewer"; your name, email (fixed); "Create a passkey" or "Use a password instead".
+6. **Accept:** "<name> invited you as a reviewer"; your name, email (fixed); "Create a passkey", Continue with Google when it's on, or "Use a password instead".
+
 7. **Approve the CLI:** the code, the client and agent, what it can do, Approve or Deny.
 8. **Reset a password:** in a person's sheet, "Copy reset link" (one hour). "Remove Jo from Mochahub" is plain text, with a confirmation.
 9. **Domains:** viewer domains (primary for links, home for passkeys) and Live previews (the content domain), read-only, with the browser-support note.
