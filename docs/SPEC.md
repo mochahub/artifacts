@@ -798,7 +798,7 @@ docs/            this spec, evaluations, implementation guides, mocks and the re
 
 ## 13. Mocks
 
-The viewer is mocked in [`mocks/boards/`](mocks/boards/) on seven boards: find and open, canvas review, read and annotate, desktop, share/decide/notify, accounts (setup, sign-in, passkeys, invites, domains), and archive and delete. The viewer is a website, so phone screens are drawn in Safari: the full bottom bar on pages seen from the top, and the collapsed bar on canvases, articles and sheets. To review them on a phone, run `python3 -I review/server.py` from `docs/` and share it with `tailscale serve --bg --https=8788 http://127.0.0.1:8788`. Comments go to `review/comments.json`, which git ignores. The phone screens shown inside the mocks are Camera Buddy's mocks, captured with `mocks/tools/capture-cb.mjs`.
+The viewer is mocked in [`mocks/boards/`](mocks/boards/) on seven boards: find and open, canvas review, read and annotate, desktop, share/decide/notify, accounts (setup, sign-in, passkeys, invites, domains), and archive and delete. The viewer is a website, so phone screens are drawn in Safari: the full bottom bar on pages seen from the top, and the collapsed bar on canvases, articles and sheets. To view them here, run `python3 -I review/server.py` from `docs/`. Comments left there go to `review/comments.json`, which git ignores. To review them on a phone, publish them as an artifact. The phone screens shown inside the mocks are Camera Buddy's mocks, captured with `mocks/tools/capture-cb.mjs`.
 
 ## 14. Self-hosted, on Railway
 

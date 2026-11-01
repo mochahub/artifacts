@@ -41,7 +41,7 @@
 - Page ids: `a-z`, `0-9` and `-`. Changing one breaks its link.
 - Paths are relative, and stay inside this folder.
 
-**Page kinds:** `article` (Markdown), `canvas` (HTML boards), `prototype` (one live HTML page, with `device` and optional `title`), `gallery` (optional `title`, and `items` with `src` and `caption`; images or video).
+**Page kinds:** `article` (Markdown), `canvas` (HTML boards), `prototype` (one live HTML page, with `device` and optional `title`; use it when the work needs motion or interaction, and read "The sandbox" in the micro apps guide first), `gallery` (optional `title`, and `items` with `src` and `caption`; images or video).
 
 **Canvas boards:** every screen is an element with `data-frame="id"`, and optionally `data-device` (`iphone`, `ipad`, `watch`, `mac`, `browser`, `none`), `data-title`, and `data-live` to offer Try it.
 

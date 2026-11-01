@@ -78,7 +78,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts init [--project <slug>] [--slug <slug>] [--kind canvas\|article\|prototype] [--template <name>] [--in-repo]` | Makes `.artifacts/work/<slug>/` in the repo root, or the current folder outside a repo, with `artifact.json`, a starter page and `fixtures/`, copies the kit (`@artifacts/kit`) into `vendor/artifacts-kit/` (pinned to the CLI's version, so bundles stay self-contained), and adds `.artifacts/` to `.gitignore`. `--in-repo` writes them to the current folder instead, to commit them. `--template` copies an editable starter instead of a blank page: `design-review`, `presentation`, `case-study`, `prd`, `rfc`, `research-report` or `weekly-status`. It can't be used with `--kind`, and its slug defaults to its name. `publish` warns if the template's placeholder `summary` is still there. |
 | `artifacts dev [--port 4321]` | Local viewer and content host with hot reload, using the real viewer build bundled in the CLI, a local data folder, and local backends (08). No server needed. It listens on loopback only (`localhost` for the viewer, `127.0.0.1` for the content host on port + 1), answers only requests whose `Host` is one of those (so DNS rebinding gets nothing), and puts a random per-run secret in the content host's path, as the real host's signed token does, because that host answers any website with CORS `*` and runs the backend. |
 | `artifacts lint [<slug>] [--json]` | Rules below. Errors fail; warnings print. |
-| `artifacts render [<slug>] [--json]` | Renders (05), writes `.artifacts/contact-sheet.png` and prints its path. |
+| `artifacts render [<slug>] [--json]` | Renders (05), writes `.artifacts/contact-sheet.png` and prints its path. With no frames there's no sheet, and `--json` says `null`. |
 | `artifacts publish [<slug>] [-m <message>] [--name <label>] [--note <frame>=<text>]… [--json]` | lint → render → hash → prepare → upload → commit. Output below. |
 | `artifacts pack [<slug>] [-m <message>] [--name <label>] [--json]` | Lint and render, then write a publish to `.artifacts/pack/` and print the arguments for `artifacts_publish_prepare`. Needs no sign-in, because the hosted MCP has that. It does need this CLI and WebKit, which is the one thing a connector can't do without. |
 | `artifacts pack [<slug>] --upload <plan>` | Uploads what a plan from `artifacts_publish_prepare` lists, straight to the bucket. Files go only to the plan's own origin, and only hashes in this pack. |
@@ -174,7 +174,7 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
 **Body, in order:**
 1. **Start every session with `artifacts status --json`.** If changes were requested, read the note and the open comments before anything else.
 2. **Check what's already there:** `artifacts search` before research, design or prototyping.
-3. **When to publish:** plans, research reports, mocks, comparisons, prototypes the user should read or review. Not throwaway output.
+3. **Publish by default:** publishing to the org's hosted library needs no approval. Plans, research reports, mocks, comparisons and prototypes someone should read or review get published without asking, and the agent hands over the artifact link, not a local one, unless the user asks for local. Work that needs motion or interaction is a `prototype` page. Not throwaway output. `share --link`, `share --invite`, changing visibility and deleting still need an explicit request.
 4. **Structure:**
    - one artifact per deliverable; pages for its parts (the plan as an article, research as articles grouped "Research", mocks as a canvas)
    - stable `data-frame` and heading ids, and never renaming ids that have comments
@@ -185,7 +185,7 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
    - add a backend only when the frontend store isn't enough
    - keep a `schema` number in stored values
    - provide fixtures
-8. **Gate:** `artifacts lint`, then `artifacts render`, then **look at the contact sheet** (read `.artifacts/contact-sheet.png`), fix, repeat; publish only on a clean lint.
+8. **Gate:** `artifacts lint`, then `artifacts render`, then **look at what you made** (read `.artifacts/contact-sheet.png` if there are frames, and run each prototype in `artifacts dev`), fix, repeat; publish only on a clean lint.
 9. **Review loop on "address the comments":**
    1. `artifacts comments --open --json`, and download each crop and look at it
    2. fix the source

@@ -243,6 +243,7 @@ describe("a later agent finds hosted work", () => {
     send({ id: 1, method: "initialize", params: {} });
     const hello = await next();
     expect(hello.result.instructions).toContain("artifacts_search");
+    expect(hello.result.instructions).toContain("publish it with artifacts_publish without asking");
     expect(hello.result.instructions).toContain("forest-game (1 artifacts)");
     send({ id: 2, method: "tools/list" });
     const names = (await next()).result.tools.map((tool: { name: string }) => tool.name);

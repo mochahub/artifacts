@@ -77,7 +77,7 @@ The mock boards are HTML in `docs/mocks/boards/` that use `docs/mocks/kit.css` a
 
 ```
 cd docs && python3 -I review/server.py --port 8788
-# phone review over Tailscale (the user does this):  tailscale serve --bg --https=8788 http://127.0.0.1:8788
+# to review on a phone, publish the boards as an artifact and use its link
 ```
 
 - `review/comments.json` holds review comments (git-ignored).
