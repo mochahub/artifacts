@@ -732,6 +732,8 @@ export const ProposeBrand = z.object({
   slug: Slug,
   agent: z.string().max(60).nullable().optional(),
 });
+/** A brand a person sets in Settings. Its fonts come from the one already applied, never from here. */
+export const SaveBrand = Brand.omit({ fonts: true }).strict();
 export const BrandProposal = z.object({
   id: Id,
   name: z.string(),
@@ -741,6 +743,8 @@ export const BrandProposal = z.object({
   agent: z.string().nullable(),
   createdAt: Time,
   appliedAt: Time.nullable(),
+  /** The same brand as the one applied now. Older servers don't send it. */
+  current: z.boolean().default(false),
 });
 export type BrandProposal = z.infer<typeof BrandProposal>;
 

@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./sanitize": "./src/sanitize.ts",
     "./templates": "./src/templates.ts",
+    "./brand-prompt": "./src/brand-prompt.ts",
     "./theme-css": "./src/theme-css.ts",
     "./article": "./src/article.ts"
   },

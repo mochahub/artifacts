@@ -519,10 +519,13 @@
 }
 .seg {
   display: flex;
-  flex: 1;
+  flex: none;
   background: var(--soft);
   border-radius: 99px;
   padding: 3px;
+}
+.row > .seg {
+  flex: 1;
 }
 .seg button {
   flex: 1;
@@ -1432,7 +1435,6 @@
   }
   .panel .seg {
     margin: 0 12px 10px;
-    flex: none;
   }
 }
 .hint {
@@ -1633,4 +1635,126 @@
   padding-left: 22px;
   display: grid;
   gap: 8px;
+}
+
+/* Settings, Brand: a small page drawn with the brand's own tokens, and nothing around it. */
+.specimen {
+  --art-accent: #0a84ff;
+  --art-on-accent: #fff;
+  --art-bg: #f5f6f8;
+  --art-card: #fff;
+  --art-tx: #121418;
+  --art-tx2: #5e6470;
+  --art-sep: #e4e6ea;
+  --art-radius: 14px;
+  --art-ui: var(--ui);
+  margin: 0;
+  padding: 28px 20px;
+  border-radius: 18px;
+  background: var(--art-bg);
+  box-shadow: 0 0 0 0.5px var(--sep);
+}
+.specimen-card {
+  padding: 22px 20px;
+  border-radius: var(--art-radius);
+  background: var(--art-card);
+  box-shadow: 0 0 0 0.5px var(--art-sep);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+.specimen h2 {
+  margin: 0 0 10px;
+  font: 700 30px / 1.1 var(--art-display, var(--art-ui));
+  overflow-wrap: anywhere;
+}
+.specimen p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+}
+.specimen small {
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--art-tx2);
+}
+.specimen hr {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--art-sep);
+}
+.specimen-action {
+  display: block;
+  padding: 11px 16px;
+  border-radius: var(--art-radius);
+  background: var(--art-accent);
+  color: var(--art-on-accent);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+.select {
+  position: relative;
+}
+.select select {
+  appearance: none;
+  padding-right: 44px;
+}
+.select svg {
+  position: absolute;
+  top: 15px;
+  right: 16px;
+  width: 20px;
+  height: 20px;
+  color: var(--tx3);
+  pointer-events: none;
+}
+.hex {
+  width: 92px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--tx);
+  font: 16px var(--ui);
+  text-align: right;
+  outline: none;
+}
+.swatch {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  appearance: none;
+}
+.swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.5px var(--sep);
+}
+.more summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tx2);
+  margin-left: 4px;
+}
+.more summary::-webkit-details-marker {
+  display: none;
+}
+.more summary svg {
+  width: 18px;
+  height: 18px;
+}
+.more[open] summary svg {
+  transform: rotate(90deg);
 }
