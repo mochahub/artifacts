@@ -57,6 +57,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts org invite <email> [--role member\|reviewer\|admin]` | Prints the invite link. |
 | `artifacts org reset-link <email>` | Prints a one-hour reset link. |
 | `artifacts teams` | Lists teams: slug, name, size, and whether you're in one. Admins make them in Settings. Tokens can't change teams or who's in them. |
+| `artifacts project access [<project>]` | Who has a project and why. Read-only, for someone who manages it: tokens can't change project access. Uses the nearest `artifact.json` if no project is named. |
 
 **The Railway path** in `artifacts setup` (SPEC §7.4; every command exists in Railway CLI 5.71.0; spike S1 runs the whole sequence):
 1. **The Railway CLI itself:** `railway --version`. If it's missing, offer `brew install railway` or `npm i -g @railway/cli`.
@@ -92,8 +93,11 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 ✓ upload   7 new files (412 KB); 214 already stored
 ✓ v5       https://art.zahin.ca/camerabuddy/roadmap
   changed  Shoot / Live view, Shoot / Exposure picker, Plan § Phase 1
+  visible to  Design team and 2 people
   threads on changed frames  #3, #4, #6, #8
 ```
+
+`artifacts status` and the MCP status tools say who can see it too, for whoever can share it. Agents publish more than people do, so this is where a wrong default gets caught.
 
 ### The library
 
