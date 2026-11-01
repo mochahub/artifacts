@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { org } from "../../../apps/server/src/db/schema.ts";
 import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
 import { checksumFor } from "../src/commands/operate.ts";
 import { VERSION } from "../src/version.ts";
@@ -135,6 +136,15 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(calls).toContain("variable set MORE_URLS=https://art.example.com --service artifacts");
     expect(calls).not.toContain("PUBLIC_URL=https://art.example.com");
     expect((await cli(["domain", "nonsense"], e)).code).toBe(2);
+    expect(JSON.parse(result.stdout).googleRedirectUri).toBeNull();
+
+    // With Google on, a new domain needs its own redirect, or sign-in there fails.
+    await t.server.db.update(org).set({ googleClientId: "client", googleEnabled: true });
+    const withGoogle = await cli(["domain", "add", "art.example.com", "--json"], e);
+    expect(JSON.parse(withGoogle.stdout).googleRedirectUri).toBe(
+      "https://art.example.com/api/auth/google/callback",
+    );
+    await t.server.db.update(org).set({ googleClientId: null, googleEnabled: false });
   });
 
   test("upgrade --server moves the service to the release's image", async () => {
