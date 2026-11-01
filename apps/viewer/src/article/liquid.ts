@@ -150,7 +150,11 @@ export function useLiquidChrome({ capsule, bar, body, loaded }: Options) {
 }
 
 /** Slides the bar's bead of light to a control, or to the one that's on when nothing is held. */
-export function usePool(bar: RefObject<HTMLElement | null>, pool: RefObject<HTMLElement | null>, on: unknown[]) {
+export function usePool(
+  bar: RefObject<HTMLElement | null>,
+  pool: RefObject<HTMLElement | null>,
+  on: unknown[],
+) {
   useEffect(() => {
     const host = bar.current;
     const bead = pool.current;

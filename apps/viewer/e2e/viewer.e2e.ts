@@ -217,7 +217,9 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   expect(errors).toEqual([]);
 });
 
-test("the reader's glass draws back on the way down and fits its ink to a picture", async ({ page }, info) => {
+test("the reader's glass draws back on the way down and fits its ink to a picture", async ({
+  page,
+}, info) => {
   test.skip(info.project.name !== "iphone", "phone only");
   const errors = watchErrors(page);
   await page.goto("/camerabuddy/roadmap/plan");
