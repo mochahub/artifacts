@@ -23,7 +23,8 @@ A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google
 | M14 Brand setup | `m14-brand` | PR #23 | see the PR |
 | M15 OAuth, hosted MCP and publishing | `m15-connector` | PR #24 | see the PR |
 | M16 Articles without the CLI | `m16-articles` | PR #25 | see the PR |
-| M17 Teams | `m17-teams` | see the PR | see the PR |
+| M17 Teams | `m17-teams` | PR #29 | see the PR |
+| M18 Project access | `m18-project-access` | see the PR | see the PR |
 
 ## Verified
 
@@ -64,6 +65,8 @@ A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google
 - **M13 follow-up (2026-11-01):** rendering a template's article by eye found what no test had: `:::steps` collapsed to one word a line, and a `:::` after a table showed on the page. The second was Biome, which formats Markdown and had rewritten the fence into a table cell, so `packages/kit/src/templates` and `skill/references/kit.md` are now outside it, and a test checks every template. **Don't run `biome check --write` on Markdown that uses directives.**
 
 - **M17 (2026-11-01):** the existing matrix is unchanged: all 3,828 results for the old callers and actions were dumped from `5400f6e` and compared after the change, with no differences. New rows cover team grants at each level, the role cap, token-made rows alone and tied, and who runs a team. `apps/server/test/api/teams.test.ts` and `events.test.ts` cover every team route, sharing, `via_token`, removal, revocation, and streams closing within a heartbeat for a session and a token. `packages/cli/test/teams.e2e.test.ts` runs the real CLI. A WebKit e2e makes a team and shares with it at iPhone size and desktop, with screenshots in `docs/mocks/shots/08-*`.
+
+- **M18 (2026-11-01):** open projects match M17 exactly: all 7,524 results dumped from M17 compared with no differences. The matrix now has an open and a restricted dimension, and a second table of every caller against a project. `apps/server/test/api/projects.test.ts` covers the leak list across session and token: search, snippets, counts, project lists, activity, home, push digest, MCP and bundle. An independent review (subagent) raised eight findings and three smaller issues. Six were fixed with a test that failed first. The commit race and the permission checks outside `can()` were changed without one. What's left is under Known gaps.
 
 ## Decisions to review
 
@@ -179,6 +182,18 @@ A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google
 92. **M17, a token can't refresh an invite that has teams,** as well as not making one. A fresh link is the same way in.
 93. **M17, team rows an agent added show "Confirm so they can approve"** in the Share sheet, which grants the same level again as a person.
 
+94. **M18, project "Can publish" counts as a comment on an artifact,** worked out in `inherit()`, so `can()` needs no special case and the matrix covers it.
+95. **M18, a new action, `artifact.share_outside`.** The scope wants links and outside invites to need `manage` in a restricted project, and `artifact.share` is also true for the publisher. It covers adding an existing outside person, and sharing with a team that has one in it, which the M18 review found was a way round.
+96. **M18, purging stays with the publisher and admins, and so does `data.export`.** The scope's list for `manage` stops at archive and delete, and purging can't be undone. A project manager who deletes can restore.
+97. **M18, a new route, `POST /api/projects/:slug/access`.** The scope says an unknown email becomes an outside invite, and `POST /api/invites` is for admins, while project managers can be members. Invite kind `project` is new too.
+98. **M18, a token can read project access, as `artifacts project access` needs, without addresses or team members.** A member list and addresses are the directory, which the user kept in the browser. The same goes for `inherited` on an artifact's access; a reviewer who published loses it in the browser too.
+99. **M18, `audience` on status goes to those who can share the artifact,** and organization tokens. Anyone else needn't learn who was let in. A publish always gets it. `Only the publisher` leaves out admins, who can see everything anyway.
+100. **M18, `findOrg` fills in defaults instead of casting.** It didn't parse `settings` at all, so a stored row without `defaultProjectAccess` had no value. `PatchOrg` no longer uses `OrgSettings.partial()`, because Zod fills a `.default()` inside `.partial()`, and saving one setting would have reset this one to `org`.
+101. **M18, the Tokens page gained a project chooser.** A restricted project has to be named on a token, and Settings had no way to name one.
+102. **M18, brand proposals hide a sample the caller can't see,** and proposing one answers the same for a hidden artifact as for none. Neither was in the scope; both named restricted artifacts.
+103. **M18, a token can't issue a reset link for someone who leads a team or manages a project.** A session is what a token may never have for those powers. This extends 24.
+104. **M18, the commit checks `project.publish` again inside its transaction** for a new artifact, because a project can appear or be restricted after `target()` looked. A concurrent first publish to an open project still works, as it did.
+
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.
@@ -218,6 +233,11 @@ In this order. Nothing here has been done or tested by the agent.
 24. **Template taste:** review `docs/images/templates.webp` and the contact sheets on a phone.
 
 ## Known gaps
+
+- **A project manager can't make a link for their own `me` artifact in a restricted project.** Project grants don't reach `me`, so `can()` doesn't see them there. An admin can, or they can make it `org`. It fails closed.
+- **`/api/deleted` shows what someone deleted, after they lose access to it,** until it's purged: only the title of something they could already see.
+- **Taking `manage` from someone leaves their pending project invites live.** An admin sees them in Settings, People, and can revoke them.
+- **A few body-dependent token guards sit in routes, not `can()`:** a token giving a team `publish`, inviting into a team, and the reset-link guard. They follow `guardTokenInvite`, because `can()` doesn't see a request's body.
 
 - **Search is English-stemmed, and rows are read for every search.** Numbers are in [load-notes.md](load-notes.md).
 - **Working folders are per git worktree.** `.artifacts/work/` isn't shared between worktrees of one repo. `artifacts pull` is the way across.
