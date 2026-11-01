@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TEMPLATES } from "@artifacts/schema/templates";
 import { buildArticle } from "../src/article/build.ts";
-import { TEMPLATES } from "../src/templates.ts";
 
 function build(source: string, root: string, bundle: Record<string, string>) {
   return buildArticle({
