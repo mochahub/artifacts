@@ -167,10 +167,14 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
     } satisfies OAuthConsent);
   });
 
-  routes.post("/api/oauth/consent", { action: "account.manage", recentAuth: true }, async (c) => {
+  routes.post("/api/oauth/consent", { action: "account.manage" }, async (c) => {
     const body = await parseBody(c, OAuthConsentDecision);
     const caller = c.get("caller");
     if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
+    // Saying no is always safe, so only saying yes asks someone to prove who they are.
+    if (body.approve && !caller.recentAuth) {
+      throw new ApiError("recent_auth_required", "Sign in again to do that.");
+    }
     const orgId = c.get("org").id;
     const origin = (await requestOrigin(c, deps)) as string;
     const checked = await checkRequest(deps, orgId, origin, body.request);

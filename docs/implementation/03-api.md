@@ -328,7 +328,7 @@ Both are on viewer origins only, never the Live-preview origin. Issuer, resource
 | `GET /.well-known/oauth-authorization-server` | none | RFC 8414, with `code_challenge_methods_supported: ["S256"]`, `client_id_metadata_document_supported`, and `authorization_response_iss_parameter_supported`. |
 | `GET /api/oauth/authorize` | none | Checks `client_id` and `redirect_uri` first and answers 400 if they fail, without redirecting. Other failures redirect back with `error` and `iss`. A good request goes to the viewer's `/device/connect`. Needs `response_type=code`, S256 PKCE, and `resource` equal to this origin's MCP endpoint. 60 per IP per 15 minutes. |
 | `GET /api/oauth/consent?<the same query>` | session | What the consent screen shows: `{ client, clientId, redirectHost, local, scopes, resource }`. |
-| `POST /api/oauth/consent` | session, recent auth | `{ approve, request }`. Checks `request` again → `{ redirect }`, with `code`, `state` and `iss`, or `error=access_denied`. |
+| `POST /api/oauth/consent` | session, and a recent sign-in to approve | `{ approve, request }`. Checks `request` again → `{ redirect }`, with `code`, `state` and `iss`, or `error=access_denied`. |
 | `POST /api/oauth/token` | none, form-encoded | `authorization_code` or `refresh_token`, for public clients. Access tokens last an hour; refresh tokens rotate. A code or refresh token used twice revokes the grant. Errors are RFC 6749's. 120 per IP per 15 minutes. |
 | `POST /api/oauth/revoke` | none, form-encoded | RFC 7009: `{ token }`. Revoking a refresh token ends the grant. Always 200. |
 | `POST /api/oauth/register` | none | RFC 7591, deprecated by MCP and kept for clients that need it. Public clients only; redirects must be https, or http on loopback. 20 per IP per hour. |

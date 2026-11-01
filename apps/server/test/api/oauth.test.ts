@@ -282,6 +282,12 @@ describe("OAuth and the hosted MCP", () => {
     });
     expect(late.status).toBe(401);
     expect(((await late.json()) as { error: { code: string } }).error.code).toBe("recent_auth_required");
+    const no = await t.api("/api/oauth/consent", {
+      method: "POST",
+      cookie: stale,
+      json: { approve: false, request },
+    });
+    expect(no.status).toBe(200);
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
 
