@@ -144,6 +144,7 @@ export function render(
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const contactSheet = join(root, ".artifacts/contact-sheet.png");
+  rmSync(contactSheet, { force: true }); // With no frames nothing replaces it.
 
   const boards = manifest.pages.flatMap((page) =>
     page.kind === "canvas"
