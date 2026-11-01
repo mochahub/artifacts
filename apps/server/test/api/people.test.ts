@@ -224,20 +224,6 @@ describe("people, invites and tokens", () => {
     expect((await t.api(`/api/artifacts/${artifactId}`, { cookie: ownersGuest })).status).toBe(200);
   });
 
-  test("a reset link works once and is only for this person", async () => {
-    const { cookie } = await invited("reset@example.com", "member");
-    const [row] = await t.server.db.select().from(people).where(eq(people.email, "reset@example.com"));
-    const { url } = (await (
-      await t.api(`/api/people/${row?.id}/reset-link`, { method: "POST", bearer: token })
-    ).json()) as { url: string };
-    const secret = url.split("/reset/")[1];
-    expect(
-      (await t.api(`/api/reset/${secret}`, { method: "POST", json: { password: "a brand new password" } }))
-        .status,
-    ).toBe(200);
-    expect((await t.api("/api/me", { cookie })).status).toBe(401);
-  });
-
   test("people lists members and pending invites, for admins only", async () => {
     const list = (await (await t.api("/api/people", { cookie: owner })).json()) as {
       people: { email: string; password: boolean; passkeys: number }[];

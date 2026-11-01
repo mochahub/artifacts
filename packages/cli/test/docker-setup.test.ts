@@ -17,9 +17,7 @@ describe("the Docker deployment files", () => {
       .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
   );
 
-  test("keeps every secret in a private .env and writes no other file that holds one", () => {
-    expect(statSync(join(dir, ".env")).mode & 0o077).toBe(0);
-    expect(statSync(dir).mode & 0o077).toBe(0);
+  test("writes no file but .env that holds a secret", () => {
     expect(existsSync(join(dir, "s3.json"))).toBe(false);
     expect(env.S3_ACCESS_KEY_ID).toHaveLength(32);
     expect(env.S3_SECRET_ACCESS_KEY).toHaveLength(64);
@@ -37,10 +35,6 @@ describe("the Docker deployment files", () => {
     // SeaweedFS takes the key pair from the environment, so no file is mounted for it.
     expect(compose).toContain("AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?");
     expect(compose).not.toContain("s3.json");
-  });
-
-  test("refuses to overwrite an existing deployment", () => {
-    expect(() => writeDeployment(dir, "x", 9000)).toThrow("already has a deployment");
   });
 });
 

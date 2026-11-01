@@ -49,6 +49,14 @@ describe("svg paint", () => {
     expect(fill(value)).toContain("fill=");
   });
 
+  test("keeps internal marker references, not external ones", () => {
+    const clean = sanitizeArticle(
+      '<svg><path d="M0 0" marker-end="url(#arrow)"/><path d="M0 0" marker-end="url(https://evil.test/#a)"/></svg>',
+    );
+    expect(clean).toContain('marker-end="url(#arrow)"');
+    expect(clean).not.toContain("evil.test");
+  });
+
   test("applies to stroke too", () => {
     expect(sanitizeArticle('<svg><path stroke="url(//evil.test/x.svg#a)"/></svg>')).not.toContain("stroke");
   });
@@ -60,6 +68,20 @@ describe("svg paint", () => {
 });
 
 describe("hostile markup", () => {
+  test("drops script and style, and keeps the block keys", () => {
+    const clean = sanitizeArticle(
+      '<p data-block="a">Hi<script>alert(1)</script></p><style>body{display:none}</style>',
+    );
+    expect(clean).toBe('<p data-block="a">Hi</p>');
+  });
+
+  test("is stable: sanitizing twice changes nothing", () => {
+    const once = sanitizeArticle(
+      '<h2 id="a" data-block="a">T</h2><table><tr><td align="left">x</td></tr></table>',
+    );
+    expect(sanitizeArticle(once)).toBe(once);
+  });
+
   test.each([
     '<a href="java&#9;script:alert(1)">x</a>',
     '<a href=" javascript:alert(1)">x</a>',

@@ -42,7 +42,7 @@ describe("login opens the browser", () => {
     for (const server of servers) server.stop(true);
   });
 
-  async function loginTo(verificationUrl: string) {
+  async function loginTo(verificationUrl: string, wanted = false) {
     const server = serverWithVerificationUrl(verificationUrl);
     servers.push(server);
     const box = sandbox();
@@ -50,12 +50,12 @@ describe("login opens the browser", () => {
     const { ARTIFACTS_NO_BROWSER: _off, ...env } = box.env;
     await cli(["login", `http://127.0.0.1:${server.port}`], { ...env, PATH: `${openers.bin}:${env.PATH}` });
     // The opener is started and left running, so give it a moment to write its line.
-    await Bun.sleep(300);
+    for (let i = 0; i < 100 && (i < 12 || wanted) && openers.opened().length === 0; i++) await Bun.sleep(25);
     return openers.opened();
   }
 
   test("for a web page", async () => {
-    expect(await loginTo("https://art.example.com/device")).toEqual(["https://art.example.com/device"]);
+    expect(await loginTo("https://art.example.com/device", true)).toEqual(["https://art.example.com/device"]);
   });
 
   test("but not for a file or an app the server named", async () => {

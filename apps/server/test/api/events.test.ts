@@ -126,6 +126,8 @@ describe("push endpoints", () => {
       "https://metadata.google.internal/x",
       "https://web.push.apple.com.internal/x",
       "ftp://fcm.googleapis.com/x",
+      "https://evil.test/push.apple.com",
+      "nonsense",
     ]) {
       expect(isPushEndpoint(bad)).toBe(false);
     }

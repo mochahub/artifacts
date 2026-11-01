@@ -84,7 +84,7 @@ describe("the three ports", () => {
         expect(csp).toContain("object-src 'none'");
         expect(csp).toContain("form-action 'self'");
         expect(response.headers.get("cross-origin-opener-policy")).toBe("same-origin");
-        expect(csp).toContain("img-src 'self' data: blob: http://127.0.0.1:18333");
+        expect(csp).toContain(`img-src 'self' data: blob: ${testEnv("postgres://unused").s3.endpoint}`);
       }
     });
 
@@ -163,7 +163,6 @@ describe("the three ports", () => {
     });
 
     test("with it, an unknown job is 404", async () => {
-      expect((await internal("/internal/jobs/nonsense", auth)).status).toBe(404);
       expect((await internal("/internal/jobs/nonsense", auth)).status).toBe(404);
     });
 

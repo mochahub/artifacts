@@ -64,9 +64,9 @@ describe("the data store", () => {
     expect((await put("shared", "missing", 1, token, { "If-Match": "abc" })).status).toBe(412);
   });
 
-  test("ten people racing a conditional update: exactly one wins", async () => {
+  test("three people racing a conditional update: exactly one wins", async () => {
     const { etag } = (await (await put("shared", "race", 0)).json()) as { etag: string };
-    await Bun.sleep(1100);
+    t.clock.advance(1001);
     const results = await Promise.all(
       [sam, jo, token].map((bearer, i) => put("shared", "race", i + 1, bearer, { "If-Match": etag })),
     );
@@ -154,7 +154,6 @@ describe("the data store", () => {
   });
 
   test("delete frees the usage; a missing key is 404", async () => {
-    await Bun.sleep(1100);
     await fresh();
     await put("shared", "gone", 1);
     expect(
@@ -173,11 +172,9 @@ describe("the data store", () => {
         body,
         headers: { "Content-Type": type },
       });
-    await Bun.sleep(1100);
+    t.clock.advance(1001);
     expect((await up("a.png", "png-bytes", "image/png")).status).toBe(200);
-    await Bun.sleep(150);
     expect((await up("page.html", "<script>1</script>", "text/html")).status).toBe(200);
-    await Bun.sleep(150);
     expect((await up("x.svg", "<svg/>", "image/svg+xml")).status).toBe(200);
 
     const image = await t.api(`/api/artifacts/${id}/files/shared/a.png`, {
@@ -231,7 +228,6 @@ describe("the data store", () => {
   });
 
   test("export names people; clear empties; only the publisher and admins", async () => {
-    await Bun.sleep(1100);
     await fresh();
     await put("shared", "s", 1);
     await put("me", "m", 2, sam);
@@ -260,7 +256,6 @@ describe("the data store", () => {
   });
 
   test("archived data is read-only everywhere", async () => {
-    await Bun.sleep(1100);
     await fresh();
     await put("shared", "k", 1);
     await t.api(`/api/artifacts/${id}/archive`, { method: "POST", bearer: token });
@@ -273,7 +268,6 @@ describe("the data store", () => {
   });
 
   test("no caller, a stranger, and a view-only guest", async () => {
-    await Bun.sleep(1100);
     await fresh();
     await put("shared", "k", 1);
     expect((await t.api(`/api/artifacts/${id}/data/shared/k`)).status).toBe(401);
@@ -297,7 +291,6 @@ describe("the data store", () => {
   });
 
   test("the usage job recounts what's really there", async () => {
-    await Bun.sleep(1100);
     await fresh();
     await put("shared", "a", 1);
     await t.server.bucket.put(`data/${id}/shared/stray`, "12345");
