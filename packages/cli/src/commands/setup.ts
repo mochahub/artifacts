@@ -1,3 +1,4 @@
+import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import qrcode from "qrcode-terminal";
 import { setupDocker } from "../docker/setup.ts";
 import type { Output } from "../output.ts";
@@ -5,7 +6,6 @@ import { ask, confirm } from "../prompt.ts";
 import { setupRailway } from "../railway/setup.ts";
 import { installSkill } from "../skill/install.ts";
 import { type ClaimAnswers, setupExisting } from "./account.ts";
-import { BRAND_PROMPT } from "./brand.ts";
 
 type Flags = ClaimAnswers & {
   docker?: boolean;

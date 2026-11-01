@@ -5,7 +5,7 @@ const source = readFileSync(new URL("../public/sw.js", import.meta.url), "utf8")
 const ORIGIN = "https://art.test";
 
 /** Runs the worker's file against a stand-in for its global scope. */
-function load() {
+function load(windows: unknown[] = []) {
   const handlers: Record<string, (event: unknown) => unknown> = {};
   const shown: { title: string; options: { body?: string; data: { url: string } } }[] = [];
   const opened: string[] = [];
@@ -17,7 +17,7 @@ function load() {
     skipWaiting: () => {},
     clients: {
       claim: async () => {},
-      matchAll: async () => [],
+      matchAll: async () => windows,
       openWindow: async (url: string) => {
         opened.push(url);
       },
@@ -159,5 +159,18 @@ describe("push", () => {
     const worker = load();
     await worker.click("/camerabuddy/roadmap/plan?c=2");
     expect(worker.opened).toEqual(["/camerabuddy/roadmap/plan?c=2"]);
+  });
+
+  test("leaves the path for an app that's already open, then wakes it", async () => {
+    const steps: string[] = [];
+    const app = {
+      postMessage: (message: string) => steps.push(message),
+      focus: async () => steps.push("focus"),
+    };
+    const worker = load([app]);
+    await worker.click("/camerabuddy/roadmap/plan?c=2");
+    expect(worker.opened).toEqual([]);
+    expect(worker.kept).toEqual(["/tapped-notification"]);
+    expect(steps).toEqual(["tapped", "focus"]);
   });
 });
