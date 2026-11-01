@@ -130,5 +130,5 @@ test("request changes, and the artifact says so", async ({ page }, info) => {
   await shot(page, info.project.name, "05-3-decide");
   await sheet.getByRole("button", { name: "Request changes" }).last().click();
   await expect(page.getByText(`Tighten it ${info.project.name}`)).toBeVisible();
-  await expect(page.getByText("With Claude")).toBeVisible();
+  await expect(page.getByText(/^With .*'s Claude$/)).toBeVisible();
 });
