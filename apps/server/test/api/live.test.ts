@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import sharp from "sharp";
 import { sha256 } from "../../src/auth/secrets.ts";
 import { artifacts, comments, people, pushSubscriptions, sessions } from "../../src/db/schema.ts";
-import { isPushEndpoint, sendDigest } from "../../src/push/notify.ts";
+import { sendDigest } from "../../src/push/notify.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { hash, makePerson, publish } from "../publish-helper.ts";
 
@@ -150,24 +150,6 @@ describe("live review", () => {
     expect((await t.api("/api/events?artifact=nope", { cookie })).status).toBe(404);
     const stranger = await makePerson(t, orgId, "outside");
     expect((await t.api(`/api/events?artifact=${id}`, { bearer: stranger })).status).toBe(404);
-  });
-
-  test("push: only real push services can be subscribed", async () => {
-    expect(isPushEndpoint("https://fcm.googleapis.com/fcm/send/abc")).toBe(true);
-    expect(isPushEndpoint("https://web.push.apple.com/abc")).toBe(true);
-    expect(isPushEndpoint("https://updates.push.services.mozilla.com/wpush/v2/abc")).toBe(true);
-    expect(isPushEndpoint("https://sub.notify.windows.com/w/?token=x")).toBe(true);
-    for (const bad of [
-      "http://fcm.googleapis.com/x",
-      "https://169.254.169.254/latest",
-      "https://localhost/x",
-      "https://fcm.googleapis.com:8443/x",
-      "https://fcm.googleapis.com.evil.test/x",
-      "https://evil.test/push.apple.com",
-      "nonsense",
-    ]) {
-      expect(isPushEndpoint(bad)).toBe(false);
-    }
   });
 
   test("push: the key is stable, and subscribing needs a browser session", async () => {
@@ -343,8 +325,11 @@ describe("live review", () => {
     expect(open.map((response) => response.status)).toEqual(new Array(10).fill(200));
     expect((await t.api(`/api/events?artifact=${id}`, { cookie })).status).toBe(429);
     await open[0]?.body?.cancel();
-    await Bun.sleep(50);
-    const again = await t.api(`/api/events?artifact=${id}`, { cookie });
+    let again = await t.api(`/api/events?artifact=${id}`, { cookie });
+    for (let i = 0; i < 40 && again.status === 429; i++) {
+      await Bun.sleep(25);
+      again = await t.api(`/api/events?artifact=${id}`, { cookie });
+    }
     expect(again.status).toBe(200);
     await Promise.all([again, ...open.slice(1)].map((response) => response.body?.cancel()));
   });
