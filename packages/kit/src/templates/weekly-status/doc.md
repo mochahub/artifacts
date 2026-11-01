@@ -18,8 +18,7 @@ Two sentences: where things stand, and whether anyone needs to act.
 > What's stuck, who can unstick it, and by when.
 
 ## Next week
-
 :::steps
 1. **The main thing.** What done looks like.
 2. **The next thing.** What done looks like.
-   :::
+:::

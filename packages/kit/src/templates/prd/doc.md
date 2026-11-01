@@ -9,11 +9,10 @@ Who this is for, what they can do afterwards that they can't do today, and how w
 What people do now, and what it costs them. Use their words where you have them.
 
 ## Goals
-
 :::stats
 - **00%** the outcome we'd call success
 - **00** a number that must not get worse
-  :::
+:::
 
 ## Not doing
 
