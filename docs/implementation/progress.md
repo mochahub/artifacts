@@ -18,11 +18,11 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M9 Micro apps I | `m9-micro-apps` | `0eb0aeb` | green |
 | M10 Micro apps II | `m10-backends` | `7708f14` | green |
 | M11 Live review | `m11-live` | `b4977b5` | green |
-| M12 The hosted library | `m12-library` | see PR | see PR |
-| M13 Templates, guides and theme | `m13-templates` | see PR | see PR |
-| M14 Brand setup | `m14-brand` | see PR | see PR |
-| M15 OAuth, hosted MCP and publishing | `m15-connector` | see PR | see PR |
-| M16 Articles without the CLI | `m16-articles` | see PR | see PR |
+| M12 The hosted library | `m12-library` | PR #21 | see the PR |
+| M13 Templates, guides and theme | `m13-templates` | PR #22 | see the PR |
+| M14 Brand setup | `m14-brand` | PR #23 | see the PR |
+| M15 OAuth, hosted MCP and publishing | `m15-connector` | PR #24 | see the PR |
+| M16 Articles without the CLI | `m16-articles` | PR #25 | see the PR |
 
 ## Verified
 
@@ -59,6 +59,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M15 (2026-11-01):** a scripted OAuth client, with no browser, covers discovery from a 401, registration, PKCE, code exchange, refresh, revocation, and every negative case in the brief (`apps/server/test/api/oauth.test.ts`). `packages/cli/test/connector.e2e.test.ts` runs the whole loop with a real CLI that has no sign-in: pack, upload, commit, search, read, view, read comments, reply. **No real client has connected:** nothing here has met Claude Code or Codex.
 
 - **M16 (2026-11-01):** `apps/server/test/api/articles.test.ts` publishes from a plain HTTP client with no filesystem or shell, then reads it through the viewer's route, `read`, search and `pull`'s bundle. An XSS payload comes out as a CLI publish's does, and the stored HTML is unchanged by sanitizing it again. That test also found that M13's `:::stats`, `:::compare` and `:::steps` never survived the allowlist, because the attribute name didn't match. Fixed on `m13-templates`, with a test.
+
+- **M13 follow-up (2026-11-01):** rendering a template's article by eye found what no test had: `:::steps` collapsed to one word a line, and a `:::` after a table showed on the page. The second was Biome, which formats Markdown and had rewritten the fence into a table cell, so `packages/kit/src/templates` and `skill/references/kit.md` are now outside it, and a test checks every template. **Don't run `biome check --write` on Markdown that uses directives.**
 
 ## Decisions to review
 
@@ -156,6 +158,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 78. **M16, article-only means one page called `doc`.** Anything else would lose its other pages, so it's refused.
 79. **M16, the pipeline moved to `packages/schema`,** which already held the sanitizer. Its packages moved with it; there are no new ones.
 80. **M16, Mermaid is refused,** because drawing it needs a browser, which the server doesn't run.
+
+81. **M15, `Origin` is checked at `/api/mcp` even with a good token.** The transport requires it, and the CSRF rule exempts bearer requests.
+82. **M15, declining a connector needs no recent sign-in.** Only approving does.
 
 ## Needs you
 
