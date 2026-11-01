@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 import { publishCopy, publishFixture } from "./seed.ts";
 
 test.describe.configure({ timeout: 120_000 });
@@ -151,8 +151,11 @@ test("after a first comment on iPhone, the install sheet shows once", async ({ p
 
 test("connect an app: the consent screen says who and what, and a decision goes back to the client", async ({
   page,
+  baseURL,
 }) => {
-  const registered = await page.request.post("/api/oauth/register", {
+  // A client has no cookie, and one with a cookie but no Origin is what the CSRF guard refuses.
+  const client = await request.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+  const registered = await client.post("/api/oauth/register", {
     data: { client_name: "Scripted client", redirect_uris: ["http://127.0.0.1:9/callback"] },
   });
   const { client_id: clientId } = await registered.json();
