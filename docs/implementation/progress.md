@@ -25,7 +25,7 @@ A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google
 | M16 Articles without the CLI | `m16-articles` | PR #25 | see the PR |
 | M17 Teams | `m17-teams` | PR #29 | see the PR |
 | M18 Project access | `m18-project-access` | PR #33 | see the PR |
-| M19 Google sign-in | `m19-google` | see the PR | see the PR |
+| M19 Google sign-in | `m19-google` | PR #36 | see the PR |
 
 ## Verified
 
