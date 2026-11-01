@@ -15,6 +15,8 @@ export type Role = z.infer<typeof Role>;
 export const Permission = z.enum(["view", "comment", "publish"]);
 export type Permission = z.infer<typeof Permission>;
 export const TeamRole = z.enum(["lead", "member"]);
+export const ProjectPermission = z.enum(["view", "comment", "publish", "manage"]);
+export type ProjectPermission = z.infer<typeof ProjectPermission>;
 export const PageKind = z.enum(["canvas", "article", "prototype", "gallery", "deck"]);
 export const ThreadStatus = z.enum(["open", "fixed", "resolved"]);
 export const AnchorState = z.enum(["ok", "updated", "orphaned", "moved_version"]);
@@ -109,6 +111,7 @@ export const InvitePreview = z.object({
   role: Role,
   email: z.string(),
   artifact: z.object({ title: z.string() }).optional(),
+  project: z.object({ name: z.string() }).optional(),
   teams: z.array(z.string()).optional(),
 });
 export const AcceptInvite = z.object({
@@ -176,11 +179,16 @@ export const OrgLimits = z.object({
   writesPerSecond: z.number().int().positive(),
 });
 
-export const OrgSettings = z.object({
+const ProjectAccessDefault = z.enum(["org", "restricted"]);
+const StoredSettings = z.object({
   defaultVisibility: Visibility,
   linkSharing: z.boolean(),
   limits: OrgLimits,
   sandboxProcesses: z.number().int().positive(),
+});
+/** What a new project starts as. A default here, so settings stored before it still parse. */
+export const OrgSettings = StoredSettings.extend({
+  defaultProjectAccess: ProjectAccessDefault.default("org"),
 });
 export type OrgSettings = z.infer<typeof OrgSettings>;
 
@@ -190,6 +198,7 @@ const MB = 1024 * 1024;
 export const DEFAULT_ORG_SETTINGS: OrgSettings = {
   defaultVisibility: "org",
   linkSharing: true,
+  defaultProjectAccess: "org",
   limits: {
     dataValueBytes: 64 * 1024,
     dataKeysPerScope: 1000,
@@ -207,9 +216,10 @@ export const DEFAULT_ORG_SETTINGS: OrgSettings = {
   sandboxProcesses: 2,
 };
 
+// Not OrgSettings.partial(): Zod fills a default inside partial(), so saving one setting would reset it.
 export const PatchOrg = z.object({
   name: z.string().min(1).optional(),
-  settings: OrgSettings.partial().optional(),
+  settings: StoredSettings.extend({ defaultProjectAccess: ProjectAccessDefault }).partial().optional(),
 });
 
 // Projects, artifacts and lists
@@ -284,9 +294,17 @@ export const ProjectRow = z.object({
   artifactCount: z.number().int(),
   openCount: z.number().int(),
   updatedAt: Time,
+  restricted: z.boolean().optional(),
 });
 export const ProjectArtifacts = z.object({
-  project: z.object({ slug: z.string(), name: z.string(), repo: z.string().nullable() }),
+  project: z.object({
+    slug: z.string(),
+    name: z.string(),
+    repo: z.string().nullable(),
+    restricted: z.boolean().optional(),
+    /** Whether the caller can see and change who has access. */
+    canShare: z.boolean().optional(),
+  }),
   artifacts: z.array(ArtifactCard),
 });
 export type ProjectArtifacts = z.infer<typeof ProjectArtifacts>;
@@ -334,6 +352,46 @@ export const PeopleSearch = z.object({
 // Sharing
 export const AddAccess = z.object({ email: Email, permission: Permission });
 export const ShareWithTeam = z.object({ permission: Permission });
+export const SetProjectAccess = z.object({ permission: ProjectPermission });
+export const AddProjectAccess = z.object({ email: Email, permission: ProjectPermission });
+export const RestrictProject = z.object({
+  restricted: z.boolean(),
+  /** Also revoke its share links and outside invites, which a restriction otherwise leaves working. */
+  revokeLinks: z.boolean().optional(),
+});
+/** `email` is left out for a token: addresses are the directory, and that's for browsers (04). */
+const ProjectAccessRow = z.object({ id: Id, name: z.string(), email: z.string().optional(), role: Role });
+export const ProjectAccessList = z.object({
+  project: z.object({ slug: z.string(), name: z.string(), restricted: z.boolean() }),
+  people: z.array(ProjectAccessRow.extend({ permission: ProjectPermission, capped: z.boolean() })),
+  teams: z.array(
+    z.object({
+      id: Id,
+      slug: z.string(),
+      name: z.string(),
+      permission: ProjectPermission,
+      members: z.number().int(),
+    }),
+  ),
+  inherited: z.array(
+    ProjectAccessRow.extend({
+      level: ProjectPermission,
+      via: z.enum(["publisher", "role", "grant"]),
+      sources: z.array(z.object({ kind: z.string(), slug: z.string(), name: z.string() })),
+      capped: z.boolean(),
+    }),
+  ),
+  /** What restricting changes. */
+  impact: z.object({
+    loses: z.number().int(),
+    names: z.array(z.string()),
+    links: z.number().int(),
+    invites: z.number().int(),
+    tokens: z.number().int(),
+  }),
+  canChange: z.boolean(),
+});
+export type ProjectAccessList = z.infer<typeof ProjectAccessList>;
 export const CreateShareLink = z.object({
   permission: Permission.exclude(["publish"]),
   expiresIn: z.enum(["1d", "7d", "30d"]).nullable().optional(),
@@ -475,6 +533,8 @@ export const PublishResult = z.object({
   orphaned: z.array(z.number().int()),
   uploaded: z.object({ files: z.number().int(), bytes: z.number().int() }),
   reused: z.number().int(),
+  /** Who can see it, in words. Agents publish more than people do, so this is where a wrong default gets caught. */
+  audience: z.string().optional(),
 });
 export type PublishResult = z.infer<typeof PublishResult>;
 
@@ -554,6 +614,7 @@ export const ArtifactReviewStatus = z.object({
   note: z.string().nullable(),
   open: z.array(Thread),
   fixedAwaiting: z.array(Thread),
+  audience: z.string().optional(),
 });
 export type ArtifactReviewStatus = z.infer<typeof ArtifactReviewStatus>;
 export const Seen = z.object({

@@ -1,4 +1,4 @@
-import type { OrgSettings } from "@artifacts/schema";
+import { DEFAULT_ORG_SETTINGS, type OrgSettings } from "@artifacts/schema";
 import { asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -16,5 +16,7 @@ export type OrgRow = Omit<typeof schema.org.$inferSelect, "settings"> & { settin
 /** The deployment's one organization; null means setup mode (04). */
 export async function findOrg(db: Db): Promise<OrgRow | null> {
   const [row] = await db.select().from(schema.org).orderBy(asc(schema.org.id)).limit(1);
-  return (row as OrgRow | undefined) ?? null;
+  if (!row) return null;
+  // Stored before a setting existed, it takes the default, and nothing needs rewriting.
+  return { ...row, settings: { ...DEFAULT_ORG_SETTINGS, ...(row.settings as Partial<OrgSettings>) } };
 }

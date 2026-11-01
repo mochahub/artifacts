@@ -15,6 +15,7 @@ import { lifecycleRoutes } from "./lifecycle.ts";
 import { listRoutes } from "./lists.ts";
 import { passkeyRoutes } from "./passkeys.ts";
 import { peopleRoutes } from "./people.ts";
+import { projectRoutes } from "./projects.ts";
 import type { Routes } from "./routes.ts";
 import { setupRoutes } from "./setup.ts";
 import { sharingRoutes } from "./sharing.ts";
@@ -29,6 +30,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   peopleRoutes(routes, deps);
   sharingRoutes(routes, deps);
   teamRoutes(routes, deps);
+  projectRoutes(routes, deps);
   deviceRoutes(routes, deps);
   const publisher = createPublisher(deps);
   publishRoutes(routes, publisher);

@@ -14,11 +14,11 @@ import {
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { type ArtifactRow, toResource } from "../api/artifacts-db.ts";
+import { type ArtifactRow, findArtifact, toProject, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
-import { seesArtifact } from "../auth/can.ts";
+import { can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
 import {
   activity,
@@ -28,11 +28,13 @@ import {
   frames,
   pages,
   people,
+  projectAccess,
   projects,
   threads,
   versions,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { audienceOf } from "../library/audience.ts";
 import { notifyPublished } from "../push/notify.ts";
 import { reanchor } from "../review/reanchor.ts";
 import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
@@ -65,6 +67,9 @@ type UploadTicket = {
   payload: string | null;
   exp: number;
 };
+
+/** The whole answer for someone outside a restricted project: no more than any taken name tells them. */
+const nameTaken = () => new ApiError("conflict", "That project name is taken.");
 
 export const publisherOf = (caller: Caller): string => {
   if (caller.kind === "person" || caller.kind === "cliToken") return caller.person.id;
@@ -112,19 +117,23 @@ export function createPublisher(deps: Deps) {
           .limit(1)
       : [];
 
-    if (!row) {
+    const place = project ? await toProject(deps, project) : null;
+    const resource = row ? await toResource(deps, row) : null;
+    // Before anything about the slug, or the two answers would say which artifacts are in there.
+    const allowed = place && (seesProject(caller, place) || can(caller, "project.publish", place));
+    if (place?.restricted && !allowed && !(resource && seesArtifact(caller, resource))) throw nameTaken();
+    if (!row || !resource) {
       requireCan(c, "project.create", { type: "org" });
-      if (
-        project &&
-        caller.kind === "orgToken" &&
-        caller.projectIds &&
-        !caller.projectIds.includes(project.id)
-      ) {
-        throw new ApiError("forbidden", "This token can't publish to that project.");
+      if (place && !can(caller, "project.publish", place)) {
+        throw new ApiError(
+          "forbidden",
+          caller.kind === "orgToken"
+            ? "This token can't publish to that project."
+            : "You can't add to that project.",
+        );
       }
       return null;
     }
-    const resource = await toResource(deps, row);
     if (!seesArtifact(caller, resource)) throw new ApiError("conflict", "That slug is taken.");
     if (row.deletedAt) {
       const [by] = await db
@@ -268,7 +277,9 @@ export function createPublisher(deps: Deps) {
         .from(projects)
         .where(and(eq(projects.orgId, org.id), eq(projects.slug, ticket.project)))
         .limit(1);
+      let made = false;
       if (!project) {
+        const byToken = caller.kind === "orgToken";
         [project] = await tx
           .insert(projects)
           .values({
@@ -277,9 +288,42 @@ export function createPublisher(deps: Deps) {
             slug: ticket.project,
             name: ticket.projectName,
             repo: ticket.repo,
+            restricted: org.settings.defaultProjectAccess === "restricted",
+            createdBy: byToken ? null : publisher,
+            createdByToken: byToken ? caller.tokenId : null,
           })
-          .onConflictDoUpdate({ target: [projects.orgId, projects.slug], set: { updatedAt: now } })
+          .onConflictDoNothing({ target: [projects.orgId, projects.slug] })
           .returning();
+        // Admins manage what a token made: no person created it (04).
+        if (project && !byToken) {
+          await tx.insert(projectAccess).values({
+            id: Bun.randomUUIDv7(),
+            orgId: org.id,
+            projectId: project.id,
+            personId: publisher,
+            permission: "manage",
+            grantedBy: publisher,
+            createdAt: now,
+          });
+        }
+        made = project !== undefined;
+        if (!project) {
+          // Someone else's publish made it first.
+          [project] = await tx
+            .select()
+            .from(projects)
+            .where(and(eq(projects.orgId, org.id), eq(projects.slug, ticket.project)))
+            .limit(1);
+        }
+      }
+      // Under the transaction: it may have appeared, or been restricted, since target() looked.
+      if (
+        project &&
+        !made &&
+        ticket.isNew &&
+        !can(caller, "project.publish", await toProject(deps, project))
+      ) {
+        throw nameTaken();
       }
       if (!project) throw new Error("no project row");
       // Projects made before the CLI sent a remote learn it from their next publish.
@@ -382,6 +426,7 @@ export function createPublisher(deps: Deps) {
       };
     });
 
+    const published = await findArtifact(deps, org.id, ticket.artifactId);
     void deps.events.emit(ticket.artifactId, "version", { version: result.version });
     void notifyPublished(deps, org.id, ticket.artifactId, {
       project: ticket.project,
@@ -400,6 +445,7 @@ export function createPublisher(deps: Deps) {
       orphaned: result.orphaned,
       uploaded: ticket.uploaded,
       reused: ticket.reused,
+      ...(published ? { audience: await audienceOf(deps, org.name, published, ticket.projectName) } : {}),
     };
     return response;
   }

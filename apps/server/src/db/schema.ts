@@ -34,8 +34,9 @@ const createdAt = () => time("created_at").notNull().defaultNow();
 export const role = pgEnum("role", ["owner", "admin", "member", "reviewer", "outside"]);
 export const visibility = pgEnum("visibility", ["me", "org"]);
 export const permission = pgEnum("permission", ["view", "comment", "publish"]);
+export const projectPermission = pgEnum("project_permission", ["view", "comment", "publish", "manage"]);
 export const tokenKind = pgEnum("token_kind", ["cli", "org", "oauth"]);
-export const inviteKind = pgEnum("invite_kind", ["org", "artifact"]);
+export const inviteKind = pgEnum("invite_kind", ["org", "artifact", "project"]);
 export const pageKind = pgEnum("page_kind", ["canvas", "article", "prototype", "gallery", "deck"]);
 export const threadStatus = pgEnum("thread_status", ["open", "fixed", "resolved"]);
 export const anchorState = pgEnum("anchor_state", ["ok", "updated", "orphaned", "moved_version"]);
@@ -67,6 +68,7 @@ export const activityKind = pgEnum("activity_kind", [
   "team_deleted",
   "team_member_added",
   "team_member_removed",
+  "project_access_changed",
 ]);
 
 // Organization and people
@@ -242,12 +244,45 @@ export const projects = pgTable(
     slug: text("slug").notNull(),
     name: text("name").notNull(),
     repo: text("repo"),
+    /** Off by default: an open project is everyone's, as every project was before this column. */
+    restricted: boolean("restricted").notNull().default(false),
+    createdBy: uuid("created_by").references(() => people.id),
+    /** The organization token that made it, which can always reach it (04). */
+    createdByToken: uuid("created_by_token").references(() => tokens.id),
     createdAt: createdAt(),
     updatedAt: time("updated_at").notNull().defaultNow(),
   },
   (t) => [
     unique("projects_org_slug_unique").on(t.orgId, t.slug),
     index("projects_org_repo_idx").on(t.orgId, sql`lower(${t.repo})`),
+  ],
+);
+
+/** Access to a whole project, for a person or a team. */
+export const projectAccess = pgTable(
+  "project_access",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    personId: uuid("person_id").references(() => people.id),
+    teamId: uuid("team_id").references(() => teams.id),
+    permission: projectPermission("permission").notNull(),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("project_access_one_subject", sql`(${t.personId} is null) <> (${t.teamId} is null)`),
+    unique("project_access_project_person_unique").on(t.projectId, t.personId),
+    unique("project_access_project_team_unique").on(t.projectId, t.teamId),
+    index("project_access_person_idx").on(t.personId),
+    index("project_access_team_idx").on(t.teamId),
   ],
 );
 
@@ -386,6 +421,9 @@ export const invites = pgTable("invites", {
   viaToken: boolean("via_token").notNull().default(false),
   /** Teams to join on accepting. Not a reference: a team deleted meanwhile is skipped. */
   teamIds: uuid("team_ids").array(),
+  /** For `project` invites: the outside account gets this grant. */
+  projectId: uuid("project_id").references(() => projects.id),
+  projectPermission: projectPermission("project_permission"),
   tokenHash: text("token_hash").notNull().unique(),
   createdBy: uuid("created_by")
     .notNull()

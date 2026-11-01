@@ -406,6 +406,27 @@ describe("teams", () => {
     });
   });
 
+  test("losing a team stops an open frame within seconds", async () => {
+    const team = await makeTeam("Frames");
+    await addMember(team.slug, member);
+    const id = await publishPrivate("framed");
+    await share(id, team.id, "view");
+    const minted = await t.api(`/api/artifacts/${id}/content-token`, {
+      method: "POST",
+      cookie: member.cookie,
+      json: { version: 1 },
+    });
+    const { base } = await json<{ base: string }>(minted);
+    const open = () =>
+      fetch(`http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}index.html`, {
+        headers: { Host: "content.test", "Sec-Fetch-Dest": "iframe" },
+      });
+    expect((await open()).status).toBe(200);
+    await t.api(`/api/teams/${team.slug}/members/${member.id}`, { method: "DELETE", cookie: owner });
+    t.clock.advance(5001);
+    expect((await open()).status).toBe(404);
+  });
+
   test("purging an artifact shared with a team works", async () => {
     const team = await makeTeam("Purged");
     const id = await publishPrivate("purged");

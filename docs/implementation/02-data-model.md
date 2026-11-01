@@ -18,15 +18,16 @@
 | `role` | `owner`, `admin`, `member`, `reviewer`, `outside` |
 | `visibility` | `me`, `org` |
 | `permission` | `view`, `comment`, `publish` (`publish` only for organization members in `artifact_access`; it includes `comment`) |
+| `project_permission` | `view`, `comment`, `publish`, `manage` |
 | `token_kind` | `cli`, `org`, `oauth` |
-| `invite_kind` | `org`, `artifact` |
+| `invite_kind` | `org`, `artifact`, `project` |
 | `page_kind` | `canvas`, `article`, `prototype`, `gallery`, `deck` |
 | `thread_status` | `open`, `fixed`, `resolved` |
 | `anchor_state` | `ok`, `updated`, `orphaned`, `moved_version` |
 | `decision_kind` | `approved`, `changes_requested` |
 | `device_status` | `pending`, `approved`, `denied`, `used` |
 | `team_role` | `lead`, `member` |
-| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed` |
+| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed` |
 
 ## Tables
 
@@ -39,7 +40,7 @@
 | `id` | uuid PK | |
 | `name` | text | "Mochahub" |
 | `home_domain` | text not null | Hostname that `artifacts setup` ran against; the passkey RP ID. Never changes (SPEC §7.3). |
-| `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
+| `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, defaultProjectAccess: "org"\|"restricted", limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
 | `vapid_public` | text null | Phase 2. Generated the first time push needs it, not at boot, because there's no `org` row on first boot. |
 | `vapid_private` | text null | Phase 2. Stored as is: anyone who can read this table can already read everything else, and tying it to `SESSION_SECRET` would stop that secret being rotated. |
 | `last_digest_at` | timestamptz null | Phase 2. When the daily push digest last went out, so a restart doesn't send it again. |
@@ -109,11 +110,13 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 |---|---|---|
 | `id` | uuid PK | |
 | `org_id` | uuid | |
-| `kind` | `invite_kind` | `org` (role invite) or `artifact` (outside person). |
+| `kind` | `invite_kind` | `org` (role invite), or `artifact` or `project` (outside person). |
 | `email` | citext | |
 | `role` | `role` | For `org` invites: `admin`, `member` or `reviewer`. For `artifact` invites: `outside`. |
 | `artifact_id` | uuid null | For `artifact` invites. |
 | `permission` | `permission` null | For `artifact` invites. |
+| `project_id` | uuid null | For `project` invites. |
+| `project_permission` | `project_permission` null | For `project` invites. |
 | `via_token` | boolean not null default false | True when a token made the invite (`artifacts share --invite`). The `artifact_access` row it becomes carries it over (04). |
 | `team_ids` | uuid[] null | Teams to join on accepting. Not a foreign key: a team deleted meanwhile is skipped. |
 | `token_hash` | text unique | |
@@ -170,7 +173,9 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 
 ### Projects and artifacts
 
-**`projects`**: `id`, `org_id`, `slug` text (unique per org; lowercase `a-z0-9-`, 1–40 chars, not a reserved word, see [06-viewer.md](06-viewer.md#routes)), `name` text, `repo` text null (`owner/name`, lowercased, from `git remote`; a project with none learns it on its next publish), `created_at`, `updated_at`. Index `(org_id, lower(repo))`.
+**`projects`**: `id`, `org_id`, `slug` text (unique per org; lowercase `a-z0-9-`, 1–40 chars, not a reserved word, see [06-viewer.md](06-viewer.md#routes)), `name` text, `repo` text null (`owner/name`, lowercased, from `git remote`; a project with none learns it on its next publish), `restricted` boolean not null default false, `created_by` uuid null FK people (null for a project from before this column, or one a token made), `created_by_token` uuid null FK tokens (the organization token that made it), `created_at`, `updated_at`. Index `(org_id, lower(repo))`.
+
+**`project_access`**: access to a whole project, for a person or a team. `id`, `org_id`, `project_id`, `person_id` uuid null, `team_id` uuid null, `permission` `project_permission`, `granted_by`, `created_at`. Exactly one of `person_id` and `team_id` is set. Unique `(project_id, person_id)` and `(project_id, team_id)`; indexes on `person_id` and `team_id`. Whoever creates a project gets `manage` here. Tokens never write this table.
 
 **`artifacts`**
 

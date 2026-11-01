@@ -1,8 +1,9 @@
 import { type BrandProposal, Brand as BrandSchema, type OrgBrand, ProposeBrand } from "@artifacts/schema";
 import { and, desc, eq } from "drizzle-orm";
-import { toResource } from "../api/artifacts-db.ts";
+import { findArtifacts, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
+import { can } from "../auth/can.ts";
 import { artifacts, brandProposals, org, people, projects, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../publish/blobs.ts";
@@ -45,11 +46,21 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       .where(eq(brandProposals.orgId, c.get("org").id))
       .orderBy(desc(brandProposals.createdAt))
       .limit(50);
+    const samples = await findArtifacts(
+      deps,
+      c.get("org").id,
+      rows.flatMap(({ row }) => (row.artifactId ? [row.artifactId] : [])),
+    );
+    // A proposal is everyone's to see, but its sample keeps its own access.
+    const visible = (id: string | null) => {
+      const sample = id ? samples.get(id) : undefined;
+      return sample !== undefined && can(c.get("caller"), "artifact.read", sample);
+    };
     const list: BrandProposal[] = rows.map(({ row, by, slug, project }) => ({
       id: row.id,
       name: row.name,
       brand: BrandSchema.parse(row.brand),
-      sample: slug && project ? { project, slug } : null,
+      sample: slug && project && visible(row.artifactId) ? { project, slug } : null,
       proposedBy: by,
       agent: row.agent,
       createdAt: row.createdAt.toISOString(),
@@ -71,8 +82,11 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       .innerJoin(projects, eq(projects.id, artifacts.projectId))
       .where(and(eq(artifacts.orgId, orgId), eq(projects.slug, body.project), eq(artifacts.slug, body.slug)))
       .limit(1);
-    if (!sample) throw new ApiError("not_found", "Publish the sample first.");
-    const resource = await toResource(deps, sample.row);
+    const resource = sample ? await toResource(deps, sample.row) : null;
+    // The same answer for a hidden artifact as for none, or this would say what's in a restricted project.
+    if (!sample || !resource || !can(caller, "artifact.read", resource)) {
+      throw new ApiError("not_found", "Publish the sample first.");
+    }
     requireCan(c as ApiContext, "artifact.publish", resource);
     // Fonts are named by hash, so each must be a file the proposer really published, not any blob here.
     const [version] = await db

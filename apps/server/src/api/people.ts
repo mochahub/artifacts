@@ -20,6 +20,7 @@ import {
   passkeys,
   passwords,
   people,
+  projectAccess,
   projects,
   resetLinks,
   sessions,
@@ -31,7 +32,7 @@ import {
 import { ApiError } from "../http/errors.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
-import { isUuid } from "./artifacts-db.ts";
+import { isUuid, projectGrants } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 import { latestRelease } from "./updates.ts";
@@ -81,10 +82,19 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       throw new ApiError("forbidden", "Invite admins from the viewer, not with a token.");
     }
   }
-  function guardTokenReset(c: ApiContext, target: { id: string; role: string }) {
+  async function guardTokenReset(c: ApiContext, target: { id: string; orgId: string; role: string }) {
     const caller = c.get("caller");
+    if (caller.kind === "person") return;
     const above = target.role === "admin" || target.role === "owner";
-    if (caller.kind !== "person" && (above || target.id === actorOf(caller).id)) {
+    // Managing a project or leading a team is what a token may never do, so it can't borrow that either.
+    const [lead] = await db
+      .select({ id: teamMembers.teamId })
+      .from(teamMembers)
+      .where(and(eq(teamMembers.personId, target.id), eq(teamMembers.role, "lead")))
+      .limit(1);
+    const grants = await projectGrants(deps, target.orgId, { personId: target.id });
+    const manages = [...grants.values()].flat().some((grant) => grant.level === "manage");
+    if (above || lead || manages || target.id === actorOf(caller).id) {
       throw new ApiError("forbidden", "Issue this reset link from the viewer, not with a token.");
     }
   }
@@ -188,7 +198,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       .where(
         and(
           eq(invites.orgId, orgId),
-          eq(invites.kind, outside ? "artifact" : "org"),
+          outside ? inArray(invites.kind, ["artifact", "project"]) : eq(invites.kind, "org"),
           isNull(invites.acceptedAt),
           isNull(invites.revokedAt),
           gt(invites.expiresAt, now),
@@ -196,7 +206,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       )
       .orderBy(desc(invites.createdAt));
     const ids = rows.map((row) => row.id);
-    const [withPassword, withPasskey, shares, memberships] = await Promise.all([
+    const [withPassword, withPasskey, shares, memberships, onProjects] = await Promise.all([
       ids.length
         ? db.select({ id: passwords.personId }).from(passwords).where(inArray(passwords.personId, ids))
         : [],
@@ -227,6 +237,19 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
             .where(inArray(teamMembers.personId, ids))
             .orderBy(asc(teams.name))
         : [],
+      ids.length
+        ? db
+            .select({
+              personId: projectAccess.personId,
+              slug: projects.slug,
+              name: projects.name,
+              permission: projectAccess.permission,
+            })
+            .from(projectAccess)
+            .innerJoin(projects, eq(projects.id, projectAccess.projectId))
+            .where(inArray(projectAccess.personId, ids))
+            .orderBy(asc(projects.name))
+        : [],
     ]);
     return c.json({
       people: rows.map((row) => ({
@@ -239,6 +262,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         teams: memberships
           .filter((entry) => entry.personId === row.id)
           .map(({ slug, name, role }) => ({ slug, name, role })),
+        projects: onProjects
+          .filter((entry) => entry.personId === row.id)
+          .map(({ slug, name, permission }) => ({ slug, name, permission })),
       })),
       invites: pending.map(({ invite, by }) => ({
         id: invite.id,
@@ -283,6 +309,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       await tx.update(people).set({ removedAt: now }).where(eq(people.id, person.id));
       await tx.delete(sessions).where(eq(sessions.personId, person.id));
       await tx.delete(teamMembers).where(eq(teamMembers.personId, person.id));
+      await tx.delete(projectAccess).where(eq(projectAccess.personId, person.id));
       await tx
         .update(tokens)
         .set({ revokedAt: now })
@@ -307,7 +334,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   routes.post("/api/people/:id/reset-link", { action: "people.invite" }, async (c) => {
     const person = await target(c as ApiContext);
     guardOwner(c as ApiContext, person.role);
-    guardTokenReset(c as ApiContext, person);
+    await guardTokenReset(c as ApiContext, person);
     const secret = randomSecret();
     const now = clock.now();
     const expiresAt = new Date(now.getTime() + HOUR);
@@ -458,6 +485,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           .where(eq(artifacts.id, row.artifactId))
           .limit(1)
       : [];
+    const [project] = row.projectId
+      ? await db.select({ name: projects.name }).from(projects).where(eq(projects.id, row.projectId)).limit(1)
+      : [];
     const joining = row.teamIds?.length
       ? await db.select({ name: teams.name }).from(teams).where(inArray(teams.id, row.teamIds))
       : [];
@@ -467,6 +497,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       role: row.role,
       email: row.email,
       ...(artifact ? { artifact } : {}),
+      ...(project ? { project } : {}),
       ...(joining.length > 0 ? { teams: joining.map((team) => team.name) } : {}),
     });
   });
@@ -516,6 +547,16 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           permission: invite.permission,
           grantedBy: invite.createdBy,
           viaToken: invite.viaToken,
+        });
+      }
+      if (invite.projectId && invite.projectPermission) {
+        await tx.insert(projectAccess).values({
+          id: Bun.randomUUIDv7(),
+          orgId: invite.orgId,
+          projectId: invite.projectId,
+          personId: row.id,
+          permission: invite.projectPermission,
+          grantedBy: invite.createdBy,
         });
       }
       if (invite.teamIds?.length) {
@@ -605,7 +646,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/shares", { action: "org.manage" }, async (c) => {
     const orgId = c.get("org").id;
     const now = clock.now();
-    const [links, access] = await Promise.all([
+    const [links, access, onProjects, inTeams] = await Promise.all([
       db
         .select({ link: shareLinks, title: artifacts.title, project: projects.slug, slug: artifacts.slug })
         .from(shareLinks)
@@ -618,6 +659,18 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         .innerJoin(people, eq(people.id, artifactAccess.personId))
         .innerJoin(artifacts, eq(artifacts.id, artifactAccess.artifactId))
         .where(and(eq(artifactAccess.orgId, orgId), eq(people.role, "outside"), isNull(people.removedAt))),
+      db
+        .select({ person: people, permission: projectAccess.permission, project: projects.name })
+        .from(projectAccess)
+        .innerJoin(people, eq(people.id, projectAccess.personId))
+        .innerJoin(projects, eq(projects.id, projectAccess.projectId))
+        .where(and(eq(projectAccess.orgId, orgId), eq(people.role, "outside"), isNull(people.removedAt))),
+      db
+        .select({ person: people, team: teams.name })
+        .from(teamMembers)
+        .innerJoin(people, eq(people.id, teamMembers.personId))
+        .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+        .where(and(eq(teamMembers.orgId, orgId), eq(people.role, "outside"), isNull(people.removedAt))),
     ]);
     return c.json({
       links: links
@@ -637,6 +690,13 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         permission,
         title,
       })),
+      projects: onProjects.map(({ person, permission, project }) => ({
+        email: person.email,
+        name: person.name,
+        permission,
+        project,
+      })),
+      teams: inTeams.map(({ person, team }) => ({ email: person.email, name: person.name, team })),
     });
   });
 }

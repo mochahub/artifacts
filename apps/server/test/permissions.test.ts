@@ -5,8 +5,12 @@ import {
   type Action,
   type ArtifactResource,
   can,
+  capFor,
   type Grant,
   inherit,
+  type Level,
+  type ProjectResource,
+  projectLevels,
   type TeamResource,
 } from "../src/auth/can.ts";
 
@@ -36,6 +40,19 @@ const MEMBER_DIRECT_VIEW = "00000000-0000-7000-8000-00000000002c";
 const OUTSIDE_DIRECT_TOKEN = "00000000-0000-7000-8000-00000000002d";
 const CLI_TEAM_PUBLISH = "00000000-0000-7000-8000-00000000002e";
 const CLI_TEAM_COMMENT = "00000000-0000-7000-8000-00000000002f";
+const PROJECT_VIEW = "00000000-0000-7000-8000-000000000031";
+const PROJECT_COMMENT = "00000000-0000-7000-8000-000000000032";
+const PROJECT_PUBLISH = "00000000-0000-7000-8000-000000000033";
+const PROJECT_MANAGE = "00000000-0000-7000-8000-000000000034";
+const PROJECT_TEAM_MANAGE = "00000000-0000-7000-8000-000000000035";
+const REVIEWER_MANAGE = "00000000-0000-7000-8000-000000000036";
+const OUTSIDE_MANAGE = "00000000-0000-7000-8000-000000000037";
+const OUTSIDE_VIEW = "00000000-0000-7000-8000-000000000038";
+const CLI_MANAGE = "00000000-0000-7000-8000-000000000039";
+const CLI_PUBLISH = "00000000-0000-7000-8000-00000000003a";
+const TIE_ACROSS = "00000000-0000-7000-8000-00000000003b";
+const DIRECT_VIEW_MANAGE = "00000000-0000-7000-8000-00000000003c";
+const MAKER_TOKEN = "00000000-0000-7000-8000-00000000003d";
 const ARTIFACT = "00000000-0000-7000-8000-0000000000f0";
 const PROJECT = "00000000-0000-7000-8000-0000000000e0";
 const OTHER_PROJECT = "00000000-0000-7000-8000-0000000000e1";
@@ -53,9 +70,9 @@ const guest = (permission: "view" | "comment", active: boolean): Caller => ({
   guestId: "g",
   links: [{ artifactId: ARTIFACT, shareLinkId: "l", permission, name: "Guest", active }],
 });
-const orgToken = (projectIds: string[], scopes = ALL_SCOPES): Caller => ({
+const orgToken = (projectIds: string[] | null, scopes = ALL_SCOPES, tokenId = "t"): Caller => ({
   kind: "orgToken",
-  tokenId: "t",
+  tokenId,
   createdBy: OTHER,
   scopes,
   projectIds,
@@ -122,6 +139,20 @@ const CALLERS = {
   "outside (token direct, person team)": person(OUTSIDE_DIRECT_TOKEN, "outside"),
   "cliToken (team, publish)": cliToken(CLI_TEAM_PUBLISH, "member", CLI_SCOPES),
   "cliToken (team, comment)": cliToken(CLI_TEAM_COMMENT, "member", CLI_SCOPES),
+  "member (project, view)": person(PROJECT_VIEW, "member"),
+  "member (project, comment)": person(PROJECT_COMMENT, "member"),
+  "member (project, publish)": person(PROJECT_PUBLISH, "member"),
+  "member (project, manage)": person(PROJECT_MANAGE, "member"),
+  "member (project, manage through a team)": person(PROJECT_TEAM_MANAGE, "member"),
+  "reviewer (project, manage)": person(REVIEWER_MANAGE, "reviewer"),
+  "outside (project, manage)": person(OUTSIDE_MANAGE, "outside"),
+  "outside (project, view)": person(OUTSIDE_VIEW, "outside"),
+  "cliToken (project, manage)": cliToken(CLI_MANAGE, "member", CLI_SCOPES),
+  "cliToken (project, publish)": cliToken(CLI_PUBLISH, "member", CLI_SCOPES),
+  "member (token team row, person's project grant)": person(TIE_ACROSS, "member"),
+  "member (direct view, project manage)": person(DIRECT_VIEW_MANAGE, "member"),
+  "orgToken (all projects)": orgToken(null),
+  "orgToken (made this project)": orgToken([], ALL_SCOPES, MAKER_TOKEN),
 } satisfies Record<string, Caller>;
 
 const team = (personId: string, level: "view" | "comment" | "publish", viaToken = false): Grant => ({
@@ -133,7 +164,27 @@ const team = (personId: string, level: "view" | "comment" | "publish", viaToken 
   level,
   viaToken,
 });
+const onProject = (personId: string, level: Level, viaTeam = false): Grant => ({
+  personId,
+  kind: "project",
+  team: viaTeam ? { id: "design", slug: "design", name: "Design" } : null,
+  level,
+  viaToken: false,
+});
 const GRANTS: Grant[] = [
+  onProject(PROJECT_VIEW, "view"),
+  onProject(PROJECT_COMMENT, "comment"),
+  onProject(PROJECT_PUBLISH, "publish"),
+  onProject(PROJECT_MANAGE, "manage"),
+  onProject(PROJECT_TEAM_MANAGE, "manage", true),
+  onProject(REVIEWER_MANAGE, "manage"),
+  onProject(OUTSIDE_MANAGE, "manage"),
+  onProject(OUTSIDE_VIEW, "view"),
+  onProject(CLI_MANAGE, "manage"),
+  onProject(CLI_PUBLISH, "publish"),
+  team(TIE_ACROSS, "comment", true),
+  onProject(TIE_ACROSS, "comment"),
+  onProject(DIRECT_VIEW_MANAGE, "manage"),
   team(TEAM_VIEW, "view"),
   team(TEAM_COMMENT, "comment"),
   team(TEAM_PUBLISH, "publish"),
@@ -154,7 +205,12 @@ const GRANTS: Grant[] = [
   team(CLI_TEAM_COMMENT, "comment"),
 ];
 
-const artifact = (visibility: "me" | "org", lifecycle: Lifecycle): ArtifactResource => ({
+type Place = "open" | "restricted";
+const artifact = (
+  visibility: "me" | "org",
+  lifecycle: Lifecycle,
+  place: Place = "open",
+): ArtifactResource => ({
   type: "artifact",
   id: ARTIFACT,
   projectId: PROJECT,
@@ -171,8 +227,11 @@ const artifact = (visibility: "me" | "org", lifecycle: Lifecycle): ArtifactResou
     { personId: OUTSIDE_DIRECT_VIEW, permission: "view", viaToken: false },
     { personId: MEMBER_DIRECT_VIEW, permission: "view", viaToken: false },
     { personId: OUTSIDE_DIRECT_TOKEN, permission: "comment", viaToken: true },
+    { personId: DIRECT_VIEW_MANAGE, permission: "view", viaToken: false },
   ],
-  inherited: inherit(GRANTS),
+  restricted: place === "restricted",
+  projectTokenId: MAKER_TOKEN,
+  inherited: inherit(GRANTS, visibility),
 });
 
 type Lifecycle = "active" | "archived" | "deleted";
@@ -180,7 +239,7 @@ const ADMINS: Name[] = ["owner", "admin"];
 const GUESTS_OK: Name[] = ["guest (view link)", "guest (comment link)"];
 
 /** Who sees the artifact, ignoring deletion: the "Visibility first" table. */
-function sees(name: Name, visibility: "me" | "org"): boolean {
+function sees(name: Name, visibility: "me" | "org", place: Place): boolean {
   if (name === "member (publisher)" || name === "cliToken (publisher)") return true;
   if (name === "cliToken (publisher, read only)" || name === "cliToken (admin, not the publisher)")
     return true;
@@ -189,8 +248,9 @@ function sees(name: Name, visibility: "me" | "org"): boolean {
   if (name === "outside (added by a token)" || name === "member (added by a token)") return true;
   if (name === "cliToken (outside, added)") return true;
   if (GUESTS_OK.includes(name) || name === "guest (comment link)") return true;
+  // Their role is all they have, and in a restricted project a role gives nothing.
   if (name === "member (other)" || name === "reviewer" || name === "cliToken (reviewer)")
-    return visibility === "org";
+    return visibility === "org" && place === "open";
   if (name === "orgToken (allowed project)") return visibility === "org";
   return false;
 }
@@ -248,17 +308,19 @@ const MEMBERS: Name[] = [
  * Access a token granted lets someone comment but not decide or resolve, unless their role already lets
  * them comment: a member on an org-visible artifact. An outside person has only the row.
  */
-function commentOnlyFromTokenGrant(name: Name, visibility: "me" | "org"): boolean {
+function commentOnlyFromTokenGrant(name: Name, visibility: "me" | "org", place: Place): boolean {
   if (name === "outside (added by a token)") return true;
-  return name === "member (added by a token)" && visibility === "me";
+  return name === "member (added by a token)" && (visibility === "me" || place === "restricted");
 }
 
 /**
  * Callers who hold access through a team, written out by hand: what they can do on a private artifact
  * (`me`) and an org-visible one (`org`). r reads, c comments, d decides or resolves, p publishes.
  * `as` is the caller with the same role and no grant, for everything that isn't about this artifact.
+ * A restricted project takes the role's right away, so `org` there reads as `me` unless it says otherwise.
  */
-const THROUGH_TEAMS: Partial<Record<Name, { me: string; org: string; as: Name }>> = {
+type Standing = { me: string; org: string; restricted?: string; as: Name };
+const THROUGH_TEAMS: Partial<Record<Name, Standing>> = {
   "member (team, view)": { me: "r", org: "rcd", as: "member (other)" },
   "member (team, comment)": { me: "rcd", org: "rcd", as: "member (other)" },
   "member (team, publish)": { me: "rcdp", org: "rcdp", as: "member (other)" },
@@ -276,17 +338,49 @@ const THROUGH_TEAMS: Partial<Record<Name, { me: string; org: string; as: Name }>
   // Tokens never decide, whatever their person may do.
   "cliToken (team, publish)": { me: "rcp", org: "rcp", as: "cliToken (publisher)" },
   "cliToken (team, comment)": { me: "rc", org: "rc", as: "cliToken (publisher)" },
+  // m manages. Project grants never reach `me`, and project "Can publish" adds new artifacts only.
+  "member (project, view)": { me: "", org: "rcd", restricted: "r", as: "member (other)" },
+  "member (project, comment)": { me: "", org: "rcd", restricted: "rcd", as: "member (other)" },
+  "member (project, publish)": { me: "", org: "rcd", restricted: "rcd", as: "member (other)" },
+  "member (project, manage)": { me: "", org: "rcdpm", restricted: "rcdpm", as: "member (other)" },
+  "member (project, manage through a team)": {
+    me: "",
+    org: "rcdpm",
+    restricted: "rcdpm",
+    as: "member (other)",
+  },
+  "reviewer (project, manage)": { me: "", org: "rcd", restricted: "rcd", as: "reviewer" },
+  "outside (project, manage)": { me: "", org: "rcd", restricted: "rcd", as: "outside (not added)" },
+  "outside (project, view)": { me: "", org: "r", restricted: "r", as: "outside (not added)" },
+  // Project `manage` is for a browser: a token gets what commenting gives.
+  "cliToken (project, manage)": { me: "", org: "rc", restricted: "rc", as: "cliToken (publisher)" },
+  "cliToken (project, publish)": { me: "", org: "rc", restricted: "rc", as: "cliToken (publisher)" },
+  "member (token team row, person's project grant)": {
+    me: "rc",
+    org: "rcd",
+    restricted: "rcd",
+    as: "member (other)",
+  },
+  "member (direct view, project manage)": {
+    me: "r",
+    org: "rcdpm",
+    restricted: "rcdpm",
+    as: "member (other)",
+  },
+  "orgToken (all projects)": { me: "", org: "rp", restricted: "", as: "orgToken (allowed project)" },
+  "orgToken (made this project)": { me: "", org: "rp", restricted: "rp", as: "orgToken (allowed project)" },
 };
 
-function throughTeam(
-  row: { me: string; org: string; as: Name },
+function throughGrant(
+  row: Standing,
   action: Action,
   visibility: "me" | "org",
   lifecycle: Lifecycle,
+  place: Place,
 ): boolean {
   const live = lifecycle !== "deleted";
   const unarchived = lifecycle === "active";
-  const may = row[visibility];
+  const may = visibility === "me" ? row.me : place === "open" ? row.org : (row.restricted ?? row.me);
   switch (action) {
     case "artifact.read":
     case "data.read":
@@ -301,20 +395,30 @@ function throughTeam(
       return unarchived && may.includes("p");
     case "artifact.manage":
     case "artifact.share":
+    case "artifact.share_outside":
     case "artifact.archive":
+      return live && may.includes("m");
     case "artifact.delete":
+      // A project manager deletes, and only the deleter brings it back: this table's publisher deleted it.
+      return live && may.includes("m");
     case "artifact.purge":
     case "data.export":
-      return false; // No team grant reaches these. Only a project can (04).
+      return false; // The publisher and admins, however a grant reads.
     default:
-      return expected(row.as, action, visibility, lifecycle);
+      return expected(row.as, action, visibility, lifecycle, place);
   }
 }
 
-function expected(name: Name, action: Action, visibility: "me" | "org", lifecycle: Lifecycle): boolean {
+function expected(
+  name: Name,
+  action: Action,
+  visibility: "me" | "org",
+  lifecycle: Lifecycle,
+  place: Place,
+): boolean {
   const teamRow = THROUGH_TEAMS[name];
-  if (teamRow) return throughTeam(teamRow, action, visibility, lifecycle);
-  const seen = sees(name, visibility);
+  if (teamRow) return throughGrant(teamRow, action, visibility, lifecycle, place);
+  const seen = sees(name, visibility, place);
   const live = lifecycle !== "deleted";
   const unarchived = lifecycle === "active";
   const anyPerson = !name.startsWith("guest") && name !== "anonymous" && !name.startsWith("orgToken");
@@ -371,7 +475,7 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
         seen &&
         commenters.includes(name) &&
         people.includes(name) &&
-        !commentOnlyFromTokenGrant(name, visibility)
+        !commentOnlyFromTokenGrant(name, visibility, place)
       );
     case "artifact.publish":
       return unarchived && seen && publishers.includes(name);
@@ -379,6 +483,9 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "artifact.share":
     case "artifact.archive":
       return live && seen && managers.includes(name);
+    case "artifact.share_outside":
+      // A link would undo a restriction, so there it takes admins, in a browser. Project managers are above.
+      return live && seen && (place === "open" ? managers : ADMINS).includes(name);
     case "artifact.delete":
       return managers.includes(name); // The publisher deleted it in this table, so they and admins may undelete.
     case "artifact.purge":
@@ -406,7 +513,11 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "team.manage":
       return ADMINS.includes(name); // People only.
     case "team.members":
-      return false; // It's about one team, and this resource isn't one. Below.
+    case "project.publish":
+    case "project.update":
+    case "project.access.read":
+    case "project.access.write":
+      return false; // About one team or project, and this resource isn't one. Below.
   }
 }
 
@@ -414,15 +525,97 @@ describe("the permission matrix", () => {
   for (const name of Object.keys(CALLERS) as Name[]) {
     for (const visibility of ["me", "org"] as const) {
       for (const lifecycle of ["active", "archived", "deleted"] as const) {
-        test(`${name}, ${visibility}, ${lifecycle}`, () => {
-          const resource = artifact(visibility, lifecycle);
-          const actual = Object.fromEntries(ACTIONS.map((a) => [a, can(CALLERS[name], a, resource)]));
-          const want = Object.fromEntries(ACTIONS.map((a) => [a, expected(name, a, visibility, lifecycle)]));
-          expect(actual).toEqual(want);
-        });
+        for (const place of ["open", "restricted"] as const) {
+          test(`${name}, ${visibility}, ${lifecycle}, ${place}`, () => {
+            const resource = artifact(visibility, lifecycle, place);
+            const actual = Object.fromEntries(ACTIONS.map((a) => [a, can(CALLERS[name], a, resource)]));
+            const want = Object.fromEntries(
+              ACTIONS.map((a) => [a, expected(name, a, visibility, lifecycle, place)]),
+            );
+            expect(actual).toEqual(want);
+          });
+        }
       }
     }
   }
+});
+
+describe("what callers can do with a project", () => {
+  /** s sees it, p adds artifacts, a reads who has access, w changes that. Open, then restricted. */
+  const TABLE: Partial<Record<Name, [string, string]>> = {
+    owner: ["spaw", "spaw"],
+    admin: ["spaw", "spaw"],
+    "member (publisher)": ["sp", ""],
+    "member (added with publish)": ["sp", ""],
+    "member (other)": ["sp", ""],
+    "member (added by a token)": ["sp", ""],
+    reviewer: ["s", ""],
+    "outside (added)": ["", ""],
+    "outside (not added)": ["", ""],
+    "outside (added by a token)": ["", ""],
+    "guest (view link)": ["", ""],
+    "guest (comment link)": ["", ""],
+    "guest (revoked link)": ["", ""],
+    "cliToken (publisher)": ["sp", ""],
+    "cliToken (admin, not the publisher)": ["spa", "spa"],
+    "cliToken (reviewer)": ["s", ""],
+    "cliToken (outside, added)": ["", ""],
+    "cliToken (publisher, read only)": ["s", ""],
+    "orgToken (allowed project)": ["sp", "sp"],
+    "orgToken (other project)": ["", ""],
+    "orgToken (no read scope)": ["p", "p"],
+    "orgToken (all projects)": ["sp", ""],
+    "orgToken (made this project)": ["sp", "sp"],
+    anonymous: ["", ""],
+    "member (project, view)": ["sp", "s"],
+    "member (project, comment)": ["sp", "s"],
+    "member (project, publish)": ["sp", "sp"],
+    "member (project, manage)": ["spaw", "spaw"],
+    "member (project, manage through a team)": ["spaw", "spaw"],
+    "reviewer (project, manage)": ["s", "s"],
+    "outside (project, manage)": ["s", "s"],
+    "outside (project, view)": ["s", "s"],
+    "cliToken (project, manage)": ["spa", "spa"],
+    "cliToken (project, publish)": ["sp", "sp"],
+    "member (token team row, person's project grant)": ["sp", "s"],
+    "member (direct view, project manage)": ["spaw", "spaw"],
+  };
+  const project = (place: Place): ProjectResource => ({
+    type: "project",
+    id: PROJECT,
+    restricted: place === "restricted",
+    tokenId: MAKER_TOKEN,
+    grants: projectLevels(GRANTS.filter((grant) => grant.kind === "project")),
+  });
+  for (const name of Object.keys(CALLERS) as Name[]) {
+    for (const place of ["open", "restricted"] as const) {
+      test(`${name}, ${place}`, () => {
+        const row = TABLE[name] ?? (TABLE[THROUGH_TEAMS[name]?.as as Name] as [string, string]);
+        const may = row[place === "open" ? 0 : 1];
+        const resource = project(place);
+        const caller = CALLERS[name];
+        expect({
+          read: can(caller, "project.read", resource),
+          publish: can(caller, "project.publish", resource),
+          accessRead: can(caller, "project.access.read", resource),
+          accessWrite: can(caller, "project.access.write", resource),
+          update: can(caller, "project.update", resource),
+        }).toEqual({
+          read: may.includes("s"),
+          publish: may.includes("p"),
+          accessRead: may.includes("a"),
+          accessWrite: may.includes("w"),
+          update: may.includes("w"),
+        });
+      });
+    }
+  }
+
+  test("project actions need a project", () => {
+    for (const action of ["project.publish", "project.access.read", "project.access.write"] as const) {
+      expect(can(CALLERS.owner, action, { type: "org" })).toBe(false);
+    }
+  });
 });
 
 describe("who runs a team", () => {
@@ -453,14 +646,31 @@ describe("who runs a team", () => {
 
 describe("what a grant adds up to", () => {
   test("level and confirmed stay apart", () => {
-    const [row] = inherit([team(MEMBER_TIED, "publish", true), team(MEMBER_TIED, "view")]);
+    const [row] = inherit([team(MEMBER_TIED, "publish", true), team(MEMBER_TIED, "view")], "org");
     expect(row?.level).toBe("publish");
     expect(row?.confirmed).toBe("view");
     expect(row?.sources).toHaveLength(2);
   });
 
   test("only tokens made it: nothing is confirmed", () => {
-    expect(inherit([team(MEMBER_TIED, "comment", true)])[0]?.confirmed).toBeNull();
+    expect(inherit([team(MEMBER_TIED, "comment", true)], "org")[0]?.confirmed).toBeNull();
+  });
+
+  test("project grants don't reach a private artifact", () => {
+    expect(inherit([onProject(OTHER, "manage")], "me")).toEqual([]);
+  });
+
+  test("project publish is worth a comment on an artifact", () => {
+    expect(inherit([onProject(OTHER, "publish")], "org")[0]).toMatchObject({
+      level: "comment",
+      confirmed: "comment",
+    });
+  });
+
+  test("the cap reads the same from outside can()", () => {
+    expect(capFor({ role: "reviewer" }, "manage")).toBe("comment");
+    expect(capFor({ role: "outside" }, "view")).toBe("view");
+    expect(capFor({ role: "member" }, "manage")).toBe("manage");
   });
 });
 
@@ -527,9 +737,35 @@ describe("rules the matrix can't express", () => {
   test("a token-made publish row doesn't let a person decide, but a person's view row doesn't either", () => {
     const shared = artifact("me", "active");
     shared.access = [];
-    shared.inherited = inherit([team(OTHER, "publish", true), team(OTHER, "view")]);
+    shared.inherited = inherit([team(OTHER, "publish", true), team(OTHER, "view")], "me");
     expect(can(CALLERS["member (other)"], "artifact.comment", shared)).toBe(true);
     expect(can(CALLERS["member (other)"], "artifact.decide", shared)).toBe(false);
+  });
+
+  test("a project manager deletes a teammate's work and brings it back, but only that person erases it", () => {
+    const gone = artifact("org", "deleted");
+    gone.deletedBy = PROJECT_MANAGE;
+    expect(can(CALLERS["member (project, manage)"], "artifact.delete", gone)).toBe(true);
+    expect(can(CALLERS["member (project, manage)"], "artifact.purge", gone)).toBe(false);
+  });
+
+  test("a project manager's token can't touch a teammate's artifact, on its own project", () => {
+    const token = CALLERS["cliToken (project, manage)"];
+    for (const action of [
+      "artifact.publish",
+      "artifact.archive",
+      "artifact.manage",
+      "artifact.share",
+    ] as const) {
+      expect(can(token, action, live)).toBe(false);
+    }
+  });
+
+  test("a token never shares outside a restricted project, even for the publisher", () => {
+    const restricted = artifact("org", "active", "restricted");
+    expect(can(CALLERS["member (publisher)"], "artifact.share_outside", restricted)).toBe(false);
+    expect(can(CALLERS["cliToken (publisher)"], "artifact.share_outside", restricted)).toBe(false);
+    expect(can(CALLERS["member (project, manage)"], "artifact.share_outside", restricted)).toBe(true);
   });
 
   test("a guest's rights stop at their own artifact", () => {
