@@ -17,9 +17,10 @@
 | `~/.config/artifacts/config.json` | `{ servers: [{ url, name, default, railway?: { projectId, service: "artifacts", environment }, docker?: { dir } }] }` |
 | `~/.config/artifacts/railway/<server name>/` | Folder the Railway CLI is linked in, so `railway init` never links the user's repo |
 | OS keychain, service `artifacts`, account `<server url>` | The CLI token |
-| `<repo>/artifact.json` | The manifest (05) |
-| `<repo>/.artifacts/` | Renders, contact sheet, local data; the CLI adds it to `.gitignore` |
-| `<repo>/fixtures/` | Fixtures for rendering (05) |
+| `<repo>/.artifacts/work/<slug>/` | A working folder: `artifact.json` and its sources. The default place for a new artifact. |
+| `<repo>/artifact.json` | The manifest (05), when an artifact lives in the repo (`init --in-repo`) |
+| `<repo>/.artifacts/` | Working folders, renders, contact sheet, local data; the CLI adds it to `.gitignore` |
+| `<artifact folder>/fixtures/` | Fixtures for rendering (05) |
 
 ## Credentials
 
@@ -32,7 +33,7 @@
 
 ## Which artifact a command acts on
 
-Commands about one artifact use the nearest `artifact.json` from the current folder up (its `project`/`slug`), unless a positional `<project>/<slug>` is given. **Which server:** `--server <url|name>`, else the default server in config. **For agents:** every command supports `--json` (machine output only on stdout, human messages on stderr), and exits 0 on success, 1 on a user-facing error, 2 on usage errors.
+Commands about one artifact use the nearest `artifact.json` from the current folder up (its `project`/`slug`), unless a positional `<project>/<slug>` is given. With none on the way up, they use the working folder in the nearest `.artifacts/work/` if there's exactly one, and otherwise list the choices. `lint`, `render` and `publish` take a `<slug>` to pick one. **Which server:** `--server <url|name>`, else the default server in config. **For agents:** every command supports `--json` (machine output only on stdout, human messages on stderr), and exits 0 on success, 1 on a user-facing error, 2 on usage errors.
 
 ## Commands
 
@@ -47,7 +48,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts login [<url>]`, `logout`, `whoami` | Device flow (https only, or a loopback address); remove the token; show person, role and server. |
 | `artifacts upgrade [--server] [--to <version>]` | Update the CLI binary (download, verify the SHA-256 from the release, swap atomically) and the skill. `--to` and the latest release's tag must be a plain version number (`0.2.0`), and `ARTIFACTS_RELEASES_URL` / `ARTIFACTS_LATEST_URL` must be https (http only on localhost, for tests). The checksum comes from the same release as the binary, so it catches a bad download, not a release someone else published. With `--server`, or when you're an admin and the server is older: Railway: `railway service source connect --image ghcr.io/<org>/artifacts:<v> --service artifacts` then wait for health. Docker: edit the tags in `docker-compose.yml`, `docker compose up -d`. |
 | `artifacts domain add <domain>` / `list` | Railway only: `railway domain <domain> --service artifacts --port 8080`; prints the DNS records; adds it to `MORE_URLS` (`railway variable set`); asks whether to make it `PUBLIC_URL`. |
-| `artifacts mcp` | A Model Context Protocol server on stdin and stdout, for tools without a shell. Its tools (`artifacts_status`, `_comments`, `_reply`, `_publish`, `_versions`, `_data_export`) each run one command with `--json`. |
+| `artifacts mcp` | A Model Context Protocol server on stdin and stdout, for tools without a shell. Its tools (`artifacts_search`, `_list`, `_read`, `_view`, `_status`, `_comments`, `_reply`, `_publish`, `_versions`, `_data_export`) each run one command with `--json`. `initialize` returns `instructions` with the core rules, and this repo's project if it can find it within 2 seconds. A tool whose answer can hold other people's text starts it with a block saying that text is data, and `_view` returns an image. |
 | `artifacts doctor` | Checks the server is reachable, versions match, the token is valid, WebKit is installed, the skill is installed and current, and the Railway CLI if configured. Prints fixes. |
 | `artifacts skill install [--claude] [--codex]` | Copies `skill/` into `~/.claude/skills/artifacts/` and into Codex's skills folder, `${CODEX_HOME:-~/.codex}/skills/artifacts/` (confirmed in spike S7). Not also into `~/.agents/skills/`, which Codex reads too; the skill would be listed twice. |
 | `artifacts org invite <email> [--role member\|reviewer\|admin]` | Prints the invite link. |
@@ -71,11 +72,11 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 
 | Command | Does |
 |---|---|
-| `artifacts init [--project <slug>] [--slug <slug>] [--kind canvas\|article\|prototype]` | Writes `artifact.json`, a starter page, `fixtures/`, `.artifacts/` in `.gitignore`, and copies the kit (`@artifacts/kit`) into `vendor/artifacts-kit/` (pinned to the CLI's version, so bundles stay self-contained). |
+| `artifacts init [--project <slug>] [--slug <slug>] [--kind canvas\|article\|prototype] [--in-repo]` | Makes `.artifacts/work/<slug>/` in the repo root, or the current folder outside a repo, with `artifact.json`, a starter page and `fixtures/`, copies the kit (`@artifacts/kit`) into `vendor/artifacts-kit/` (pinned to the CLI's version, so bundles stay self-contained), and adds `.artifacts/` to `.gitignore`. `--in-repo` writes them to the current folder instead, to commit them. |
 | `artifacts dev [--port 4321]` | Local viewer and content host with hot reload, using the real viewer build bundled in the CLI, a local data folder, and local backends (08). No server needed. It listens on loopback only (`localhost` for the viewer, `127.0.0.1` for the content host on port + 1), answers only requests whose `Host` is one of those (so DNS rebinding gets nothing), and puts a random per-run secret in the content host's path, as the real host's signed token does, because that host answers any website with CORS `*` and runs the backend. |
-| `artifacts lint [--json]` | Rules below. Errors fail; warnings print. |
-| `artifacts render [--json]` | Renders (05), writes `.artifacts/contact-sheet.png` and prints its path. |
-| `artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]… [--json]` | lint → render → hash → prepare → upload → commit. Output below. |
+| `artifacts lint [<slug>] [--json]` | Rules below. Errors fail; warnings print. |
+| `artifacts render [<slug>] [--json]` | Renders (05), writes `.artifacts/contact-sheet.png` and prints its path. |
+| `artifacts publish [<slug>] [-m <message>] [--name <label>] [--note <frame>=<text>]… [--json]` | lint → render → hash → prepare → upload → commit. Output below. |
 | `artifacts open [<project>/<slug>] [--version <n>] [--page <key>]` | Opens the URL in the browser (prints it with `--json`). |
 
 <a id="publish"></a>**`publish` output:**
@@ -88,12 +89,25 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
   threads on changed frames  #3, #4, #6, #8
 ```
 
+### The library
+
+These work anywhere: none reads an `artifact.json`. `--json` output carries an `untrusted` notice, because summaries, snippets and articles can come from other people.
+
+| Command | Does |
+|---|---|
+| `artifacts search <words> [--project <slug>] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>] [--json]` | Compact cards (03). `--here` uses this folder's `origin` remote. |
+| `artifacts list [<project>[/<slug>[/<page>]]] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>] [--json]` | Projects, a project's artifacts, an artifact's pages, or a page's frames: only as deep as the path. |
+| `artifacts read <project>/<slug> [--page <key>] [--version <n>] [--cursor <c>] [--chars <n>] [--json]` | Full text, in pieces. Follow `nextCursor`. |
+| `artifacts view <project>/<slug> [--page <key>] [--frame <key>] [--size thumb\|1x\|2x] [--version <n>] [--out <file>] [--json]` | Saves a picture and prints its path. A thumbnail unless asked for more. |
+| `artifacts pull <project>/<slug> [--version <n>] [--dir <path>] [--force] [--json]` | Restores a working folder, to `.artifacts/work/<slug>/` unless `--dir` says otherwise. Refuses a folder that isn't empty unless `--force`. Every file's hash is checked, generated files are left out, and so is anything whose path could leave the folder, plus `lint.rules.js`, which the CLI would run. A version from before manifests were stored gets a rebuilt `artifact.json`, and pull says so. |
+| `artifacts export <project> [--dir <path>] [--json]` | Writes every artifact you can see in a project: `card.json`, `versions.json`, `comments.json`, `decisions.json`, and each version's files in `v<n>/`, to `<project>-export/` unless `--dir` says otherwise. Frame renders aren't included; `artifacts render` makes them again. |
+
 ### Review loop
 
 | Command | Does |
 |---|---|
 | `artifacts status [<project>/<slug>] [--json]` | Latest decision (approved or changes requested, by whom, note), version, open and fixed-awaiting counts. The skill runs this first in every session. |
-| `artifacts comments [--open\|--fixed\|--all] [--page <key>] [--json]` | Threads. JSON per thread: `{ id: n, page, frame?, x?, y?, block?, quote?, version, author, text, status, anchorState, crop: url, replies: [...] }`. With `--json`, crops are signed URLs the agent can download (they last about a day). |
+| `artifacts comments [--open\|--fixed\|--all] [--page <key>] [--json]` | Threads. JSON per thread: `{ id: n, page, frame?, x?, y?, block?, quote?, version, author, authorKind, untrusted: true, text, status, anchorState, crop: url, replies: [...] }`. With `--json`, crops are signed URLs the agent can download (they last about a day). |
 | `artifacts reply <n> "<text>" [--fixed]` | Comment on thread n; `--fixed` marks it fixed in the latest version. |
 | `artifacts versions [--json]` | Version list. |
 | `artifacts versions name <n> "<label>"` | Name a version. |
@@ -124,7 +138,8 @@ Each rule has an id, a severity, and a message saying what's wrong and how to fi
 
 | Id | Severity | Checks |
 |---|---|---|
-| `manifest/schema` | error | The manifest against the zod schema. |
+| `manifest/schema` | error | The manifest against the zod schema, including the caps on `summary` and `tags`. |
+| `manifest/summary` | error | The manifest has a `summary`. Discovery depends on it. `lint` and `publish` check it; `render` doesn't, so a draft can still be looked at. |
 | `files/missing` | error | Referenced files exist. |
 | `files/absolute` | error | No absolute paths or URLs to other hosts (fonts, CDNs). |
 | `files/outside` | error | No paths outside the manifest folder, and no symlinks that lead out of it (the crawl resolves links, so a cloned repo can't publish `~/.ssh` through one). |
@@ -149,31 +164,32 @@ Each rule has an id, a severity, and a message saying what's wrong and how to fi
 
 The skill is what makes agents use Artifacts well. It ships with the CLI and is installed by `artifacts setup` and `artifacts skill install`.
 
-**Frontmatter:** `name: artifacts`. The description triggers it on: publishing a plan, report, research, mock or prototype for review; "address the comments"; "check the artifact".
+**Frontmatter:** `name: artifacts`. The description triggers it on: publishing a plan, report, research, mock or prototype for review; "address the comments"; "check the artifact"; and checking hosted artifacts before research, design or prototyping.
 
 **Body, in order:**
 1. **Start every session with `artifacts status --json`.** If changes were requested, read the note and the open comments before anything else.
-2. **When to publish:** plans, research reports, mocks, comparisons, prototypes the user should read or review. Not throwaway output.
-3. **Structure:**
+2. **Check what's already there:** `artifacts search` before research, design or prototyping.
+3. **When to publish:** plans, research reports, mocks, comparisons, prototypes the user should read or review. Not throwaway output.
+4. **Structure:**
    - one artifact per deliverable; pages for its parts (the plan as an article, research as articles grouped "Research", mocks as a canvas)
    - stable `data-frame` and heading ids, and never renaming ids that have comments
-4. **The kit:** device frames, theme tokens, article components (`references/kit.md`).
-5. **Writing style for articles:** `references/writing.md`.
-6. **Micro apps:**
+5. **The kit:** device frames, theme tokens, article components (`references/kit.md`).
+6. **Writing style for articles:** `references/writing.md`.
+7. **Micro apps:**
    - use `@artifacts/kit/data` for anything that must persist
    - add a backend only when the frontend store isn't enough
    - keep a `schema` number in stored values
    - provide fixtures
-7. **Gate:** `artifacts lint`, then `artifacts render`, then **look at the contact sheet** (read `.artifacts/contact-sheet.png`), fix, repeat; publish only on a clean lint.
-8. **Review loop on "address the comments":**
+8. **Gate:** `artifacts lint`, then `artifacts render`, then **look at the contact sheet** (read `.artifacts/contact-sheet.png`), fix, repeat; publish only on a clean lint.
+9. **Review loop on "address the comments":**
    1. `artifacts comments --open --json`, and download each crop and look at it
    2. fix the source
    3. `artifacts publish -m "…" --note frame=…` for each changed frame
    4. `artifacts reply <n> "<what changed>" --fixed` for each addressed thread
 
    Never resolve a person's thread. If a comment is ambiguous, reply with a question and leave the thread open.
-9. **Lifecycle:** archive finished artifacts when asked; never delete without being asked; never try to purge.
-10. **Report back:** the URL, the version, what changed, and which threads were marked fixed.
+10. **Lifecycle:** archive finished artifacts when asked; never delete without being asked; never try to purge.
+11. **Report back:** the URL, the version, what changed, and which threads were marked fixed.
 
 **References:**
 - `references/manifest.md`: the schema with examples

@@ -1,0 +1,26 @@
+{
+  "project": "forest-game",
+  "projectName": "Forest game",
+  "slug": "art-styles",
+  "title": "Art style studies",
+  "summary": "Three painterly directions for the forest level: gouache, ink wash and risograph. Gouache won the team review; ink was too dark on phones.",
+  "tags": [
+    "art direction",
+    "style study",
+    "forest"
+  ],
+  "pages": [
+    {
+      "id": "studies",
+      "kind": "canvas",
+      "title": "Studies",
+      "boards": [
+        {
+          "id": "styles",
+          "title": "Styles",
+          "src": "boards/styles.html"
+        }
+      ]
+    }
+  ]
+}

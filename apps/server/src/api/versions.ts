@@ -72,6 +72,8 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         agent: version.agent,
         publishedAt: version.publishedAt.toISOString(),
         restoredFrom: version.restoredFrom,
+        summary: version.summary,
+        tags: version.tags ?? [],
         decision: decided.find((entry) => entry.version === version.n)?.kind,
         changes: counts[index],
       })),

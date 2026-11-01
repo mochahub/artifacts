@@ -44,7 +44,28 @@ export const RelPath = z
     "use a relative path inside the bundle",
   );
 
+/**
+ * A path a version may list. Anything else could climb out of the folder `artifacts pull` writes to, or
+ * land in a place a tool acts on. `RelPath` is for a manifest, which lint has already resolved.
+ */
+export const isBundlePath = (path: string) =>
+  path.length > 0 &&
+  path.length <= 500 &&
+  !/[\\\0]/.test(path) &&
+  !path.startsWith("/") &&
+  !/^[a-zA-Z]:/.test(path) &&
+  path
+    .split("/")
+    .every((part) => part !== "" && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
+
 export const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "use a colour like #ff9f0a");
+
+/** The frontmatter an agent reads instead of the whole artifact, so these caps are what keep search small. */
+export const SUMMARY_MAX = 280;
+export const TAGS_MAX = 8;
+export const TAG_MAX = 32;
+export const Summary = z.string().trim().min(1).max(SUMMARY_MAX);
+export const Tags = z.array(z.string().trim().min(1).max(TAG_MAX)).max(TAGS_MAX);
 
 export const Visibility = z.enum(["me", "org"]);
 export type Visibility = z.infer<typeof Visibility>;
@@ -92,6 +113,8 @@ export const Manifest = z.object({
   projectName: z.string().optional(),
   slug: Slug,
   title: z.string().min(1).max(120),
+  summary: Summary.optional(),
+  tags: Tags.optional(),
   visibility: Visibility.optional(),
   theme: z
     .object({

@@ -27,8 +27,16 @@ export async function publish(
     tamper?: string;
     renderBytes?: Uint8Array;
     frameKey?: string;
+    title?: string;
     backend?: string;
     agent?: string;
+    summary?: string | null;
+    tags?: string[];
+    blocks?: { key: string; text: string }[];
+    frameTitle?: string;
+    message?: string;
+    notes?: Record<string, string>;
+    repo?: string;
   } = {},
 ) {
   const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame"), visibility } = options;
@@ -54,7 +62,14 @@ export async function publish(
   const prepared = await t.api("/api/publish/prepare", {
     method: "POST",
     bearer,
-    json: { project, slug, title: "Roadmap", visibility, files: files.map(({ body: _, ...rest }) => rest) },
+    json: {
+      project,
+      slug,
+      title: options.title ?? "Roadmap",
+      visibility,
+      repo: options.repo,
+      files: files.map(({ body: _, ...rest }) => rest),
+    },
   });
   if (prepared.status !== 200) return prepared;
   const ready = PublishPrepared.parse(await prepared.json());
@@ -78,8 +93,11 @@ export async function publish(
     bearer,
     json: {
       uploadId: ready.uploadId,
-      message: "First",
+      message: options.message ?? "First",
       agent: options.agent,
+      summary: options.summary,
+      tags: options.tags,
+      notes: options.notes,
       backendHash: module?.sha256 ?? null,
       files: bundle,
       pages: [
@@ -98,7 +116,7 @@ export async function publish(
           pageKey: "mocks",
           boardKey: "main",
           frameKey: options.frameKey ?? "live-view",
-          title: "Live view",
+          title: options.frameTitle ?? "Live view",
           device: "iphone",
           x: 0,
           y: 0,
@@ -109,7 +127,12 @@ export async function publish(
           livePath: "index.html",
         },
       ],
-      blocks: [{ pageKey: "plan", blockKey: "intro/p1", contentHash: hash("hello"), text: "Hello" }],
+      blocks: (options.blocks ?? [{ key: "intro/p1", text: "Hello" }]).map((block) => ({
+        pageKey: "plan",
+        blockKey: block.key,
+        contentHash: hash(block.text),
+        text: block.text,
+      })),
     },
   });
 }

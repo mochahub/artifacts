@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { PublishPrepared, PublishResult } from "@artifacts/schema";
+import { normalizeRepo, PublishPrepared, PublishResult } from "@artifacts/schema";
 import article from "../../../kit/src/article.css" with { type: "text" };
 // @ts-expect-error: embedded as text
 import backend from "../../../kit/src/backend.js" with { type: "text" };
@@ -10,7 +10,7 @@ import data from "../../../kit/src/data.js" with { type: "text" };
 import frames from "../../../kit/src/frames/index.js" with { type: "text" };
 import tokens from "../../../kit/src/tokens.css" with { type: "text" };
 import { detectAgent } from "../agent.ts";
-import { findRoot, loadManifest, type Problem } from "../bundle/manifest.ts";
+import { findRoot, loadManifest, type Problem, repoRoot, WORK } from "../bundle/manifest.ts";
 import type { Client } from "../client.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
@@ -52,9 +52,21 @@ async function collect(root: string, out: Output, options: { lint: boolean }) {
   if (!manifest) return { manifest: null, problems, rendered: null };
   const checked = await staticLint(root, manifest);
   problems.push(...checked.problems, ...(await projectRules(root, manifest)));
-  if (hasErrors(problems)) return { manifest, problems, rendered: null };
+  // After the render check: a missing summary shouldn't stop someone looking at the contact sheet.
+  const summary: Problem[] =
+    options.lint && !manifest.summary
+      ? [
+          {
+            rule: "manifest/summary",
+            severity: "error",
+            message:
+              'artifact.json has no "summary". In up to 280 characters, say what this holds and why it mattered: it\'s what a later agent reads instead of the whole artifact.',
+          },
+        ]
+      : [];
+  if (hasErrors(problems)) return { manifest, problems: [...problems, ...summary], rendered: null };
   const rendered = render(root, manifest, checked.files, options, out);
-  problems.push(...rendered.problems);
+  problems.push(...rendered.problems, ...summary);
   const weights = new Map<string, number>();
   for (const frame of rendered.frames)
     weights.set(frame.frameKey, Bun.file(rendered.renders.get(frame.renders["3x"]) ?? "").size);
@@ -66,8 +78,8 @@ async function collect(root: string, out: Output, options: { lint: boolean }) {
   return { manifest, problems, rendered };
 }
 
-export async function lintCommand(out: Output) {
-  const root = findRoot();
+export async function lintCommand(want: string | undefined, out: Output) {
+  const root = findRoot(undefined, want);
   const { problems, rendered } = await collect(root, out, { lint: true });
   const ok = !hasErrors(problems);
   out.result({ ok, problems }, () => {
@@ -80,8 +92,8 @@ export async function lintCommand(out: Output) {
   if (!ok) process.exitCode = 1;
 }
 
-export async function renderCommand(out: Output) {
-  const root = findRoot();
+export async function renderCommand(want: string | undefined, out: Output) {
+  const root = findRoot(undefined, want);
   const { problems, rendered } = await collect(root, out, { lint: false });
   if (!rendered) {
     printProblems(problems, out);
@@ -94,15 +106,14 @@ export async function renderCommand(out: Output) {
   });
 }
 
-function gitRepo(root: string): string | null {
+/** This folder's git remote as `owner/name`, which is how a project is found again from another folder. */
+export function gitRepo(root: string): string | null {
   const result = Bun.spawnSync(["git", "remote", "get-url", "origin"], {
     cwd: root,
     stdout: "pipe",
     stderr: "ignore",
   });
-  if (!result.success) return null;
-  const match = /[:/]([^/:]+\/[^/]+?)(\.git)?\s*$/.exec(result.stdout.toString());
-  return match?.[1] ?? null;
+  return result.success ? normalizeRepo(result.stdout.toString()) : null;
 }
 
 async function upload(missing: PublishPrepared["missing"], sources: Map<string, string>, out: Output) {
@@ -135,8 +146,8 @@ async function upload(missing: PublishPrepared["missing"], sources: Map<string, 
 
 export type PublishFlags = { message?: string; name?: string; notes: string[]; server?: string };
 
-export async function publishCommand(flags: PublishFlags, out: Output) {
-  const root = findRoot();
+export async function publishCommand(want: string | undefined, flags: PublishFlags, out: Output) {
+  const root = findRoot(undefined, want);
   const client: Client = await signedIn(flags.server);
   const { manifest, problems, rendered } = await collect(root, out, { lint: true });
   if (!manifest || !rendered || hasErrors(problems)) {
@@ -198,6 +209,8 @@ export async function publishCommand(flags: PublishFlags, out: Output) {
       uploadId: prepared.uploadId,
       message: flags.message ?? null,
       name: flags.name ?? null,
+      summary: manifest.summary,
+      tags: manifest.tags,
       notes,
       agent: detectAgent(),
       files: Object.fromEntries(
@@ -255,10 +268,23 @@ const STARTERS = {
   },
 } as const;
 
-/** `artifacts init` (07): a manifest, a starter page and a pinned copy of the kit. */
-export function initCommand(flags: { project?: string; slug?: string; kind?: string }, out: Output) {
-  const root = process.cwd();
-  if (existsSync(join(root, "artifact.json"))) throw new CliError("There's already an artifact.json here.");
+/** `.artifacts/` holds renders and working folders, so it stays out of git. */
+function ignoreArtifacts(root: string) {
+  const ignore = join(root, ".gitignore");
+  const current = existsSync(ignore) ? readFileSync(ignore, "utf8") : "";
+  if (!current.split("\n").includes(".artifacts/")) {
+    writeFileSync(ignore, `${current}${current && !current.endsWith("\n") ? "\n" : ""}.artifacts/\n`);
+  }
+}
+
+/**
+ * `artifacts init` (07): a manifest, a starter page and a pinned copy of the kit. They go in the
+ * gitignored working folder, because the server holds the published copy; `--in-repo` writes them here.
+ */
+export function initCommand(
+  flags: { project?: string; slug?: string; kind?: string; inRepo?: boolean },
+  out: Output,
+) {
   const kind = (flags.kind ?? "canvas") as keyof typeof STARTERS;
   // hasOwn, so "--kind constructor" isn't taken for a starter.
   if (!Object.hasOwn(STARTERS, kind)) throw new UsageError("--kind is canvas, article or prototype.");
@@ -269,12 +295,25 @@ export function initCommand(flags: { project?: string; slug?: string; kind?: str
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 40);
-  const project = flags.project ?? (slugify(basename(root)) || "project");
+  const base = flags.inRepo ? process.cwd() : repoRoot();
+  const project = flags.project ?? (slugify(basename(base)) || "project");
   const slug = flags.slug ?? "overview";
+  // It becomes a folder name, and only the server's own check looks at it otherwise.
+  if (!/^[a-z0-9-]{1,40}$/.test(slug))
+    throw new UsageError("--slug uses a-z, 0-9 and -, up to 40 characters.");
+  const root = flags.inRepo ? base : join(base, WORK, slug);
+  if (existsSync(join(root, "artifact.json"))) {
+    throw new CliError(
+      flags.inRepo
+        ? "There's already an artifact.json here."
+        : `There's already an artifact called ${slug} here. Pick another --slug.`,
+    );
+  }
+  mkdirSync(root, { recursive: true });
 
   writeFileSync(
     join(root, "artifact.json"),
-    `${JSON.stringify({ project, slug, title: basename(root), pages: [starter.page("main")] }, null, 2)}\n`,
+    `${JSON.stringify({ project, slug, title: basename(base), pages: [starter.page("main")] }, null, 2)}\n`,
   );
   mkdirSync(join(root, starter.file, ".."), { recursive: true });
   writeFileSync(join(root, starter.file), starter.body);
@@ -286,15 +325,11 @@ export function initCommand(flags: { project?: string; slug?: string; kind?: str
   writeFileSync(join(root, "vendor/artifacts-kit/tokens.css"), tokens);
   writeFileSync(join(root, "vendor/artifacts-kit/article.css"), article);
   writeFileSync(join(root, "vendor/artifacts-kit/VERSION"), `${VERSION}\n`);
-
-  const ignore = join(root, ".gitignore");
-  const current = existsSync(ignore) ? readFileSync(ignore, "utf8") : "";
-  if (!current.split("\n").includes(".artifacts/")) {
-    writeFileSync(ignore, `${current}${current && !current.endsWith("\n") ? "\n" : ""}.artifacts/\n`);
-  }
-  out.result({ project, slug, kind }, () =>
-    out.say(`✓ Wrote artifact.json for ${project}/${slug}. Next: artifacts render`),
-  );
+  ignoreArtifacts(base);
+  out.result({ project, slug, kind, root }, () => {
+    out.say(`✓ Wrote ${project}/${slug} in ${root}`);
+    out.say('  Next: add a "summary" to artifact.json, then artifacts render');
+  });
 }
 
 export async function openCommand(

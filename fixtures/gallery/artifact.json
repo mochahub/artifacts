@@ -3,6 +3,7 @@
   "projectName": "Demo",
   "slug": "gallery",
   "title": "Field photos",
+  "summary": "Fixture: Field photos.",
   "pages": [
     {
       "id": "photos",

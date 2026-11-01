@@ -5,6 +5,14 @@ import { login, logout, recover, serverName, whoami } from "./commands/account.t
 import { dataCommand, logsCommand } from "./commands/data.ts";
 import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
+import {
+  exportCommand,
+  listCommand,
+  pullCommand,
+  readCommand,
+  searchCommand,
+  viewCommand,
+} from "./commands/library.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
 import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
@@ -37,9 +45,15 @@ const USAGE = `artifacts ${VERSION}
   artifacts doctor
   artifacts upgrade [--server] [--to <version>]
   artifacts domain add <domain> | list
-  artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype]
-  artifacts lint | render
-  artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]
+  artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype] [--in-repo]
+  artifacts lint | render [<slug>]
+  artifacts publish [<slug>] [-m <message>] [--name <label>] [--note <frame>=<text>]
+  artifacts search <words> [--project <slug>] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]
+  artifacts list [<project>[/<slug>[/<page>]]] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]
+  artifacts read <project>/<slug> [--page <key>] [--version <n>] [--cursor <c>] [--chars <n>]
+  artifacts view <project>/<slug> [--page <key>] [--frame <key>] [--size thumb|1x|2x] [--out <file>]
+  artifacts pull <project>/<slug> [--version <n>] [--dir <path>] [--force]
+  artifacts export <project> [--dir <path>]
   artifacts open [<project>/<slug>] [--version <n>] [--page <key>]
   artifacts status [<project>/<slug>]
   artifacts comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]
@@ -94,6 +108,16 @@ const OPTIONS = {
   claude: { type: "boolean" },
   codex: { type: "boolean" },
   "no-skill": { type: "boolean" },
+  "in-repo": { type: "boolean" },
+  repo: { type: "string" },
+  here: { type: "boolean" },
+  limit: { type: "string" },
+  cursor: { type: "string" },
+  chars: { type: "string" },
+  frame: { type: "string" },
+  size: { type: "string" },
+  out: { type: "string" },
+  force: { type: "boolean" },
 } as const;
 
 /** `--version` is a boolean everywhere except `open --version <n>`, where it takes a number. */
@@ -123,7 +147,9 @@ async function main(argv: string[]) {
   try {
     // Its number would otherwise be read as a positional.
     const isUpgrade = argv[0] === "upgrade";
-    const takesVersion = ["open", "delete", "undelete", "logs"].includes(argv[0] ?? "");
+    const takesVersion = ["open", "delete", "undelete", "logs", "read", "view", "pull"].includes(
+      argv[0] ?? "",
+    );
     const args = takesVersion
       ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
       : argv;
@@ -234,16 +260,78 @@ async function main(argv: string[]) {
         out,
       );
     case "init":
-      return initCommand({ project: values.project, slug: values.slug, kind: values.kind }, out);
+      return initCommand(
+        { project: values.project, slug: values.slug, kind: values.kind, inRepo: values["in-repo"] },
+        out,
+      );
     case "lint":
-      return lintCommand(out);
+      return lintCommand(first, out);
     case "render":
-      return renderCommand(out);
+      return renderCommand(first, out);
     case "publish":
       return publishCommand(
+        first,
         { message: values.message, name: values.name, notes: values.note ?? [], server: values.server },
         out,
       );
+    case "search":
+      return searchCommand(
+        positionals.slice(1).join(" "),
+        {
+          project: values.project,
+          repo: values.repo,
+          here: values.here,
+          limit: values.limit,
+          cursor: values.cursor,
+          server: values.server,
+        },
+        out,
+      );
+    case "list":
+      return listCommand(
+        first,
+        {
+          repo: values.repo,
+          here: values.here,
+          limit: values.limit,
+          cursor: values.cursor,
+          server: values.server,
+        },
+        out,
+      );
+    case "read":
+      return readCommand(
+        first,
+        {
+          page: values.page,
+          version: optionAfter("--version"),
+          cursor: values.cursor,
+          chars: values.chars,
+          server: values.server,
+        },
+        out,
+      );
+    case "view":
+      return viewCommand(
+        first,
+        {
+          page: values.page,
+          frame: values.frame,
+          size: values.size,
+          version: optionAfter("--version"),
+          out: values.out,
+          server: values.server,
+        },
+        out,
+      );
+    case "pull":
+      return pullCommand(
+        first,
+        { version: optionAfter("--version"), dir: values.dir, force: values.force, server: values.server },
+        out,
+      );
+    case "export":
+      return exportCommand(first, { dir: values.dir, server: values.server }, out);
     case "open":
       return openCommand(
         first,

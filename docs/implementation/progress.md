@@ -1,6 +1,6 @@
-# Progress: building M2–M11
+# Progress: building M2–M16
 
-A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-M2-M11.md) for the brief, then this.
+A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF-M12-M16.md) for the current brief, then this.
 
 ## Status
 
@@ -18,6 +18,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 | M9 Micro apps I | `m9-micro-apps` | `0eb0aeb` | green |
 | M10 Micro apps II | `m10-backends` | `7708f14` | green |
 | M11 Live review | `m11-live` | `b4977b5` | green |
+| M12 The hosted library | `m12-library` | see PR | see PR |
 
 ## Verified
 
@@ -44,6 +45,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 - **M11 (2026-10-30):** 432 tests, 74 Playwright tests plus 4 that apply to one device only. SSE across a real server, including inside the Docker image; a listener recovering from a cut Postgres connection through a TCP proxy. Web Push against a local fake push service: payloads decrypted by a separate RFC 8291 implementation in the test, VAPID signature and claims verified; the reviewer also matched RFC 8291's Appendix A vector byte for byte. The Chromium e2e reloads a version with no network, then signs out and checks the kept data is gone. **Web Push has not reached a real push service or a real device.** Load figures: [load-notes.md](load-notes.md), local only.
 - **Compiled binary (2026-10-30):** a final check found `bun build --compile` had been failing since M10, because `host.js` was imported as both code and text; CI didn't build the binary. Fixed, and CI now builds and runs it. On the macOS binary: `artifacts mcp` spawned itself correctly, and `artifacts dev` installed its helpers, served the viewer and ran a backend.
 - **M11 independent review (subagent, 2026-10-30):** 12 findings and one spec gap, all fixed. The worst: a model-supplied MCP argument could send the token to another server.
+
+- **M12 (2026-10-31):** 774 tests, every one of 108 routes reached; Playwright 75 passed. `packages/cli/test/library.e2e.test.ts` is the agent-style script, with the real CLI against a real server: the art style fixture of image-only frames is found by search from an unrelated folder, its card and pages read, a frame viewed as a real WebP at two sizes, and pulled; publishing the pull uploads 0 files and changes no frame. A fresh clone with no `artifact.json` finds its project from an `https://user:password@` remote. The local MCP returns cards, text and an image block, and starts with no server. Search permissions cover owner, member, reviewer, outside, guest, organization token and anonymous. `bun run e2e` passed 75 of 76 in one full run: the backend poll failed on iPhone, then passed alone on both devices with no change, so it looks like load on one machine. Watch it in CI.
 
 ## Decisions to review
 
@@ -102,6 +105,17 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M2-M11.md](HANDOFF-
 44. **Releases are automatic.** Green CI on `main` releases the next patch, unless only docs or workflows changed. The version comes from the latest tag and is stamped at build time, so there are no version commits and `package.json` stays at the version of the first release. To choose a version, raise it in `packages/cli/package.json`, or run the workflow by hand. To go back to deliberate releases: remove `workflow_run` from `release.yml`.
 45. **A release tries itself first:** the new binary runs `setup --docker` against the new image, and nothing is published if that fails. A failure after the image is pushed is safe to re-run.
 
+46. **M12, the library is a separate set of routes.** `/api/search` keeps its shape for ⌘K and gains `content`; agents use `/api/library/*`, which `/api` keeps out of the way of project slugs. The hosted MCP (M15) calls the same functions in `apps/server/src/library/`.
+47. **M12, archived artifacts in search.** SPEC §5.5 hides them from search, and `/api/search` didn't, which was a bug, now fixed. But `outcome.archived` exists so an agent can see a dropped experiment, so `/api/library/search` includes them unless `archived=false`. SPEC §5.5 now says so. To change: the filter in `librarySearch`.
+48. **M12, `repo` stays `owner/name`.** The handoff said to normalize remotes, and existing rows hold `owner/name`, so that's the form, lowercased: two hosts with the same owner and name would match each other. To change: `normalizeRepo`, and migrate the rows.
+49. **M12, no search index beyond blocks and comments.** Titles, summaries and notes are read through each artifact's latest version, a primary-key join, so an index wouldn't be used. Stemming is English only: other languages match whole words, and CJK text mostly doesn't match. See Known gaps.
+50. **M12, `manifest/summary` doesn't stop `render`.** A draft can still be looked at. `lint` and `publish` fail on it. Whether the summary is any good isn't checked.
+51. **M12, cursors are offsets, not keysets.** Rank has no stable key, so a publish between two pages can repeat or skip a card. An agent reading a list loses nothing important.
+52. **M12, `pull` restores what was published, not the working folder.** `artifact.json`, the backend's source and `fixtures/files/` are now stored with each version so it can; versions from before that keep none of them. Files nothing references were never uploaded. Converted images come back as WebP under their old name, which is what publishing would make again.
+53. **M12, the bundle route presigns everything.** Bucket URLs need no token, so the CLI downloads directly, and that's why `pull` needs no content-host change. Anyone with `artifact.read` could already see these files through a frame, including `__backend.js`.
+54. **M12, `export` leaves out frame renders.** `artifacts render` makes them again, and a project's worth is gigabytes. To add: the renders are listed by `/api/artifacts/:id/versions/:n`.
+55. **M12, `isBundlePath` applies at commit from now on,** so a new publish with `../` or `.git` in a path is refused. Older rows are filtered by the bundle route and again by the CLI.
+
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.
@@ -134,6 +148,9 @@ In this order. Nothing here has been done or tested by the agent.
 19. **MCP:** add `artifacts mcp` to a real client. It's tested against the protocol, not a client.
 
 ## Known gaps
+
+- **Search is English-stemmed, and rows are read for every search.** Numbers are in [load-notes.md](load-notes.md).
+- **Working folders are per git worktree.** `.artifacts/work/` isn't shared between worktrees of one repo. `artifacts pull` is the way across.
 
 - **Backends sharing a child stall each other.** A busy loop in one backend blocks the others pinned to the same child until its deadline, up to 10 seconds. SPEC says "without slowing others". 08's pinning makes this true per child, not per backend; more `sandboxProcesses` reduces it.
 - **The render tests** share one helper install in the temp folder and the machine's WebKit cache.

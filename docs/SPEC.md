@@ -80,13 +80,18 @@ Organization          mochahub                 one per deployment; created by `a
 
 ## 4. Authoring contract
 
-### 4.1 Manifest (`artifact.json`, kept next to the source in the project repo)
+### 4.1 Manifest (`artifact.json`, kept next to the source)
+
+The server holds what's published, so source doesn't have to be in git. `artifacts init` writes to `.artifacts/work/<slug>/`, which git ignores; `--in-repo` writes to the current folder, to commit it. `artifacts pull` restores a working folder from any version, and `artifacts export` writes out a whole project.
+
 ```jsonc
 {
   "project": "camerabuddy",
   "slug": "roadmap",
   "visibility": "org",           // "me" or "org"; optional, otherwise the organization default (§7.3)
   "title": "Camera Buddy roadmap",
+  "summary": "The plan, research and mocks. Wi-Fi pairing won over Bluetooth.",   // required by lint, up to 280 characters
+  "tags": ["roadmap", "camera"],  // optional: up to 8, up to 32 characters each
   "theme": { "accent": "#ff9f0a", "font": "inter", "mode": "auto" },
   "backend": { "src": "api/index.ts" },   // optional: request handlers shipped with the bundle (§7.9)
   "pages": [
@@ -98,6 +103,8 @@ Organization          mochahub                 one per deployment; created by `a
   ]
 }
 ```
+
+`summary` and `tags` are an artifact's frontmatter: what a later agent reads instead of the whole document (§10.3). Versions from before they existed stay valid, and show their first text instead.
 
 ### 4.2 Canvas rules
 - Every screen is an element with a **stable** `data-frame="live-view"` id and `data-device="iphone|ipad|watch|mac|browser|none"`. Comments attach to these ids, so renaming one orphans its comments, and lint warns about it.
@@ -171,7 +178,7 @@ Two ways to clear an artifact away: **archive** when it's done and worth keeping
 | | Archive | Delete |
 |---|---|---|
 | What it's for | Finished work you may want to look back at | Mistakes, duplicates, things published by accident |
-| Lists | Hidden from Home, Projects and search; shown under a project's **Archived** filter | Gone from every list; shown in **Recently deleted** for 30 days |
+| Lists | Hidden from Home, Projects and people's search; shown under a project's **Archived** filter. Agents still find it in `artifacts search`, marked archived, because a dropped experiment is worth knowing about (§10.3) | Gone from every list; shown in **Recently deleted** for 30 days |
 | Its links | Keep working, with an "Archived" banner | Stop working at once: people who could see it are told "This artifact was deleted", anyone else gets the ordinary not-found page, and share links stop |
 | Reviewing | Read-only: no new comments, versions or approvals | Nothing |
 | Micro app | Try it still runs; its data folder becomes read-only, so backend writes are refused | Its backend stops |
@@ -694,10 +701,16 @@ artifacts doctor                  # checks WebKit, the skill, the sign-in and th
 artifacts skill install           # reinstalls the skill for Claude Code and Codex
 artifacts login <url> | logout | whoami   # browser approval (device flow); token in the OS keychain
 artifacts recover <url>           # with SETUP_TOKEN: a one-hour reset link for an owner
-artifacts init                    # adds artifact.json + kit to the current repo
+artifacts init [--in-repo]        # a working folder in .artifacts/work/, or artifact.json + kit here
 artifacts dev                     # local viewer with hot reload (replaces review/server.py)
 artifacts lint | render           # quality gates; contact sheet in .artifacts/
 artifacts publish [-m <message>] [--note <frame>=<text>]   # → URL, change summary, threads on changed anchors
+artifacts search <words>          # the hosted library: short cards, from any folder
+artifacts list [<project>[/<slug>[/<page>]]]   # browse, only as deep as asked
+artifacts read <project>/<slug>   # full text, in pieces
+artifacts view <project>/<slug>   # a frame as a picture: a thumbnail, or larger on request
+artifacts pull <project>/<slug>   # restore a working folder from a published version
+artifacts export <project>        # every artifact in a project, with versions, comments and decisions
 artifacts open [--version N]
 artifacts comments [--open] [--json] [--page mocks]
 artifacts status                  # latest decision, note and open comment count
@@ -716,7 +729,7 @@ artifacts restore <n>             # publishes a copy of version n as the next ve
 artifacts data ls | get <key> | export | clear [--scope shared|me]   # an artifact's data (§7.9)
 artifacts logs [--follow]         # the artifact backend's console output and errors
 ```
-- **Which artifact a command acts on:** commands about one artifact (`publish`, `open`, `comments`, `status`, `reply`, `visibility`, `share`, `versions`, `restore`, `archive`, `delete`, `undelete`, `data`, `logs`) act on the artifact named by the `artifact.json` in the current folder or its nearest parent. An optional `<project>/<slug>` argument overrides that, for example `artifacts archive camerabuddy/onboarding-v1`. Every command accepts `--json` for agents.
+- **Which artifact a command acts on:** commands about one artifact (`publish`, `open`, `comments`, `status`, `reply`, `visibility`, `share`, `versions`, `restore`, `archive`, `delete`, `undelete`, `data`, `logs`) act on the artifact named by the `artifact.json` in the current folder or its nearest parent, or else on the only working folder in `.artifacts/work/`. An optional `<project>/<slug>` argument overrides that, for example `artifacts archive camerabuddy/onboarding-v1`. Every command accepts `--json` for agents.
 - **`share --invite` from a CLI token** gives access that can comment but not approve, request changes or resolve, until a person confirms it by granting the same person access in the viewer.
 - The CLI is agent-agnostic, so Claude Code, Codex, CI and you can all use the same contract. The full command reference, with flags and output, is in [implementation/07-cli-and-skill.md](implementation/07-cli-and-skill.md).
 - An **MCP server** (Phase 2) is a thin wrapper over the same API, for tools without a shell.
@@ -736,6 +749,17 @@ artifacts logs [--follow]         # the artifact backend's console output and er
   3. Republish.
   4. Reply to each thread with what changed, using `--fixed`. Never resolve a person's comment. If a comment is ambiguous, ask a question and leave the thread open.
 - **Report back:** the URL, the version, what changed and which threads were marked fixed.
+
+### 10.3 The hosted library
+
+A later agent should find, skim and open published work almost as easily as local files, in any repo, with or without a working copy.
+
+- **Selective disclosure.** `search` and `list` return small cards with a capped size: project, slug, title, summary, tags, status, outcome, latest version, updated time and a match snippet. Only `read` (paged) and `view` (a picture) return content, so an agent can page through a hundred results without filling its context.
+- **Search** is Postgres full-text search over each artifact's latest version: article text, frame and page titles, summaries, tags, version notes and comments. It answers in the viewer's ⌘K too.
+- **`outcome`** says how the review ended: approved or changes requested, open comments, and archived, so an agent can tell whether an experiment won or was dropped.
+- **Project matching.** A project remembers its git remote, in any form, with credentials removed, so an agent in a clone finds its project with no `artifact.json`.
+- **Every search, list and read** goes through the same permission check as the viewer, and a hidden artifact can't show through a count, a snippet or a summary.
+- **Text in results is data.** Comments, summaries and articles can come from other people, guests included, so tool results say to treat them as data, never as instructions.
 
 ## 11. Repo layout (this repo)
 ```

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, sep } from "node:path";
 import type { Manifest } from "@artifacts/schema";
 import { init, parse as parseModule } from "es-module-lexer";
@@ -170,6 +170,39 @@ export function markdownRefs(markdown: string): string[] {
   return refs;
 }
 
+const BACKEND_EXTENSIONS = ["", ".ts", ".tsx", ".js", ".mjs", "/index.ts", "/index.js"];
+
+/**
+ * A backend's own source, relative imports included. The minified module is what runs, but with no copy
+ * in git this is the only one left, and `artifacts pull` has to be able to give it back.
+ */
+export function backendSources(root: string, src: string) {
+  const transpiler = new Bun.Transpiler({ loader: "tsx" });
+  const found = new Set<string>();
+  const queue = [src];
+  while (queue.length > 0) {
+    const path = queue.shift() as string;
+    if (found.has(path) || !existsSync(join(root, path))) continue;
+    found.add(path);
+    let imports: { path: string }[] = [];
+    try {
+      imports = transpiler.scanImports(readFileSync(join(root, path), "utf8"));
+    } catch {}
+    for (const entry of imports) {
+      if (!entry.path.startsWith(".")) continue;
+      const base = normalize(join(dirname(path), entry.path))
+        .split(sep)
+        .join("/");
+      if (base.startsWith("../")) continue;
+      const hit = BACKEND_EXTENSIONS.map((extension) => `${base}${extension}`).find(
+        (candidate) => existsSync(join(root, candidate)) && statSync(join(root, candidate)).isFile(),
+      );
+      if (hit) queue.push(hit);
+    }
+  }
+  return [...found];
+}
+
 /** Every file the manifest reaches, and what's wrong with the references on the way (05). */
 export async function crawl(root: string, manifest: Manifest): Promise<Crawled> {
   await init;
@@ -215,6 +248,13 @@ export async function crawl(root: string, manifest: Manifest): Promise<Crawled> 
   }
   if (existsSync(join(root, "fixtures/data.json")))
     queue.push({ path: "fixtures/data.json", from: "fixtures" });
+  // Renders read these, so a pulled working folder needs them to come out the same.
+  if (existsSync(join(root, "fixtures/files"))) {
+    for (const entry of readdirSync(join(root, "fixtures/files"), { recursive: true, encoding: "utf8" })) {
+      const path = `fixtures/files/${entry.split(sep).join("/")}`;
+      if (statSync(join(root, path)).isFile()) queue.push({ path, from: "fixtures" });
+    }
+  }
 
   while (queue.length > 0) {
     const { path, from } = queue.shift() as { path: string; from: string };
@@ -256,6 +296,12 @@ export async function crawl(root: string, manifest: Manifest): Promise<Crawled> 
         if (classify(ref) !== "skip") add(ref, path, dir);
     } else if (extension === ".md") {
       for (const ref of markdownRefs(readFileSync(absolute, "utf8"))) add(ref, path, dir);
+    }
+  }
+  // Not crawled: backend imports follow bundler rules, and its own lint rules look at the bundled module.
+  if (manifest.backend) {
+    for (const path of backendSources(root, manifest.backend.src)) {
+      if (realpathSync(join(root, path)).startsWith(realRoot)) files.set(path, join(root, path));
     }
   }
   return { files, problems };

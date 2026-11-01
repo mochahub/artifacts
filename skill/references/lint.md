@@ -3,6 +3,7 @@
 | Rule                    | Fix                                                                                               |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
 | `manifest/schema`       | Fix the field it names in `artifact.json`.                                                        |
+| `manifest/summary`      | Add `summary` to `artifact.json`: what it holds and why it mattered, up to 280 characters.        |
 | `files/missing`         | Add the file, or fix the path.                                                                    |
 | `files/absolute`        | Ship the font or image in the bundle and use a relative path.                                     |
 | `files/outside`         | Move the file inside the folder that holds `artifact.json`.                                       |

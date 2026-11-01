@@ -78,6 +78,13 @@
       "when": 1793418794799,
       "tag": "0010_silly_saracen",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793490203148,
+      "tag": "0011_far_lady_mastermind",
+      "breakpoints": true
     }
   ]
 }

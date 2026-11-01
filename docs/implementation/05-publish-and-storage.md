@@ -12,6 +12,8 @@ const Manifest = z.object({
   projectName: z.string().optional(),
   slug: Slug,
   title: z.string().min(1).max(120),
+  summary: z.string().trim().min(1).max(280).optional(),     // required by lint: manifest/summary (07)
+  tags: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
   visibility: z.enum(["me", "org"]).optional(),
   theme: z.object({
     accent: Hex.optional(), font: z.string().optional(),
@@ -33,12 +35,19 @@ const Page = z.discriminatedUnion("kind", [
 
 **Fixtures** (SPEC §7.9) live next to the manifest: `fixtures/data.json` (`{ "shared": { key: value }, "me": { key: value } }`) and `fixtures/files/{shared,me}/<name>`.
 
+**`summary` and `tags` are the artifact's frontmatter:** what an agent reads instead of the whole document, so they're stored per version and capped in `packages/schema`. A version from before they existed stays valid, and shows a truncated first block instead (03).
+
 ## What gets uploaded
 
 The bundle is:
 - every file the manifest references
 - everything those files reference by relative URL: `src`, `href`, CSS `url()`, `@import`, and JS `import` and `fetch` of literal relative paths
+- the backend's source, with its relative imports
+- `fixtures/data.json` and everything in `fixtures/files/`
+- `artifact.json`, as written
 - the generated outputs below
+
+The first four are what `artifacts pull` gives back. Files nothing references aren't uploaded, so they aren't restored either.
 
 Files are collected by a crawler that parses HTML (htmlparser2), CSS (postcss) and JS (es-module-lexer). Anything unreferenced isn't uploaded. Absolute URLs and paths outside the manifest's folder are lint errors.
 

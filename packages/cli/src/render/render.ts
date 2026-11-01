@@ -47,6 +47,11 @@ type HelperResult = {
   og: string;
 };
 
+const isWebp = (body: Uint8Array) =>
+  body.length > 12 &&
+  Buffer.from(body.subarray(0, 4)).toString() === "RIFF" &&
+  Buffer.from(body.subarray(8, 12)).toString() === "WEBP";
+
 const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
 
 function fixtures(root: string) {
@@ -169,7 +174,8 @@ export function render(
       path,
       hash: converted ?? sha256(body),
       size: body.length,
-      type: converted ? "image/webp" : typeOf(path),
+      // A converted image keeps its path, so a pulled one is still WebP under its old name.
+      type: converted || isWebp(body) ? "image/webp" : typeOf(path),
       source,
     });
   }
@@ -178,6 +184,9 @@ export function render(
     writeFileSync(source, body);
     files.set(path, { path, hash: sha256(body), size: Buffer.byteLength(body), type, source });
   };
+
+  // Stored with each version, so `artifacts pull` can give back what was published (05).
+  addGenerated("artifact.json", readFileSync(join(root, "artifact.json")), "application/json");
 
   let backendHash: string | null = null;
   if (backendPath) {

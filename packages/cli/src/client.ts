@@ -80,6 +80,24 @@ export class Client {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  /** A picture from the API, as bytes. A redirect isn't followed, as everywhere, so it counts as a failure. */
+  async bytes(path: string): Promise<Uint8Array> {
+    requireHttps(this.url);
+    const response = await fetch(`${this.url}${path}`, {
+      headers: {
+        "Artifacts-CLI": VERSION,
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs()),
+    }).catch((error) => {
+      throw new CliError(`Can't reach ${this.url}: ${(error as Error).message}`);
+    });
+    if (response.status !== 200)
+      throw new CliError(`The server answered ${response.status} for that picture.`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
   get = <T>(path: string) => this.request<T>("GET", path);
   post = <T>(path: string, body?: unknown) => this.request<T>("POST", path, body ?? {});
 }

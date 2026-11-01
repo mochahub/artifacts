@@ -151,7 +151,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 
 ### Projects and artifacts
 
-**`projects`**: `id`, `org_id`, `slug` text (unique per org; lowercase `a-z0-9-`, 1–40 chars, not a reserved word, see [06-viewer.md](06-viewer.md#routes)), `name` text, `repo` text null (`owner/name`, detected by the CLI from `git remote`), `created_at`, `updated_at`.
+**`projects`**: `id`, `org_id`, `slug` text (unique per org; lowercase `a-z0-9-`, 1–40 chars, not a reserved word, see [06-viewer.md](06-viewer.md#routes)), `name` text, `repo` text null (`owner/name`, lowercased, from `git remote`; a project with none learns it on its next publish), `created_at`, `updated_at`. Index `(org_id, lower(repo))`.
 
 **`artifacts`**
 
@@ -185,11 +185,13 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `id` | uuid PK | |
 | `org_id`, `artifact_id` | uuid | |
 | `n` | int | 1, 2, 3…; unique `(artifact_id, n)`. Numbers are never reused, even after a version is purged. |
-| `files` | jsonb | The version manifest: `{ "<path>": { "hash": "<sha256>", "size": 1234, "type": "text/html" } }`. Every file in the bundle, including generated article HTML and the backend module. |
+| `files` | jsonb | The version manifest: `{ "<path>": { "hash": "<sha256>", "size": 1234, "type": "text/html" } }`. Every file in the bundle, including `artifact.json`, generated article HTML, the backend module and the backend's source. Paths must pass `isBundlePath`: relative, no `..`, no `.git`, no backslash (03). |
 | `backend_hash` | text null | sha256 of the bundled backend module, if any. |
 | `message` | text | `publish -m`. |
 | `name` | text null | Version name ("Real photos"), set by `publish --name`, `versions name`, or the viewer. |
 | `notes` | jsonb | `{ "<frameKey>": "Moved MF above the strip" }` from `--note`. |
+| `summary` | text null | The manifest's `summary`, at most 280 characters. Null on versions from before it existed; those show their first text instead (03). |
+| `tags` | text[] null | The manifest's `tags`, at most 8 of at most 32 characters. |
 | `published_by` | uuid FK people | |
 | `agent` | text null | "Claude Code", from the CLI's detection. |
 | `restored_from` | int null | Set when the version was made by restoring version n. |
@@ -214,7 +216,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `renders` | jsonb | `{ "1x": "<sha256>", "2x": "<sha256>", "3x": "<sha256>", "thumb": "<sha256>" }`, WebP blobs. |
 | `live_path` | text null | Path of the frame's live HTML inside the bundle, for Try it. |
 
-**`blocks`**: article blocks. `id`, `org_id`, `version_id`, `page_key`, `block_key` text (heading slug or `<heading slug>/p<n>`), `content_hash` text, `text` text (plain text, for quote re-anchoring and search). Unique `(version_id, page_key, block_key)`.
+**`blocks`**: article blocks. `id`, `org_id`, `version_id`, `page_key`, `block_key` text (heading slug or `<heading slug>/p<n>`), `content_hash` text, `text` text (plain text, for quote re-anchoring and search). Unique `(version_id, page_key, block_key)`. GIN index on `to_tsvector('english', text)`. Ids are in reading order, because they're UUIDv7 written in order.
 
 ### Review
 
@@ -238,7 +240,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `created_at`, `resolved_at` | timestamptz | |
 | `resolved_by` | uuid null | A person; never an agent (SPEC §6). |
 
-**`comments`**: `id`, `thread_id`, `org_id`, `author_person_id` / `author_guest_id` (one set), `author_name`, `agent` text null (set when written through a CLI token with an agent detected: the reply shows as the agent, "Claude", for the person), `body` text (Markdown, 10 000 chars max), `version` int, `marks_fixed` bool, `created_at`, `edited_at`.
+**`comments`**: `id`, `thread_id`, `org_id`, `author_person_id` / `author_guest_id` (one set), `author_name`, `agent` text null (set when written through a CLI token with an agent detected: the reply shows as the agent, "Claude", for the person), `body` text (Markdown, 10 000 chars max), `version` int, `marks_fixed` bool, `created_at`, `edited_at`. GIN index on `to_tsvector('english', body)`.
 
 **`decisions`**: `id`, `org_id`, `artifact_id`, `version` int, `person_id`, `kind` `decision_kind`, `note` text, `created_at`. The latest row per artifact is the current decision.
 

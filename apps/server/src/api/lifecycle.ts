@@ -378,6 +378,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           backendHash: version.backendHash,
           message: `Restored v${version.n}`,
           notes: {},
+          summary: version.summary,
+          tags: version.tags,
           publishedBy: publisher,
           restoredFrom: version.n,
           publishedAt: now,
@@ -385,7 +387,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         const [pageRows, frameRows, blockRows] = await Promise.all([
           tx.select().from(pages).where(eq(pages.versionId, version.id)),
           tx.select().from(frames).where(eq(frames.versionId, version.id)),
-          tx.select().from(blocks).where(eq(blocks.versionId, version.id)),
+          // By id: that's the order they were written in, and `read` and search's fallback depend on it.
+          tx.select().from(blocks).where(eq(blocks.versionId, version.id)).orderBy(blocks.id),
         ]);
         if (pageRows.length > 0) {
           await tx

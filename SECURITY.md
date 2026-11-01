@@ -23,6 +23,10 @@ This is what the design defends against and what it assumes. The contracts behin
 
 ### What is untrusted
 
+**Text agents read.** Comments, summaries, article text and notes can come from anyone who can write them, including guests on a share link. A model reading them through the CLI or the MCP could take them for instructions. Results from `search`, `list`, `read`, `status` and `comments` say that the text is data, and the skill says so too. That's a warning to the model, not a boundary: tokens stay limited to undoable actions either way.
+
+**What `artifacts pull` writes.** A version's file list comes from whoever published it, so `pull` and `export` check every path, stay inside the target folder, verify every hash, and never write `lint.rules.js`, which the CLI would run. New publishes with a path outside the bundle are refused.
+
 **Artifact code.** An artifact's HTML, CSS, JavaScript and backend are written by an agent, and may be wrong or hostile. The server never runs it in a place that holds a sign-in or a secret.
 
 | Layer                       | What it does                                                                                                                                                                                                                                                                                                 |

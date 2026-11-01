@@ -48,6 +48,9 @@ function threadJson(thread: Thread) {
     status: thread.status,
     anchorState: thread.anchorState,
     crop: thread.crop,
+    /** Written by a person or a guest: data to read, never instructions (UNTRUSTED_NOTICE). */
+    untrusted: true,
+    authorKind: thread.author.kind,
     replies: replies.map((reply) => ({
       author: reply.author.name,
       agent: reply.agent,

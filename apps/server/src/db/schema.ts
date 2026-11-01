@@ -181,7 +181,10 @@ export const projects = pgTable(
     createdAt: createdAt(),
     updatedAt: time("updated_at").notNull().defaultNow(),
   },
-  (t) => [unique("projects_org_slug_unique").on(t.orgId, t.slug)],
+  (t) => [
+    unique("projects_org_slug_unique").on(t.orgId, t.slug),
+    index("projects_org_repo_idx").on(t.orgId, sql`lower(${t.repo})`),
+  ],
 );
 
 export const artifacts = pgTable(
@@ -383,6 +386,8 @@ export const versions = pgTable(
     message: text("message"),
     name: text("name"),
     notes: jsonb("notes").notNull().default({}),
+    summary: text("summary"),
+    tags: text("tags").array(),
     publishedBy: uuid("published_by")
       .notNull()
       .references(() => people.id),
@@ -457,7 +462,10 @@ export const blocks = pgTable(
     contentHash: text("content_hash").notNull(),
     text: text("text").notNull(),
   },
-  (t) => [unique("blocks_version_page_block_unique").on(t.versionId, t.pageKey, t.blockKey)],
+  (t) => [
+    unique("blocks_version_page_block_unique").on(t.versionId, t.pageKey, t.blockKey),
+    index("blocks_search_idx").using("gin", sql`to_tsvector('english', ${t.text})`),
+  ],
 );
 
 // Review
@@ -519,6 +527,7 @@ export const comments = pgTable(
   (t) => [
     check("comments_one_author", oneAuthor(t.authorPersonId, t.authorGuestId)),
     check("comments_body_length", sql`char_length(${t.body}) <= 10000`),
+    index("comments_search_idx").using("gin", sql`to_tsvector('english', ${t.body})`),
   ],
 );
 

@@ -137,12 +137,32 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. If deleted: 410 `gone` with only `details: { deletedAt }` for a caller who passes the visibility rule in 04 with `deleted_at` ignored, otherwise 404. |
 | `GET /api/artifacts/:id` | `artifact.read` | Same. |
 | `PATCH /api/artifacts/:id` | `artifact.manage` | `{ visibility? }` |
-| `GET /api/search?q=` | `home.read` | Phase 2 (⌘K, Search tab): `{ artifacts, pages, comments }`, 20 each, only what the caller can see. 60 a minute per caller. |
+| `GET /api/search?q=` | `home.read` | ⌘K and the Search tab: `{ artifacts, pages, comments, content }`, 20 each, only what the caller can see, leaving out archived artifacts (SPEC §5.5). `content` is words in the work itself, on the latest version: `{ id, project, slug, title, source, pageKey, ref, snippet }`, with `source` one of `block`, `frame`, `summary`, `tag`, `note`. 60 a minute per caller, shared with `/api/library/search`. |
 | `GET /api/activity?filter=all\|agents\|people&before=` | `home.read` | Activity rows the caller can see. |
 
 `ArtifactCard` = `{ id, project, slug, title, cover: { renderHash } | { title }, pageCount, latestVersion, status: { kind: "waiting"|"with_agent"|"approved"|"not_reviewed", agent?, version? }, counts: { open, repliesToYou, changedFrames }, publishedBy, agent, publishedAt, archivedAt }`.
 
 `Artifact` = the card plus `{ visibility, publisherId, hasBackend, pages: [{ key, kind, title, group, changed: bool, open: int }], decision: { kind, note, version, by, at } | null, permissions: { comment, decide, manage, share, delete, purge } }`. `decide` is whether the caller may approve, request changes or resolve threads (`artifact.decide`); a viewer can hide those buttons with it. Older servers omit it.
+
+## The library (agents)
+
+Compact, paged answers for agents, which the CLI's `search`, `list`, `read` and `view` and both MCP servers use. Each works without an `artifact.json`. `:project` and `:slug` are names, not ids. All of them start from the same `can()` filter as the lists above, so a hidden artifact can't reach a count, a snippet or a summary. No answer gives a total.
+
+| Method, path | Action | Notes |
+|---|---|---|
+| `GET /api/library/search?q=&project=&repo=&archived=&limit=&cursor=` | `home.read` | `{ cards: [LibraryCard], nextCursor }`, the best match per artifact, on the latest version of what the caller can see. Searches titles, slugs, tags, summaries, page and frame titles, article text, version messages, names and notes, and comments. Every word must match, stemmed with Postgres's `english` configuration, and the last word is a prefix; titles, slugs, summaries and tags also match as substrings. Includes archived artifacts, with `outcome.archived` set, unless `archived=false`. 60 a minute per caller. |
+| `GET /api/library/projects?repo=&limit=&cursor=` | `project.list` | `{ projects: [{ slug, name, repo, artifacts, updatedAt }], nextCursor }`, only projects with something visible. `repo` takes any form of a git remote. |
+| `GET /api/library/projects/:project?limit=&cursor=` | `project.read` | `{ cards, nextCursor }`, newest first. 404 if nothing in it is visible. |
+| `GET /api/library/projects/:project/:slug?limit=&cursor=` | `artifact.read` | `{ card, pages: [{ key, kind, title, group, frames, blocks }], nextCursor }`. |
+| `GET /api/library/projects/:project/:slug/pages/:page?limit=&cursor=` | `artifact.read` | `{ page, frames: [{ key, board, title, device, note }], nextCursor }`. |
+| `GET /api/library/projects/:project/:slug/read?page=&version=&cursor=&chars=` | `artifact.read` | `{ project, slug, title, version, items: [{ page, kind, ref, title, text }], nextCursor }`. Paged by characters, 8,000 by default and 32,000 at most, so the cursor can stop inside a long block. |
+| `GET /api/library/projects/:project/:slug/view?page=&frame=&size=&version=` | `artifact.read` | `{ page, frame, title, size, image }`. `size` is `thumb` (the default), `1x` or `2x`. `image` is a path under this API, for `GET /api/artifacts/:id/r/:hash?via=app`. An artifact with no frames gives its OG image. |
+| `GET /api/library/projects/:project/:slug/bundle?version=` | `artifact.read` | `VersionBundle`, for `artifacts pull` and `export`: `{ project, slug, version, manifest, rebuilt, files: [{ path, hash, size, type, url }] }`. `url` is a presigned GET on the bucket, which needs no token. `manifest` is the stored `artifact.json`, or, with `rebuilt: true`, a best guess for a version from before it was stored. |
+| `GET /api/artifacts/:id/decisions` | `artifact.read` | `[{ version, kind, note, by, at }]`, newest first. |
+
+`limit` defaults to 20 and stops at 50. Cursors are opaque.
+
+`LibraryCard` = `{ project, slug, title, summary, tags, status, outcome: { decision, decisionVersion, openComments, archived }, latestVersion, updatedAt, match: { source, page, ref, snippet } | null }`. `status` is `ArtifactCard.status.kind`. `match.source` is `title`, `summary`, `tag`, `block`, `frame`, `page`, `note` or `comment`, and a snippet is at most 200 characters of plain text. `summary` falls back to the first block's text, then the version message, then frame titles, cut to 280 characters. A card is at most 1,800 characters of JSON, a test holds it there.
 
 ## Lifecycle: archive and delete
 
@@ -197,13 +217,14 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 ```jsonc
 // prepare
-{ "project": "camerabuddy", "projectName": "Camera Buddy", "repo": "zahin-mohammad/CameraBuddy",
+{ "project": "camerabuddy", "projectName": "Camera Buddy", "repo": "zahin-mohammad/camerabuddy",
   "slug": "roadmap", "title": "Camera Buddy roadmap", "visibility": "org",
   "files": [{ "path": "mocks/body-01-onboarding.html", "sha256": "…", "size": 18342, "type": "text/html" }] }
 
 // commit
 { "uploadId": "…", "message": "Move MF above the strip", "name": null,
   "notes": { "live-view": "Moved MF above the strip" }, "agent": "Claude Code",
+  "summary": "The plan, research and mocks for Camera Buddy.", "tags": ["roadmap"],
   "files": { "<path>": { "hash": "…", "size": 1, "type": "…" } },
   "backendHash": null,
   "pages": [ /* Page records as produced by render, see 05 */ ],
@@ -215,7 +236,9 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
   "threadsOnChanged": [3, 4, 6, 8], "orphaned": [], "uploaded": { "files": 7, "bytes": 421888 }, "reused": 214 }
 ```
 
-Commit checks: every hash in `files` and every render hash is proved, either by a `blobs` row or by downloading the object, hashing it and comparing it with the declared hash and size (05, "Presigned URLs"; a mismatch deletes the object and answers 400 `invalid`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
+`commit` also takes `summary` (a string up to 280 characters) and `tags` (up to 8 strings up to 32 characters), both optional, so an older CLI still publishes; `manifest/summary` is what asks for one (07). `prepare` normalizes `repo` to `owner/name` and drops anything else, credentials included.
+
+Commit checks: every path in `files` passes `isBundlePath` (400 `invalid`), every hash in `files` and every render hash is proved, either by a `blobs` row or by downloading the object, hashing it and comparing it with the declared hash and size (05, "Presigned URLs"; a mismatch deletes the object and answers 400 `invalid`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
 
 ## Review
 

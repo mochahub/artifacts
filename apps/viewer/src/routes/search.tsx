@@ -10,6 +10,15 @@ type Results = {
   artifacts: Hit[];
   pages: (Hit & { pageKey: string; pageTitle: string | null })[];
   comments: (Hit & { thread: number; pageKey: string; body: string; author: string })[];
+  content?: (Hit & { source: string; pageKey: string | null; ref: string | null; snippet: string })[];
+};
+
+type ContentHit = NonNullable<Results["content"]>[number];
+
+/** A frame opens at that frame; anything else opens its page, or the artifact. */
+const contentLink = (hit: ContentHit) => {
+  const base = `/${hit.project}/${hit.slug}${hit.pageKey ? `/${hit.pageKey}` : ""}`;
+  return hit.source === "frame" && hit.ref ? `${base}#frame=${encodeURIComponent(hit.ref)}` : base;
 };
 
 /** The results list, shared by the Search tab and ⌘K. */
@@ -39,14 +48,17 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
       </div>
     </a>
   );
-  const none = results && results.artifacts.length + results.pages.length + results.comments.length === 0;
+  const content = results?.content ?? [];
+  const none =
+    results &&
+    results.artifacts.length + results.pages.length + results.comments.length + content.length === 0;
   return (
     <>
       <label class="search">
         <SearchIcon />
         <input
           ref={field}
-          placeholder="Search artifacts, pages and comments"
+          placeholder="Search artifacts, their text and comments"
           aria-label="Search"
           value={q.value}
           onInput={(event) => {
@@ -75,6 +87,21 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
                 hit.pageTitle ?? hit.pageKey,
                 hit.title,
                 `${hit.id}/${hit.pageKey}`,
+              ),
+            )}
+          </div>
+        </>
+      )}
+      {content.length > 0 && (
+        <>
+          <span class="gh">In the text</span>
+          <div class="group">
+            {content.map((hit) =>
+              row(
+                contentLink(hit),
+                hit.snippet,
+                hit.title,
+                `${hit.id}/${hit.pageKey}/${hit.ref}/${hit.source}`,
               ),
             )}
           </div>

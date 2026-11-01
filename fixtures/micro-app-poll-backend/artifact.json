@@ -2,6 +2,7 @@
   "project": "demo",
   "slug": "poll-backend",
   "title": "Which direction, secretly?",
+  "summary": "Fixture: Which direction, secretly?.",
   "backend": { "src": "api/index.js" },
   "pages": [
     { "id": "poll", "kind": "prototype", "src": "index.html", "device": "iphone" },

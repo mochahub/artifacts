@@ -69,7 +69,7 @@ Then in `.env`, set `PUBLIC_URL`, `CONTENT_URL` and `S3_PUBLIC_ENDPOINT` to thos
 ## Use it
 
 ```sh
-artifacts init            # artifact.json, a starter page and the kit
+artifacts init            # a working folder in .artifacts/work/, with the kit
 artifacts lint            # overlap, clipping, safe areas, contrast, determinism
 artifacts render          # look at .artifacts/contact-sheet.png
 artifacts publish -m "First draft"

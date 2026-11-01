@@ -23,6 +23,13 @@ export async function signedIn(server: string | undefined): Promise<Client> {
   return new Client(url, token);
 }
 
+/** The same client, or null with no server or token, for callers that must not fail. */
+export async function findClient(): Promise<Client | null> {
+  const url = pickServer(undefined);
+  const token = await getToken(url);
+  return token ? new Client(url, token) : null;
+}
+
 /** The link comes from the server, so only web pages open: not file:, an app's own scheme, or a path. */
 function openBrowser(url: string) {
   if (!/^https?:\/\//i.test(url)) return;

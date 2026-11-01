@@ -2,6 +2,8 @@ import {
   type Anchor,
   type BlockRecord,
   type FrameRecord,
+  isBundlePath,
+  normalizeRepo,
   type PageRecord,
   PublishCommit,
   PublishPrepare,
@@ -163,7 +165,8 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       isNew: !existing,
       project: body.project,
       projectName: body.projectName ?? body.project,
-      repo: body.repo ?? null,
+      // Whatever a client sends: a remote can hold a password, and lookups need one form for one repo.
+      repo: normalizeRepo(body.repo),
       slug: body.slug,
       title: body.title,
       // An org token has no person to be private to, so what it makes stays reachable by it.
@@ -194,6 +197,9 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();
     for (const [path, file] of Object.entries(body.files)) {
+      // `artifacts pull` writes these paths to someone's disk.
+      if (!isBundlePath(path))
+        throw new ApiError("invalid", `${path.slice(0, 200)} isn't a path in a bundle.`);
       checkType(path, file.type);
       wanted.set(file.hash, file.size);
     }
@@ -265,6 +271,10 @@ export function publishRoutes(routes: Routes, deps: Deps) {
           .returning();
       }
       if (!project) throw new Error("no project row");
+      // Projects made before the CLI sent a remote learn it from their next publish.
+      if (!project.repo && ticket.repo) {
+        await tx.update(projects).set({ repo: ticket.repo }).where(eq(projects.id, project.id));
+      }
 
       const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, ticket.artifactId)).limit(1);
       if (ticket.isNew) {
@@ -319,6 +329,8 @@ export function publishRoutes(routes: Routes, deps: Deps) {
         message: body.message ?? null,
         name: body.name ?? null,
         notes: body.notes,
+        summary: body.summary ?? null,
+        tags: body.tags ?? null,
         publishedBy: publisher,
         agent: body.agent ?? null,
         publishedAt: now,

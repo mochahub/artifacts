@@ -226,10 +226,16 @@ describe("publishing with the real CLI", () => {
   test("init makes something that renders", async () => {
     const dir = copyFixture(fixture("refs"));
     for (const file of ["artifact.json", "board.html"]) Bun.spawnSync(["rm", join(dir, file)]);
-    expect((await cli(["init", "--project", "demo", "--slug", "fresh"], box.env, dir)).code).toBe(0);
-    expect((await cli(["init"], box.env, dir)).code).toBe(1);
+    expect(
+      (await cli(["init", "--in-repo", "--project", "demo", "--slug", "fresh"], box.env, dir)).code,
+    ).toBe(0);
+    expect((await cli(["init", "--in-repo"], box.env, dir)).code).toBe(1);
+    // It asks for a summary, and nothing else.
     const result = await cli(["lint", "--json"], box.env, dir);
-    expect(JSON.parse(result.stdout).problems).toEqual([]);
+    expect(JSON.parse(result.stdout).problems.map((p: { rule: string }) => p.rule)).toEqual([
+      "manifest/summary",
+    ]);
+    expect((await cli(["render", "--json"], box.env, dir)).code).toBe(0);
     expect(readFileSync(join(dir, ".gitignore"), "utf8")).toContain(".artifacts/");
     expect(existsSync(join(dir, "vendor/artifacts-kit/frames.js"))).toBe(true);
   }, 60_000);
