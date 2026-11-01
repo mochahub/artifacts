@@ -658,8 +658,9 @@ The kit is why artifacts look stunning by default instead of only when an agent 
   - Android in a later phase
   - Each is a web component (`<a-phone time="9:41">`), generalized from CameraBuddy's `mock.js`.
 - **iOS-style primitives:**
-  - glass material, tab bar, nav bar, sheet, list rows, toggles, segmented control
+  - tab bar, nav bar, sheet, list rows, toggles, segmented control
   - the "safe text" utilities the audit kept needing (no text under the home indicator, no clipped labels)
+- **Templates:** editable starters for daily work, copied by `artifacts init --template <name>`: design review, presentation, case study, PRD, RFC, research report and weekly status. Each has a guide to its structure in the skill. They never prescribe content, and agents can skip them. Presentations are canvas boards of 16:9 frames.
 - **Icons:** an open-licence icon set such as Lucide, with a name map. No emoji as icons, as the CameraBuddy audit found.
 - **Article typography:** a display and body font pair, plus these components:
   - callouts
@@ -668,7 +669,7 @@ The kit is why artifacts look stunning by default instead of only when an agent 
   - verdict badges
   - stat tiles
   - figures and charts (the `dataviz` skill's palette and rules)
-- **Theme tokens:** accent, neutrals, radius, font and density. Each project sets them in its manifest, so CameraBuddy looks like CameraBuddy.
+- **Theme tokens:** accent, neutrals, radius, fonts and type scale. Each project sets them in its manifest, so CameraBuddy looks like CameraBuddy. The CLI turns them into tokens at render, and articles carry the allowed values to the viewer, which applies them only inside the article body. The review UI keeps its own look.
 - **Photo helpers:** stand-in images, `data-p` photo frames with real aspect-fit, and computed overlays. CameraBuddy's overlay code stays in that project; the kit only provides the hook.
 
 Phase 0 sets the visual direction: we mock the viewer itself and review it in the existing local canvas. The system is also its own first artifact.

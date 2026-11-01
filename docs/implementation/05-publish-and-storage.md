@@ -15,10 +15,8 @@ const Manifest = z.object({
   summary: z.string().trim().min(1).max(280).optional(),     // required by lint: manifest/summary (07)
   tags: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
   visibility: z.enum(["me", "org"]).optional(),
-  theme: z.object({
-    accent: Hex.optional(), font: z.string().optional(),
-    mode: z.enum(["light", "dark", "auto"]).default("auto"),
-  }).optional(),
+  theme: Theme.optional(),
+  templateTheme: Theme.optional(),                           // a template's own look; everything else wins over it
   backend: z.object({ src: RelPath }).optional(),            // Phase 2
   pages: z.array(Page).min(1),
 });
@@ -30,10 +28,19 @@ const Page = z.discriminatedUnion("kind", [
   z.object({ id: Key, kind: z.literal("prototype"), src: RelPath, device: Device.default("iphone") }),   // Phase 2
   z.object({ id: Key, kind: z.literal("gallery"), title: z.string().optional(), items: z.array(z.object({ src: RelPath, caption: z.string().optional() })) }), // Phase 2
 ]);
+const Theme = z.object({
+  accent: Hex.optional(), font: FontName.optional(), display: FontName.optional(),
+  mode: z.enum(["light", "dark", "auto"]).optional(),        // leaving it out means auto
+  radius: z.number().min(0).max(32).optional(), scale: z.number().min(0.85).max(1.25).optional(),
+  neutrals: Neutrals.optional(), neutralsDark: Neutrals.optional(),   // { bg, card, text, muted, line }, each Hex, no other keys
+});
+// FontName: letters, digits, spaces and -, up to 40. Hex: #rrggbb.
 // Key: a-z0-9-, 1–60. RelPath: relative, no "..", no leading "/", must exist.
 ```
 
 **Fixtures** (SPEC §7.9) live next to the manifest: `fixtures/data.json` (`{ "shared": { key: value }, "me": { key: value } }`) and `fixtures/files/{shared,me}/<name>`.
+
+**Theme.** `render` merges `templateTheme`, then `theme`, into tokens (`themeCss` in `packages/schema/src/theme-css.ts`). On a canvas they're the last stylesheet in each board and live frame, so every template and any CSS using `var(--art-…)` follows them. On an article, `accent`, `font`, `display` and `radius` go in `pages.meta.theme`, which `commit` validates with the same rules, and the viewer sets them as custom properties on the article body only. Prototypes are the author's own page and aren't themed.
 
 **`summary` and `tags` are the artifact's frontmatter:** what an agent reads instead of the whole document, so they're stored per version and capped in `packages/schema`. A version from before they existed stays valid, and shows a truncated first block instead (03).
 
@@ -84,6 +91,7 @@ Pipeline: unified, then `remark-parse`, `remark-gfm` and `remark-directive`. Cus
 - **callouts:** `> [!NOTE]`
 - **figures:** an image followed by an italic paragraph becomes `figure` with `figcaption`
 - **verdict badges:** `{Verified}`, `{Unverified}`
+- **components:** `:::stats`, `:::compare` and `:::steps` containers around ordinary lists and tables become `data-component`, from a closed list the allowlist enforces
 - **`::frame{ref="mocks/onboarding/welcome"}`:** resolves to the frame's render hash in this version
 - **`::chart{src="charts/x.json"}`:** `{ "type": "bar"|"line", "labels": [...], "series": [{ "name", "values": [...] }] }` drawn to SVG by the CLI at publish
 - **Mermaid code blocks:** rendered to SVG in WebKit at publish

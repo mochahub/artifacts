@@ -107,4 +107,12 @@ describe("hostile markup", () => {
     expect(clean).not.toContain("</title><img");
     expect(clean).not.toContain("<img");
   });
+  test("components are a closed list, and a style attribute never survives", () => {
+    const clean = sanitizeArticle(
+      '<div data-component="stats" style="color:red"><p>a</p></div><div data-component="evil"><p>b</p></div>',
+    );
+    expect(clean).toContain('data-component="stats"');
+    expect(clean).not.toContain("evil");
+    expect(clean).not.toContain("style");
+  });
 });

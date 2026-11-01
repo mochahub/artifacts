@@ -1,0 +1,8 @@
+{
+  "project": "demo",
+  "slug": "themed",
+  "title": "A themed article",
+  "summary": "Fixture: an article with a theme and Markdown components.",
+  "theme": { "accent": "#00a36c", "display": "didone", "radius": 4 },
+  "pages": [{ "id": "doc", "kind": "article", "src": "doc.md", "title": "Document" }]
+}

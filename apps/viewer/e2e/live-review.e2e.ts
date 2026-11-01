@@ -55,6 +55,24 @@ test("search finds words inside an article, and opens that page", async ({ page 
   await expect(page).toHaveURL(new RegExp(`/camerabuddy/${slug}/research-`));
 });
 
+test("an article's theme stays inside its body, and its components draw", async ({ page }, info) => {
+  const slug = `themed-${info.project.name}`;
+  publishFixture("themed-article", slug, token());
+  await page.goto(`/demo/${slug}/doc`);
+  const stat = page.locator('[data-component="stats"] strong').first();
+  await expect(stat).toHaveText("41%");
+  await expect(stat).toHaveCSS("border-top-color", "rgb(0, 163, 108)");
+  const scoped = await page.evaluate(() => {
+    const body = document.querySelector("[data-block]")?.parentElement as HTMLElement;
+    return {
+      body: body.style.getPropertyValue("--theme-accent"),
+      article: (document.querySelector(".article") as HTMLElement).style.getPropertyValue("--theme-accent"),
+      root: getComputedStyle(document.documentElement).getPropertyValue("--theme-accent"),
+    };
+  });
+  expect(scoped).toEqual({ body: "#00a36c", article: "", root: "" });
+});
+
 test("⌘K opens search anywhere", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop", "keyboards only");
   await page.goto("/projects");

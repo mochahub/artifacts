@@ -67,6 +67,32 @@ export const TAG_MAX = 32;
 export const Summary = z.string().trim().min(1).max(SUMMARY_MAX);
 export const Tags = z.array(z.string().trim().min(1).max(TAG_MAX)).max(TAGS_MAX);
 
+/** A font this repo knows by name, or a family the bundle ships. See `FONT_STACKS` in theme-css.ts. */
+export const FontName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{0,39}$/, "use a font's name");
+export const Radius = z.number().min(0).max(32);
+const Neutrals = z.object({ bg: Hex, card: Hex, text: Hex, muted: Hex, line: Hex }).partial().strict();
+export const Theme = z.object({
+  accent: Hex.optional(),
+  font: FontName.optional(),
+  /** Headings and big numbers. */
+  display: FontName.optional(),
+  /** Leaving it out means auto. */
+  mode: z.enum(["light", "dark", "auto"]).optional(),
+  radius: Radius.optional(),
+  /** Multiplies type size in templates. */
+  scale: z.number().min(0.85).max(1.25).optional(),
+  neutrals: Neutrals.optional(),
+  neutralsDark: Neutrals.optional(),
+});
+export type Theme = z.infer<typeof Theme>;
+/** What the viewer may apply inside an article's body. 03 and 05 own the list. */
+export const ArticleTheme = z.object({
+  accent: Hex.optional(),
+  font: FontName.optional(),
+  display: FontName.optional(),
+  radius: Radius.optional(),
+});
+
 export const Visibility = z.enum(["me", "org"]);
 export type Visibility = z.infer<typeof Visibility>;
 
@@ -116,13 +142,9 @@ export const Manifest = z.object({
   summary: Summary.optional(),
   tags: Tags.optional(),
   visibility: Visibility.optional(),
-  theme: z
-    .object({
-      accent: Hex.optional(),
-      font: z.string().optional(),
-      mode: z.enum(["light", "dark", "auto"]).default("auto"),
-    })
-    .optional(),
+  theme: Theme.optional(),
+  /** A template's own look. Anything else wins over it: the org's brand, then `theme`. */
+  templateTheme: Theme.optional(),
   backend: z.object({ src: RelPath }).optional(),
   pages: z.array(ManifestPage).min(1),
 });

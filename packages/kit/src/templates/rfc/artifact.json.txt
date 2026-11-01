@@ -1,0 +1,42 @@
+{
+  "project": "{{project}}",
+  "slug": "{{slug}}",
+  "title": "{{title}}",
+  "summary": "Replace this: say what this holds and why it mattered, in up to 280 characters.",
+  "tags": ["rfc"],
+  "templateTheme": {
+    "mode": "light",
+    "accent": "#8a1c2b",
+    "display": "serif",
+    "font": "serif",
+    "radius": 2,
+    "neutrals": {
+      "bg": "#fbfaf6",
+      "card": "#f1eee5",
+      "text": "#1b1a17",
+      "muted": "#62605a",
+      "line": "#d8d4c8"
+    }
+  },
+  "pages": [
+    {
+      "id": "doc",
+      "kind": "article",
+      "src": "doc.md",
+      "title": "Document"
+    },
+    {
+      "id": "cover",
+      "kind": "canvas",
+      "title": "Cover",
+      "boards": [
+        {
+          "id": "main",
+          "title": "Cover",
+          "src": "boards/cover.html"
+        }
+      ],
+      "styles": ["vendor/artifacts-kit/tokens.css", "vendor/artifacts-kit/components.css", "style.css"]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-/* Theme tokens for artifacts. A project overrides them in its own CSS or through the manifest's theme. */
+/* Theme tokens for artifacts. A project sets them through the manifest's `theme`, which the CLI turns into a last stylesheet at render, or in its own CSS. */
 :root {
   --art-accent: #0a84ff;
   --art-bg: #f5f6f8;
@@ -28,7 +28,7 @@ body {
   font: 16px / 1.4 var(--art-ui);
 }
 
-/* iOS-style primitives. `.safe` keeps content clear of the status bar and home indicator. */
+/* iOS-style primitives. `.art-safe` keeps content clear of the status bar and home indicator. */
 .art-safe {
   padding-top: 59px;
   padding-bottom: 34px;
@@ -58,7 +58,7 @@ body {
   border: 0;
   border-radius: 14px;
   background: var(--art-accent);
-  color: #fff;
+  color: var(--art-on-accent, #fff);
   font: 600 17px var(--art-ui);
 }
 .art-title {

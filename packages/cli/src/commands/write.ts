@@ -4,10 +4,13 @@ import { normalizeRepo, PublishPrepared, PublishResult } from "@artifacts/schema
 import article from "../../../kit/src/article.css" with { type: "text" };
 // @ts-expect-error: embedded as text
 import backend from "../../../kit/src/backend.js" with { type: "text" };
+import components from "../../../kit/src/components.css" with { type: "text" };
 // @ts-expect-error: embedded as text
 import data from "../../../kit/src/data.js" with { type: "text" };
 // @ts-expect-error: embedded as text
 import frames from "../../../kit/src/frames/index.js" with { type: "text" };
+// @ts-expect-error: embedded as text
+import icons from "../../../kit/src/icons.js" with { type: "text" };
 import tokens from "../../../kit/src/tokens.css" with { type: "text" };
 import { detectAgent } from "../agent.ts";
 import { findRoot, loadManifest, type Problem, repoRoot, WORK } from "../bundle/manifest.ts";
@@ -15,6 +18,7 @@ import type { Client } from "../client.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { render } from "../render/render.ts";
+import { TEMPLATE_SUMMARY, TEMPLATES } from "../templates.ts";
 import { VERSION } from "../version.ts";
 import { signedIn } from "./account.ts";
 import { renamedProblems } from "./review.ts";
@@ -159,6 +163,13 @@ export async function publishCommand(want: string | undefined, flags: PublishFla
     blocks: new Set(rendered.blocks.map((block) => `${block.pageKey}/${block.blockKey}`)),
   });
   problems.push(...(renamed as Problem[]));
+  if (manifest.summary === TEMPLATE_SUMMARY) {
+    problems.push({
+      rule: "manifest/summary",
+      severity: "warning",
+      message: "The summary is still the template's. It's what a later agent reads, so write your own.",
+    });
+  }
   printProblems(problems, out);
   if (hasErrors(problems)) throw new CliError("Lint found errors, so nothing was published.");
   const articles = rendered.pages.filter((page) => page.kind === "article").length;
@@ -282,12 +293,17 @@ function ignoreArtifacts(root: string) {
  * gitignored working folder, because the server holds the published copy; `--in-repo` writes them here.
  */
 export function initCommand(
-  flags: { project?: string; slug?: string; kind?: string; inRepo?: boolean },
+  flags: { project?: string; slug?: string; kind?: string; template?: string; inRepo?: boolean },
   out: Output,
 ) {
+  if (flags.template && flags.kind) throw new UsageError("Use --template or --kind, not both.");
   const kind = (flags.kind ?? "canvas") as keyof typeof STARTERS;
   // hasOwn, so "--kind constructor" isn't taken for a starter.
   if (!Object.hasOwn(STARTERS, kind)) throw new UsageError("--kind is canvas, article or prototype.");
+  const template = flags.template ? TEMPLATES[flags.template] : undefined;
+  if (flags.template && (!template || !Object.hasOwn(TEMPLATES, flags.template))) {
+    throw new UsageError(`--template is one of: ${Object.keys(TEMPLATES).join(", ")}.`);
+  }
   const starter = STARTERS[kind];
   const slugify = (value: string) =>
     value
@@ -297,7 +313,7 @@ export function initCommand(
       .slice(0, 40);
   const base = flags.inRepo ? process.cwd() : repoRoot();
   const project = flags.project ?? (slugify(basename(base)) || "project");
-  const slug = flags.slug ?? "overview";
+  const slug = flags.slug ?? flags.template ?? "overview";
   // It becomes a folder name, and only the server's own check looks at it otherwise.
   if (!/^[a-z0-9-]{1,40}$/.test(slug))
     throw new UsageError("--slug uses a-z, 0-9 and -, up to 40 characters.");
@@ -311,25 +327,50 @@ export function initCommand(
   }
   mkdirSync(root, { recursive: true });
 
-  writeFileSync(
-    join(root, "artifact.json"),
-    `${JSON.stringify({ project, slug, title: basename(base), pages: [starter.page("main")] }, null, 2)}\n`,
-  );
-  mkdirSync(join(root, starter.file, ".."), { recursive: true });
-  writeFileSync(join(root, starter.file), starter.body);
+  if (template) {
+    // Values are quoted for JSON, because a folder's name becomes the title and can hold anything.
+    const quoted = (value: string) => JSON.stringify(value).slice(1, -1);
+    for (const [path, body] of Object.entries(template)) {
+      const target = join(root, path);
+      mkdirSync(join(target, ".."), { recursive: true });
+      writeFileSync(
+        target,
+        path === "artifact.json"
+          ? body
+              .replaceAll("{{project}}", project)
+              .replaceAll("{{slug}}", slug)
+              .replaceAll("{{title}}", quoted(basename(base)))
+          : body,
+      );
+    }
+  } else {
+    writeFileSync(
+      join(root, "artifact.json"),
+      `${JSON.stringify({ project, slug, title: basename(base), pages: [starter.page("main")] }, null, 2)}\n`,
+    );
+    mkdirSync(join(root, starter.file, ".."), { recursive: true });
+    writeFileSync(join(root, starter.file), starter.body);
+  }
   mkdirSync(join(root, "fixtures"), { recursive: true });
   mkdirSync(join(root, "vendor/artifacts-kit"), { recursive: true });
   writeFileSync(join(root, "vendor/artifacts-kit/frames.js"), frames);
   writeFileSync(join(root, "vendor/artifacts-kit/data.js"), data);
   writeFileSync(join(root, "vendor/artifacts-kit/backend.js"), backend);
+  writeFileSync(join(root, "vendor/artifacts-kit/icons.js"), icons);
   writeFileSync(join(root, "vendor/artifacts-kit/tokens.css"), tokens);
+  writeFileSync(join(root, "vendor/artifacts-kit/components.css"), components);
   writeFileSync(join(root, "vendor/artifacts-kit/article.css"), article);
   writeFileSync(join(root, "vendor/artifacts-kit/VERSION"), `${VERSION}\n`);
   ignoreArtifacts(base);
-  out.result({ project, slug, kind, root }, () => {
-    out.say(`✓ Wrote ${project}/${slug} in ${root}`);
-    out.say('  Next: add a "summary" to artifact.json, then artifacts render');
-  });
+  out.result(
+    { project, slug, kind: flags.template ? "template" : kind, template: flags.template, root },
+    () => {
+      out.say(`✓ Wrote ${project}/${slug} in ${root}`);
+      out.say(
+        `  Next: ${template ? "write your own" : "add a"} "summary" in artifact.json, then artifacts render`,
+      );
+    },
+  );
 }
 
 export async function openCommand(

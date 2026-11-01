@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { BlockRecord, FrameRecord, Manifest, PageRecord } from "@artifacts/schema";
+import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@artifacts/schema";
+import { themeCss } from "@artifacts/schema/theme-css";
 import { buildArticle, mermaidSources } from "../article/build.ts";
 import { typeOf } from "../bundle/crawl.ts";
 import type { Problem } from "../bundle/manifest.ts";
@@ -51,6 +52,18 @@ const isWebp = (body: Uint8Array) =>
   body.length > 12 &&
   Buffer.from(body.subarray(0, 4)).toString() === "RIFF" &&
   Buffer.from(body.subarray(8, 12)).toString() === "WEBP";
+
+/** Lowest first: a template's look, then what the artifact says. */
+export function resolveTheme(manifest: Manifest): Theme | undefined {
+  const layers = [manifest.templateTheme, manifest.theme].filter((layer) => layer !== undefined);
+  if (layers.length === 0) return undefined;
+  return layers.reduce((merged, layer) => ({
+    ...merged,
+    ...layer,
+    neutrals: { ...merged.neutrals, ...layer.neutrals },
+    neutralsDark: { ...merged.neutralsDark, ...layer.neutralsDark },
+  }));
+}
 
 const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
 
@@ -145,6 +158,8 @@ export function render(
     .filter(([path, absolute]) => /\.(png|jpe?g)$/i.test(path) && Bun.file(absolute).size > 500 * 1024)
     .map(([path]) => path);
 
+  const merged = resolveTheme(manifest);
+  const theme = themeCss(merged);
   const backendPath = manifest.backend ? bundleBackend(root, manifest.backend.src, outDir) : null;
 
   const helper = runHelper(
@@ -158,6 +173,7 @@ export function render(
       out: outDir,
       lint: options.lint,
       fixtures: fixtures(root),
+      theme,
       contactSheet,
       title: manifest.title,
     },
@@ -251,7 +267,7 @@ export function render(
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 ${definition.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}
 ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join("\n")}
-<style>html,body{margin:0}</style></head><body>${frame.html}</body></html>`,
+<style>html,body{margin:0}</style>${theme ? `<style>${theme}</style>` : ""}</head><body>${frame.html}</body></html>`,
           "text/html",
         );
       }
@@ -274,6 +290,16 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
 
   const blocks: BlockRecord[] = [];
   const pages: PageRecord[] = [];
+  const { accent, font, display, radius } = merged ?? {};
+  const articleTheme =
+    accent || font || display || radius !== undefined
+      ? {
+          ...(accent ? { accent } : {}),
+          ...(font ? { font } : {}),
+          ...(display ? { display } : {}),
+          ...(radius === undefined ? {} : { radius }),
+        }
+      : null;
   manifest.pages.forEach((page, position) => {
     const title = "title" in page ? (page.title ?? null) : null;
     const group = "group" in page ? (page.group ?? null) : null;
@@ -300,6 +326,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
           htmlHash: files.get(htmlPath)?.hash,
           outline: built.outline,
           readingMinutes: built.readingMinutes,
+          ...(articleTheme ? { theme: articleTheme } : {}),
         },
       });
     } else if (page.kind === "canvas") {

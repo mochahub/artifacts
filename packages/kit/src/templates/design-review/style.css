@@ -1,0 +1,74 @@
+/* The brief and the labels of a pin-up wall. Colours and fonts come from the theme. */
+.brief {
+  width: 620px;
+  height: 852px;
+  padding: 56px 52px;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--art-sep);
+  border-radius: var(--art-radius);
+}
+.brief small {
+  font: 600 15px var(--art-ui);
+  color: var(--art-accent);
+}
+.brief h1 {
+  font: 400 62px / 1.04 var(--art-display);
+  letter-spacing: -0.01em;
+  margin: 14px 0 28px;
+}
+.brief .ask {
+  margin-top: auto;
+  padding-top: 22px;
+  border-top: 3px solid var(--art-tx);
+  font: 400 27px / 1.25 var(--art-display);
+}
+.brief p {
+  font: 18px / 1.5 var(--art-ui);
+  color: var(--art-tx2);
+  margin: 0 0 12px;
+}
+.brief .ask span {
+  display: block;
+  font: 600 15px var(--art-ui);
+  color: var(--art-tx2);
+  margin-bottom: 8px;
+}
+.screen {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+.screen main {
+  flex: 1;
+  padding: 16px 20px;
+}
+.screen h2 {
+  font: 400 34px / 1.1 var(--art-display);
+  margin: 6px 0 18px;
+}
+.screen .hero {
+  height: 190px;
+  border-radius: var(--art-radius);
+  background: var(--art-tx);
+  color: var(--art-bg);
+  display: flex;
+  align-items: flex-end;
+  padding: 16px;
+  font: 400 26px / 1.1 var(--art-display);
+  margin-bottom: 16px;
+}
+.screen .art-list {
+  margin-bottom: 16px;
+}
+.screen footer {
+  padding: 0 20px 44px;
+}
+.screen .art-btn {
+  width: 100%;
+}

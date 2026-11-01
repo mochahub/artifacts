@@ -113,6 +113,7 @@ function boardPage(board) {
   return `<!doctype html><html><head><meta charset="utf-8">
 ${board.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}
 ${board.scripts.map((path) => `<script src="${up}${path}"></script>`).join("\n")}
+${job.theme ? `<style>${job.theme}</style>` : ""}
 <style>html,body{margin:0}body{padding:40px;display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start}
 *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important;transition-delay:0s!important}</style>
 </head><body>${body}</body></html>`;

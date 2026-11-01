@@ -19,6 +19,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M10 Micro apps II | `m10-backends` | `7708f14` | green |
 | M11 Live review | `m11-live` | `b4977b5` | green |
 | M12 The hosted library | `m12-library` | see PR | see PR |
+| M13 Templates, guides and theme | `m13-templates` | see PR | see PR |
 
 ## Verified
 
@@ -47,6 +48,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M11 independent review (subagent, 2026-10-30):** 12 findings and one spec gap, all fixed. The worst: a model-supplied MCP argument could send the token to another server.
 
 - **M12 (2026-10-31):** 774 tests, every one of 108 routes reached; Playwright 75 passed. `packages/cli/test/library.e2e.test.ts` is the agent-style script, with the real CLI against a real server: the art style fixture of image-only frames is found by search from an unrelated folder, its card and pages read, a frame viewed as a real WebP at two sizes, and pulled; publishing the pull uploads 0 files and changes no frame. A fresh clone with no `artifact.json` finds its project from an `https://user:password@` remote. The local MCP returns cards, text and an image block, and starts with no server. Search permissions cover owner, member, reviewer, outside, guest, organization token and anonymous. `bun run e2e` passed 75 of 76 in one full run: the backend poll failed on iPhone, then passed alone on both devices with no change, so it looks like load on one machine. Watch it in CI.
+
+- **M13 (2026-10-31):** every template initializes, lints with no errors or warnings, renders in WebKit and publishes, through the real CLI. One accent changed pixels in at least one frame of all seven, and reached the article page's `meta.theme`. Hostile theme values are refused by the manifest and dropped by the code that writes CSS. A WebKit e2e checks the theme lands on the article body and nowhere else. The agent looked at all seven contact sheets, and changed the slides after that.
 
 ## Decisions to review
 
@@ -115,6 +118,13 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 53. **M12, the bundle route presigns everything.** Bucket URLs need no token, so the CLI downloads directly, and that's why `pull` needs no content-host change. Anyone with `artifact.read` could already see these files through a frame, including `__backend.js`.
 54. **M12, `export` leaves out frame renders.** `artifacts render` makes them again, and a project's worth is gigabytes. To add: the renders are listed by `/api/artifacts/:id/versions/:n`.
 55. **M12, `isBundlePath` applies at commit from now on,** so a new publish with `../` or `.git` in a path is refused. Older rows are filtered by the bundle route and again by the CLI.
+
+56. **M13, `templateTheme` is new.** A template's look has to lose to a brand and to `theme`, so it can't live in `theme`, and articles only get what's in the manifest, so it can't live in `style.css`.
+57. **M13, article templates carry a cover frame.** A contact sheet only shows frames, and the handoff wants renders compared. The cover is a one-frame canvas page, embedded at the top of the article with `::frame`, and it's what cards and share links show.
+58. **M13, `font` stays a free name, within a pattern.** Tightening it to a list would fail manifests that say `"inter"`, as SPEC's example did. A name we don't know becomes a family with a system fallback, which M14's bundled brand fonts use.
+59. **M13, an article's accent is an underline and a rule, never text colour.** A brand colour has to read on both of the viewer's themes.
+60. **M13, a reader's font choice wins** over an article's `font`, once they've made one.
+61. **M13, SPEC §8's "glass material" is gone.** The handoff bans it for templates, and the kit never had it.
 
 ## Needs you
 

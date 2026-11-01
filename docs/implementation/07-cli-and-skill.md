@@ -72,7 +72,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 
 | Command | Does |
 |---|---|
-| `artifacts init [--project <slug>] [--slug <slug>] [--kind canvas\|article\|prototype] [--in-repo]` | Makes `.artifacts/work/<slug>/` in the repo root, or the current folder outside a repo, with `artifact.json`, a starter page and `fixtures/`, copies the kit (`@artifacts/kit`) into `vendor/artifacts-kit/` (pinned to the CLI's version, so bundles stay self-contained), and adds `.artifacts/` to `.gitignore`. `--in-repo` writes them to the current folder instead, to commit them. |
+| `artifacts init [--project <slug>] [--slug <slug>] [--kind canvas\|article\|prototype] [--template <name>] [--in-repo]` | Makes `.artifacts/work/<slug>/` in the repo root, or the current folder outside a repo, with `artifact.json`, a starter page and `fixtures/`, copies the kit (`@artifacts/kit`) into `vendor/artifacts-kit/` (pinned to the CLI's version, so bundles stay self-contained), and adds `.artifacts/` to `.gitignore`. `--in-repo` writes them to the current folder instead, to commit them. `--template` copies an editable starter instead of a blank page: `design-review`, `presentation`, `case-study`, `prd`, `rfc`, `research-report` or `weekly-status`. It can't be used with `--kind`, and its slug defaults to its name. `publish` warns if the template's placeholder `summary` is still there. |
 | `artifacts dev [--port 4321]` | Local viewer and content host with hot reload, using the real viewer build bundled in the CLI, a local data folder, and local backends (08). No server needed. It listens on loopback only (`localhost` for the viewer, `127.0.0.1` for the content host on port + 1), answers only requests whose `Host` is one of those (so DNS rebinding gets nothing), and puts a random per-run secret in the content host's path, as the real host's signed token does, because that host answers any website with CORS `*` and runs the backend. |
 | `artifacts lint [<slug>] [--json]` | Rules below. Errors fail; warnings print. |
 | `artifacts render [<slug>] [--json]` | Renders (05), writes `.artifacts/contact-sheet.png` and prints its path. |
@@ -197,3 +197,5 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
 - `references/writing.md`
 - `references/micro-apps.md`: the data API and the backend handler, with examples
 - `references/lint.md`: every rule with fixes
+- `references/theme.md`: the theme fields and tokens
+- `references/templates/<name>.md`: when to use each template, and how to structure it. Structure only, and agents may skip them.

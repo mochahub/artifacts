@@ -120,6 +120,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
             htmlHash: meta.htmlHash,
             outline: meta.outline,
             readingMinutes: meta.readingMinutes,
+            theme: meta.theme ?? null,
             blocks: now.blockRows
               .filter((block) => block.pageKey === page.pageKey)
               .map((block) => {

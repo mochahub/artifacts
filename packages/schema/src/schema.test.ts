@@ -12,6 +12,7 @@ import {
   Slug,
 } from "./index.ts";
 import { sanitizeArticle } from "./sanitize.ts";
+import { articleStyle, fontStack, themeCss } from "./theme-css.ts";
 
 const spec = {
   project: "camerabuddy",
@@ -47,7 +48,7 @@ describe("manifest", () => {
         { id: "p", kind: "prototype", src: "index.html" },
       ],
     });
-    expect(parsed.theme?.mode).toBe("auto");
+    expect(parsed.theme?.mode).toBeUndefined();
     expect(parsed.pages[0]).toMatchObject({ styles: [], scripts: [] });
     expect(parsed.pages[1]).toMatchObject({ device: "iphone" });
   });
@@ -191,5 +192,45 @@ describe("blank text", () => {
   test("a guest name is trimmed, and spaces are no name", () => {
     expect(GuestName.parse({ name: "  Riley " })).toEqual({ name: "Riley" });
     expect(GuestName.safeParse({ name: "   " }).success).toBe(false);
+  });
+});
+
+describe("theme values can't become CSS", () => {
+  const evil = [
+    "#fff;}body{display:none",
+    "url(https://evil.test/x)",
+    'x"}*{background:url(https://evil.test)}',
+    "expression(alert(1))",
+    "#00000g",
+  ];
+
+  test("the manifest refuses them", () => {
+    const base = { project: "a", slug: "b", title: "c", pages: [{ id: "d", kind: "article", src: "e.md" }] };
+    for (const value of evil) {
+      expect(Manifest.safeParse({ ...base, theme: { accent: value } }).success).toBe(false);
+      expect(Manifest.safeParse({ ...base, theme: { font: value } }).success).toBe(false);
+      expect(Manifest.safeParse({ ...base, theme: { neutrals: { bg: value } } }).success).toBe(false);
+    }
+    expect(Manifest.safeParse({ ...base, theme: { radius: 9999 } }).success).toBe(false);
+    expect(Manifest.safeParse({ ...base, theme: { neutrals: { other: "#000000" } } }).success).toBe(false);
+  });
+
+  test("the code that writes CSS drops them, whatever the schema let through", () => {
+    for (const value of evil) {
+      const theme = { accent: value, font: value, display: value, neutrals: { bg: value } };
+      expect(articleStyle(theme as never)).toEqual({});
+      expect(themeCss(theme as never)).toBe("");
+    }
+    expect(articleStyle({ radius: "4px;}" as never })).toEqual({});
+  });
+
+  test("good values come through", () => {
+    expect(articleStyle({ accent: "#00a36c", radius: 4, display: "serif" })).toMatchObject({
+      "--theme-accent": "#00a36c",
+      "--theme-radius": "4px",
+    });
+    expect(themeCss({ accent: "#ffffff" })).toContain("--art-on-accent:#141414");
+    expect(themeCss({ accent: "#101010" })).toContain("--art-on-accent:#ffffff");
+    expect(fontStack("Acme Sans")).toStartWith('"Acme Sans"');
   });
 });

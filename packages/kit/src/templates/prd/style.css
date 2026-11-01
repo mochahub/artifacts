@@ -1,0 +1,62 @@
+.cover {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+/* A spec sheet: a ruled grid, with one thing in the accent. */
+.cover {
+  background-image:
+    linear-gradient(var(--art-sep) 1px, transparent 1px),
+    linear-gradient(90deg, var(--art-sep) 1px, transparent 1px);
+  background-size: 60px 60px;
+  background-position: -1px -1px;
+}
+.cover .sheet {
+  position: absolute;
+  left: 60px;
+  top: 60px;
+  width: 780px;
+  height: 510px;
+  padding: 40px 44px;
+  background: var(--art-card);
+  display: flex;
+  flex-direction: column;
+}
+.cover h1 {
+  margin: 12px 0 0;
+  font: 700 66px / 1.02 var(--art-display);
+  letter-spacing: -0.03em;
+}
+.cover small {
+  font: 600 18px var(--art-ui);
+  color: var(--art-tx2);
+}
+.cover dl {
+  margin: auto 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  font: 16px / 1.3 var(--art-ui);
+}
+.cover dt {
+  color: var(--art-tx2);
+}
+.cover dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+.cover .tab {
+  position: absolute;
+  left: 840px;
+  top: 60px;
+  width: 300px;
+  height: 180px;
+  padding: 26px;
+  background: var(--art-accent);
+  color: var(--art-on-accent);
+  font: 700 34px / 1.08 var(--art-display);
+}

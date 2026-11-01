@@ -21,6 +21,8 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest("hex
 const normalizeText = (text: string) => text.replace(/\s+/g, " ").trim();
 
 const VERDICT = /\{(Verified|Unverified)\}/g;
+/** `:::stats`, `:::compare` and `:::steps` around ordinary Markdown (05). The viewer draws them. */
+const COMPONENTS = new Set(["stats", "compare", "steps"]);
 const CALLOUT = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/;
 
 export type ArticleInput = {
@@ -82,7 +84,9 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
         data?: Record<string, unknown>;
       };
       if (!directive.type.endsWith("Directive")) return;
-      if (directive.name === "frame") {
+      if (directive.type === "containerDirective" && COMPONENTS.has(directive.name ?? "")) {
+        directive.data = { hName: "div", hProperties: { "data-component": directive.name } };
+      } else if (directive.name === "frame") {
         directive.data = {
           hName: "div",
           hProperties: { "data-embed": "frame", "data-ref": directive.attributes?.ref ?? "" },

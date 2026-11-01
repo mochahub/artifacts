@@ -1,4 +1,5 @@
 import type { Artifact, Thread } from "@artifacts/schema";
+import { type ArticleThemeValues, articleStyle } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
 import { List, Menu, MessageCircle, MessagesSquare, Triangle } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
@@ -20,6 +21,7 @@ export type ArticlePage = {
   key: string;
   title: string | null;
   readingMinutes: number;
+  theme?: ArticleThemeValues | null;
   outline: { id: string; title: string; level: number }[];
   blocks: { key: string; contentHash: string; changed: boolean }[];
 };
@@ -51,7 +53,8 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
     draft.value = { pageKey: page.key, anchor: { type: "block", blockKey: key }, where: where(key) };
   };
   const size = useSignal(Number(stored("size", "19")));
-  const font = useSignal(stored("font", "serif"));
+  // "theme" until the reader picks: an artifact's own font, and a choice of theirs that isn't stored.
+  const font = useSignal(stored("font", page.theme?.font ? "theme" : "serif"));
   const theme = useSignal(stored("theme", "auto"));
   const changedCount = page.blocks.filter((block) => block.changed).length;
   const loaded = useSignal(0);
@@ -113,7 +116,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
 
   useEffect(() => {
     writeStored("artifacts.read.size", String(size.value));
-    writeStored("artifacts.read.font", font.value);
+    if (font.value !== "theme") writeStored("artifacts.read.font", font.value);
     writeStored("artifacts.read.theme", theme.value);
   }, [size.value, font.value, theme.value]);
 
@@ -135,6 +138,10 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
     api<string>(`/api/artifacts/${artifact.id}/v/${version}/article/${page.key}`, { text: true }).then(
       (html) => {
         if (!live || !body.current) return;
+        // The publisher's theme stops at this element: the review UI around it keeps its own look.
+        for (const [name, value] of Object.entries(articleStyle(page.theme))) {
+          body.current.style.setProperty(name, value);
+        }
         // Sanitized by the server at commit (05); only `artifacts:blob/` needs mapping.
         body.current.innerHTML = html.replaceAll("artifacts:blob/", `/api/artifacts/${artifact.id}/r/`);
         for (const block of page.blocks) {
@@ -176,7 +183,9 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         onClick={pick}
         style={{
           "--read-size": `${size.value}px`,
-          "--read-font": font.value === "serif" ? "var(--serif)" : "var(--ui)",
+          ...(font.value === "theme"
+            ? {}
+            : { "--read-font": font.value === "serif" ? "var(--serif)" : "var(--ui)" }),
         }}
       >
         {changedCount > 0 && !changes.value && (

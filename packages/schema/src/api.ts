@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Key, Slug, Summary, Tags, Visibility } from "./manifest.ts";
+import { ArticleTheme, Key, Slug, Summary, Tags, Visibility } from "./manifest.ts";
 
 /** Request and response shapes for the HTTP API. 03-api.md owns the names; 02 owns the enums. */
 
@@ -371,6 +371,7 @@ export const PageRecord = z.object({
   meta: z.object({
     readingMinutes: z.number().optional(),
     htmlHash: Sha256.optional(),
+    theme: ArticleTheme.optional(),
     outline: z.array(OutlineEntry).optional(),
     boards: z.array(BoardRecord).optional(),
     device: z.string().optional(),

@@ -45,7 +45,8 @@ const USAGE = `artifacts ${VERSION}
   artifacts doctor
   artifacts upgrade [--server] [--to <version>]
   artifacts domain add <domain> | list
-  artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype] [--in-repo]
+  artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype]
+                 [--template <name>] [--in-repo]
   artifacts lint | render [<slug>]
   artifacts publish [<slug>] [-m <message>] [--name <label>] [--note <frame>=<text>]
   artifacts search <words> [--project <slug>] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]
@@ -109,6 +110,7 @@ const OPTIONS = {
   codex: { type: "boolean" },
   "no-skill": { type: "boolean" },
   "in-repo": { type: "boolean" },
+  template: { type: "string" },
   repo: { type: "string" },
   here: { type: "boolean" },
   limit: { type: "string" },
@@ -261,7 +263,13 @@ async function main(argv: string[]) {
       );
     case "init":
       return initCommand(
-        { project: values.project, slug: values.slug, kind: values.kind, inRepo: values["in-repo"] },
+        {
+          project: values.project,
+          slug: values.slug,
+          kind: values.kind,
+          template: values.template,
+          inRepo: values["in-repo"],
+        },
         out,
       );
     case "lint":

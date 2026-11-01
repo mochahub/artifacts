@@ -1,0 +1,42 @@
+{
+  "project": "{{project}}",
+  "slug": "{{slug}}",
+  "title": "{{title}}",
+  "summary": "Replace this: say what this holds and why it mattered, in up to 280 characters.",
+  "tags": ["weekly status"],
+  "templateTheme": {
+    "mode": "light",
+    "accent": "#b45f06",
+    "display": "rounded",
+    "font": "system",
+    "radius": 14,
+    "neutrals": {
+      "bg": "#faf4e8",
+      "card": "#ffffff",
+      "text": "#201a12",
+      "muted": "#65594a",
+      "line": "#e6dcc8"
+    }
+  },
+  "pages": [
+    {
+      "id": "doc",
+      "kind": "article",
+      "src": "doc.md",
+      "title": "Document"
+    },
+    {
+      "id": "cover",
+      "kind": "canvas",
+      "title": "Cover",
+      "boards": [
+        {
+          "id": "main",
+          "title": "Cover",
+          "src": "boards/cover.html"
+        }
+      ],
+      "styles": ["vendor/artifacts-kit/tokens.css", "vendor/artifacts-kit/components.css", "style.css"]
+    }
+  ]
+}

@@ -193,7 +193,7 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/versions` | `artifact.read` | `[{ n, name, message, publishedBy, agent, publishedAt, restoredFrom, decision?, changes: { frames, blocks } }]` |
-| `GET /api/artifacts/:id/versions/:n` | `artifact.read` | `{ n, pages: [Page], notes }`. `Page` for canvas: `{ key, kind, title, boards, frames: [{ key, board, title, device, x, y, w, h, contentHash, renders, live: bool, changed: bool }] }`; for article: `{ key, kind, title, htmlHash, outline, blocks: [{ key, contentHash, changed }] }`. |
+| `GET /api/artifacts/:id/versions/:n` | `artifact.read` | `{ n, pages: [Page], notes }`. `Page` for canvas: `{ key, kind, title, boards, frames: [{ key, board, title, device, x, y, w, h, contentHash, renders, live: bool, changed: bool }] }`; for article: `{ key, kind, title, htmlHash, outline, theme, blocks: [{ key, contentHash, changed }] }`, where `theme` is null or `{ accent?, font?, display?, radius? }` (05). |
 | `PATCH /api/artifacts/:id/versions/:n` | `artifact.publish` | `{ name }` |
 | `POST /api/artifacts/:id/versions/:n/restore` | `artifact.publish` | Publishes a copy as the next version (same `files`, `backend_hash`, frames, blocks), with `restored_from = n`; re-anchors threads; → `{ n }` |
 | `GET /api/artifacts/:id/compare?from=&to=` | `artifact.read` | `{ frames: { added, removed, changed }, blocks: { added, removed, changed }, notes }`. `frames.regions` maps each changed frame (the first 40) to `{ before, after, regions }`: the two @2x render hashes and `[{ x, y, w, h }]` as 0–1 fractions, at most 12. |
