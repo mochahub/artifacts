@@ -39,6 +39,8 @@ jobs:
           cd "$(mktemp -d)"
           echo 'ARTIFACTS_URL=http://from-dotenv.invalid' > .env
           if "$cli" whoami 2>&1 | grep -F from-dotenv; then exit 1; fi
+      - name: The server image builds
+        run: docker build -f apps/server/Dockerfile -t artifacts:ci .
       - name: Viewer size budget
         run: bun run size
       - name: Playwright WebKit at iPhone size and desktop
