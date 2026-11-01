@@ -387,6 +387,14 @@ describe("OAuth and the hosted MCP", () => {
     expect((await t.api("/api/mcp", { method: "DELETE", bearer: owner })).status).toBe(405);
   });
 
+  test("a good token from a foreign Origin is still refused", async () => {
+    const send = (origin: string) => mcp(owner, "tools/list", {}, { Origin: origin });
+    expect((await send("https://evil.test")).status).toBe(403);
+    expect((await send("http://viewer.test")).status).toBe(200);
+    expect((await send("https://art.example.org")).status).toBe(200);
+    expect((await send("http://content.test")).status).toBe(403);
+  });
+
   test("a CLI token works as a static bearer, on any tool it has the scope for", async () => {
     const found = await call(owner, "artifacts_search", { query: "lanterns" });
     expect(found.content[0]?.text).toBe(UNTRUSTED_NOTICE);

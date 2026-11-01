@@ -109,6 +109,7 @@ Our server is its own OAuth 2.1 authorization server, on the sign-in above. No o
 - **Audience:** every access token is bound to `<origin>/api/mcp`. Anywhere else, including the rest of this API and the same path on another of this deployment's domains, it's a 401. There's no token passthrough: the server calls no upstream API.
 - **Redirects** match exactly, apart from a loopback port (RFC 8252). Only https, or http to loopback. A bad client or redirect never redirects.
 - **PKCE** is S256 only. A failed exchange burns the code.
+- **Origin:** `POST /api/mcp` refuses a foreign `Origin` even with a valid token, which the CSRF rule below exempts. It's what stops DNS rebinding from a browser.
 - **Rotation:** each refresh issues a new refresh token. One used twice, or a code used twice, revokes the grant, and so everything from it.
 - **Client ID Metadata Documents:** a URL `client_id` is fetched only over https, on the default port, to public addresses, with no redirects, 5 seconds and 64 KB at most, and is kept an hour. A document must name its own URL. A hostname could resolve differently between the check and the fetch, because Bun can't pin an address; the document is never shown to the caller, and only its name and redirects are used.
 - **Revocation:** Settings, Sign-in lists each grant as a connector. Removing a person or resetting their password ends theirs.
