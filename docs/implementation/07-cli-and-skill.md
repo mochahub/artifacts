@@ -56,6 +56,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts skill install [--claude] [--codex]` | Copies `skill/` into `~/.claude/skills/artifacts/` and into Codex's skills folder, `${CODEX_HOME:-~/.codex}/skills/artifacts/` (confirmed in spike S7). Not also into `~/.agents/skills/`, which Codex reads too; the skill would be listed twice. |
 | `artifacts org invite <email> [--role member\|reviewer\|admin]` | Prints the invite link. |
 | `artifacts org reset-link <email>` | Prints a one-hour reset link. |
+| `artifacts teams` | Lists teams: slug, name, size, and whether you're in one. Admins make them in Settings. Tokens can't change teams or who's in them. |
 
 **The Railway path** in `artifacts setup` (SPEC §7.4; every command exists in Railway CLI 5.71.0; spike S1 runs the whole sequence):
 1. **The Railway CLI itself:** `railway --version`. If it's missing, offer `brew install railway` or `npm i -g @railway/cli`.
@@ -126,6 +127,7 @@ These work anywhere: none reads an `artifact.json`. `--json` output carries an `
 | `artifacts visibility org\|me` | |
 | `artifacts share --link [--comment] [--expires 1d\|7d\|30d]` | Prints the link. |
 | `artifacts share --invite <email> [--comment\|--publish]` | Prints the invite link for an outside person, or adds an existing member. `--publish` lets a member publish new versions of this artifact (members only; 04). Access the CLI grants this way can comment but can't approve, request changes or resolve threads until a person confirms it in the viewer's Share sheet (04). |
+| `artifacts share --team <slug> [--comment]` | Shares with a team, at `view` or `comment`. Only a person can give a team `publish`. Like `--invite`, it can't approve or resolve until a person confirms it. |
 | `artifacts archive [<project>/<slug>] [--undo]` | |
 | `artifacts delete [<project>/<slug>] [--version <n>]` | To Recently deleted; prints the purge date and the undo command. |
 | `artifacts undelete [<project>/<slug>] [--version <n>]` | |
@@ -194,7 +196,8 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
 
    Never resolve a person's thread. If a comment is ambiguous, reply with a question and leave the thread open.
 10. **Lifecycle:** archive finished artifacts when asked; never delete without being asked; never try to purge.
-11. **Report back:** the URL, the version, what changed, and which threads were marked fixed.
+11. **Sharing:** `artifacts teams`, and `share --team` for its own work.
+12. **Report back:** the URL, the version, what changed, and which threads were marked fixed.
 
 **References:**
 - `references/manifest.md`: the schema with examples

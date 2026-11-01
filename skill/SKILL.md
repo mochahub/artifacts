@@ -90,6 +90,10 @@ Never resolve a person's thread; only people resolve. If a comment is ambiguous,
 
 Archive finished artifacts when asked. Never delete without being asked, and never try to purge.
 
-## 11. Report back
+## 11. Sharing
+
+Run `artifacts teams` to see the teams. Run `artifacts share --team <slug> --comment` to share your own work with one, at view or comment. A person has to confirm it before that team can approve, and only a person can let a team publish. You can't change a team or who's in it.
+
+## 12. Report back
 
 Say the URL, the version, what changed, and which threads you marked fixed.

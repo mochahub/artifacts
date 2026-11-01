@@ -18,7 +18,7 @@ import {
 import { mcpCommand } from "./commands/mcp.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
 import { packCommand, packUpload } from "./commands/pack.ts";
-import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
+import { orgCommand, shareCommand, teamsCommand, visibilityCommand } from "./commands/people.ts";
 import {
   archiveCommand,
   commentsCommand,
@@ -76,6 +76,8 @@ const USAGE = `artifacts ${VERSION}
   artifacts delete | undelete [<project>/<slug>] [--version <n>]
   artifacts share --link [--comment] [--expires 1d|7d|30d]
   artifacts share --invite <email> [--comment|--publish]
+  artifacts share --team <slug> [--comment]
+  artifacts teams
 
 Every command takes --json. Commands that talk to a server take --server <url|name>
 (on upgrade, --server means "the server too", and it can't name one).`;
@@ -108,6 +110,7 @@ const OPTIONS = {
   undo: { type: "boolean" },
   link: { type: "boolean" },
   invite: { type: "string" },
+  team: { type: "string" },
   comment: { type: "boolean" },
   publish: { type: "boolean" },
   expires: { type: "string" },
@@ -270,12 +273,15 @@ async function main(argv: string[]) {
       return orgCommand(first, positionals[2], { role: values.role, server: values.server }, out);
     case "visibility":
       return visibilityCommand(first, positionals[2], values.server, out);
+    case "teams":
+      return teamsCommand(values.server, out);
     case "share":
       return shareCommand(
         first,
         {
           link: values.link,
           invite: values.invite,
+          team: values.team,
           comment: values.comment,
           publish: values.publish,
           expires: values.expires,
