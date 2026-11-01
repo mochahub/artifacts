@@ -90,7 +90,7 @@ artifacts comments --open --json
 artifacts reply 3 "Moved it above the strip" --fixed
 ```
 
-Invite people with `artifacts org invite sam@example.com`, which prints a link to send yourself. The server never sends email.
+Invite people with `artifacts org invite sam@example.com`, which prints a link to send yourself. The server never sends email. Group them into teams in Settings, and share an artifact with a team from its Share sheet or with `artifacts share --team design`.
 
 ## Upgrading
 

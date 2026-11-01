@@ -1,6 +1,6 @@
-# Progress: building M2–M16
+# Progress: building M2–M19
 
-A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF-M12-M16.md) for the current brief, then this.
+A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google.md](SCOPE-teams-projects-google.md) for the current brief, then this.
 
 ## Status
 
@@ -23,6 +23,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M14 Brand setup | `m14-brand` | PR #23 | see the PR |
 | M15 OAuth, hosted MCP and publishing | `m15-connector` | PR #24 | see the PR |
 | M16 Articles without the CLI | `m16-articles` | PR #25 | see the PR |
+| M17 Teams | `m17-teams` | see the PR | see the PR |
 
 ## Verified
 
@@ -61,6 +62,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M16 (2026-11-01):** `apps/server/test/api/articles.test.ts` publishes from a plain HTTP client with no filesystem or shell, then reads it through the viewer's route, `read`, search and `pull`'s bundle. An XSS payload comes out as a CLI publish's does, and the stored HTML is unchanged by sanitizing it again. That test also found that M13's `:::stats`, `:::compare` and `:::steps` never survived the allowlist, because the attribute name didn't match. Fixed on `m13-templates`, with a test.
 
 - **M13 follow-up (2026-11-01):** rendering a template's article by eye found what no test had: `:::steps` collapsed to one word a line, and a `:::` after a table showed on the page. The second was Biome, which formats Markdown and had rewritten the fence into a table cell, so `packages/kit/src/templates` and `skill/references/kit.md` are now outside it, and a test checks every template. **Don't run `biome check --write` on Markdown that uses directives.**
+
+- **M17 (2026-11-01):** the existing matrix is unchanged: all 3,828 results for the old callers and actions were dumped from `5400f6e` and compared after the change, with no differences. New rows cover team grants at each level, the role cap, token-made rows alone and tied, and who runs a team. `apps/server/test/api/teams.test.ts` and `events.test.ts` cover every team route, sharing, `via_token`, removal, revocation, and streams closing within a heartbeat for a session and a token. `packages/cli/test/teams.e2e.test.ts` runs the real CLI. A WebKit e2e makes a team and shares with it at iPhone size and desktop, with screenshots in `docs/mocks/shots/08-*`.
 
 ## Decisions to review
 
@@ -165,6 +168,16 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 83. **The stack ships as 0.2.0, not a patch.** It changes `init`'s default and adds a lint error, and raising `packages/cli/package.json` is how `release.yml` takes a chosen version.
 
 84. **Every token is shown as an agent.** A comment from a token with no detected agent used to read as the person's own. Now the server marks it, and shows it as "Zahin's agent". Rows from before this have no mark, and can't be told apart. Pushes for a publish stay tied to a named agent, so someone at their own terminal isn't told what they just did.
+
+85. **M17, a publisher keeps managing after a demotion.** The scope applies the role cap to rule 2, but today a member made a reviewer still manages what they published, and "nothing changes on upgrade" wins. The cap holds for every grant, which is what the rule is for. To change: the publisher line in `effective()`.
+86. **M17, a team lead must be a member or above.** The scope doesn't say. Leading hands out the team's access, including project `manage`, and a role capped at commenting shouldn't do that. The route refuses it, and `can()` also ignores a lead who has since become a reviewer.
+87. **M17, people search includes outside people.** A lead has to find one to add them to a team, and the user decided outside people can join.
+88. **M17, a token sees a team's name, size and shared work, but not its members.** The user's decision keeps the directory in the browser, and a member list is the same data by another route.
+89. **M17, a team's page lists only shared work the caller can see.** Anything else would name a private artifact to any member.
+90. **M17, `inherit()` lives in `can.ts`.** Both loaders call it, so what a grant adds up to is pure, and the matrix runs through it.
+91. **M17, `/api/activity` and the digest load artifacts in one batch.** The scope expected up to 200 extra lookups; the batch is fewer queries than before.
+92. **M17, a token can't refresh an invite that has teams,** as well as not making one. A fresh link is the same way in.
+93. **M17, team rows an agent added show "Confirm so they can approve"** in the Share sheet, which grants the same level again as a person.
 
 ## Needs you
 
