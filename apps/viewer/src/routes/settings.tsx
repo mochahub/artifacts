@@ -298,6 +298,7 @@ type PersonRow = {
   passkeys: number;
   shares: { title: string; permission: string }[];
   teams: { slug: string; name: string; role: string }[];
+  projects: { slug: string; name: string; permission: keyof typeof LEVELS }[];
 };
 type InviteRow = { id: string; email: string; role: string; expiresAt: string };
 type PeopleList = { people: PersonRow[]; invites: InviteRow[] };
@@ -567,6 +568,21 @@ function People() {
                 </span>
               </div>
             )}
+            {person.projects.length > 0 && (
+              <div class="li">
+                <div class="grow">
+                  <div class="tt">Projects</div>
+                </div>
+                <span class="ss">
+                  {person.projects.map((project, i) => (
+                    <span key={project.slug}>
+                      {i > 0 && ", "}
+                      <a href={`/${project.slug}`}>{project.name}</a>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            )}
           </div>
           {person.role !== "outside" && (
             <div class="seg">
@@ -821,6 +837,9 @@ function TeamDetail({ slug }: { slug: string }) {
           ))}
         </div>
       )}
+      <a class="fn" href={`/projects?team=${team.slug}`}>
+        See its projects
+      </a>
       <p class="fn">
         Anyone added here gets what the team has. Reviewers and outside people stop at commenting.
       </p>
@@ -907,7 +926,11 @@ function TeamDetail({ slug }: { slug: string }) {
 type Org = {
   newVersion: string | null;
   name: string;
-  settings: { defaultVisibility: "me" | "org"; linkSharing: boolean };
+  settings: {
+    defaultVisibility: "me" | "org";
+    linkSharing: boolean;
+    defaultProjectAccess: "org" | "restricted";
+  };
   domains: { home: string; publicUrl: string; moreUrls: string[]; contentUrl: string | null };
 };
 
@@ -1095,6 +1118,19 @@ function OrgSettings() {
           </button>
         ))}
       </div>
+      <span class="gh">New projects are visible to</span>
+      <div class="seg">
+        {(["org", "restricted"] as const).map((value) => (
+          <button
+            type="button"
+            key={value}
+            aria-pressed={body.settings.defaultProjectAccess === value}
+            onClick={() => save({ settings: { defaultProjectAccess: value } })}
+          >
+            {value === "org" ? "Organization" : "Only people added"}
+          </button>
+        ))}
+      </div>
       <span class="gh">Share links</span>
       <div class="seg">
         {[true, false].map((value) => (
@@ -1120,6 +1156,8 @@ function Tokens() {
   const recent = useRecent();
   const name = useSignal("");
   const made = useSignal<string | null>(null);
+  const projects = usePoll<{ id: string; name: string; restricted?: boolean }[]>("/api/projects", 60_000);
+  const chosen = useSignal<string[]>([]);
   return (
     <Frame title="Tokens">
       <p class="sub">
@@ -1136,6 +1174,44 @@ function Tokens() {
           name.value = e.currentTarget.value;
         }}
       />
+      <span class="gh">Projects</span>
+      <div class="group">
+        <button
+          type="button"
+          class="li btn-li"
+          onClick={() => {
+            chosen.value = [];
+          }}
+        >
+          <div class="grow">
+            <div class="tt">Every open project</div>
+            <div class="ss">And any it creates. A restricted project has to be chosen below.</div>
+          </div>
+          {chosen.value.length === 0 && <Check />}
+        </button>
+        {projects.data.value?.map((project) => {
+          const on = chosen.value.includes(project.id);
+          return (
+            <button
+              type="button"
+              class="li btn-li"
+              key={project.id}
+              aria-pressed={on}
+              onClick={() => {
+                chosen.value = on
+                  ? chosen.value.filter((id) => id !== project.id)
+                  : [...chosen.value, project.id];
+              }}
+            >
+              <div class="grow">
+                <div class="tt">{project.name}</div>
+                {project.restricted && <div class="ss">Restricted</div>}
+              </div>
+              {on && <Check />}
+            </button>
+          );
+        })}
+      </div>
       <button
         type="button"
         class="btn ink"
@@ -1145,9 +1221,11 @@ function Tokens() {
             const { token } = await post<{ token: string }>("/api/tokens", {
               name: name.value,
               scopes: ["publish", "read", "org"],
+              ...(chosen.value.length > 0 ? { projectIds: chosen.value } : {}),
             });
             made.value = token;
             name.value = "";
+            chosen.value = [];
             await list.refresh();
           })
         }

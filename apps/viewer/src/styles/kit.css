@@ -909,6 +909,9 @@
 .sheet .addrow {
   flex: none;
 }
+select.field {
+  min-height: 48px;
+}
 .level {
   flex: none;
   width: 132px;
