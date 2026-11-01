@@ -162,6 +162,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 81. **M15, `Origin` is checked at `/api/mcp` even with a good token.** The transport requires it, and the CSRF rule exempts bearer requests.
 82. **M15, declining a connector needs no recent sign-in.** Only approving does.
 
+83. **The stack ships as 0.2.0, not a patch.** It changes `init`'s default and adds a lint error, and raising `packages/cli/package.json` is how `release.yml` takes a chosen version.
+
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.

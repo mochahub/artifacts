@@ -475,9 +475,9 @@ describe("the backend sandbox", () => {
     } };`);
     expect(await (await call("x")).json()).toEqual({ write: "wrote" });
     await t.api(`/api/artifacts/${id}/archive`, { method: "POST", bearer: token });
-    await Bun.sleep(5100);
+    t.clock.advance(5001);
     expect(await (await call("x")).json()).toEqual({ write: "read_only" });
-  }, 15_000);
+  });
 
   test("old versions run their own backend", async () => {
     const slug = "versions";

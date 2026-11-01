@@ -32,7 +32,9 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
     DATABASE_URL: databaseUrl,
     S3_ENDPOINT,
     S3_REGION: "auto",
-    S3_BUCKET: "artifacts-test",
+    // Each server has its own database, so the GC job deletes what's only in another server's. One
+    // bucket per worker keeps it away from files running now. `bun run test` sets this.
+    S3_BUCKET: process.env.ARTIFACTS_TEST_PARALLEL ? `artifacts-test-${process.pid}` : "artifacts-test",
     S3_ACCESS_KEY_ID: "devaccesskey",
     S3_SECRET_ACCESS_KEY: "devsecretkey",
     PUBLIC_URL: "http://viewer.test",
