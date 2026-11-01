@@ -1,3 +1,4 @@
+import { agentLabel } from "@artifacts/schema";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { blocks, decisions, frames, pages, people, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
@@ -69,7 +70,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         name: version.name,
         message: version.message,
         publishedBy: by,
-        agent: version.agent,
+        agent: version.agent ? agentLabel(by, version.agent) : null,
         publishedAt: version.publishedAt.toISOString(),
         restoredFrom: version.restoredFrom,
         summary: version.summary,

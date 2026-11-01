@@ -125,9 +125,9 @@ describe("the review API", () => {
     expect(fixed.status).toBe(200);
     const comment = Comment.parse(await fixed.json());
     expect(comment).toMatchObject({
-      agent: "Claude Code",
+      agent: "Zahin's Claude Code",
       marksFixed: true,
-      author: { name: "Claude Code", kind: "agent" },
+      author: { name: "Zahin's Claude Code", kind: "agent" },
     });
 
     const list = z
@@ -298,5 +298,37 @@ describe("the review API", () => {
 
     const gone = PublishResult.parse(await (await publish(t, token, { frameKey: "renamed" })).json());
     expect(gone.orphaned).toContain(before.n);
+  });
+
+  test("a token never reads as its person, named or not, and only a browser writes as one", async () => {
+    await publish(t, token, { slug: "identity" });
+    const { id } = (await (
+      await t.api("/api/artifacts/by-slug/camerabuddy/identity", { bearer: token })
+    ).json()) as {
+      id: string;
+    };
+    const made = await t.api(`/api/artifacts/${id}/threads`, {
+      method: "POST",
+      bearer: token,
+      json: { pageKey: "plan", anchor: null, body: "From a script with no name", version: 1 },
+    });
+    expect(((await made.json()) as { author: unknown }).author).toEqual({
+      name: "Zahin's agent",
+      kind: "agent",
+    });
+    const versions = (await (await t.api(`/api/artifacts/${id}/versions`, { bearer: token })).json()) as {
+      agent: string;
+    }[];
+    expect(versions[0]?.agent).toBe("Zahin's agent");
+    const signedIn = await signIn(t, OWNER.email, OWNER.password);
+    const person = await t.api(`/api/artifacts/${id}/threads`, {
+      method: "POST",
+      cookie: signedIn,
+      json: { pageKey: "plan", anchor: null, body: "From me", version: 1 },
+    });
+    expect(((await person.json()) as { author: unknown }).author).toEqual({
+      name: OWNER.name,
+      kind: "person",
+    });
   });
 });

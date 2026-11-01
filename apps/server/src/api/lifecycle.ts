@@ -1,3 +1,4 @@
+import { agentLabel, UNNAMED_AGENT } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
@@ -100,7 +101,9 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       projectId: row.projectId,
       actorPersonId: actorId(c.get("caller")),
       agent:
-        c.get("caller").kind === "person" ? null : (c.req.header("artifacts-agent")?.slice(0, 60) ?? null),
+        c.get("caller").kind === "person"
+          ? null
+          : c.req.header("artifacts-agent")?.slice(0, 60) || UNNAMED_AGENT,
       kind,
       payload,
       createdAt: clock.now(),
@@ -531,8 +534,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       items: visible.map(({ row, actor, title, slug, project }) => ({
         id: row.id,
         kind: row.kind,
-        actor: row.agent ?? actor ?? "A guest",
-        agent: row.agent,
+        actor: (row.agent && actor ? agentLabel(actor, row.agent) : (row.agent ?? actor)) ?? "A guest",
+        agent: row.agent && actor ? agentLabel(actor, row.agent) : row.agent,
         artifact: title ? { title, slug, project } : null,
         payload: row.payload,
         createdAt: row.createdAt.toISOString(),

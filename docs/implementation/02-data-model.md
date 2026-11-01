@@ -253,7 +253,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `created_at`, `resolved_at` | timestamptz | |
 | `resolved_by` | uuid null | A person; never an agent (SPEC §6). |
 
-**`comments`**: `id`, `thread_id`, `org_id`, `author_person_id` / `author_guest_id` (one set), `author_name`, `agent` text null (set when written through a CLI token with an agent detected: the reply shows as the agent, "Claude", for the person), `body` text (Markdown, 10 000 chars max), `version` int, `marks_fixed` bool, `created_at`, `edited_at`. GIN index on `to_tsvector('english', body)`.
+**`comments`**: `id`, `thread_id`, `org_id`, `author_person_id` / `author_guest_id` (one set), `author_name`, `agent` text null (always set when a token wrote it: the client's name for itself, or `agent` if it gave none. Shown with its person, as "Zahin's agent". Comments from before this rule were saved with none, and can't be told apart), `body` text (Markdown, 10 000 chars max), `version` int, `marks_fixed` bool, `created_at`, `edited_at`. GIN index on `to_tsvector('english', body)`.
 
 **`decisions`**: `id`, `org_id`, `artifact_id`, `version` int, `person_id`, `kind` `decision_kind`, `note` text, `created_at`. The latest row per artifact is the current decision.
 

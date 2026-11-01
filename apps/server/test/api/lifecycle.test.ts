@@ -341,7 +341,7 @@ describe("lifecycle", () => {
     const { items } = (await (await t.api("/api/activity?filter=agents", { bearer: token })).json()) as {
       items: { kind: string; actor: string }[];
     };
-    expect(items[0]).toMatchObject({ kind: "archived", actor: "Claude Code" });
+    expect(items.find((item) => item.kind === "archived")?.actor).toBe("Zahin's Claude Code");
   });
 
   test("restore publishes a copy, which re-anchors threads", async () => {

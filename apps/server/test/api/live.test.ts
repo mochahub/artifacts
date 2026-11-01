@@ -196,7 +196,7 @@ describe("live review", () => {
     expect(message?.headers.get("content-encoding")).toBe("aes128gcm");
     expect(message?.headers.get("authorization")).toMatch(/^vapid t=.+\..+\..+, k=/);
     const opened = device.decrypt(message?.body as Uint8Array);
-    expect(opened.title).toBe("Claude replied");
+    expect(opened.title).toBe("Zahin's Claude replied");
     expect(opened.body).toBe("Fixed it");
     expect(opened.url).toBe(`/camerabuddy/live/plan?c=${thread.n}`);
 

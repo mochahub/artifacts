@@ -1,4 +1,12 @@
-import { type Anchor, CreateComment, CreateDecision, CreateThread, EditComment } from "@artifacts/schema";
+import {
+  type Anchor,
+  agentLabel,
+  CreateComment,
+  CreateDecision,
+  CreateThread,
+  EditComment,
+  UNNAMED_AGENT,
+} from "@artifacts/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { artifactParam, findArtifact, isUuid } from "../api/artifacts-db.ts";
@@ -38,7 +46,8 @@ function authorOf(caller: Caller, artifactId: string, agent: string | null | und
       authorPersonId: caller.person.id,
       authorGuestId: null,
       authorName: caller.person.name,
-      agent: agent ?? null,
+      // Every token is marked, named or not: what an agent wrote never reads as the person's own words.
+      agent: agent?.trim() || UNNAMED_AGENT,
     };
   }
   if (caller.kind === "guest") {
@@ -57,7 +66,7 @@ const commenterId = (caller: Caller) =>
       : caller.kind;
 
 const authorView = (row: { authorGuestId: string | null; authorName: string; agent?: string | null }) => ({
-  name: row.agent ?? row.authorName,
+  name: row.agent ? agentLabel(row.authorName, row.agent) : row.authorName,
   kind: row.agent ? ("agent" as const) : row.authorGuestId ? ("guest" as const) : ("person" as const),
 });
 
@@ -92,7 +101,8 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
           status: row.status,
           createdVersion: row.createdVersion,
           fixedVersion: row.fixedVersion,
-          author: authorView(row),
+          // Threads don't store an agent; the comment that opened one does.
+          author: authorView(own[0] ?? row),
           crop: row.cropKey ? await bucket.presignGet(row.cropKey) : null,
           comments: own.map(commentView),
           createdAt: row.createdAt.toISOString(),
@@ -105,7 +115,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
   const commentView = (row: CommentRow) => ({
     id: row.id,
     author: authorView(row),
-    agent: row.agent,
+    agent: row.agent ? agentLabel(row.authorName, row.agent) : null,
     body: row.body,
     version: row.version,
     marksFixed: row.marksFixed,
@@ -376,7 +386,9 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     );
     void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
     notifyReply(deps, c.get("org").id, thread, {
-      authorName: author.agent ?? (comment as CommentRow).authorName,
+      authorName: author.agent
+        ? agentLabel((comment as CommentRow).authorName, author.agent)
+        : (comment as CommentRow).authorName,
       body: (comment as CommentRow).body,
       actor: author.agent ? null : (comment as CommentRow).authorPersonId,
     }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
