@@ -42,6 +42,7 @@
 | `vapid_public` | text null | Phase 2. Generated the first time push needs it, not at boot, because there's no `org` row on first boot. |
 | `vapid_private` | text null | Phase 2. Stored as is: anyone who can read this table can already read everything else, and tying it to `SESSION_SECRET` would stop that secret being rotated. |
 | `last_digest_at` | timestamptz null | Phase 2. When the daily push digest last went out, so a restart doesn't send it again. |
+| `brand` | jsonb null | The applied brand: `{ name, theme, fonts: [{ family, weight, style, format, hash }] }`. Null means the default look. Only a person changes it (04). |
 | `pseudonym_key` | bytea not null | 32 random bytes generated at setup. Keys the per-artifact caller pseudonyms (08). Separate from `SESSION_SECRET` so that secret can be rotated; never rotated itself, because `me` data is keyed by pseudonym. |
 | `created_at` | timestamptz | |
 
@@ -148,6 +149,8 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `project_ids` | uuid[] null | `org` tokens only; null = all projects. |
 | `created_by` | uuid FK people | |
 | `created_at`, `last_used_at`, `expires_at`, `revoked_at` | timestamptz | `cli` tokens don't expire; they're revoked from the sign-in page or by `logout`. |
+
+**`brand_proposals`**: `id`, `org_id`, `name`, `brand` jsonb (the same shape as `org.brand`), `artifact_id` uuid null (the sample; cleared if it's purged), `proposed_by` uuid FK people, `agent` text null, `created_at`, `applied_at`, `applied_by`.
 
 ### Projects and artifacts
 

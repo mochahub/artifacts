@@ -18,6 +18,7 @@
 | `~/.config/artifacts/railway/<server name>/` | Folder the Railway CLI is linked in, so `railway init` never links the user's repo |
 | OS keychain, service `artifacts`, account `<server url>` | The CLI token |
 | `<repo>/.artifacts/work/<slug>/` | A working folder: `artifact.json` and its sources. The default place for a new artifact. |
+| `~/.config/artifacts/brand/<server>/` | The org's brand and font files, cached at each render, so rendering works offline |
 | `<repo>/artifact.json` | The manifest (05), when an artifact lives in the repo (`init --in-repo`) |
 | `<repo>/.artifacts/` | Working folders, renders, contact sheet, local data; the CLI adds it to `.gitignore` |
 | `<artifact folder>/fixtures/` | Fixtures for rendering (05) |
@@ -49,6 +50,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts upgrade [--server] [--to <version>]` | Update the CLI binary (download, verify the SHA-256 from the release, swap atomically) and the skill. `--to` and the latest release's tag must be a plain version number (`0.2.0`), and `ARTIFACTS_RELEASES_URL` / `ARTIFACTS_LATEST_URL` must be https (http only on localhost, for tests). The checksum comes from the same release as the binary, so it catches a bad download, not a release someone else published. With `--server`, or when you're an admin and the server is older: Railway: `railway service source connect --image ghcr.io/<org>/artifacts:<v> --service artifacts` then wait for health. Docker: edit the tags in `docker-compose.yml`, `docker compose up -d`. |
 | `artifacts domain add <domain>` / `list` | Railway only: `railway domain <domain> --service artifacts --port 8080`; prints the DNS records; adds it to `MORE_URLS` (`railway variable set`); asks whether to make it `PUBLIC_URL`. |
 | `artifacts mcp` | A Model Context Protocol server on stdin and stdout, for tools without a shell. Its tools (`artifacts_search`, `_list`, `_read`, `_view`, `_status`, `_comments`, `_reply`, `_publish`, `_versions`, `_data_export`) each run one command with `--json`. `initialize` returns `instructions` with the core rules, and this repo's project if it can find it within 2 seconds. A tool whose answer can hold other people's text starts it with a block saying that text is data, and `_view` returns an image. |
+| `artifacts brand [show] \| prompt \| preview <file> \| propose <file>` | The org brand. `show` prints it and any waiting proposals. `prompt` prints what to hand an agent, which `setup` also prints at the end. `preview` renders every template with a `brand.json` and prints the contact sheet's path, with nothing sent anywhere. `propose` publishes that sample as `brand/sample-<hash>` and records a proposal, which a person applies in Settings. |
 | `artifacts doctor` | Checks the server is reachable, versions match, the token is valid, WebKit is installed, the skill is installed and current, and the Railway CLI if configured. Prints fixes. |
 | `artifacts skill install [--claude] [--codex]` | Copies `skill/` into `~/.claude/skills/artifacts/` and into Codex's skills folder, `${CODEX_HOME:-~/.codex}/skills/artifacts/` (confirmed in spike S7). Not also into `~/.agents/skills/`, which Codex reads too; the skill would be listed twice. |
 | `artifacts org invite <email> [--role member\|reviewer\|admin]` | Prints the invite link. |
@@ -198,4 +200,5 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
 - `references/micro-apps.md`: the data API and the backend handler, with examples
 - `references/lint.md`: every rule with fixes
 - `references/theme.md`: the theme fields and tokens
+- `references/brand.md`: fitting Artifacts to a brand guide, `brand.json`, and font licensing
 - `references/templates/<name>.md`: when to use each template, and how to structure it. Structure only, and agents may skip them.

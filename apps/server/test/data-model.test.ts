@@ -197,7 +197,7 @@ describe("the database matches 02-data-model.md", () => {
       where contype = 'f' and confrelid = 'org'::regclass
         and conkey = array[(select attnum from pg_attribute where attrelid = conrelid and attname = 'org_id')]`;
     const names = (rows: postgres.Row[]) => rows.map((row) => row.table_name as string).sort();
-    expect(tables).toHaveLength(30);
+    expect(tables).toHaveLength(31);
     expect(names(columns)).toEqual(names(tables));
     expect(names(references)).toEqual(names(tables));
   });

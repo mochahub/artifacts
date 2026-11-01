@@ -183,6 +183,7 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "home.read":
     case "project.list":
     case "project.read":
+    case "brand.read":
       return anyPerson || (name.startsWith("orgToken") && name !== "orgToken (no read scope)");
     case "account.read":
       return anyPerson;
@@ -190,6 +191,18 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
       return anyPerson && !name.startsWith("cliToken");
     case "deleted.read":
       return anyPerson && !readOnly; // A token needs manage: agents can undelete, so they must find what they deleted.
+    case "brand.propose":
+      // As project.create, for people: an org token has nobody to answer for a proposal.
+      return [
+        "owner",
+        "admin",
+        "member (publisher)",
+        "member (added with publish)",
+        "member (other)",
+        "member (added by a token)",
+        "cliToken (publisher)",
+        "cliToken (admin, not the publisher)",
+      ].includes(name);
     case "project.create":
       // Members and up. A token also needs publish (cli) or org (org token); reviewers and outside people never.
       return (
@@ -238,6 +251,7 @@ function expected(name: Name, action: Action, visibility: "me" | "org", lifecycl
     case "org.manage":
     case "people.manage":
     case "tokens.manage":
+    case "brand.apply":
       return ADMINS.includes(name); // People only.
     case "people.invite":
       return ADMINS.includes(name) || tokenAdmins.includes(name);

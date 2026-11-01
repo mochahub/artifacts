@@ -164,6 +164,16 @@ Compact, paged answers for agents, which the CLI's `search`, `list`, `read` and 
 
 `LibraryCard` = `{ project, slug, title, summary, tags, status, outcome: { decision, decisionVersion, openComments, archived }, latestVersion, updatedAt, match: { source, page, ref, snippet } | null }`. `status` is `ArtifactCard.status.kind`. `match.source` is `title`, `summary`, `tag`, `block`, `frame`, `page`, `note` or `comment`, and a snippet is at most 200 characters of plain text. `summary` falls back to the first block's text, then the version message, then frame titles, cut to 280 characters. A card is at most 1,800 characters of JSON, a test holds it there.
 
+## Brand
+
+| Method, path | Action | Notes |
+|---|---|---|
+| `GET /api/brand` | `brand.read` | `{ brand, fonts: [{ hash, url }] }`. `brand` is null for the default look; `url` is a presigned GET. |
+| `DELETE /api/brand` | `brand.apply` | Back to the default look. |
+| `GET /api/brand/proposals` | `brand.read` | The latest 50: `[{ id, name, brand, sample: { project, slug } \| null, proposedBy, agent, createdAt, appliedAt }]`. |
+| `POST /api/brand/proposals` | `brand.propose` | `{ brand, project, slug, agent? }`, naming a published sample the caller may publish to. Each font's hash must be a file in its latest version → `{ id }`. Changes nothing until it's applied. |
+| `POST /api/brand/proposals/:id/apply` | `brand.apply` (a person) | Copies it to `org.brand`. |
+
 ## Lifecycle: archive and delete
 
 | Method, path | Action | Notes |

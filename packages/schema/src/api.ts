@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArticleTheme, Key, Slug, Summary, Tags, Visibility } from "./manifest.ts";
+import { ArticleTheme, Brand, Key, Slug, Summary, Tags, Visibility } from "./manifest.ts";
 
 /** Request and response shapes for the HTTP API. 03-api.md owns the names; 02 owns the enums. */
 
@@ -667,3 +667,29 @@ export const DecisionRow = z.object({
   at: Time,
 });
 export const DecisionList = z.array(DecisionRow);
+
+// Brand (04)
+const BrandFontLink = z.object({ hash: Sha256, url: z.string() });
+export const OrgBrand = z.object({
+  brand: Brand.nullable(),
+  /** Presigned links to the brand's font files. */
+  fonts: z.array(BrandFontLink),
+});
+export type OrgBrand = z.infer<typeof OrgBrand>;
+export const ProposeBrand = z.object({
+  brand: Brand,
+  project: Slug,
+  slug: Slug,
+  agent: z.string().max(60).nullable().optional(),
+});
+export const BrandProposal = z.object({
+  id: Id,
+  name: z.string(),
+  brand: Brand,
+  sample: z.object({ project: z.string(), slug: z.string() }).nullable(),
+  proposedBy: z.string(),
+  agent: z.string().nullable(),
+  createdAt: Time,
+  appliedAt: Time.nullable(),
+});
+export type BrandProposal = z.infer<typeof BrandProposal>;

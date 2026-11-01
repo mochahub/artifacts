@@ -2,6 +2,7 @@
 import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
+import { brandCommand } from "./commands/brand.ts";
 import { dataCommand, logsCommand } from "./commands/data.ts";
 import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
@@ -55,6 +56,7 @@ const USAGE = `artifacts ${VERSION}
   artifacts view <project>/<slug> [--page <key>] [--frame <key>] [--size thumb|1x|2x] [--out <file>]
   artifacts pull <project>/<slug> [--version <n>] [--dir <path>] [--force]
   artifacts export <project> [--dir <path>]
+  artifacts brand [show] | prompt | preview <file> | propose <file>
   artifacts open [<project>/<slug>] [--version <n>] [--page <key>]
   artifacts status [<project>/<slug>]
   artifacts comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]
@@ -338,6 +340,8 @@ async function main(argv: string[]) {
         { version: optionAfter("--version"), dir: values.dir, force: values.force, server: values.server },
         out,
       );
+    case "brand":
+      return brandCommand(first, positionals[2], { server: values.server }, out);
     case "export":
       return exportCommand(first, { dir: values.dir, server: values.server }, out);
     case "open":

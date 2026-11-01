@@ -162,6 +162,9 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `org.read` | Admins, owner |
 | `org.manage`, `people.manage`, `tokens.manage` | Admins, owner (people only) |
 | `people.read` | Admins, owner; an admin's cliToken with `read` |
+| `brand.read` | As `home.read`: what renders use. |
+| `brand.propose` | Members and up; cliToken with `publish`. A proposal changes nothing. Not org tokens, which have no person to answer for it. |
+| `brand.apply` | Admins, owner, as people. Never a token: it changes how everyone's work looks, and an agent's scopes hold only what a person can undo for one artifact. |
 | `people.invite` | Admins, owner; an admin's cliToken with `manage`. `artifacts org invite` and `org reset-link` need this (SPEC §10). |
 
 ### Test matrix

@@ -27,6 +27,9 @@ export const ACTIONS = [
   "people.manage",
   "people.invite",
   "tokens.manage",
+  "brand.read",
+  "brand.propose",
+  "brand.apply",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -207,7 +210,13 @@ function canOnOrg(caller: Caller, action: Action): boolean {
     case "home.read":
     case "project.list":
     case "project.read":
+    case "brand.read":
       return (person !== null || caller.kind === "orgToken") && hasScope(caller, "read");
+    case "brand.propose":
+      // Proposing changes nothing, and an agent is who usually does it (SPEC 8).
+      return (
+        person !== null && ["owner", "admin", "member"].includes(person.role) && hasScope(caller, "publish")
+      );
     case "project.create":
       if (caller.kind === "orgToken") return caller.scopes.includes("org");
       return (
@@ -221,6 +230,7 @@ function canOnOrg(caller: Caller, action: Action): boolean {
     case "org.manage":
     case "people.manage":
     case "tokens.manage":
+    case "brand.apply":
       return session && admin;
     default:
       return false;

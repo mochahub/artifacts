@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import brand from "../../../../skill/references/brand.md" with { type: "text" };
 import kit from "../../../../skill/references/kit.md" with { type: "text" };
 import lint from "../../../../skill/references/lint.md" with { type: "text" };
 import manifest from "../../../../skill/references/manifest.md" with { type: "text" };
@@ -28,6 +29,7 @@ import { VERSION } from "../version.ts";
 
 const FILES: Record<string, string> = {
   "SKILL.md": skill,
+  "references/brand.md": brand,
   "references/kit.md": kit,
   "references/lint.md": lint,
   "references/manifest.md": manifest,

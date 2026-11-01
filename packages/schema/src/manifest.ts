@@ -85,6 +85,25 @@ export const Theme = z.object({
   neutralsDark: Neutrals.optional(),
 });
 export type Theme = z.infer<typeof Theme>;
+/** Fonts ship in the bundle, because lint bans external ones. */
+export const FONT_FORMATS = { woff2: "woff2", woff: "woff", otf: "opentype", ttf: "truetype" } as const;
+export const MAX_BRAND_FONTS = 8;
+export const MAX_FONT_BYTES = 4 * 1024 * 1024;
+export const BrandFont = z.object({
+  family: FontName,
+  weight: z.string().regex(/^[1-9]00$/, "use a weight like 400"),
+  style: z.enum(["normal", "italic"]).default("normal"),
+  format: z.enum(["woff2", "woff", "otf", "ttf"]),
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type BrandFont = z.infer<typeof BrandFont>;
+export const Brand = z.object({
+  name: z.string().trim().min(1).max(80),
+  theme: Theme.omit({ mode: true }),
+  fonts: z.array(BrandFont).max(MAX_BRAND_FONTS).default([]),
+});
+export type Brand = z.infer<typeof Brand>;
+
 /** What the viewer may apply inside an article's body. 03 and 05 own the list. */
 export const ArticleTheme = z.object({
   accent: Hex.optional(),

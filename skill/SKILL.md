@@ -54,7 +54,7 @@ Publish plans, research reports, mocks, comparisons and prototypes that someone 
 
 `artifacts init` copies device frames, components, icons and theme tokens into `vendor/artifacts-kit/`. See `references/kit.md`.
 
-`artifacts init --template <name>` starts from an editable template for daily work: `design-review`, `presentation`, `case-study`, `prd`, `rfc`, `research-report` or `weekly-status`, each with a guide in `references/templates/`. They suggest a structure, and they're never required: what you make and how it looks is your call. `references/theme.md` covers colours and fonts.
+`artifacts init --template <name>` starts from an editable template for daily work: `design-review`, `presentation`, `case-study`, `prd`, `rfc`, `research-report` or `weekly-status`, each with a guide in `references/templates/`. They suggest a structure, and they're never required: what you make and how it looks is your call. `references/theme.md` covers colours and fonts, and `references/brand.md` fitting Artifacts to a company's brand.
 
 ## 6. Writing
 

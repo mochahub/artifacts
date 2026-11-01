@@ -40,7 +40,9 @@ const Theme = z.object({
 
 **Fixtures** (SPEC §7.9) live next to the manifest: `fixtures/data.json` (`{ "shared": { key: value }, "me": { key: value } }`) and `fixtures/files/{shared,me}/<name>`.
 
-**Theme.** `render` merges `templateTheme`, then `theme`, into tokens (`themeCss` in `packages/schema/src/theme-css.ts`). On a canvas they're the last stylesheet in each board and live frame, so every template and any CSS using `var(--art-…)` follows them. On an article, `accent`, `font`, `display` and `radius` go in `pages.meta.theme`, which `commit` validates with the same rules, and the viewer sets them as custom properties on the article body only. Prototypes are the author's own page and aren't themed.
+**Theme.** `render` merges `templateTheme`, then the org's brand, then `theme`, into tokens (`themeCss` in `packages/schema/src/theme-css.ts`). On a canvas they're the last stylesheet in each board and live frame, so every template and any CSS using `var(--art-…)` follows them. On an article, `accent`, `font`, `display` and `radius` go in `pages.meta.theme`, which `commit` validates with the same rules, and the viewer sets them as custom properties on the article body only. Prototypes are the author's own page and aren't themed.
+
+**Brand.** The CLI fetches `GET /api/brand` at each render, waiting at most 3 seconds, and caches it, so a render works offline; a stale copy prints a warning. Brand fonts are files in the bundle at `.artifacts/brand-fonts/<hash>.<format>`, with `@font-face` rules beside the tokens, because lint bans external fonts. They reach canvases and live frames. The viewer loads no publisher's fonts, so an article body names the family and falls back to a system font.
 
 **`summary` and `tags` are the artifact's frontmatter:** what an agent reads instead of the whole document, so they're stored per version and capped in `packages/schema`. A version from before they existed stays valid, and shows a truncated first block instead (03).
 

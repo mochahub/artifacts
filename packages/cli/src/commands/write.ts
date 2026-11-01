@@ -13,6 +13,7 @@ import frames from "../../../kit/src/frames/index.js" with { type: "text" };
 import icons from "../../../kit/src/icons.js" with { type: "text" };
 import tokens from "../../../kit/src/tokens.css" with { type: "text" };
 import { detectAgent } from "../agent.ts";
+import { type LocalBrand, loadBrand } from "../brand/cache.ts";
 import { findRoot, loadManifest, type Problem, repoRoot, WORK } from "../bundle/manifest.ts";
 import type { Client } from "../client.ts";
 import { staticLint } from "../lint/static.ts";
@@ -51,7 +52,7 @@ async function projectRules(root: string, manifest: unknown): Promise<Problem[]>
   return problems;
 }
 
-async function collect(root: string, out: Output, options: { lint: boolean }) {
+async function collect(root: string, out: Output, options: { lint: boolean; brand?: LocalBrand | null }) {
   const { manifest, problems } = loadManifest(root);
   if (!manifest) return { manifest: null, problems, rendered: null };
   const checked = await staticLint(root, manifest);
@@ -69,7 +70,8 @@ async function collect(root: string, out: Output, options: { lint: boolean }) {
         ]
       : [];
   if (hasErrors(problems)) return { manifest, problems: [...problems, ...summary], rendered: null };
-  const rendered = render(root, manifest, checked.files, options, out);
+  const brand = options.brand === undefined ? await loadBrand(out) : options.brand;
+  const rendered = render(root, manifest, checked.files, { ...options, brand }, out);
   problems.push(...rendered.problems, ...summary);
   const weights = new Map<string, number>();
   for (const frame of rendered.frames)
@@ -152,8 +154,39 @@ export type PublishFlags = { message?: string; name?: string; notes: string[]; s
 
 export async function publishCommand(want: string | undefined, flags: PublishFlags, out: Output) {
   const root = findRoot(undefined, want);
-  const client: Client = await signedIn(flags.server);
-  const { manifest, problems, rendered } = await collect(root, out, { lint: true });
+  const result = await publishRoot(root, flags, await signedIn(flags.server), out);
+  out.result(result, () => {
+    out.say(
+      `✓ upload   ${result.uploaded.files} new files (${Math.round(result.uploaded.bytes / 1024)} KB); ${result.reused} already stored`,
+    );
+    out.say(`✓ v${result.version}       ${result.url}`);
+    const changed = [...(result.changes.frames.changed ?? []), ...(result.changes.blocks.changed ?? [])];
+    if (changed.length > 0) out.say(`  changed  ${changed.join(", ")}`);
+    if (result.threadsOnChanged.length > 0) {
+      out.say(`  threads on changed frames  ${result.threadsOnChanged.map((n) => `#${n}`).join(", ")}`);
+    }
+  });
+}
+
+/** A brand's sample, rendered but not published. */
+export async function previewRoot(root: string, brand: LocalBrand, out: Output) {
+  const { problems, rendered } = await collect(root, out, { lint: true, brand });
+  if (!rendered) {
+    printProblems(problems, out);
+    throw new CliError("Fix the problems above, then preview again.");
+  }
+  return { contactSheet: rendered.contactSheet, frames: rendered.frames.length, problems };
+}
+
+/** Lint, render, upload and commit one folder. */
+export async function publishRoot(
+  root: string,
+  flags: PublishFlags,
+  client: Client,
+  out: Output,
+  brand?: LocalBrand,
+) {
+  const { manifest, problems, rendered } = await collect(root, out, { lint: true, brand });
   if (!manifest || !rendered || hasErrors(problems)) {
     printProblems(problems, out);
     throw new CliError("Lint found errors, so nothing was published.");
@@ -237,17 +270,7 @@ export async function publishCommand(want: string | undefined, flags: PublishFla
     }),
   );
 
-  out.result(result, () => {
-    out.say(
-      `✓ upload   ${result.uploaded.files} new files (${Math.round(result.uploaded.bytes / 1024)} KB); ${result.reused} already stored`,
-    );
-    out.say(`✓ v${result.version}       ${result.url}`);
-    const changed = [...(result.changes.frames.changed ?? []), ...(result.changes.blocks.changed ?? [])];
-    if (changed.length > 0) out.say(`  changed  ${changed.join(", ")}`);
-    if (result.threadsOnChanged.length > 0) {
-      out.say(`  threads on changed frames  ${result.threadsOnChanged.map((n) => `#${n}`).join(", ")}`);
-    }
-  });
+  return result;
 }
 
 const STARTERS = {
@@ -278,6 +301,18 @@ const STARTERS = {
     body: "<!doctype html>\n<title>Prototype</title>\n<h1>Prototype</h1>\n",
   },
 } as const;
+
+/** The kit, as `init` copies it. */
+export const kitFiles = (): Record<string, string> => ({
+  "vendor/artifacts-kit/frames.js": frames,
+  "vendor/artifacts-kit/data.js": data,
+  "vendor/artifacts-kit/backend.js": backend,
+  "vendor/artifacts-kit/icons.js": icons,
+  "vendor/artifacts-kit/tokens.css": tokens,
+  "vendor/artifacts-kit/components.css": components,
+  "vendor/artifacts-kit/article.css": article,
+  "vendor/artifacts-kit/VERSION": `${VERSION}\n`,
+});
 
 /** `.artifacts/` holds renders and working folders, so it stays out of git. */
 function ignoreArtifacts(root: string) {
@@ -353,14 +388,7 @@ export function initCommand(
   }
   mkdirSync(join(root, "fixtures"), { recursive: true });
   mkdirSync(join(root, "vendor/artifacts-kit"), { recursive: true });
-  writeFileSync(join(root, "vendor/artifacts-kit/frames.js"), frames);
-  writeFileSync(join(root, "vendor/artifacts-kit/data.js"), data);
-  writeFileSync(join(root, "vendor/artifacts-kit/backend.js"), backend);
-  writeFileSync(join(root, "vendor/artifacts-kit/icons.js"), icons);
-  writeFileSync(join(root, "vendor/artifacts-kit/tokens.css"), tokens);
-  writeFileSync(join(root, "vendor/artifacts-kit/components.css"), components);
-  writeFileSync(join(root, "vendor/artifacts-kit/article.css"), article);
-  writeFileSync(join(root, "vendor/artifacts-kit/VERSION"), `${VERSION}\n`);
+  for (const [path, body] of Object.entries(kitFiles())) writeFileSync(join(root, path), body);
   ignoreArtifacts(base);
   out.result(
     { project, slug, kind: flags.template ? "template" : kind, template: flags.template, root },

@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@artifacts/schema";
-import { themeCss } from "@artifacts/schema/theme-css";
+import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
 import { buildArticle, mermaidSources } from "../article/build.ts";
+import type { LocalBrand } from "../brand/cache.ts";
 import { typeOf } from "../bundle/crawl.ts";
 import type { Problem } from "../bundle/manifest.ts";
 import { CliError, type Output } from "../output.ts";
@@ -53,9 +54,14 @@ const isWebp = (body: Uint8Array) =>
   Buffer.from(body.subarray(0, 4)).toString() === "RIFF" &&
   Buffer.from(body.subarray(8, 12)).toString() === "WEBP";
 
-/** Lowest first: a template's look, then what the artifact says. */
-export function resolveTheme(manifest: Manifest): Theme | undefined {
-  const layers = [manifest.templateTheme, manifest.theme].filter((layer) => layer !== undefined);
+/** Lowest first: a template's look, then the org's brand, then what the artifact says. */
+export function resolveTheme(
+  manifest: Manifest,
+  brand?: Pick<LocalBrand, "theme"> | null,
+): Theme | undefined {
+  const layers = [manifest.templateTheme, brand?.theme, manifest.theme].filter(
+    (layer): layer is Theme => layer !== undefined,
+  );
   if (layers.length === 0) return undefined;
   return layers.reduce((merged, layer) => ({
     ...merged,
@@ -131,7 +137,7 @@ export function render(
   root: string,
   manifest: Manifest,
   bundle: Map<string, string>,
-  options: { lint: boolean },
+  options: { lint: boolean; brand?: LocalBrand | null },
   out: Output,
 ): RenderResult {
   const outDir = join(root, ".artifacts/render");
@@ -158,8 +164,16 @@ export function render(
     .filter(([path, absolute]) => /\.(png|jpe?g)$/i.test(path) && Bun.file(absolute).size > 500 * 1024)
     .map(([path]) => path);
 
-  const merged = resolveTheme(manifest);
-  const theme = themeCss(merged);
+  const merged = resolveTheme(manifest, options.brand);
+  // Fonts ship in the bundle, so each page finds them by a path that depends on its folder.
+  const fonts = (options.brand?.fonts ?? []).filter((font) => options.brand?.fontFiles.has(font.hash));
+  const fontDir = join(root, ".artifacts/brand-fonts");
+  for (const font of fonts) {
+    mkdirSync(fontDir, { recursive: true });
+    copyFileSync(options.brand?.fontFiles.get(font.hash) as string, join(root, fontPath(font)));
+  }
+  const themeWith = (up: string) => `${fontFaceCss(fonts, up)}\n${themeCss(merged)}`.trim();
+  const theme = themeWith("{{up}}");
   const backendPath = manifest.backend ? bundleBackend(root, manifest.backend.src, outDir) : null;
 
   const helper = runHelper(
@@ -200,6 +214,18 @@ export function render(
     writeFileSync(source, body);
     files.set(path, { path, hash: sha256(body), size: Buffer.byteLength(body), type, source });
   };
+
+  for (const font of fonts) {
+    const path = fontPath(font);
+    const source = join(root, path);
+    files.set(path, {
+      path,
+      hash: font.hash,
+      size: statSync(source).size,
+      type: `font/${font.format}`,
+      source,
+    });
+  }
 
   // Stored with each version, so `artifacts pull` can give back what was published (05).
   addGenerated("artifact.json", readFileSync(join(root, "artifact.json")), "application/json");
@@ -267,7 +293,7 @@ export function render(
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 ${definition.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}
 ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join("\n")}
-<style>html,body{margin:0}</style>${theme ? `<style>${theme}</style>` : ""}</head><body>${frame.html}</body></html>`,
+<style>html,body{margin:0}</style>${theme ? `<style>${themeWith(up)}</style>` : ""}</head><body>${frame.html}</body></html>`,
           "text/html",
         );
       }

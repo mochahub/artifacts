@@ -74,6 +74,7 @@ export const org = pgTable("org", {
   vapidPublic: text("vapid_public"),
   vapidPrivate: text("vapid_private"),
   lastDigestAt: time("last_digest_at"),
+  brand: jsonb("brand"),
   pseudonymKey: bytea("pseudonym_key").notNull(),
   createdAt: createdAt(),
 });
@@ -167,6 +168,23 @@ export const guests = pgTable("guests", {
 });
 
 // Projects and artifacts (declared before the tables that reference them)
+
+export const brandProposals = pgTable("brand_proposals", {
+  id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  name: text("name").notNull(),
+  brand: jsonb("brand").notNull(),
+  artifactId: uuid("artifact_id").references(() => artifacts.id, { onDelete: "set null" }),
+  proposedBy: uuid("proposed_by")
+    .notNull()
+    .references(() => people.id),
+  agent: text("agent"),
+  createdAt: createdAt(),
+  appliedAt: time("applied_at"),
+  appliedBy: uuid("applied_by").references(() => people.id),
+});
 
 export const projects = pgTable(
   "projects",

@@ -109,3 +109,29 @@ export function articleStyle(theme: ArticleThemeValues | null | undefined): Reco
   if (radius !== null) style["--theme-radius"] = `${radius}px`;
   return style;
 }
+
+const EXTENSION = /^(woff2|woff|otf|ttf)$/;
+const FORMATS: Record<string, string> = { woff2: "woff2", woff: "woff", otf: "opentype", ttf: "truetype" };
+
+export const fontPath = (font: { hash: string; format: string }) =>
+  `.artifacts/brand-fonts/${font.hash}.${font.format}`;
+
+/** `@font-face` rules for fonts in the bundle. `up` is the way from the page to the bundle's root. */
+export function fontFaceCss(
+  fonts: { family: string; weight: string; style?: string; format: string; hash: string }[],
+  up: string,
+) {
+  return fonts
+    .filter(
+      (font) =>
+        FONT_NAME.test(font.family) &&
+        /^[1-9]00$/.test(font.weight) &&
+        /^[0-9a-f]{64}$/.test(font.hash) &&
+        EXTENSION.test(font.format),
+    )
+    .map(
+      (font) =>
+        `@font-face{font-family:"${font.family}";font-weight:${font.weight};font-style:${font.style === "italic" ? "italic" : "normal"};src:url("${up}${fontPath(font)}") format("${FORMATS[font.format]}")}`,
+    )
+    .join("\n");
+}

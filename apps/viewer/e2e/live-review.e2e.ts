@@ -73,6 +73,12 @@ test("an article's theme stays inside its body, and its components draw", async 
   expect(scoped).toEqual({ body: "#00a36c", article: "", root: "" });
 });
 
+test("Settings shows the brand, and says how one gets proposed", async ({ page }) => {
+  await page.goto("/settings/brand");
+  await expect(page.getByRole("heading", { name: "Brand" })).toBeVisible();
+  await expect(page.getByText("artifacts brand propose")).toBeVisible();
+});
+
 test("⌘K opens search anywhere", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop", "keyboards only");
   await page.goto("/projects");

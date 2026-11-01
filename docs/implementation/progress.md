@@ -20,6 +20,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M11 Live review | `m11-live` | `b4977b5` | green |
 | M12 The hosted library | `m12-library` | see PR | see PR |
 | M13 Templates, guides and theme | `m13-templates` | see PR | see PR |
+| M14 Brand setup | `m14-brand` | see PR | see PR |
 
 ## Verified
 
@@ -50,6 +51,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M12 (2026-10-31):** 774 tests, every one of 108 routes reached; Playwright 75 passed. `packages/cli/test/library.e2e.test.ts` is the agent-style script, with the real CLI against a real server: the art style fixture of image-only frames is found by search from an unrelated folder, its card and pages read, a frame viewed as a real WebP at two sizes, and pulled; publishing the pull uploads 0 files and changes no frame. A fresh clone with no `artifact.json` finds its project from an `https://user:password@` remote. The local MCP returns cards, text and an image block, and starts with no server. Search permissions cover owner, member, reviewer, outside, guest, organization token and anonymous. `bun run e2e` passed 75 of 76 in one full run: the backend poll failed on iPhone, then passed alone on both devices with no change, so it looks like load on one machine. Watch it in CI.
 
 - **M13 (2026-10-31):** every template initializes, lints with no errors or warnings, renders in WebKit and publishes, through the real CLI. One accent changed pixels in at least one frame of all seven, and reached the article page's `meta.theme`. Hostile theme values are refused by the manifest and dropped by the code that writes CSS. A WebKit e2e checks the theme lands on the article body and nowhere else. The agent looked at all seven contact sheets, and changed the slides after that.
+
+- **M14 (2026-10-31):** `packages/cli/test/brand.e2e.test.ts` runs the real CLI from a sample `brand.json` to a preview, a published sample every template appears in, a reviewer's comment on it, and a person applying it. Tokens, including the owner's, get 403 on applying and on clearing. Precedence, taking a brand off, a font that isn't in the sample, and rendering from the cache with the server stopped are all covered. The font file in the test is a stand-in, so no real font has been drawn through this path.
 
 ## Decisions to review
 
@@ -125,6 +128,12 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 59. **M13, an article's accent is an underline and a rule, never text colour.** A brand colour has to read on both of the viewer's themes.
 60. **M13, a reader's font choice wins** over an article's `font`, once they've made one.
 61. **M13, SPEC §8's "glass material" is gone.** The handoff bans it for templates, and the kit never had it.
+
+62. **M14, a proposal is a row, and the sample is an ordinary artifact.** Applying copies the brand to `org.brand`. That's no extra machinery for review: people use the viewer as they always do.
+63. **M14, no activity row for applying a brand.** `activity_kind` has no value for it, and a feed entry can wait.
+64. **M14, the sample drops each template's own palette.** Its pages share one manifest, so `templateTheme` can't differ per page; a brand with no neutrals shows on the kit's. A real template keeps its neutrals until the brand sets them.
+65. **M14, brand fonts don't reach articles.** The viewer's CSP loads fonts from its own origin, and serving a publisher's font files from there isn't worth widening it. An article names the family and shows a fallback. To change: add a route that serves them, and `font-src`.
+66. **M14, a brand applies to every render,** including artifacts that aren't from a template. Only CSS that reads the tokens changes, and article accents.
 
 ## Needs you
 

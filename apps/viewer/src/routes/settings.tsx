@@ -95,6 +95,7 @@ function Index() {
           ["/settings/tokens", "Tokens", "For CI and headless agents"],
           ["/settings/domains", "Domains", "Where this deployment answers"],
           ["/settings/org", "Organization", "Name, defaults and link sharing"],
+          ["/settings/brand", "Brand", "How your templates look"],
         ]
       : []),
     ["/settings/deleted", "Recently deleted", "Kept for 30 days"],
@@ -639,6 +640,82 @@ function Domains() {
   );
 }
 
+type BrandInfo = { name: string; theme: { accent?: string } };
+type Proposal = {
+  id: string;
+  name: string;
+  brand: BrandInfo;
+  sample: { project: string; slug: string } | null;
+  proposedBy: string;
+  agent: string | null;
+  appliedAt: string | null;
+};
+
+function BrandSettings() {
+  const current = usePoll<{ brand: BrandInfo | null }>("/api/brand", 60_000);
+  const proposals = usePoll<Proposal[]>("/api/brand/proposals", 60_000);
+  const error = useSignal<string | null>(null);
+  const act = async (path: string, method: "POST" | "DELETE") => {
+    try {
+      await api(path, { method });
+      await Promise.all([current.refresh(), proposals.refresh()]);
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  };
+  const brand = current.data.value?.brand;
+  const list = proposals.data.value ?? [];
+  return (
+    <Frame title="Brand">
+      <p class="fn">
+        {brand
+          ? `Templates use ${brand.name}. A project's own theme still wins.`
+          : "Templates use their own look. An agent can propose a brand with artifacts brand propose."}
+      </p>
+      {error.value && <p class="fn">{error.value}</p>}
+      {brand && (
+        <button type="button" class="btn" onClick={() => act("/api/brand", "DELETE")}>
+          Go back to the default
+        </button>
+      )}
+      {list.length > 0 && <span class="gh">Proposed</span>}
+      <div class="group">
+        {list.map((row) => (
+          <div class="li" key={row.id}>
+            <span
+              aria-hidden="true"
+              style={`width:22px;height:22px;border-radius:50%;flex:none;background:${/^#[0-9a-fA-F]{6}$/.test(row.brand.theme.accent ?? "") ? row.brand.theme.accent : "transparent"}`}
+            />
+            <div class="grow">
+              <div class="tt">{row.name}</div>
+              <div class="ss">
+                {row.agent ? `${row.agent} for ${row.proposedBy}` : row.proposedBy}
+                {row.sample && (
+                  <>
+                    {", "}
+                    <a href={`/${row.sample.project}/${row.sample.slug}`}>see the sample</a>
+                  </>
+                )}
+              </div>
+            </div>
+            {row.appliedAt ? (
+              <span class="word ok">Applied</span>
+            ) : (
+              <button
+                type="button"
+                class="btn"
+                onClick={() => act(`/api/brand/proposals/${row.id}/apply`, "POST")}
+              >
+                Apply
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </Frame>
+  );
+}
+
 function OrgSettings() {
   const org = usePoll<Org>("/api/org", 60_000);
   const name = useSignal<string | null>(null);
@@ -843,6 +920,7 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
   people: People,
   domains: Domains,
   org: OrgSettings,
+  brand: BrandSettings,
   tokens: Tokens,
 };
 

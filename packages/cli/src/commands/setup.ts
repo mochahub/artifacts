@@ -5,6 +5,7 @@ import { ask, confirm } from "../prompt.ts";
 import { setupRailway } from "../railway/setup.ts";
 import { installSkill } from "../skill/install.ts";
 import { type ClaimAnswers, setupExisting } from "./account.ts";
+import { BRAND_PROMPT } from "./brand.ts";
 
 type Flags = ClaimAnswers & {
   docker?: boolean;
@@ -53,5 +54,9 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
     out.say(`                    ${target}/settings/sign-in`);
     out.say("  Invite someone    artifacts org invite sam@example.com");
     out.say("  Your own domain   artifacts domain add art.example.com");
+    out.say("");
+    out.say("Artifacts has a good default look. To fit your brand, hand this to your agent:");
+    out.say("");
+    out.say(BRAND_PROMPT);
   });
 }
