@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { Brand, BrandFont, BrandProposal, MAX_FONT_BYTES, OrgBrand } from "@artifacts/schema";
+import { TEMPLATES } from "@artifacts/schema/templates";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
 import type { LocalBrand } from "../brand/cache.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { TEMPLATES } from "../templates.ts";
 import { signedIn } from "./account.ts";
 import { kitFiles, previewRoot, publishRoot } from "./write.ts";
 

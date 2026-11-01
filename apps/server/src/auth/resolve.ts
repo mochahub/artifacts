@@ -3,8 +3,9 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { Deps } from "../api/deps.ts";
 import { findOrg, type OrgRow } from "../db/index.ts";
-import { guestLinks, guests, people, sessions, shareLinks, tokens } from "../db/schema.ts";
+import { guestLinks, guests, oauthGrants, people, sessions, shareLinks, tokens } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { MCP_PATH, requestOrigin } from "../oauth/origin.ts";
 import type { Caller, GuestLink } from "./caller.ts";
 import { sha256 } from "./secrets.ts";
 import {
@@ -19,7 +20,28 @@ import {
 const DAY = 24 * 3600_000;
 const HOUR = 3600_000;
 
-async function byToken(deps: Deps, org: OrgRow, secret: string): Promise<Caller> {
+/**
+ * A connector's token is for the MCP endpoint on the origin it was issued for, and nothing else:
+ * "audience-bound" (MCP, authorization). So it can't reach the rest of the API, and one taken from
+ * a client can't be replayed against another of this deployment's domains.
+ */
+async function checkAudience(c: Context, deps: Deps, token: typeof tokens.$inferSelect) {
+  const [grant] = token.grantId
+    ? await deps.db.select().from(oauthGrants).where(eq(oauthGrants.id, token.grantId)).limit(1)
+    : [];
+  const origin = await requestOrigin(c, deps);
+  if (
+    !grant ||
+    grant.revokedAt ||
+    c.req.path !== MCP_PATH ||
+    !origin ||
+    token.audience !== `${origin}${MCP_PATH}`
+  ) {
+    throw new ApiError("unauthenticated", "This token isn't valid here.");
+  }
+}
+
+async function byToken(c: Context, deps: Deps, org: OrgRow, secret: string): Promise<Caller> {
   const now = deps.clock.now();
   const [token] = await deps.db
     .select()
@@ -30,6 +52,7 @@ async function byToken(deps: Deps, org: OrgRow, secret: string): Promise<Caller>
   if (!token || (token.expiresAt && token.expiresAt <= now)) {
     throw new ApiError("unauthenticated", "This token isn't valid. Run artifacts login.");
   }
+  if (token.kind === "oauth") await checkAudience(c, deps, token);
   if (!token.lastUsedAt || now.getTime() - token.lastUsedAt.getTime() > HOUR) {
     await deps.db.update(tokens).set({ lastUsedAt: now }).where(eq(tokens.id, token.id));
   }
@@ -118,7 +141,7 @@ export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> 
 /** Bearer token, then session cookie, then guest cookie (04, "Callers"). */
 export async function resolveCaller(c: Context, deps: Deps, org: OrgRow): Promise<Caller> {
   const header = c.req.header("authorization");
-  if (header?.startsWith("Bearer ")) return byToken(deps, org, header.slice(7));
+  if (header?.startsWith("Bearer ")) return byToken(c, deps, org, header.slice(7));
   const session = getCookie(c, SESSION_COOKIE);
   if (session) {
     const caller = await bySession(c, deps, org, session);

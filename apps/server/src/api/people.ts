@@ -27,6 +27,7 @@ import {
   tokens,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
 import { isUuid } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
@@ -238,6 +239,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         .update(tokens)
         .set({ revokedAt: now })
         .where(and(eq(tokens.personId, person.id), isNull(tokens.revokedAt)));
+      await revokeGrants(tx, person.id, now);
       await revokeIssued(tx, person.id, now);
       // What they created for others outlives their account unless it ends with it: an organization
       // token keeps acting as the organization, and a share link keeps admitting guests (04).

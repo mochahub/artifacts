@@ -9,6 +9,7 @@ import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
 import { ArtifactPage } from "./routes/artifact.tsx";
 import { ComparePage } from "./routes/compare.tsx";
+import { Connect } from "./routes/connect.tsx";
 import { RecentlyDeleted } from "./routes/deleted-list.tsx";
 import { Device } from "./routes/device.tsx";
 import { GuestLanding } from "./routes/guest.tsx";
@@ -72,6 +73,7 @@ function App() {
           <Route path="/search" component={SearchPage} />
           <Route path="/sign-in" component={SignIn} />
           <Route path="/device" component={Device} />
+          <Route path="/device/connect" component={Connect} />
           <Route path="/reset/:token" component={Reset} />
           <Route path="/join/:token" component={Join} />
           <Route path="/s/:token" component={GuestLanding} />

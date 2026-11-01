@@ -25,6 +25,8 @@ This is what the design defends against and what it assumes. The contracts behin
 
 **Text agents read.** Comments, summaries, article text and notes can come from anyone who can write them, including guests on a share link. A model reading them through the CLI or the MCP could take them for instructions. Results from `search`, `list`, `read`, `status` and `comments` say that the text is data, and the skill says so too. That's a warning to the model, not a boundary: tokens stay limited to undoable actions either way.
 
+**Connectors.** The hosted MCP accepts access tokens bound to one endpoint on one origin, from our own OAuth server, plus CLI and organization tokens. Client metadata URLs come from unauthenticated callers, so fetching them is limited to public addresses over https, with no redirects (a hostname that changes its answer between the check and the fetch is the remaining gap, and the fetched document is never shown to the caller). A client's name is its own claim, and the consent screen says so. `artifacts pack --upload` takes a URL an agent passed along, so it only sends this pack's files, and only to the plan's own origin: a planted plan could still collect that pack.
+
 **What `artifacts pull` writes.** A version's file list comes from whoever published it, so `pull` and `export` check every path, stay inside the target folder, verify every hash, and never write `lint.rules.js`, which the CLI would run. New publishes with a path outside the bundle are refused.
 
 **Artifact code.** An artifact's HTML, CSS, JavaScript and backend are written by an agent, and may be wrong or hostile. The server never runs it in a place that holds a sign-in or a secret.

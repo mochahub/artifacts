@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
 import { brandCommand } from "./commands/brand.ts";
+import { mcpInstall } from "./commands/connect.ts";
 import { dataCommand, logsCommand } from "./commands/data.ts";
 import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
@@ -16,6 +17,7 @@ import {
 } from "./commands/library.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
+import { packCommand, packUpload } from "./commands/pack.ts";
 import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
 import {
   archiveCommand,
@@ -64,7 +66,8 @@ const USAGE = `artifacts ${VERSION}
   artifacts skill install [--claude] [--codex]
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
   artifacts dev [--port 4321]
-  artifacts mcp
+  artifacts mcp | mcp install [--claude] [--codex] [--token-env <name>]
+  artifacts pack [<slug>] [-m <message>] [--name <label>] | pack [<slug>] --upload <plan>
   artifacts data ls | get <key> | export | clear [--scope shared|me]
   artifacts logs [--follow] [--version <n>]
   artifacts visibility org|me
@@ -113,6 +116,8 @@ const OPTIONS = {
   "no-skill": { type: "boolean" },
   "in-repo": { type: "boolean" },
   template: { type: "string" },
+  "token-env": { type: "string" },
+  upload: { type: "string" },
   repo: { type: "string" },
   here: { type: "boolean" },
   limit: { type: "string" },
@@ -227,7 +232,22 @@ async function main(argv: string[]) {
         out,
       );
     case "mcp":
+      if (first === "install") {
+        return mcpInstall(
+          {
+            claude: values.claude,
+            codex: values.codex,
+            tokenEnv: values["token-env"],
+            server: values.server,
+          },
+          out,
+        );
+      }
+      if (first) throw new UsageError("Usage: artifacts mcp | mcp install");
       return mcpCommand();
+    case "pack":
+      if (values.upload) return packUpload(first, values.upload, out);
+      return packCommand(first, { message: values.message, name: values.name }, out);
     case "dev":
       return devCommand({ port: portOption(values.port) ?? 4321 }, out);
     case "versions":

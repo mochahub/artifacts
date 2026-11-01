@@ -34,7 +34,7 @@ const createdAt = () => time("created_at").notNull().defaultNow();
 export const role = pgEnum("role", ["owner", "admin", "member", "reviewer", "outside"]);
 export const visibility = pgEnum("visibility", ["me", "org"]);
 export const permission = pgEnum("permission", ["view", "comment", "publish"]);
-export const tokenKind = pgEnum("token_kind", ["cli", "org"]);
+export const tokenKind = pgEnum("token_kind", ["cli", "org", "oauth"]);
 export const inviteKind = pgEnum("invite_kind", ["org", "artifact"]);
 export const pageKind = pgEnum("page_kind", ["canvas", "article", "prototype", "gallery", "deck"]);
 export const threadStatus = pgEnum("thread_status", ["open", "fixed", "resolved"]);
@@ -371,6 +371,75 @@ export const tokens = pgTable("tokens", {
   lastUsedAt: time("last_used_at"),
   expiresAt: time("expires_at"),
   revokedAt: time("revoked_at"),
+  grantId: uuid("grant_id").references(() => oauthGrants.id),
+  audience: text("audience"),
+});
+
+/** A client we've seen: registered with us, or a metadata document we fetched (`metadata_url`). */
+export const oauthClients = pgTable(
+  "oauth_clients",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    clientId: text("client_id").notNull(),
+    name: text("name").notNull(),
+    redirectUris: text("redirect_uris").array().notNull(),
+    metadataUrl: boolean("metadata_url").notNull().default(false),
+    createdAt: createdAt(),
+    fetchedAt: time("fetched_at"),
+  },
+  (t) => [unique("oauth_clients_org_client_unique").on(t.orgId, t.clientId)],
+);
+
+/** One person's consent to one client for one resource. Every token from it ends with it. */
+export const oauthGrants = pgTable("oauth_grants", {
+  id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  personId: uuid("person_id")
+    .notNull()
+    .references(() => people.id),
+  clientId: text("client_id").notNull(),
+  clientName: text("client_name").notNull(),
+  audience: text("audience").notNull(),
+  scopes: text("scopes").array().notNull(),
+  createdAt: createdAt(),
+  lastUsedAt: time("last_used_at"),
+  revokedAt: time("revoked_at"),
+});
+
+export const oauthCodes = pgTable("oauth_codes", {
+  id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  codeHash: text("code_hash").notNull().unique(),
+  grantId: uuid("grant_id")
+    .notNull()
+    .references(() => oauthGrants.id),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  createdAt: createdAt(),
+  expiresAt: time("expires_at").notNull(),
+  usedAt: time("used_at"),
+});
+
+export const oauthRefreshTokens = pgTable("oauth_refresh_tokens", {
+  id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  grantId: uuid("grant_id")
+    .notNull()
+    .references(() => oauthGrants.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: createdAt(),
+  expiresAt: time("expires_at").notNull(),
+  usedAt: time("used_at"),
 });
 
 // Versions and content

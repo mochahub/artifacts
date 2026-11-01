@@ -11,6 +11,7 @@ import {
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import type { z } from "zod";
 import { type ArtifactRow, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
@@ -58,6 +59,8 @@ type UploadTicket = {
   visibility: "me" | "org";
   uploaded: { files: number; bytes: number };
   reused: number;
+  /** Set when a payload blob carries the commit, so it can only commit that payload (MCP). */
+  payload: string | null;
   exp: number;
 };
 
@@ -84,7 +87,10 @@ async function insertChunks<T>(rows: T[], insert: (chunk: T[]) => Promise<unknow
   for (let i = 0; i < rows.length; i += 500) await insert(rows.slice(i, i + 500));
 }
 
-export function publishRoutes(routes: Routes, deps: Deps) {
+export type Publisher = ReturnType<typeof createPublisher>;
+
+/** Publishing, for the API and the hosted MCP alike. `c` only supplies the org and the caller. */
+export function createPublisher(deps: Deps) {
   const { db, env, clock, bucket } = deps;
 
   /** Who may publish to this project/slug, and the row if it exists. Prepare and commit both run this. */
@@ -134,11 +140,9 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     return row;
   }
 
-  routes.post("/api/publish/prepare", { action: "artifact.publish", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const body = await parseBody(c, PublishPrepare);
+  async function prepare(c: ApiContext, body: z.infer<typeof PublishPrepare>, payload: string | null = null) {
     const org = c.get("org");
-    const existing = await target(c as ApiContext, body.project, body.slug);
+    const existing = await target(c, body.project, body.slug);
 
     const declared = new Map<string, { size: number; type: string }>();
     for (const file of body.files) {
@@ -173,25 +177,28 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       visibility: caller.kind === "orgToken" ? "org" : (body.visibility ?? org.settings.defaultVisibility),
       uploaded: { files: missing.length, bytes: missing.reduce((sum, [, file]) => sum + file.size, 0) },
       reused: known.size,
+      payload,
       exp: clock.now().getTime() + UPLOAD_HOURS * 3600_000,
     };
-    return c.json({
+    return {
       uploadId: signPayload(ticket, env.sessionSecret, UPLOAD_INFO),
       artifactId: ticket.artifactId,
       missing: signed,
-    });
-  });
+    };
+  }
 
-  routes.post("/api/publish/commit", { action: "artifact.publish", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const body = await parseBody(c, PublishCommit);
+  async function commit(c: ApiContext, body: z.infer<typeof PublishCommit>, payload: string | null = null) {
     const org = c.get("org");
     const ticket = verifyPayload<UploadTicket>(body.uploadId, env.sessionSecret, UPLOAD_INFO);
     if (!ticket || ticket.exp <= clock.now().getTime()) {
       throw new ApiError("invalid", "This upload expired. Publish again.");
     }
+    // A ticket made for one payload commits only that one, and a ticket for the API none.
+    if ((ticket.payload ?? null) !== payload) {
+      throw new ApiError("invalid", "This upload was made for another payload.");
+    }
     const caller = c.get("caller");
-    const existing = await target(c as ApiContext, ticket.project, ticket.slug);
+    const existing = await target(c, ticket.project, ticket.slug);
     if (existing && existing.id !== ticket.artifactId) throw new ApiError("conflict", "That slug is taken.");
 
     // Every hash the version will use must be proved before anything is written.
@@ -388,7 +395,21 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       uploaded: ticket.uploaded,
       reused: ticket.reused,
     };
-    return c.json(response);
+    return response;
+  }
+
+  return { prepare, commit, target };
+}
+
+export function publishRoutes(routes: Routes, publisher: Publisher) {
+  routes.post("/api/publish/prepare", { action: "artifact.publish", inHandler: true }, async (c) => {
+    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
+    return c.json(await publisher.prepare(c as ApiContext, await parseBody(c, PublishPrepare)));
+  });
+
+  routes.post("/api/publish/commit", { action: "artifact.publish", inHandler: true }, async (c) => {
+    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
+    return c.json(await publisher.commit(c as ApiContext, await parseBody(c, PublishCommit)));
   });
 }
 

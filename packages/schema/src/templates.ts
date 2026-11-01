@@ -1,5 +1,19 @@
 // The templates, as text imports, because the CLI is one compiled binary. A test checks this against the folders.
 
+import guideBrand from "../../../skill/references/brand.md" with { type: "text" };
+import guideKit from "../../../skill/references/kit.md" with { type: "text" };
+import guideManifest from "../../../skill/references/manifest.md" with { type: "text" };
+import guideCaseStudy from "../../../skill/references/templates/case-study.md" with { type: "text" };
+import guideDesignReview from "../../../skill/references/templates/design-review.md" with { type: "text" };
+import guidePrd from "../../../skill/references/templates/prd.md" with { type: "text" };
+import guidePresentation from "../../../skill/references/templates/presentation.md" with { type: "text" };
+import guideResearchReport from "../../../skill/references/templates/research-report.md" with {
+  type: "text",
+};
+import guideRfc from "../../../skill/references/templates/rfc.md" with { type: "text" };
+import guideWeeklyStatus from "../../../skill/references/templates/weekly-status.md" with { type: "text" };
+import guideTheme from "../../../skill/references/theme.md" with { type: "text" };
+import guideWriting from "../../../skill/references/writing.md" with { type: "text" };
 import caseStudyArtifactJson from "../../kit/src/templates/case-study/artifact.json.txt" with {
   type: "text",
 };
@@ -98,3 +112,19 @@ export const TEMPLATES = {
 /** What a template's artifact.json says until someone writes their own. */
 export const TEMPLATE_SUMMARY =
   "Replace this: say what this holds and why it mattered, in up to 280 characters.";
+
+/** The skill's guides, by name, for the MCP's resources and the skill's installer. */
+export const GUIDES: Record<string, string> = {
+  "templates/design-review": guideDesignReview,
+  "templates/presentation": guidePresentation,
+  "templates/case-study": guideCaseStudy,
+  "templates/prd": guidePrd,
+  "templates/rfc": guideRfc,
+  "templates/research-report": guideResearchReport,
+  "templates/weekly-status": guideWeeklyStatus,
+  brand: guideBrand,
+  kit: guideKit,
+  manifest: guideManifest,
+  theme: guideTheme,
+  writing: guideWriting,
+};

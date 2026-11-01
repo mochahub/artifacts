@@ -74,8 +74,8 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `POST /api/auth/passkey/verify` | none | `{ challengeId, response }` → sets cookie; `{ person }` |
 | `POST /api/auth/logout` | session or CLI token | Ends this session, or revokes the token that called it, so `artifacts logout` leaves nothing valid behind. |
 | `GET /api/me` | any person caller | `{ person: { id, name, email, role }, org: { name }, recentAuth: bool }` |
-| `GET /api/me/sessions` | session | Sessions and CLI tokens: `[{ id, kind: "session"\|"cli", name, userAgent, lastSeenAt, current }]` |
-| `DELETE /api/me/sessions/:id` | session | Ends a session or revokes a CLI token. |
+| `GET /api/me/sessions` | session | Sessions, CLI tokens and connectors: `[{ id, kind: "session"\|"cli"\|"connector", name, userAgent, lastSeenAt, current }]` |
+| `DELETE /api/me/sessions/:id` | session | Ends a session, revokes a CLI token, or ends a connector and every token from it. |
 | `POST /api/me/password` | session, recent auth | `{ password }` (12+ chars) → ends other sessions. |
 | `GET /api/me/passkeys` | session | `{ passkeys: [{ id, name, rpId, createdAt, lastUsedAt }], passwordSetAt }` |
 | `POST /api/me/passkeys/options` | session, recent auth | → registration options for `rpId` = home domain (or the current domain when the client says it lacks Related Origin Requests). |
@@ -317,6 +317,29 @@ The CSP's `sandbox allow-scripts` forces an opaque origin on any document from t
 | `POST /internal/jobs/:name` | `Authorization: Bearer <OPS_SECRET>` (operators and tests) | Run a job now: `purge`, `gc`, `expire`, `usage`, `digest` ([05](05-publish-and-storage.md#clean-up)) |
 
 Backends don't use the internal API: they run in sandbox processes that talk to the app over IPC ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
+
+## OAuth and the hosted MCP
+
+Both are on viewer origins only, never the Live-preview origin. Issuer, resource and audience are the origin the client used, so each domain in `MORE_URLS` describes itself. Built against MCP revision `2026-07-28` (checked 2026-11-01).
+
+| Method, path | Auth | Notes |
+|---|---|---|
+| `GET /.well-known/oauth-protected-resource/api/mcp`, `GET /.well-known/oauth-protected-resource` | none | RFC 9728: `{ resource, authorization_servers, scopes_supported, bearer_methods_supported }`. |
+| `GET /.well-known/oauth-authorization-server` | none | RFC 8414, with `code_challenge_methods_supported: ["S256"]`, `client_id_metadata_document_supported`, and `authorization_response_iss_parameter_supported`. |
+| `GET /api/oauth/authorize` | none | Checks `client_id` and `redirect_uri` first and answers 400 if they fail, without redirecting. Other failures redirect back with `error` and `iss`. A good request goes to the viewer's `/device/connect`. Needs `response_type=code`, S256 PKCE, and `resource` equal to this origin's MCP endpoint. 60 per IP per 15 minutes. |
+| `GET /api/oauth/consent?<the same query>` | session | What the consent screen shows: `{ client, clientId, redirectHost, local, scopes, resource }`. |
+| `POST /api/oauth/consent` | session, recent auth | `{ approve, request }`. Checks `request` again → `{ redirect }`, with `code`, `state` and `iss`, or `error=access_denied`. |
+| `POST /api/oauth/token` | none, form-encoded | `authorization_code` or `refresh_token`, for public clients. Access tokens last an hour; refresh tokens rotate. A code or refresh token used twice revokes the grant. Errors are RFC 6749's. 120 per IP per 15 minutes. |
+| `POST /api/oauth/revoke` | none, form-encoded | RFC 7009: `{ token }`. Revoking a refresh token ends the grant. Always 200. |
+| `POST /api/oauth/register` | none | RFC 7591, deprecated by MCP and kept for clients that need it. Public clients only; redirects must be https, or http on loopback. 20 per IP per hour. |
+| `POST /api/mcp` | Bearer | Streamable HTTP, JSON responses, no sessions. An access token or a CLI or organization token. Up to 4 MB. No valid token: 401 with `WWW-Authenticate` pointing at the metadata. Too little scope: 403 with `error="insufficient_scope"`. |
+| `GET`, `DELETE /api/mcp` | | 405. |
+
+**Protocol.** `2026-07-28` requests (`_meta` version, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) and the older handshake (`initialize`, for `2025-11-25`, `2025-06-18` and `2025-03-26`) both work. Headers that disagree with the body get 400 with `-32020`, an unknown version 400 with `-32022`, and an unknown method 404 with `-32601`. Methods: `server/discover`, `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`.
+
+**Tools:** `artifacts_search`, `_list`, `_read`, `_view`, `_status`, `_comments`, `_reply`, `_versions`, `_publish_prepare` and `_publish_commit`, each a call to the same server functions as the routes above. They need `read`, except `_reply` (`comment`) and publishing (`publish`). Answers that can hold other people's text start with a block saying it's data, and each comment carries `untrusted: true` and `authorKind`. **Resources:** `artifacts://guides/<name>` and `artifacts://templates/<name>/<path>`.
+
+**Publishing.** The client renders; the server runs no browser. `artifacts_publish_prepare` takes the fields `artifacts pack` prints, including `payload: { sha256, size }`. If the payload isn't in the bucket yet it answers `{ step: "upload_payload", plan }`; call it again after uploading, and it reads the payload (`PublishCommit` without `uploadId`, plus `declared`, the file list) and answers `{ step: "upload_files", uploadId, missing, plan }`. `plan` is a presigned GET of a JSON file of signed PUTs, so a long list never passes through a model. `artifacts_publish_commit` takes `{ uploadId, payload }`. The ticket is bound to that payload hash, the payload is proved by hash like any other blob, and the commit is the same code and checks as `POST /api/publish/commit`.
 
 ## Realtime and push (Phase 2)
 

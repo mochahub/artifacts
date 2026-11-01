@@ -90,7 +90,7 @@ export const PasskeyVerify = z.object({ challengeId: Id, response: z.unknown() }
 export const Me = z.object({ person: Person, org: z.object({ name: z.string() }), recentAuth: z.boolean() });
 export const SessionRow = z.object({
   id: Id,
-  kind: z.enum(["session", "cli"]),
+  kind: z.enum(["session", "cli", "connector"]),
   name: z.string(),
   userAgent: z.string().nullable(),
   lastSeenAt: Time.nullable(),
@@ -693,3 +693,20 @@ export const BrandProposal = z.object({
   appliedAt: Time.nullable(),
 });
 export type BrandProposal = z.infer<typeof BrandProposal>;
+
+// OAuth consent (04)
+export const OAuthConsent = z.object({
+  client: z.string(),
+  clientId: z.string(),
+  redirectHost: z.string(),
+  /** The code goes to this machine: anything on it could be claiming that name. */
+  local: z.boolean(),
+  scopes: z.array(z.string()),
+  resource: z.string(),
+});
+export type OAuthConsent = z.infer<typeof OAuthConsent>;
+export const OAuthConsentDecision = z.object({
+  approve: z.boolean(),
+  /** The query the client sent, checked again here: the page is only a messenger. */
+  request: z.record(z.string(), z.string()),
+});

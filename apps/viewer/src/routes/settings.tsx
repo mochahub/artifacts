@@ -141,7 +141,7 @@ type Keys = {
 };
 type Session = {
   id: string;
-  kind: "session" | "cli";
+  kind: "session" | "cli" | "connector";
   name: string;
   userAgent: string | null;
   lastSeenAt: string | null;
@@ -217,8 +217,9 @@ function SignIn() {
           <div class="li" key={row.id}>
             <Laptop />
             <div class="grow">
-              <div class="tt">{row.kind === "cli" ? row.name : row.name}</div>
+              <div class="tt">{row.name}</div>
               <div class="ss">
+                {row.kind === "connector" && "Connector, "}
                 {row.current ? "This browser" : row.lastSeenAt ? ago(row.lastSeenAt) : "Not used yet"}
               </div>
             </div>

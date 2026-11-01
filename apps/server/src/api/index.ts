@@ -1,7 +1,9 @@
 import { dataRoutes } from "../data/routes.ts";
 import { brandRoutes } from "../library/brand.ts";
 import { libraryRoutes } from "../library/routes.ts";
-import { publishRoutes } from "../publish/routes.ts";
+import { mcpRoutes } from "../mcp/routes.ts";
+import { oauthRoutes } from "../oauth/routes.ts";
+import { createPublisher, publishRoutes } from "../publish/routes.ts";
 import { pushRoutes } from "../push/notify.ts";
 import { eventRoutes } from "../realtime/events.ts";
 import { reviewRoutes } from "../review/routes.ts";
@@ -26,15 +28,18 @@ export function mountApi(routes: Routes, deps: Deps) {
   peopleRoutes(routes, deps);
   sharingRoutes(routes, deps);
   deviceRoutes(routes, deps);
-  publishRoutes(routes, deps);
+  const publisher = createPublisher(deps);
+  publishRoutes(routes, publisher);
   listRoutes(routes, deps);
   libraryRoutes(routes, deps);
   brandRoutes(routes, deps);
-  reviewRoutes(routes, deps);
+  const review = reviewRoutes(routes, deps);
   versionRoutes(routes, deps);
   lifecycleRoutes(routes, deps);
   fileRoutes(routes, deps);
   dataRoutes(routes, deps);
   eventRoutes(routes, deps);
   pushRoutes(routes, deps);
+  oauthRoutes(routes, deps);
+  mcpRoutes(routes, deps, { publisher, review });
 }

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { normalizeRepo, PublishPrepared, PublishResult } from "@artifacts/schema";
+import { type Manifest, normalizeRepo, PublishPrepared, PublishResult } from "@artifacts/schema";
+import { TEMPLATE_SUMMARY, TEMPLATES } from "@artifacts/schema/templates";
 import article from "../../../kit/src/article.css" with { type: "text" };
 // @ts-expect-error: embedded as text
 import backend from "../../../kit/src/backend.js" with { type: "text" };
@@ -19,7 +20,6 @@ import type { Client } from "../client.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { render } from "../render/render.ts";
-import { TEMPLATE_SUMMARY, TEMPLATES } from "../templates.ts";
 import { VERSION } from "../version.ts";
 import { signedIn } from "./account.ts";
 import { renamedProblems } from "./review.ts";
@@ -122,7 +122,11 @@ export function gitRepo(root: string): string | null {
   return result.success ? normalizeRepo(result.stdout.toString()) : null;
 }
 
-async function upload(missing: PublishPrepared["missing"], sources: Map<string, string>, out: Output) {
+export async function uploadFiles(
+  missing: PublishPrepared["missing"],
+  sources: Map<string, string>,
+  out: Output,
+) {
   const queue = [...missing];
   await Promise.all(
     Array.from({ length: 6 }, async () => {
@@ -186,16 +190,53 @@ export async function publishRoot(
   out: Output,
   brand?: LocalBrand,
 ) {
+  const { manifest, rendered, problems } = await collectForPublish(root, out, brand, client);
+  const notes: Record<string, string> = {};
+  for (const note of flags.notes) {
+    const split = note.indexOf("=");
+    if (split < 1) throw new UsageError(`--note wants <frame>=<text>, not "${note}".`);
+    notes[note.slice(0, split)] = note.slice(split + 1);
+  }
+  const articles = rendered.pages.filter((page) => page.kind === "article").length;
+  out.say(
+    `✓ lint     ${rendered.frames.length} frames, ${articles} articles, ${problems.length || "no"} problems`,
+  );
+  out.say(`✓ render   ${rendered.frames.length} frames in WebKit at 1x, 2x and 3x`);
+
+  const { declared, sources, commit } = publishBody(rendered, manifest, { ...flags, notes });
+  const prepared = PublishPrepared.parse(
+    await client.post("/api/publish/prepare", {
+      project: manifest.project,
+      projectName: manifest.projectName,
+      repo: gitRepo(repoRoot(root)),
+      slug: manifest.slug,
+      title: manifest.title,
+      visibility: manifest.visibility,
+      files: declared,
+    }),
+  );
+  await uploadFiles(prepared.missing, sources, out);
+  return PublishResult.parse(
+    await client.post("/api/publish/commit", { uploadId: prepared.uploadId, ...commit }),
+  );
+}
+
+type Rendered = NonNullable<Awaited<ReturnType<typeof collect>>["rendered"]>;
+
+/** The gate everything published goes through, with a sign-in or (for artifacts pack) without. */
+export async function collectForPublish(root: string, out: Output, brand?: LocalBrand, client?: Client) {
   const { manifest, problems, rendered } = await collect(root, out, { lint: true, brand });
   if (!manifest || !rendered || hasErrors(problems)) {
     printProblems(problems, out);
     throw new CliError("Lint found errors, so nothing was published.");
   }
-  const renamed = await renamedProblems(client, manifest.project, manifest.slug, {
-    frames: new Set(rendered.frames.map((frame) => frame.frameKey)),
-    blocks: new Set(rendered.blocks.map((block) => `${block.pageKey}/${block.blockKey}`)),
-  });
-  problems.push(...(renamed as Problem[]));
+  if (client) {
+    const renamed = await renamedProblems(client, manifest.project, manifest.slug, {
+      frames: new Set(rendered.frames.map((frame) => frame.frameKey)),
+      blocks: new Set(rendered.blocks.map((block) => `${block.pageKey}/${block.blockKey}`)),
+    });
+    problems.push(...(renamed as Problem[]));
+  }
   if (manifest.summary === TEMPLATE_SUMMARY) {
     problems.push({
       rule: "manifest/summary",
@@ -205,19 +246,15 @@ export async function publishRoot(
   }
   printProblems(problems, out);
   if (hasErrors(problems)) throw new CliError("Lint found errors, so nothing was published.");
-  const articles = rendered.pages.filter((page) => page.kind === "article").length;
-  out.say(
-    `✓ lint     ${rendered.frames.length} frames, ${articles} articles, ${problems.length || "no"} problems`,
-  );
-  out.say(`✓ render   ${rendered.frames.length} frames in WebKit at 1x, 2x and 3x`);
+  return { manifest, problems, rendered };
+}
 
-  const notes: Record<string, string> = {};
-  for (const note of flags.notes) {
-    const split = note.indexOf("=");
-    if (split < 1) throw new UsageError(`--note wants <frame>=<text>, not "${note}".`);
-    notes[note.slice(0, split)] = note.slice(split + 1);
-  }
-
+/** What a publish declares and commits: the same whether the CLI or a connector sends it. */
+export function publishBody(
+  rendered: Rendered,
+  manifest: Manifest,
+  flags: { message?: string; name?: string; notes: Record<string, string> },
+) {
   const sources = new Map<string, string>();
   const declared: { path: string; sha256: string; size: number; type: string }[] = [];
   for (const file of rendered.files.values()) {
@@ -234,43 +271,25 @@ export async function publishRoot(
       type: "image/webp",
     });
   }
-
-  const prepared = PublishPrepared.parse(
-    await client.post("/api/publish/prepare", {
-      project: manifest.project,
-      projectName: manifest.projectName,
-      repo: gitRepo(root),
-      slug: manifest.slug,
-      title: manifest.title,
-      visibility: manifest.visibility,
-      files: declared,
-    }),
-  );
-  await upload(prepared.missing, sources, out);
-
-  const result = PublishResult.parse(
-    await client.post("/api/publish/commit", {
-      uploadId: prepared.uploadId,
-      message: flags.message ?? null,
-      name: flags.name ?? null,
-      summary: manifest.summary,
-      tags: manifest.tags,
-      notes,
-      agent: detectAgent(),
-      files: Object.fromEntries(
-        [...rendered.files.values()].map((file) => [
-          file.path,
-          { hash: file.hash, size: file.size, type: file.type },
-        ]),
-      ),
-      backendHash: rendered.backendHash,
-      pages: rendered.pages,
-      frames: rendered.frames,
-      blocks: rendered.blocks,
-    }),
-  );
-
-  return result;
+  const commit = {
+    message: flags.message ?? null,
+    name: flags.name ?? null,
+    summary: manifest.summary,
+    tags: manifest.tags,
+    notes: flags.notes,
+    agent: detectAgent(),
+    files: Object.fromEntries(
+      [...rendered.files.values()].map((file) => [
+        file.path,
+        { hash: file.hash, size: file.size, type: file.type },
+      ]),
+    ),
+    backendHash: rendered.backendHash,
+    pages: rendered.pages,
+    frames: rendered.frames,
+    blocks: rendered.blocks,
+  };
+  return { declared, sources, commit };
 }
 
 const STARTERS = {

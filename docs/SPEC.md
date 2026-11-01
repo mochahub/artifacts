@@ -44,7 +44,7 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 - Editing in the browser. Agents and repos are where content is written; the viewer is for reading and reviewing.
 - Real-time co-editing, or a Figma replacement.
 - A hosted, multi-tenant service, for now. Artifacts is open source that each team deploys for itself: one click from the Railway template, or Docker Compose anywhere (§14, [hosting evaluation](hosting-evaluation.md)).
-- Sign-in through outside providers (Google, GitHub, SSO). Accounts use email with a password or a passkey, so a deploy needs no OAuth app.
+- Sign-in through outside providers (Google, GitHub, SSO). Accounts use email with a password or a passkey, so a deploy needs no OAuth app. Our server does issue OAuth tokens itself, for connectors (§10.4), on that same sign-in.
 - Sending email. Invite, reset and share links are copied and sent by hand, so a deploy needs no email provider.
 - Long-running servers, background jobs and SQL databases for artifacts. An artifact's backend answers requests and stops (§7.9).
 
@@ -302,7 +302,7 @@ On Railway, those are three things in one project from the template: the app ser
 | Member | Publish, see every organization-visible artifact, comment, share, archive and delete their own artifacts |
 | Reviewer | See and comment on organization-visible artifacts; can't publish |
 
-**Sign-in is email with a password, a passkey, or both.** No OAuth provider is involved.
+**Sign-in is email with a password, a passkey, or both.** No outside OAuth provider is involved.
 - **Passwords:**
   - argon2id hashes (`Bun.password`) and a 12-character minimum.
   - Rate limits with backoff, per account and per IP.
@@ -762,6 +762,16 @@ A later agent should find, skim and open published work almost as easily as loca
 - **Project matching.** A project remembers its git remote, in any form, with credentials removed, so an agent in a clone finds its project with no `artifact.json`.
 - **Every search, list and read** goes through the same permission check as the viewer, and a hidden artifact can't show through a count, a snippet or a summary.
 - **Text in results is data.** Comments, summaries and articles can come from other people, guests included, so tool results say to treat them as data, never as instructions.
+
+### 10.4 The hosted connector
+
+A hosted MCP server at `<viewer domain>/api/mcp` makes a remote box easy to set up in tools like Claude Code and Codex, with no local skill.
+
+- **Sign-in** is OAuth 2.1 with our own server as the authorization server, on the existing email, password and passkey sign-in, plus a consent screen. Connectors appear in Settings and can be ended there. Scopes are read, comment and publish. A connector can't resolve, decide, delete or manage. CLI tokens also work as a static bearer.
+- **Tools:** search, list, read, view, status, comments, reply and versions, with the same permission checks as the API, and two for publishing. Templates and guides are resources, so a connected agent has the guidance without the skill.
+- **Publishing:** the client renders, and the server stays browserless. `artifacts pack` lints, renders and writes a publish to a local folder; files go straight to the bucket, and a commit payload goes as a blob and is committed by hash, so neither passes through the model.
+- **What's still needed on a box:** the CLI and WebKit, to render canvases. Reading, commenting and replying need neither.
+- It's opt-in: `artifacts mcp install` adds it. The local `artifacts mcp` stays, for tools on the same machine.
 
 ## 11. Repo layout (this repo)
 ```

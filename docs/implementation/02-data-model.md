@@ -18,7 +18,7 @@
 | `role` | `owner`, `admin`, `member`, `reviewer`, `outside` |
 | `visibility` | `me`, `org` |
 | `permission` | `view`, `comment`, `publish` (`publish` only for organization members in `artifact_access`; it includes `comment`) |
-| `token_kind` | `cli`, `org` |
+| `token_kind` | `cli`, `org`, `oauth` |
 | `invite_kind` | `org`, `artifact` |
 | `page_kind` | `canvas`, `article`, `prototype`, `gallery`, `deck` |
 | `thread_status` | `open`, `fixed`, `resolved` |
@@ -148,9 +148,19 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `scopes` | text[] | See [04-auth-and-permissions.md](04-auth-and-permissions.md#token-scopes). |
 | `project_ids` | uuid[] null | `org` tokens only; null = all projects. |
 | `created_by` | uuid FK people | |
-| `created_at`, `last_used_at`, `expires_at`, `revoked_at` | timestamptz | `cli` tokens don't expire; they're revoked from the sign-in page or by `logout`. |
+| `created_at`, `last_used_at`, `expires_at`, `revoked_at` | timestamptz | `cli` tokens don't expire; they're revoked from the sign-in page or by `logout`. `oauth` tokens last an hour. |
+| `grant_id` | uuid null FK oauth_grants | `oauth` tokens only. |
+| `audience` | text null | `oauth` tokens only: the MCP endpoint it may be used at, on the origin it was issued for. |
 
 **`brand_proposals`**: `id`, `org_id`, `name`, `brand` jsonb (the same shape as `org.brand`), `artifact_id` uuid null (the sample; cleared if it's purged), `proposed_by` uuid FK people, `agent` text null, `created_at`, `applied_at`, `applied_by`.
+
+**`oauth_clients`**: `id`, `org_id`, `client_id` text (unique per org: `art_client_…` from registration, or a metadata document's URL), `name`, `redirect_uris` text[], `metadata_url` bool, `created_at`, `fetched_at` (when a metadata document was last read; it's kept an hour). A registered client nothing has used goes after 30 days.
+
+**`oauth_grants`**: one person's consent to one client. `id`, `org_id`, `person_id`, `client_id`, `client_name` (snapshot for display), `audience`, `scopes` text[], `created_at`, `last_used_at`, `revoked_at`. Revoking it ends every token from it. It's what Settings shows as a connector.
+
+**`oauth_codes`**: `id`, `org_id`, `code_hash` unique, `grant_id`, `client_id`, `redirect_uri`, `code_challenge`, `created_at`, `expires_at` (5 minutes), `used_at`.
+
+**`oauth_refresh_tokens`**: `id`, `org_id`, `grant_id`, `token_hash` unique, `created_at`, `expires_at` (60 days), `used_at`. Rotated on each use; one coming back revokes the grant.
 
 ### Projects and artifacts
 
@@ -282,6 +292,7 @@ One bucket, private (Railway buckets have no public mode). Every object is reach
 | Prefix | What | Written by | Lifetime |
 |---|---|---|---|
 | `blobs/<sha256>` | Every bundle file, render, generated article HTML and backend module. Content-addressed and immutable; `Content-Type` set at upload. | The CLI, by presigned PUT | Until the daily clean-up finds nothing uses it ([05](05-publish-and-storage.md#clean-up)) |
+| `plans/<id>.json` | An upload plan for a connector's publish: the signed PUTs, kept out of tool results | The app | A day, then the clean-up job |
 | `crops/<thread id>.webp` | Comment crops | The app, when a canvas thread is made | Until its artifact is purged |
 | `data/<artifact id>/shared/<key>` | Built-in store, shared scope (JSON) | The app, for frontends and backends | Until cleared or purged |
 | `data/<artifact id>/me/<caller id>/<key>` | Built-in store, per-person scope (JSON). `<caller id>` is the per-artifact pseudonym of the person or guest ([08](08-micro-apps.md#request-flow)), the same id a backend sees. | The app | Same |

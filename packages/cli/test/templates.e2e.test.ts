@@ -2,10 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { TEMPLATE_SUMMARY, TEMPLATES } from "@artifacts/schema/templates";
 import { and, eq } from "drizzle-orm";
 import { pages, versions } from "../../../apps/server/src/db/schema.ts";
 import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
-import { TEMPLATE_SUMMARY, TEMPLATES } from "../src/templates.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
 const NAMES = Object.keys(TEMPLATES);

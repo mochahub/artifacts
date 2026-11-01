@@ -12,6 +12,17 @@ An agent runs `artifacts publish`. The CLI checks the work, renders each screen 
 
 ![Four phone screens from one review: a new version waiting in the inbox, a comment pinned to a screen, a quoted passage in a research page, and a compare view outlining the two regions that changed.](docs/images/review-loop.jpg)
 
+## Connect an agent from anywhere
+
+The skill and the CLI cover agents on a machine with them installed. For remote boxes, Artifacts is also a hosted MCP server at `<your server>/api/mcp`, which signs in with your Artifacts account:
+
+```sh
+artifacts mcp install                       # Claude Code and Codex, opt-in
+claude mcp add --transport http artifacts https://art.example.com/api/mcp
+```
+
+It can search, read and view hosted work, read comments, reply and publish. On a box with no sign-in, a CLI token in an environment variable works too: `artifacts mcp install --token-env ARTIFACTS_MCP_TOKEN`. Publishing a canvas still needs the CLI and WebKit on that box, because rendering happens on the client: `artifacts pack` does it, and needs no sign-in.
+
 ## Requirements
 
 - A machine for the server that runs Docker containers, or a Railway account.

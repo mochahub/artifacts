@@ -95,7 +95,10 @@ const hitsFile = process.env.ARTIFACTS_ROUTE_HITS;
 /** A real server on a fresh database, with helpers for calling it as a browser or a CLI. */
 export async function startTestServer(
   overrides: Record<string, string> = {},
-  options: { pushAllow?: (endpoint: string) => boolean } = {},
+  options: {
+    pushAllow?: (endpoint: string) => boolean;
+    clientMetadata?: (url: URL) => Promise<unknown>;
+  } = {},
 ) {
   const database = await createDatabase();
   const clock = testClock();
@@ -105,6 +108,7 @@ export async function startTestServer(
     viewerDir: viewerFixture(),
     jobs: false,
     pushAllow: options.pushAllow,
+    clientMetadata: options.clientMetadata,
     onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
   });
   const base = `http://127.0.0.1:${server.ports.viewer}`;

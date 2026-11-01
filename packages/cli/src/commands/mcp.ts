@@ -17,6 +17,8 @@ type Tool = {
 
 const target = { type: "string", description: "project/artifact, or nothing for this folder's artifact" };
 
+const LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26"];
+
 class BadArguments extends Error {}
 
 /**
@@ -288,10 +290,23 @@ async function answer(request: { id?: unknown; method: string; params?: Record<s
   switch (request.method) {
     case "initialize":
       return {
-        protocolVersion: "2025-06-18",
+        protocolVersion: LEGACY.includes(request.params?.protocolVersion as string)
+          ? request.params?.protocolVersion
+          : LEGACY[0],
         capabilities: { tools: {} },
         serverInfo: { name: "artifacts", version: VERSION },
         instructions: await instructions(),
+      };
+    // The current revision has no handshake: a client asks this, or goes straight to a request.
+    case "server/discover":
+      return {
+        resultType: "complete",
+        supportedVersions: ["2026-07-28", ...LEGACY],
+        capabilities: { tools: {} },
+        _meta: { "io.modelcontextprotocol/serverInfo": { name: "artifacts", version: VERSION } },
+        instructions: await instructions(),
+        ttlMs: 60_000,
+        cacheScope: "private",
       };
     case "ping":
       return {};

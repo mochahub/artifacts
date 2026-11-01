@@ -1,4 +1,4 @@
-import { gt, inArray, lt, sql } from "drizzle-orm";
+import { and, gt, inArray, lt, sql } from "drizzle-orm";
 import type { Deps } from "../api/deps.ts";
 import { expireLogs } from "../content/proxy.ts";
 import { recountUsage } from "../data/store.ts";
@@ -9,6 +9,9 @@ import {
   deviceCodes,
   frames,
   invites,
+  oauthClients,
+  oauthCodes,
+  oauthRefreshTokens,
   pages,
   resetLinks,
   sessions,
@@ -87,6 +90,15 @@ const UUID_AT = /^(?:crops|data)\/([0-9a-f-]{36})/;
 
 /** What a purge's bucket step left behind, if the bucket failed after the rows were gone. */
 async function sweepOrphans(deps: Deps, cutoff: number) {
+  // Upload plans are only read during one publish, and their signed links last a day at most.
+  for (let cursor: string | undefined, more = true; more; ) {
+    const page = await deps.bucket.list("plans/", { cursor });
+    for (const object of page.objects) {
+      if (object.updatedAt.getTime() < cutoff) await deps.bucket.delete(object.key);
+    }
+    cursor = page.nextCursor ?? undefined;
+    more = cursor !== undefined;
+  }
   for (const prefix of ["crops/", "data/"]) {
     let cursor: string | undefined;
     do {
@@ -126,6 +138,17 @@ export async function expireLeftovers(deps: Deps) {
   const old = new Date(now.getTime() - 30 * DAY);
   await deps.db.delete(webauthnChallenges).where(lt(webauthnChallenges.expiresAt, now));
   await deps.db.delete(deviceCodes).where(lt(deviceCodes.expiresAt, now));
+  await deps.db.delete(oauthCodes).where(lt(oauthCodes.expiresAt, now));
+  await deps.db.delete(oauthRefreshTokens).where(lt(oauthRefreshTokens.expiresAt, now));
+  // A client registered and never used, which anyone can make: nothing refers to one.
+  await deps.db
+    .delete(oauthClients)
+    .where(
+      and(
+        lt(oauthClients.createdAt, old),
+        sql`not exists (select 1 from oauth_grants g where g.client_id = ${oauthClients.clientId})`,
+      ),
+    );
   // Their push subscriptions go with them (cascade): a dead device would otherwise count toward a person's ten.
   await deps.db.delete(sessions).where(lt(sessions.expiresAt, now));
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));

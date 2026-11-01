@@ -1,5 +1,6 @@
 import { type Anchor, CreateComment, CreateDecision, CreateThread, EditComment } from "@artifacts/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import type { z } from "zod";
 import { artifactParam, findArtifact, isUuid } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
@@ -153,25 +154,37 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     return found;
   };
 
-  routes.get("/api/artifacts/:id/threads", { action: "artifact.read", resource: artifact }, async (c) => {
-    const status = c.req.query("status") ?? "all";
-    const page = c.req.query("page");
-    const version = Number(c.req.query("version"));
+  async function listThreads(
+    artifactId: string,
+    filter: { status?: string; page?: string; version?: number } = {},
+  ) {
+    const { status = "all", page, version } = filter;
     const rows = await db
       .select()
       .from(threads)
       .where(
         and(
-          eq(threads.artifactId, c.req.param("id") as string),
+          eq(threads.artifactId, artifactId),
           status === "open" || status === "fixed" || status === "resolved"
             ? eq(threads.status, status)
             : undefined,
           page ? eq(threads.pageKey, page) : undefined,
-          Number.isInteger(version) && version > 0 ? eq(threads.createdVersion, version) : undefined,
+          Number.isInteger(version) && (version as number) > 0
+            ? eq(threads.createdVersion, version as number)
+            : undefined,
         ),
       )
       .orderBy(asc(threads.n));
-    return etagJson(c, await threadViews(rows));
+    return { rows, views: await threadViews(rows) };
+  }
+
+  routes.get("/api/artifacts/:id/threads", { action: "artifact.read", resource: artifact }, async (c) => {
+    const { views } = await listThreads(c.req.param("id") as string, {
+      status: c.req.query("status"),
+      page: c.req.query("page"),
+      version: Number(c.req.query("version")),
+    });
+    return etagJson(c, views);
   });
 
   routes.post("/api/artifacts/:id/threads", { action: "artifact.comment", resource: artifact }, async (c) => {
@@ -303,75 +316,79 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     return c.json((await threadViews([final]))[0]);
   });
 
+  /** A reply, from the API or a connector. `c` only supplies the org and the caller. */
+  async function replyTo(c: ApiContext, thread: ThreadRow, body: z.infer<typeof CreateComment>) {
+    const caller = c.get("caller");
+    limits.hit(`comment:${commenterId(caller)}`, 30, MINUTE);
+    const resource = await findArtifact(deps, thread.orgId, thread.artifactId);
+    if (!resource) throw new ApiError("not_found", "Not found.");
+    const mayFix =
+      caller.kind === "cliToken" || (caller.kind === "person" && caller.person.id === resource.publisherId);
+    if (body.marksFixed && !mayFix)
+      throw new ApiError("forbidden", "Only an agent or the publisher marks a thread fixed.");
+
+    // Leaving "resolved" is for people, with Reopen (03).
+    if (body.marksFixed && thread.status === "resolved") {
+      throw new ApiError("conflict", "That thread is resolved. A person has to reopen it.");
+    }
+    const author = authorOf(caller, thread.artifactId, body.agent);
+    const latest = resource.row.latestVersion;
+    const [fixer] = await db
+      .select()
+      .from(comments)
+      .where(and(eq(comments.threadId, thread.id), eq(comments.marksFixed, true)))
+      .orderBy(desc(comments.createdAt))
+      .limit(1);
+    const byFixer =
+      fixer !== undefined &&
+      fixer.authorPersonId === author.authorPersonId &&
+      fixer.authorGuestId === author.authorGuestId &&
+      fixer.agent === author.agent;
+
+    const reopens = thread.status === "fixed" && !body.marksFixed && !byFixer;
+    const [comment] = await db
+      .insert(comments)
+      .values({
+        id: Bun.randomUUIDv7(),
+        threadId: thread.id,
+        orgId: thread.orgId,
+        ...author,
+        body: body.body,
+        version: latest,
+        marksFixed: body.marksFixed ?? false,
+        createdAt: clock.now(),
+      })
+      .returning();
+    if (body.marksFixed) {
+      await db
+        .update(threads)
+        .set({ status: "fixed", fixedVersion: latest })
+        .where(eq(threads.id, thread.id));
+    } else if (reopens) {
+      await db.update(threads).set({ status: "open", fixedVersion: null }).where(eq(threads.id, thread.id));
+    }
+    await recordActivity(
+      c as ApiContext,
+      thread,
+      body.marksFixed ? "fixed" : reopens ? "reopened" : "replied",
+      { thread: thread.n, version: latest },
+      author.agent,
+    );
+    void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
+    notifyReply(deps, c.get("org").id, thread, {
+      authorName: author.agent ?? (comment as CommentRow).authorName,
+      body: (comment as CommentRow).body,
+      actor: author.agent ? null : (comment as CommentRow).authorPersonId,
+    }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
+    return commentView(comment as CommentRow);
+  }
+
   routes.post(
     "/api/threads/:id/comments",
     { action: "artifact.comment", resource: threadArtifact },
     async (c) => {
       const body = await parseBody(c, CreateComment);
-      const caller = c.get("caller");
-      const thread = await threadParam(c as ApiContext);
-      limits.hit(`comment:${commenterId(caller)}`, 30, MINUTE);
-      const resource = await findArtifact(deps, thread.orgId, thread.artifactId);
-      if (!resource) throw new ApiError("not_found", "Not found.");
-      const mayFix =
-        caller.kind === "cliToken" || (caller.kind === "person" && caller.person.id === resource.publisherId);
-      if (body.marksFixed && !mayFix)
-        throw new ApiError("forbidden", "Only an agent or the publisher marks a thread fixed.");
-
-      // Leaving "resolved" is for people, with Reopen (03).
-      if (body.marksFixed && thread.status === "resolved") {
-        throw new ApiError("conflict", "That thread is resolved. A person has to reopen it.");
-      }
-      const author = authorOf(caller, thread.artifactId, body.agent);
-      const latest = resource.row.latestVersion;
-      const [fixer] = await db
-        .select()
-        .from(comments)
-        .where(and(eq(comments.threadId, thread.id), eq(comments.marksFixed, true)))
-        .orderBy(desc(comments.createdAt))
-        .limit(1);
-      const byFixer =
-        fixer !== undefined &&
-        fixer.authorPersonId === author.authorPersonId &&
-        fixer.authorGuestId === author.authorGuestId &&
-        fixer.agent === author.agent;
-
-      const reopens = thread.status === "fixed" && !body.marksFixed && !byFixer;
-      const [comment] = await db
-        .insert(comments)
-        .values({
-          id: Bun.randomUUIDv7(),
-          threadId: thread.id,
-          orgId: thread.orgId,
-          ...author,
-          body: body.body,
-          version: latest,
-          marksFixed: body.marksFixed ?? false,
-          createdAt: clock.now(),
-        })
-        .returning();
-      if (body.marksFixed) {
-        await db
-          .update(threads)
-          .set({ status: "fixed", fixedVersion: latest })
-          .where(eq(threads.id, thread.id));
-      } else if (reopens) {
-        await db.update(threads).set({ status: "open", fixedVersion: null }).where(eq(threads.id, thread.id));
-      }
-      await recordActivity(
-        c as ApiContext,
-        thread,
-        body.marksFixed ? "fixed" : reopens ? "reopened" : "replied",
-        { thread: thread.n, version: latest },
-        author.agent,
-      );
-      void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
-      notifyReply(deps, c.get("org").id, thread, {
-        authorName: author.agent ?? (comment as CommentRow).authorName,
-        body: (comment as CommentRow).body,
-        actor: author.agent ? null : (comment as CommentRow).authorPersonId,
-      }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
-      return c.json(commentView(comment as CommentRow));
+      return c.json(await replyTo(c as ApiContext, await threadParam(c as ApiContext), body));
     },
   );
 
@@ -528,4 +545,6 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
       fixedAwaiting: views.filter((thread) => thread.status === "fixed"),
     });
   });
+
+  return { listThreads, replyTo };
 }

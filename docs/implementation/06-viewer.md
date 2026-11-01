@@ -52,6 +52,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/join/:token` | Accept an invite (06·6) |
 | `/reset/:token` | Set a new password |
 | `/device` | Approve the CLI: type the code the CLI printed (06·7) |
+| `/device/connect` | Connect an app: the OAuth consent screen, under an already reserved word |
 | `/sign-in` | Sign in (06·2) |
 | `/settings` | Settings index |
 | `/settings/sign-in` | Passkeys, password, sessions (06·3) |

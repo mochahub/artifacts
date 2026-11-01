@@ -11,6 +11,7 @@ Every request resolves to exactly one caller before any route code runs (`apps/s
 | `person` | `art_session` cookie → `sessions.token_hash` (not expired; person not removed) | That person, with `recentAuth = now - auth_at < 10 min` |
 | `cliToken` | `Authorization: Bearer art_…` → `tokens` where `kind = cli` | The token's person, limited to the token's scopes; never `recentAuth` |
 | `orgToken` | Same header, `kind = org` | The organization, limited to scopes and `project_ids` |
+| `cliToken` (connector) | Same header, `kind = oauth`, only at `POST /api/mcp` on the origin in its `audience`, with its grant not revoked | The person who consented, limited to the granted scopes |
 | `guest` | `art_guest` cookie → `guests`, plus the share link being used (from the route's artifact and the guest's `guest_links`) | A named guest with the link's permission on that one artifact |
 | `content` | Path token on the content port | The caller recorded in the token, for one artifact version |
 | `anonymous` | Nothing | Only public routes (health, meta, sign-in, invites, share-link preview) |
@@ -98,6 +99,21 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 2. **The person approves in the browser:** they sign in if needed, see the client name, agent and code (board 6, screen 7), and approve with a recent sign-in.
 3. **The CLI collects the token:** it polls `POST /api/device/poll` every `interval` seconds, and on `approved` stores the token in the OS keychain ([07-cli-and-skill.md](07-cli-and-skill.md#credentials)).
 4. **Expiry:** codes expire after 10 minutes and work once.
+
+## OAuth (connectors)
+
+Our server is its own OAuth 2.1 authorization server, on the sign-in above. No outside provider is involved, and a token we didn't issue is never accepted: tokens are looked up by hash, so there's nothing to validate one against.
+
+- **Consent:** a screen at `/device/connect` in the viewer, needing a session and a recent sign-in. It shows the client's self-reported name as a claim, the redirect's host, and a warning when that's this machine, because a metadata document can't stop something local from claiming a name.
+- **Scopes:** `read`, `comment` and `publish`, never `manage` or `data`. So a connector can't archive, delete, share or export. Resolving, deciding and purging are for people anyway.
+- **Audience:** every access token is bound to `<origin>/api/mcp`. Anywhere else, including the rest of this API and the same path on another of this deployment's domains, it's a 401. There's no token passthrough: the server calls no upstream API.
+- **Redirects** match exactly, apart from a loopback port (RFC 8252). Only https, or http to loopback. A bad client or redirect never redirects.
+- **PKCE** is S256 only. A failed exchange burns the code.
+- **Rotation:** each refresh issues a new refresh token. One used twice, or a code used twice, revokes the grant, and so everything from it.
+- **Client ID Metadata Documents:** a URL `client_id` is fetched only over https, on the default port, to public addresses, with no redirects, 5 seconds and 64 KB at most, and is kept an hour. A document must name its own URL. A hostname could resolve differently between the check and the fetch, because Bun can't pin an address; the document is never shown to the caller, and only its name and redirects are used.
+- **Revocation:** Settings, Sign-in lists each grant as a connector. Removing a person or resetting their password ends theirs.
+
+CLI tokens work as a static bearer at the same endpoint, for clients with no OAuth (Codex's `bearer_token_env_var`, Claude Code's `--header`).
 
 ## Token scopes
 
@@ -204,6 +220,9 @@ The expected result is computed from a second, deliberately simple table in the 
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
+| `GET /api/oauth/authorize` | 60 per IP per 15 minutes |
+| `POST /api/oauth/token`, `/revoke` | 120 per IP per 15 minutes |
+| `POST /api/oauth/register` | 20 per IP per hour |
 | `POST /api/recover` | 5 per IP per hour |
 | `POST /api/setup` | 20 per IP per hour, while in setup mode |
 | Search (`GET /api/search`) | 60 per caller per minute |

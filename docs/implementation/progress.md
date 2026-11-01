@@ -21,6 +21,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M12 The hosted library | `m12-library` | see PR | see PR |
 | M13 Templates, guides and theme | `m13-templates` | see PR | see PR |
 | M14 Brand setup | `m14-brand` | see PR | see PR |
+| M15 OAuth, hosted MCP and publishing | `m15-connector` | see PR | see PR |
 
 ## Verified
 
@@ -53,6 +54,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M13 (2026-10-31):** every template initializes, lints with no errors or warnings, renders in WebKit and publishes, through the real CLI. One accent changed pixels in at least one frame of all seven, and reached the article page's `meta.theme`. Hostile theme values are refused by the manifest and dropped by the code that writes CSS. A WebKit e2e checks the theme lands on the article body and nowhere else. The agent looked at all seven contact sheets, and changed the slides after that.
 
 - **M14 (2026-10-31):** `packages/cli/test/brand.e2e.test.ts` runs the real CLI from a sample `brand.json` to a preview, a published sample every template appears in, a reviewer's comment on it, and a person applying it. Tokens, including the owner's, get 403 on applying and on clearing. Precedence, taking a brand off, a font that isn't in the sample, and rendering from the cache with the server stopped are all covered. The font file in the test is a stand-in, so no real font has been drawn through this path.
+
+- **M15 (2026-11-01):** a scripted OAuth client, with no browser, covers discovery from a 401, registration, PKCE, code exchange, refresh, revocation, and every negative case in the brief (`apps/server/test/api/oauth.test.ts`). `packages/cli/test/connector.e2e.test.ts` runs the whole loop with a real CLI that has no sign-in: pack, upload, commit, search, read, view, read comments, reply. **No real client has connected:** nothing here has met Claude Code or Codex.
 
 ## Decisions to review
 
@@ -135,6 +138,17 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 65. **M14, brand fonts don't reach articles.** The viewer's CSP loads fonts from its own origin, and serving a publisher's font files from there isn't worth widening it. An article names the family and shows a fallback. To change: add a route that serves them, and `font-src`.
 66. **M14, a brand applies to every render,** including artifacts that aren't from a template. Only CSS that reads the tokens changes, and article accents.
 
+67. **M15, built on MCP `2026-07-28`, with the older handshake kept.** That revision dropped `initialize`, but clients in use may not have moved, and the handoff has to work with them. The server does both, and sessions don't exist in either.
+68. **M15, publishing has two plans, not one list.** Prepare is called twice: once to get the payload up, once to read it. A list of signed URLs in a tool result would cost a model thousands of tokens, and it would have to copy each one, so plans live in the bucket and the model passes one link.
+69. **M15, `artifacts_publish_prepare` takes the file list from the payload.** The handoff asked only for the commit payload to be a blob; the file list has the same problem.
+70. **M15, access tokens are opaque rows in `tokens`,** not JWTs. Revocation is immediate, and there's one code path for every bearer.
+71. **M15, every code and refresh failure on a matched code burns it.** A wrong PKCE verifier revokes the grant.
+72. **M15, connectors sign as "Connector" in replies.** The token carries no agent name. To change: send a client's name.
+73. **M15, consent needs a recent sign-in,** like approving a device. On a phone that's one more passkey prompt.
+74. **M15, a connector is listed per consent,** so reconnecting a client adds a row rather than replacing one.
+75. **M15, no CORS on the token endpoint.** A browser-only client couldn't finish. Native and server-side clients are unaffected.
+76. **M15, the local MCP** answers `server/discover` as well as `initialize`.
+
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.
@@ -165,6 +179,13 @@ In this order. Nothing here has been done or tested by the agent.
 17. **Link previews:** paste a share link into iMessage and Slack.
 18. **Windows:** the CLI, including credentials, is untested.
 19. **MCP:** add `artifacts mcp` to a real client. It's tested against the protocol, not a client.
+
+**Connectors (none of this has been tried with a real client)**
+20. **Claude Code:** `claude mcp add --transport http artifacts <url>/api/mcp`, then sign in with `/mcp`.
+21. **Codex:** add the server, run `codex mcp login artifacts`, and try `bearer_token_env_var` on a remote box.
+22. **Remote sessions:** whether connectors reach cloud or remote sessions. This wasn't verified for any client.
+23. **Passkey consent** on a real iPhone: approving a connector when a recent sign-in is needed.
+24. **Template taste:** review `docs/images/templates.webp` and the contact sheets on a phone.
 
 ## Known gaps
 
