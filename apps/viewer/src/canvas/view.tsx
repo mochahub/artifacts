@@ -13,6 +13,7 @@ import {
 import { Sheet } from "../components/sheets.tsx";
 import { renderUrl } from "../format.ts";
 import { LiveFrame, savedNotice } from "../live/frame.tsx";
+import { tapped } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { type Board, CanvasEngine, type Pin } from "./engine.ts";
 import { frameFromHash, frameHash } from "./hash.ts";
@@ -174,14 +175,15 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
     engine.current?.setPins(draft.value ? [...pins, draft.value.pin] : pins);
   });
 
-  // ?c=<n> opens a thread, once.
-  const deepLinked = useRef(false);
+  // ?c=<n> opens a thread, once for each link or tapped notification.
+  const deepLinked = useRef("");
+  const link = `${location.search}/${tapped.value}`;
   useEffect(() => {
     const n = Number(new URLSearchParams(location.search).get("c"));
-    if (deepLinked.current || !n || all.length === 0) return;
+    if (deepLinked.current === link || !n || all.length === 0) return;
     const thread = all.find((entry) => entry.n === n);
     if (!thread) return;
-    deepLinked.current = true;
+    deepLinked.current = link;
     openId.value = thread.id;
     if (thread.anchor?.type === "frame") engine.current?.focusFrame(thread.anchor.frameKey, false);
   });
