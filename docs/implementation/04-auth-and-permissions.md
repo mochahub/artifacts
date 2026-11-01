@@ -100,6 +100,10 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 3. **The CLI collects the token:** it polls `POST /api/device/poll` every `interval` seconds, and on `approved` stores the token in the OS keychain ([07-cli-and-skill.md](07-cli-and-skill.md#credentials)).
 4. **Expiry:** codes expire after 10 minutes and work once.
 
+## Agents are shown as agents
+
+Anything a token writes is marked: comments, versions and activity carry an agent name, which is the client's own if it sent one and `agent` if not. APIs and the viewer show it with its person ("Zahin's agent", "Zahin's Claude Code"). The name is the client's claim; the person is the token's. Only a browser session writes as a person. Tokens can't approve, request changes or resolve at all (below).
+
 ## OAuth (connectors)
 
 Our server is its own OAuth 2.1 authorization server, on the sign-in above. No outside provider is involved, and a token we didn't issue is never accepted: tokens are looked up by hash, so there's nothing to validate one against.

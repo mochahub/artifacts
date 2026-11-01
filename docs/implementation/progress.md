@@ -164,6 +164,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 
 83. **The stack ships as 0.2.0, not a patch.** It changes `init`'s default and adds a lint error, and raising `packages/cli/package.json` is how `release.yml` takes a chosen version.
 
+84. **Every token is shown as an agent.** A comment from a token with no detected agent used to read as the person's own. Now the server marks it, and shows it as "Zahin's agent". Rows from before this have no mark, and can't be told apart. Pushes for a publish stay tied to a named agent, so someone at their own terminal isn't told what they just did.
+
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.

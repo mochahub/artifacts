@@ -1,5 +1,6 @@
 import {
   type Anchor,
+  agentLabel,
   type BlockRecord,
   type FrameRecord,
   isBundlePath,
@@ -8,6 +9,7 @@ import {
   PublishCommit,
   PublishPrepare,
   type PublishResult,
+  UNNAMED_AGENT,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
@@ -254,6 +256,8 @@ export function createPublisher(deps: Deps) {
     });
 
     const publisher = publisherOf(caller);
+    // Anything but a signed-in person is an agent, whether or not it said which.
+    const agent = body.agent?.trim() || (caller.kind === "person" ? null : UNNAMED_AGENT);
     const now = clock.now();
     const result = await db.transaction(async (tx) => {
       // One commit at a time per artifact (03).
@@ -339,7 +343,7 @@ export function createPublisher(deps: Deps) {
         summary: body.summary ?? null,
         tags: body.tags ?? null,
         publishedBy: publisher,
-        agent: body.agent ?? null,
+        agent,
         publishedAt: now,
       });
       await writeContent(tx, org.id, versionId, safePages, body.frames, body.blocks);
@@ -365,7 +369,7 @@ export function createPublisher(deps: Deps) {
         artifactId: ticket.artifactId,
         projectId: project.id,
         actorPersonId: publisher,
-        agent: body.agent ?? null,
+        agent,
         kind: "published",
         payload: { version: n, message: body.message ?? null },
         createdAt: now,
@@ -384,7 +388,9 @@ export function createPublisher(deps: Deps) {
       slug: ticket.slug,
       title: ticket.title,
       version: result.version,
-      agent: body.agent ?? null,
+      // Only a named agent: someone running the CLI at their own terminal knows what they published.
+      agent:
+        body.agent && "person" in caller ? agentLabel(caller.person.name, body.agent) : (body.agent ?? null),
     }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
     const response: PublishResult = {
       version: result.version,

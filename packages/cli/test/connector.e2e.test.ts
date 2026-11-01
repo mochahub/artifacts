@@ -214,7 +214,7 @@ describe("artifacts mcp install", () => {
     expect(result.code).toBe(0);
     expect(JSON.parse(result.stdout).installed).toEqual(["claude", "codex"]);
     const added = readFileSync(log, "utf8");
-    expect(added).toContain("mcp add --transport http");
+    expect(added).toContain("mcp add --transport http --scope user");
     expect(added).toContain("https://art.example.org/api/mcp");
     expect(added).toContain("Authorization: Bearer ${ART_TOKEN}");
     expect(readFileSync(join(box.home, ".codex/config.toml"), "utf8")).toContain(

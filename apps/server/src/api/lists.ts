@@ -1,5 +1,5 @@
 import type { Artifact, ArtifactCard, Home } from "@artifacts/schema";
-import { Seen } from "@artifacts/schema";
+import { agentLabel, Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
@@ -165,7 +165,10 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
     if (decision?.kind === "approved" && decision.version === latest.n) {
       status = { kind: "approved", version: latest.n };
     } else if (decision?.kind === "changes_requested" && decision.createdAt > latest.publishedAt) {
-      status = { kind: "with_agent", agent: latest.agent ?? latest.publisher };
+      status = {
+        kind: "with_agent",
+        agent: latest.agent ? agentLabel(latest.publisher, latest.agent) : latest.publisher,
+      };
     } else if (unseen) status = { kind: "waiting" };
     else status = { kind: "not_reviewed" };
 
@@ -193,7 +196,7 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
           changedFrames,
         },
         publishedBy: latest.publisher,
-        agent: latest.agent,
+        agent: latest.agent ? agentLabel(latest.publisher, latest.agent) : null,
         publishedAt: latest.publishedAt.toISOString(),
         archivedAt: row.archivedAt?.toISOString() ?? null,
       },

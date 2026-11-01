@@ -36,7 +36,19 @@ export function mcpInstall(
   const done: string[] = [];
   if (flags.claude || both) {
     const header = flags.tokenEnv ? ["--header", `Authorization: Bearer \${${flags.tokenEnv}}`] : [];
-    const args = ["claude", "mcp", "add", "--transport", "http", ...header, "artifacts", url];
+    // User scope: Claude Code's default ties a server to the folder this happens to run in.
+    const args = [
+      "claude",
+      "mcp",
+      "add",
+      "--transport",
+      "http",
+      "--scope",
+      "user",
+      ...header,
+      "artifacts",
+      url,
+    ];
     const found = Bun.which("claude");
     if (found) {
       const added = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });

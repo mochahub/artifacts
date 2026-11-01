@@ -39,7 +39,7 @@ export function initials(name: string): string {
 
 /** Agents sign with initials in a violet square, never a sparkle. */
 export const agentInitials = (agent: string) =>
-  /codex/i.test(agent) ? "Cx" : /claude/i.test(agent) ? "Cl" : initials(agent);
+  /codex/i.test(agent) ? "Cx" : /claude/i.test(agent) ? "Cl" : /agent$/i.test(agent) ? "Ag" : initials(agent);
 export const agentShort = (agent: string) => agent.replace(/ Code$/, "");
 
 export const renderUrl = (artifactId: string, hash: string) => `/api/artifacts/${artifactId}/r/${hash}`;

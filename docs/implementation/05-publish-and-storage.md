@@ -121,7 +121,7 @@ Images referenced by articles are bundle files; the viewer loads them through `G
 5. **Commit.** `POST /api/publish/commit` with files, pages, frames, blocks, message, `--name`, `--note` and the detected agent. The server re-anchors threads and returns the summary.
 6. **Report.** Print the result (format in [07-cli-and-skill.md](07-cli-and-skill.md#publish)). With `--json`, print the `PublishResult` as is.
 
-**Agent detection:** `CLAUDECODE=1` means "Claude Code"; `CODEX_*` environment variables mean "Codex". `ARTIFACTS_AGENT` overrides it. Otherwise it's null, meaning a person published.
+**Agent detection:** `CLAUDECODE=1` means "Claude Code"; `CODEX_*` environment variables mean "Codex". `ARTIFACTS_AGENT` overrides it. Otherwise it's null, and the server records `agent` for any token (04).
 
 ## Re-anchoring
 

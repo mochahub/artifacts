@@ -345,7 +345,7 @@ On Railway, those are three things in one project from the template: the app ser
 **The CLI and agents.**
 - `artifacts login <url>` uses the device flow. The CLI shows a code and opens `<url>/device`; you sign in with your password or passkey and approve. The token goes in the OS keychain, acts as you, and is scoped to publishing and commenting.
 - Admins create organization tokens for CI and headless agents, scoped to projects and revocable.
-- Each publish records the person and the agent the CLI detected ("Claude for Zahin").
+- Anything a token does is marked as an agent's, shown with its person ("Zahin's Claude Code", or "Zahin's agent" when it didn't name itself). It never reads as the person's own comment or publish.
 
 **One permission check.** Every request resolves to who is asking (a session, a CLI or organization token, or a share token). One function decides what that caller may do. Every API route uses it, and so does minting content-host tokens. A test matrix covers role × visibility × share type.
 
