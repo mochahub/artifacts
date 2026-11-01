@@ -3,6 +3,7 @@ import {
   DeviceStarted,
   Health,
   Me,
+  Meta,
   RecoverResponse,
   SetupResponse,
 } from "@artifacts/schema";
@@ -75,12 +76,32 @@ export async function login(url: string, out: Output) {
 
 export type ClaimAnswers = { org?: string; name?: string; email?: string; password?: string };
 
+/**
+ * Google is optional, so Enter skips it, and with nobody at the keyboard it's only used if it's set.
+ * A server stores these and leaves them off until an admin tests them in Settings.
+ */
+async function askGoogle(url: string, out: Output) {
+  const clientId = process.env.ARTIFACTS_GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.ARTIFACTS_GOOGLE_CLIENT_SECRET;
+  if (clientId && clientSecret) return { clientId, clientSecret };
+  if (!process.stdin.isTTY) return undefined;
+  const meta = Meta.parse(await new Client(url).get("/api/meta"));
+  out.say("Google sign-in is optional. To use it, add these redirect URIs to a Web application client:");
+  for (const origin of new Set([url, ...meta.viewerOrigins])) {
+    out.say(`  ${origin}/api/auth/google/callback`);
+  }
+  const id = await ask("Google client ID (Enter to skip):");
+  if (!id) return undefined;
+  return { clientId: id, clientSecret: await askSecret("Google client secret:") };
+}
+
 /** Claims a server in setup mode, with the same questions everywhere it's reached from. */
 export async function claim(url: string, setupToken: string, answers: ClaimAnswers, out: Output) {
   const orgName = answers.org ?? (await ask("Organization name:"));
   const name = answers.name ?? (await ask("Your name:"));
   const email = answers.email ?? (await ask("Email:"));
   const password = answers.password ?? process.env.ARTIFACTS_PASSWORD ?? (await askNewPassword());
+  const google = await askGoogle(url, out);
   const result = SetupResponse.parse(
     await new Client(url).post("/api/setup", {
       setupToken,
@@ -90,11 +111,13 @@ export async function claim(url: string, setupToken: string, answers: ClaimAnswe
       password,
       clientName: clientName(),
       agent: detectAgent() ?? undefined,
+      ...(google ? { google } : {}),
     }),
   );
   await setToken(url, result.token);
   saveServer({ url, name: serverName(url) });
   out.say(`Created ${orgName} with you as owner. This machine is signed in as you.`);
+  if (google) out.say(`Google is saved but off. Open ${url}/settings/google and press Test to turn it on.`);
   return result.person;
 }
 

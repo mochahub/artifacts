@@ -30,7 +30,7 @@
 - **Fallback:** `~/.config/artifacts/credentials.json` with mode 0600, and a warning.
 - **CI:** `ARTIFACTS_TOKEN` and `ARTIFACTS_URL` environment variables override everything. The token is for one server: `ARTIFACTS_URL`, or the default server in config if that isn't set. A command aimed at any other server with `--server` doesn't get it (it looks in the keychain for that server's own token). Only when no server is known at all does `--server` receive it.
 - **Tests:** `ARTIFACTS_CREDENTIALS=file` forces the file, and config honours `HOME` and `XDG_CONFIG_HOME`, so tests never touch the real keychain.
-- **No prompts:** `ARTIFACTS_PASSWORD`, `ARTIFACTS_SETUP_TOKEN` and `--org`, `--name`, `--email` answer `setup`'s questions; `ARTIFACTS_NO_BROWSER=1` stops `login` opening a browser.
+- **No prompts:** `ARTIFACTS_PASSWORD`, `ARTIFACTS_SETUP_TOKEN`, `ARTIFACTS_GOOGLE_CLIENT_ID`, `ARTIFACTS_GOOGLE_CLIENT_SECRET` and `--org`, `--name`, `--email` answer `setup`'s questions; `ARTIFACTS_NO_BROWSER=1` stops `login` opening a browser.
 
 ## Which artifact a command acts on
 
@@ -69,7 +69,8 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 7. **URLs:** `railway domain list --service artifacts --json` → the viewer and content domains.
    Then `railway variable set CONTENT_URL=https://<content domain> --service artifacts`, and wait for the redeploy (spike S1).
 8. **Token:** `railway variable list --service artifacts --json` → `SETUP_TOKEN` (never printed).
-9. **Claim:** `POST /api/setup` with org name, your name, email and password (asked twice), client name and agent.
+9. **Claim:** `POST /api/setup` with org name, your name, email and password (asked twice), client name and agent. At a terminal it also prints the Google redirect URIs and asks for a client ID and secret, and Enter skips. Without a terminal, Google is only used if the two variables above are set. It's stored and stays off until an admin tests it in Settings.
+
 10. **Save:** write the server to config, and the token to the keychain.
 11. **Finish:** offer to install the skill; print the passkey QR code (a terminal QR of `<url>/settings/sign-in`), the invite and domain hints.
 
