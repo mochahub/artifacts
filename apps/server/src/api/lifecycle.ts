@@ -21,7 +21,7 @@ import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { reanchorThreads } from "../publish/routes.ts";
 import { diffRegions, type Region } from "../review/regions.ts";
-import { artifactParam, findArtifact, type LoadedArtifact } from "./artifacts-db.ts";
+import { artifactParam, findArtifacts } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
 import type { ApiContext, Routes } from "./routes.ts";
 
@@ -83,6 +83,9 @@ async function changedRegions(
   }
   return result;
 }
+
+/** Rows about no artifact, so nothing to check them against: they're for the people who run the place. */
+const ADMIN_ACTIVITY = ["purged", "team_created", "team_deleted", "team_member_added", "team_member_removed"];
 
 export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
@@ -510,13 +513,15 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       .limit(200);
 
     // Only what this caller can see: a private artifact's activity mustn't reach anyone else.
-    const seen = new Map<string, LoadedArtifact | null>();
+    const seen = await findArtifacts(deps, orgId, [
+      ...new Set(rows.flatMap(({ row }) => (row.artifactId ? [row.artifactId] : []))),
+    ]);
     const visible: typeof rows = [];
     for (const entry of rows) {
       const id = entry.row.artifactId;
       if (!id) {
         if (
-          entry.row.kind === "purged" &&
+          ADMIN_ACTIVITY.includes(entry.row.kind) &&
           caller.kind === "person" &&
           ["owner", "admin"].includes(caller.person.role)
         ) {
@@ -524,7 +529,6 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         }
         continue;
       }
-      if (!seen.has(id)) seen.set(id, await findArtifact(deps, orgId, id));
       const resource = seen.get(id);
       // Deletion hides the artifact, not its history: SPEC §5.5 wants the line in Activity.
       if (resource && seesArtifact(caller, resource)) visible.push(entry);

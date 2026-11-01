@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import type { ArtifactRow } from "../api/artifacts-db.ts";
+import { type ArtifactRow, artifactResource, inheritedAccess } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import type { Caller } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
@@ -33,36 +33,29 @@ export async function visibleTo(
     )
     .orderBy(desc(artifacts.updatedAt));
   if (rows.length === 0) return [];
-  // can() only ever reads the caller's own row, so nobody else's are loaded.
+  // can() only ever reads the caller's own rows, so nobody else's are loaded.
   const person = caller.kind === "person" || caller.kind === "cliToken" ? caller.person.id : null;
-  const access = person
-    ? await deps.db
-        .select({
-          artifactId: artifactAccess.artifactId,
-          personId: artifactAccess.personId,
-          permission: artifactAccess.permission,
-          viaToken: artifactAccess.viaToken,
-        })
-        .from(artifactAccess)
-        .where(and(eq(artifactAccess.orgId, orgId), eq(artifactAccess.personId, person)))
-    : [];
+  const [access, inherited] = await Promise.all([
+    person
+      ? deps.db
+          .select({
+            artifactId: artifactAccess.artifactId,
+            personId: artifactAccess.personId,
+            permission: artifactAccess.permission,
+            viaToken: artifactAccess.viaToken,
+          })
+          .from(artifactAccess)
+          .where(and(eq(artifactAccess.orgId, orgId), eq(artifactAccess.personId, person)))
+      : [],
+    person ? inheritedAccess(deps, orgId, { personId: person }) : new Map(),
+  ]);
   const byArtifact = new Map<string, typeof access>();
   for (const entry of access) {
     byArtifact.set(entry.artifactId, [...(byArtifact.get(entry.artifactId) ?? []), entry]);
   }
   const loaded: Loaded[] = [];
   for (const { row, projectSlug } of rows) {
-    const resource: ArtifactResource = {
-      type: "artifact",
-      id: row.id,
-      projectId: row.projectId,
-      visibility: row.visibility,
-      publisherId: row.publisherId,
-      archivedAt: row.archivedAt,
-      deletedAt: row.deletedAt,
-      deletedBy: row.deletedBy,
-      access: byArtifact.get(row.id) ?? [],
-    };
+    const resource = artifactResource(row, byArtifact.get(row.id) ?? [], inherited.get(row.id) ?? []);
     if (can(caller, "artifact.read", resource)) loaded.push({ row, resource, projectSlug });
   }
   return loaded;

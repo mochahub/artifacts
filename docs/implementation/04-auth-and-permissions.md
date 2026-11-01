@@ -49,6 +49,7 @@ Precedence when several are present: Bearer token, then session cookie, then gue
 `DELETE /api/people/:id` sets `removed_at` and, in the same transaction, ends everything that person could still act through:
 
 - their sessions and their own tokens (`tokens.person_id`), as `revoked_at`
+- their `team_members` rows
 - the invites and reset links they issued that are still unused
 - the **organization tokens they created** (`tokens` with `kind = org` and `created_by` = them), as `revoked_at`, so a token an admin made can't outlive the admin
 - the **share links they created** (`share_links.created_by` = them), as `revoked_at`, the same as revoking the link from the Share sheet. A guest's access is read from the link on every request, so guests who came in by those links lose access at once; nothing else is needed.
@@ -148,14 +149,27 @@ Can the caller see an artifact at all (`artifact.read`)?
 | Caller | Can see when |
 |---|---|
 | owner, admin | Always, including `me` artifacts (admins manage the deployment) |
-| member, reviewer | `visibility = org`, **or** they published it, **or** they're in `artifact_access` |
-| outside | They're in `artifact_access` |
+| member, reviewer | `visibility = org`, **or** they published it, **or** they're in `artifact_access`, **or** a team they're in has the artifact |
+| outside | They're in `artifact_access`, or a team they're in has the artifact |
 | guest | Their `guest_links` row for a link on this artifact is unexpired and the link isn't revoked or expired |
 | cliToken | As its person, and the token has `read` |
 | orgToken | `visibility = org` and the project is in its `project_ids` (or all), and it has `read` |
 | content | The token's artifact and version |
 
-**Access a token granted** (`artifacts share --invite` or `--add` run with a CLI token) is stored with `via_token = true`, on the invite and on the `artifact_access` row it becomes. An agent could otherwise invite an address it controls, open the link itself, and approve its own version. Such a person can read and comment as the permission allows, but `artifact.decide` and `thread.resolve` (which includes reopening) are refused with `forbidden` while the row is all their right to comment rests on. A person who may comment by role (owner, admin, the publisher, or a member or reviewer on an org-visible artifact) is unaffected. A person creating or changing the row (the Share sheet adding the address again, with any permission) sets `via_token = false`, which is the confirmation. A token repeating a grant with the same permission leaves the flag as it is; a token changing the permission sets it. The artifact answer reports `permissions.decide` so the viewer can hide the buttons.
+**What a person can do with an artifact** comes from one function, `effective()` in `can.ts`, and the first of these that applies wins:
+
+| # | Rule | Result |
+|---|---|---|
+| 1 | Owner or admin | Everything, including `me` artifacts |
+| 2 | Publisher | Manage the artifact |
+| 3 | In `artifact_access` | Exactly that level |
+| 4 | Anything else | The higher of: `comment` for a member or reviewer on an org-visible artifact, and the best team grant |
+
+Reviewers and outside people stop at `comment`, however a grant was made. Grants only add, apart from rule 3: a direct `view` row is how to narrow one person, and it holds against a team's `comment`. An artifact's resource carries `inherited`, one row per person, expanded from teams when it's loaded, so callers build nothing and a push to many people needs no query per person. `level` is the best a grant gives, and `confirmed` is the best one a person made.
+
+**Teams.** Anyone in a team gets what the team was given, including people added later. Outside people can be in a team, capped as above. Tokens can't change teams or memberships, so only a person can add one. Leads add and remove members of their own team, and a lead must be a member or above: leading hands out access, which a role capped at commenting shouldn't do. A lead who becomes a reviewer stops leading without anything being deleted.
+
+**Access a token granted** (`artifacts share --invite`, `--add` or `--team` run with a CLI token) is stored with `via_token = true`, on the invite and on the `artifact_access` or `artifact_team_access` row it becomes. An agent could otherwise invite an address it controls, open the link itself, and approve its own version. Such a person can read and comment as the permission allows, but `artifact.decide` and `thread.resolve` (which includes reopening) are refused with `forbidden` while the row is all their right to comment rests on. A person with any other right to comment that a person gave is unaffected: a role (owner, admin, the publisher, or a member or reviewer on an org-visible artifact), a direct row, or a team's row. So a token-made grant tied with a person-made one can't block them. A person creating or changing the row (the Share sheet adding the address again, with any permission) sets `via_token = false`, which is the confirmation. A token repeating a grant with the same permission leaves the flag as it is; a token changing the permission sets it. The artifact answer reports `permissions.decide` so the viewer can hide the buttons.
 
 Someone in `artifact_access` with `view` can only view, whatever their role: on a `me` artifact, a member added with `view` can't comment.
 
@@ -186,12 +200,16 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `brand.read` | As `home.read`: what renders use. |
 | `brand.propose` | Members and up; cliToken with `publish`. A proposal changes nothing. Not org tokens, which have no person to answer for it. |
 | `brand.apply` | Admins, owner, as people. Never a token: it changes how everyone's work looks, and an agent's scopes hold only what a person can undo for one artifact. |
-| `people.invite` | Admins, owner; an admin's cliToken with `manage`. `artifacts org invite` and `org reset-link` need this (SPEC §10). |
+| `people.invite` | Admins, owner; an admin's cliToken with `manage`. `artifacts org invite` and `org reset-link` need this (SPEC §10). A token can't invite anyone into a team. |
+| `people.search` | Members and up, as people. Names and emails, outside people included, because a picker needs them. Never a token: the directory doesn't go to agents. |
+| `team.read` | Members and up; cliToken with `read`. A token sees a team's name, size and shared work, not its members. |
+| `team.manage` | Admins, owner, as people: create, rename, delete. |
+| `team.members` | The team's leads, admins, owner, as people. |
 
 ### Test matrix
 
 `apps/server/test/permissions.test.ts` generates every combination of:
-- caller: owner, admin, member (publisher), member (added with `publish`), member (other), member (added by a token), reviewer, outside (added), outside (added by a token), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous
+- caller: owner, admin, member (publisher), member (added with `publish`), member (other), member (added by a token), reviewer, outside (added), outside (added by a token), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous, and people and tokens holding access through a team at each level, including a token-made team row alone and tied with a person's
 - visibility: `me`, `org`
 - lifecycle: active, archived, deleted
 - every action in the table above
@@ -231,6 +249,7 @@ The expected result is computed from a second, deliberately simple table in the 
 | `POST /api/recover` | 5 per IP per hour |
 | `POST /api/setup` | 20 per IP per hour, while in setup mode |
 | Search (`GET /api/search`) | 60 per caller per minute |
+| People search (`GET /api/people/search`) | 60 per person per minute |
 | Compare (`GET /api/artifacts/:id/compare`) | 30 per caller per minute, for diffs not yet made |
 | Event streams (`GET /api/events`) | 10 open per caller |
 

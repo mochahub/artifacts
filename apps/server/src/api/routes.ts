@@ -14,7 +14,7 @@ export type Guard =
   | { public: true }
   | {
       action: Action;
-      /** The artifact the action applies to. Without one the action is about the organization. */
+      /** The artifact or team the action applies to. Without one the action is about the organization. */
       resource?: (c: ApiContext) => Promise<Resource>;
       /** Needs a sign-in within the last 10 minutes (04). */
       recentAuth?: boolean;
@@ -32,6 +32,9 @@ function denial(caller: Caller, action: Action, resource: Resource): ApiError {
       return new ApiError("read_only", "This artifact is archived, so it's read-only.");
     }
     if (!can(caller, "artifact.read", resource)) return new ApiError("not_found", "Not found.");
+  }
+  if (resource.type === "team" && !can(caller, "team.read", { type: "org" })) {
+    return new ApiError("not_found", "Not found.");
   }
   return new ApiError("forbidden", "You can't do that.");
 }

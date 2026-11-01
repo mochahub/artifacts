@@ -38,6 +38,8 @@ export type StartOptions = {
   jobs?: boolean;
   pushAllow?: (endpoint: string) => boolean;
   clientMetadata?: MetadataFetch;
+  /** Tests shorten this, so a stream's recheck doesn't take 25 seconds. */
+  heartbeatMs?: number;
 };
 
 const PRIVATE_PEER = /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$|^f[cd]/;
@@ -91,7 +93,7 @@ export async function startServer(env: Env, options: StartOptions) {
     return homeDomain;
   };
 
-  const events = new Events(env.databaseUrl);
+  const events = new Events(env.databaseUrl, undefined, options.heartbeatMs);
   await events.start();
 
   const deps: Deps = {

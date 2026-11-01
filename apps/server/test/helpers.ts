@@ -100,6 +100,7 @@ export async function startTestServer(
   options: {
     pushAllow?: (endpoint: string) => boolean;
     clientMetadata?: (url: URL) => Promise<unknown>;
+    heartbeatMs?: number;
   } = {},
 ) {
   const database = await createDatabase();
@@ -111,6 +112,7 @@ export async function startTestServer(
     jobs: false,
     pushAllow: options.pushAllow,
     clientMetadata: options.clientMetadata,
+    heartbeatMs: options.heartbeatMs,
     onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
   });
   const base = `http://127.0.0.1:${server.ports.viewer}`;

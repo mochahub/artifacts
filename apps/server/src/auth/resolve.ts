@@ -138,6 +138,40 @@ export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> 
   return { kind: "guest", guestId, links };
 }
 
+/**
+ * The same caller as it is now, or null if it has ended. For something that outlives one request and
+ * can't resolve a cookie again, such as an event stream.
+ */
+export async function currentCaller(deps: Deps, caller: Caller): Promise<Caller | null> {
+  const now = deps.clock.now();
+  if (caller.kind === "guest") return guestCaller(deps, caller.guestId);
+  if (caller.kind === "person") {
+    const [row] = await deps.db
+      .select({ session: sessions, person: people })
+      .from(sessions)
+      .innerJoin(people, eq(people.id, sessions.personId))
+      .where(and(eq(sessions.id, caller.sessionId), isNull(people.removedAt)))
+      .limit(1);
+    if (!row || row.session.expiresAt <= now) return null;
+    const { id, name, email, role } = row.person;
+    return { ...caller, person: { id, name, email, role } };
+  }
+  if (caller.kind === "cliToken" || caller.kind === "orgToken") {
+    const [token] = await deps.db.select().from(tokens).where(eq(tokens.id, caller.tokenId)).limit(1);
+    if (!token || token.revokedAt || (token.expiresAt && token.expiresAt <= now)) return null;
+    if (caller.kind === "orgToken") return { ...caller, scopes: token.scopes, projectIds: token.projectIds };
+    const [person] = await deps.db
+      .select()
+      .from(people)
+      .where(and(eq(people.id, caller.person.id), isNull(people.removedAt)))
+      .limit(1);
+    if (!person) return null;
+    const { id, name, email, role } = person;
+    return { ...caller, scopes: token.scopes, person: { id, name, email, role } };
+  }
+  return null;
+}
+
 /** Bearer token, then session cookie, then guest cookie (04, "Callers"). */
 export async function resolveCaller(c: Context, deps: Deps, org: OrgRow): Promise<Caller> {
   const header = c.req.header("authorization");

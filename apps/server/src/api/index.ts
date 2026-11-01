@@ -18,6 +18,7 @@ import { peopleRoutes } from "./people.ts";
 import type { Routes } from "./routes.ts";
 import { setupRoutes } from "./setup.ts";
 import { sharingRoutes } from "./sharing.ts";
+import { teamRoutes } from "./teams.ts";
 import { versionRoutes } from "./versions.ts";
 
 /** Every /api route on the viewer port. */
@@ -27,6 +28,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   authRoutes(routes, deps, passkeys);
   peopleRoutes(routes, deps);
   sharingRoutes(routes, deps);
+  teamRoutes(routes, deps);
   deviceRoutes(routes, deps);
   const publisher = createPublisher(deps);
   publishRoutes(routes, publisher);

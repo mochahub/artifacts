@@ -6,7 +6,7 @@ import {
   OrgSettings,
   PatchOrg,
 } from "@artifacts/schema";
-import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
@@ -24,6 +24,8 @@ import {
   resetLinks,
   sessions,
   shareLinks,
+  teamMembers,
+  teams,
   tokens,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
@@ -38,6 +40,8 @@ const HOUR = 3600_000;
 const OWNER_LOCK = 7_316_003;
 const INVITE_DAYS = 7;
 const ORG_SCOPES_NEED = ["publish", "comment", "read", "manage", "data", "org"];
+const SEARCH_RESULTS = 20;
+const SEARCHES_PER_MINUTE = 60;
 
 const isAboveMember = (role: string) => role === "owner" || role === "admin";
 
@@ -82,6 +86,13 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     const above = target.role === "admin" || target.role === "owner";
     if (caller.kind !== "person" && (above || target.id === actorOf(caller).id)) {
       throw new ApiError("forbidden", "Issue this reset link from the viewer, not with a token.");
+    }
+  }
+
+  /** Only a person decides who joins a team (04), so a token can't get an invite that does. */
+  function guardTokenTeams(c: ApiContext, teamIds: string[] | null | undefined) {
+    if (c.get("caller").kind !== "person" && teamIds?.length) {
+      throw new ApiError("forbidden", "Add people to teams from the viewer, not with a token.");
     }
   }
 
@@ -135,6 +146,26 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     return c.json({ name: body.name ?? current.name, settings });
   });
 
+  routes.get("/api/people/search", { action: "people.search" }, async (c) => {
+    const q = (c.req.query("q") ?? "").trim().slice(0, 100);
+    if (q.length < 2) return c.json({ people: [] });
+    deps.limits.hit(`people-search:${actorOf(c.get("caller")).id}`, SEARCHES_PER_MINUTE, 60_000);
+    const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    const rows = await db
+      .select()
+      .from(people)
+      .where(
+        and(
+          eq(people.orgId, c.get("org").id),
+          isNull(people.removedAt),
+          or(ilike(people.name, like), ilike(people.email, like)),
+        ),
+      )
+      .orderBy(asc(people.name))
+      .limit(SEARCH_RESULTS);
+    return c.json({ people: rows.map(personView) });
+  });
+
   routes.get("/api/people", { action: "people.read" }, async (c) => {
     const orgId = c.get("org").id;
     const outside = c.req.query("kind") === "outside";
@@ -165,7 +196,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       )
       .orderBy(desc(invites.createdAt));
     const ids = rows.map((row) => row.id);
-    const [withPassword, withPasskey, shares] = await Promise.all([
+    const [withPassword, withPasskey, shares, memberships] = await Promise.all([
       ids.length
         ? db.select({ id: passwords.personId }).from(passwords).where(inArray(passwords.personId, ids))
         : [],
@@ -183,6 +214,19 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
             .innerJoin(artifacts, eq(artifacts.id, artifactAccess.artifactId))
             .where(inArray(artifactAccess.personId, ids))
         : [],
+      ids.length
+        ? db
+            .select({
+              personId: teamMembers.personId,
+              slug: teams.slug,
+              name: teams.name,
+              role: teamMembers.role,
+            })
+            .from(teamMembers)
+            .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+            .where(inArray(teamMembers.personId, ids))
+            .orderBy(asc(teams.name))
+        : [],
     ]);
     return c.json({
       people: rows.map((row) => ({
@@ -192,6 +236,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         shares: shares
           .filter((entry) => entry.personId === row.id)
           .map(({ title, permission }) => ({ title, permission })),
+        teams: memberships
+          .filter((entry) => entry.personId === row.id)
+          .map(({ slug, name, role }) => ({ slug, name, role })),
       })),
       invites: pending.map(({ invite, by }) => ({
         id: invite.id,
@@ -235,6 +282,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       }
       await tx.update(people).set({ removedAt: now }).where(eq(people.id, person.id));
       await tx.delete(sessions).where(eq(sessions.personId, person.id));
+      await tx.delete(teamMembers).where(eq(teamMembers.personId, person.id));
       await tx
         .update(tokens)
         .set({ revokedAt: now })
@@ -278,7 +326,16 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   routes.post("/api/invites", { action: "people.invite" }, async (c) => {
     const body = await parseBody(c, CreateInvite);
     guardTokenInvite(c as ApiContext, body.role);
+    guardTokenTeams(c as ApiContext, body.teamIds);
     const orgId = c.get("org").id;
+    if (body.teamIds?.length) {
+      const known = await db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(and(eq(teams.orgId, orgId), inArray(teams.id, body.teamIds)));
+      if (known.length < new Set(body.teamIds).size)
+        throw new ApiError("invalid", "That team doesn't exist.");
+    }
     const [taken] = await db
       .select({ id: people.id })
       .from(people)
@@ -301,6 +358,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         kind: "org",
         email: body.email,
         role: body.role,
+        teamIds: body.teamIds?.length ? body.teamIds : null,
         tokenHash: sha256(secret),
         createdBy: actorOf(c.get("caller")).id,
         createdAt: now,
@@ -349,6 +407,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     const row = await pendingInvite(c as ApiContext);
     // A new link is a new way in, so a token gets no more here than when it makes the invite.
     guardTokenInvite(c as ApiContext, row.role);
+    guardTokenTeams(c as ApiContext, row.teamIds);
     const secret = randomSecret();
     await db
       .update(invites)
@@ -399,12 +458,16 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           .where(eq(artifacts.id, row.artifactId))
           .limit(1)
       : [];
+    const joining = row.teamIds?.length
+      ? await db.select({ name: teams.name }).from(teams).where(inArray(teams.id, row.teamIds))
+      : [];
     return c.json({
       orgName: c.get("org").name,
       invitedBy: by?.name ?? "",
       role: row.role,
       email: row.email,
       ...(artifact ? { artifact } : {}),
+      ...(joining.length > 0 ? { teams: joining.map((team) => team.name) } : {}),
     });
   });
 
@@ -454,6 +517,23 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           grantedBy: invite.createdBy,
           viaToken: invite.viaToken,
         });
+      }
+      if (invite.teamIds?.length) {
+        // A team deleted since the invite was made is skipped, not an error for the person joining.
+        const live = await tx
+          .select({ id: teams.id })
+          .from(teams)
+          .where(and(eq(teams.orgId, invite.orgId), inArray(teams.id, invite.teamIds)));
+        if (live.length > 0) {
+          await tx.insert(teamMembers).values(
+            live.map((team) => ({
+              teamId: team.id,
+              personId: row.id,
+              orgId: invite.orgId,
+              addedBy: invite.createdBy,
+            })),
+          );
+        }
       }
       await tx.insert(activity).values({
         id: Bun.randomUUIDv7(),

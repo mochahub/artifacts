@@ -1,6 +1,7 @@
 import { PushSubscribe } from "@artifacts/schema";
 import { and, eq, gt, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
-import { findArtifact, type LoadedArtifact } from "../api/artifacts-db.ts";
+import type { LoadedArtifact } from "../api/artifacts-db.ts";
+import { findArtifact, findArtifacts } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -221,12 +222,9 @@ export async function sendDigest(deps: Deps) {
     .select()
     .from(activity)
     .where(and(eq(activity.orgId, current.id), gt(activity.createdAt, since)));
-  const resources = new Map<string, LoadedArtifact | null>();
-  for (const { artifactId } of recent) {
-    if (artifactId && !resources.has(artifactId)) {
-      resources.set(artifactId, await findArtifact(deps, current.id, artifactId));
-    }
-  }
+  const resources = await findArtifacts(deps, current.id, [
+    ...new Set(recent.flatMap(({ artifactId }) => (artifactId ? [artifactId] : []))),
+  ]);
   const keys = await vapidKeys(deps);
   const people_ = new Map(rows.map((row) => [row.person.id, row.person]));
   for (const person of people_.values()) {

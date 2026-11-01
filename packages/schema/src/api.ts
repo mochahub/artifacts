@@ -14,6 +14,7 @@ export const Role = z.enum(["owner", "admin", "member", "reviewer", "outside"]);
 export type Role = z.infer<typeof Role>;
 export const Permission = z.enum(["view", "comment", "publish"]);
 export type Permission = z.infer<typeof Permission>;
+export const TeamRole = z.enum(["lead", "member"]);
 export const PageKind = z.enum(["canvas", "article", "prototype", "gallery", "deck"]);
 export const ThreadStatus = z.enum(["open", "fixed", "resolved"]);
 export const AnchorState = z.enum(["ok", "updated", "orphaned", "moved_version"]);
@@ -108,6 +109,7 @@ export const InvitePreview = z.object({
   role: Role,
   email: z.string(),
   artifact: z.object({ title: z.string() }).optional(),
+  teams: z.array(z.string()).optional(),
 });
 export const AcceptInvite = z.object({
   name: z.string().trim().min(1).max(100),
@@ -145,7 +147,11 @@ export const GuestName = z.object({ name: z.string().trim().min(1).max(60) });
 
 // Organization and people
 export const INVITE_ROLES = ["admin", "member", "reviewer"] as const;
-export const CreateInvite = z.object({ email: Email, role: z.enum(INVITE_ROLES) });
+export const CreateInvite = z.object({
+  email: Email,
+  role: z.enum(INVITE_ROLES),
+  teamIds: z.array(Id).max(50).optional(),
+});
 export const InviteCreated = z.object({ invite: z.object({ id: Id }).loose(), url: z.string() });
 export const ChangeRole = z.object({ role: Role });
 export const CreateOrgToken = z.object({
@@ -288,8 +294,46 @@ export type ProjectRow = z.infer<typeof ProjectRow>;
 export type Home = z.infer<typeof Home>;
 export const PatchArtifact = z.object({ visibility: Visibility.optional() });
 
+// Teams
+const TeamSlug = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/);
+const TeamName = z.string().trim().min(1).max(60);
+const TeamAbout = z.string().trim().max(280).nullable();
+export const CreateTeam = z.object({
+  name: TeamName,
+  slug: TeamSlug.optional(),
+  description: TeamAbout.optional(),
+});
+export const PatchTeam = CreateTeam.partial();
+export const PutTeamMember = z.object({ role: TeamRole.default("member") });
+export const Team = z.object({
+  id: Id,
+  slug: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  members: z.number().int(),
+});
+export type Team = z.infer<typeof Team>;
+export const TeamList = z.object({
+  teams: z.array(Team.extend({ role: TeamRole.nullable() })),
+});
+export const TeamDetail = z.object({
+  team: Team,
+  /** Empty for a token: this is the people directory, and that's for browsers (04). */
+  members: z.array(z.object({ id: Id, name: z.string(), email: z.string(), role: TeamRole, orgRole: Role })),
+  /** Only what the caller can see. */
+  shared: z.array(
+    z.object({ id: Id, project: z.string(), slug: z.string(), title: z.string(), level: Permission }),
+  ),
+  permissions: z.object({ manage: z.boolean(), members: z.boolean() }),
+});
+export type TeamDetail = z.infer<typeof TeamDetail>;
+export const PeopleSearch = z.object({
+  people: z.array(z.object({ id: Id, name: z.string(), email: z.string(), role: Role })),
+});
+
 // Sharing
 export const AddAccess = z.object({ email: Email, permission: Permission });
+export const ShareWithTeam = z.object({ permission: Permission });
 export const CreateShareLink = z.object({
   permission: Permission.exclude(["publish"]),
   expiresIn: z.enum(["1d", "7d", "30d"]).nullable().optional(),

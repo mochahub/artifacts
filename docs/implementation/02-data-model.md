@@ -25,7 +25,8 @@
 | `anchor_state` | `ok`, `updated`, `orphaned`, `moved_version` |
 | `decision_kind` | `approved`, `changes_requested` |
 | `device_status` | `pending`, `approved`, `denied`, `used` |
-| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered` |
+| `team_role` | `lead`, `member` |
+| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed` |
 
 ## Tables
 
@@ -114,9 +115,14 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `artifact_id` | uuid null | For `artifact` invites. |
 | `permission` | `permission` null | For `artifact` invites. |
 | `via_token` | boolean not null default false | True when a token made the invite (`artifacts share --invite`). The `artifact_access` row it becomes carries it over (04). |
+| `team_ids` | uuid[] null | Teams to join on accepting. Not a foreign key: a team deleted meanwhile is skipped. |
 | `token_hash` | text unique | |
 | `created_by` | uuid FK people | |
 | `created_at`, `expires_at`, `accepted_at`, `revoked_at` | timestamptz | Expires in 7 days; single use. |
+
+**`teams`**: people who work together, inside the organization. `id`, `org_id`, `slug` text (unique per org; `a-z0-9-`, up to 40 characters), `name` text, `description` text null, `created_by` uuid FK people, `created_at`.
+
+**`team_members`**: PK `(team_id, person_id)`, `org_id`, `role` `team_role` (default `member`; a lead changes the membership, and must be a member or above), `added_by` uuid FK people, `created_at`. Index `(person_id)`. Removing a person deletes their rows.
 
 **`reset_links`**: `id`, `org_id`, `person_id`, `token_hash` unique, `created_by` (uuid null; null when made by `artifacts recover`), `created_at`, `expires_at` (1 hour), `used_at`.
 
@@ -186,6 +192,8 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_at is null`; `(purge_after) where deleted_at is not null`.
 
 **`artifact_access`**: people added to one artifact. PK `(artifact_id, person_id)`, `org_id`, `permission`, `granted_by`, `via_token` (boolean not null default false), `created_at`. Used for "Only me plus people I add", and for outside people. `via_token` is true while the access was granted by a token and no person has granted it again: the person can comment (when the permission allows) but can't approve, request changes or resolve threads (04). A person creating or changing the row sets it to false; a token creating it, or changing its permission, sets it to true.
+
+**`artifact_team_access`**: a team's access to one artifact. PK `(artifact_id, team_id)`, `org_id`, `permission`, `granted_by`, `via_token` (boolean not null default false, as on `artifact_access`), `created_at`. Index `(team_id)`. It's separate from `artifact_access` because that table's key needs a person, and widening it wouldn't be additive.
 
 **`share_links`**: `id`, `org_id`, `artifact_id`, `token_hash` unique (URL `/s/<secret>`), `permission`, `created_by`, `created_at`, `expires_at` null, `revoked_at` null.
 

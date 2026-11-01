@@ -41,6 +41,7 @@ export const threadStatus = pgEnum("thread_status", ["open", "fixed", "resolved"
 export const anchorState = pgEnum("anchor_state", ["ok", "updated", "orphaned", "moved_version"]);
 export const decisionKind = pgEnum("decision_kind", ["approved", "changes_requested"]);
 export const deviceStatus = pgEnum("device_status", ["pending", "approved", "denied", "used"]);
+export const teamRole = pgEnum("team_role", ["lead", "member"]);
 export const activityKind = pgEnum("activity_kind", [
   "published",
   "restored",
@@ -62,6 +63,10 @@ export const activityKind = pgEnum("activity_kind", [
   "shared",
   "joined",
   "recovered",
+  "team_created",
+  "team_deleted",
+  "team_member_added",
+  "team_member_removed",
 ]);
 
 // Organization and people
@@ -167,6 +172,47 @@ export const guests = pgTable("guests", {
   lastSeenAt: time("last_seen_at").notNull(),
 });
 
+// Teams
+
+export const teams = pgTable(
+  "teams",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+  },
+  (t) => [unique("teams_org_slug_unique").on(t.orgId, t.slug)],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    role: teamRole("role").notNull().default("member"),
+    addedBy: uuid("added_by")
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.personId] }), index("team_members_person_idx").on(t.personId)],
+);
+
 // Projects and artifacts (declared before the tables that reference them)
 
 export const brandProposals = pgTable("brand_proposals", {
@@ -262,6 +308,33 @@ export const artifactAccess = pgTable(
   (t) => [primaryKey({ columns: [t.artifactId, t.personId] })],
 );
 
+/** A team's access to one artifact. A separate table, because `artifact_access` requires a person. */
+export const artifactTeamAccess = pgTable(
+  "artifact_team_access",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    permission: permission("permission").notNull(),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => people.id),
+    /** As on `artifact_access`: a token made it and no person has confirmed it (04). */
+    viaToken: boolean("via_token").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artifactId, t.teamId] }),
+    index("artifact_team_access_team_idx").on(t.teamId),
+  ],
+);
+
 export const shareLinks = pgTable("share_links", {
   id: id(),
   orgId: uuid("org_id")
@@ -311,6 +384,8 @@ export const invites = pgTable("invites", {
   permission: permission("permission"),
   /** Created by a token; the `artifact_access` row it becomes carries the flag over. */
   viaToken: boolean("via_token").notNull().default(false),
+  /** Teams to join on accepting. Not a reference: a team deleted meanwhile is skipped. */
+  teamIds: uuid("team_ids").array(),
   tokenHash: text("token_hash").notNull().unique(),
   createdBy: uuid("created_by")
     .notNull()

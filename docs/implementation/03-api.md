@@ -88,7 +88,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 
 | Method, path | Auth | Notes |
 |---|---|---|
-| `GET /api/invites/:token` | none | Preview: `{ orgName, invitedBy, role, email, artifact?: { title } }`; 410 if used or expired. |
+| `GET /api/invites/:token` | none | Preview: `{ orgName, invitedBy, role, email, artifact?: { title }, teams?: [name] }`; 410 if used or expired. |
 | `POST /api/invites/:token/accept` | none | `{ name, password? }` → creates the person, sets `art_session`; the viewer then offers passkey registration. |
 | `GET /api/reset/:token` | none | Preview: `{ email }` or 410. |
 | `POST /api/reset/:token` | none | `{ password }` → sets it, ends the person's other sessions, signs in. |
@@ -117,15 +117,28 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 |---|---|---|
 | `GET /api/org` | `org.read` | Name, settings, domains (read-only view of `PUBLIC_URL`, `MORE_URLS`, `CONTENT_URL`, home domain). |
 | `PATCH /api/org` | `org.manage` | `{ name?, settings? }` |
-| `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. |
+| `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. Each person lists `teams: [{ slug, name, role }]`. |
+| `GET /api/people/search?q=` | `people.search` | `{ people: [{ id, name, email, role }] }`, 20 at most, matching a name or an email, outside people included. Under 2 characters finds nothing. Members and up, in a browser only. 60 a minute per person. |
 | `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. An admin or owner who becomes a member or reviewer also loses the invites and reset links they issued that are still unused. |
 | `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
 | `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner or itself. |
-| `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
+| `POST /api/invites` | `people.invite` | `{ email, role, teamIds? }` → `{ invite, url }`. `teamIds` are joined on accepting, and a team deleted meanwhile is skipped. A token gets 403 for an invite with teams. |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |
-| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. A token gets 403 unless the invite is for a member or reviewer. |
+| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. A token gets 403 unless the invite is for a member or reviewer, with no teams. |
 | `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ id, token }`, shown once. |
 | `GET /api/shares` | `org.manage` | Every outside share (people and links) across artifacts. |
+
+## Teams
+
+| Method, path | Action | Notes |
+|---|---|---|
+| `GET /api/teams` | `team.read` | `{ teams: [{ id, slug, name, description, members, role }] }`. `members` is a count; `role` is the caller's: `lead`, `member` or null. |
+| `POST /api/teams` | `team.manage` | `{ name, slug?, description? }` → `{ team }`. The slug comes from the name if it's left out. 409 if it's taken. |
+| `GET /api/teams/:slug` | `team.read` | `{ team, members: [{ id, name, email, role, orgRole }], shared: [{ id, project, slug, title, level }], permissions: { manage, members } }`. `shared` holds only what the caller can see. `members` is empty for a token, because it's the people directory. |
+| `PATCH /api/teams/:slug` | `team.manage` | `{ name?, slug?, description? }` |
+| `DELETE /api/teams/:slug` | `team.manage` | Ends the team and everything it was given. |
+| `PUT /api/teams/:slug/members/:personId` | `team.members` | `{ role? }`, `member` by default. Adds someone, or changes their role. 400 for making a reviewer or an outside person a lead. |
+| `DELETE /api/teams/:slug/members/:personId` | `team.members` | |
 
 ## Projects, artifacts and lists
 
@@ -192,9 +205,11 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 | Method, path | Action | Notes |
 |---|---|---|
-| `GET /api/artifacts/:id/access` | `artifact.share` | People added and links. |
+| `GET /api/artifacts/:id/access` | `artifact.share` | `{ people, teams, inherited, links }`. `people` were added directly. `teams` are `[{ id, slug, name, permission, viaToken, members }]`. `inherited` is everyone with access another way: `[{ id, name, email, role, level, via, sources: [{ slug, name }], capped }]`, with `via` one of `publisher`, `role` or `grant`, and `capped` when their role holds them below what they were given. `level` comes from the same function as `can()`. |
 | `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. `publish` is refused (400) for people outside the organization. Called with a token, the access or invite is marked `via_token`, so that person can comment but not decide or resolve; the same call by a person clears the mark (04). |
 | `DELETE /api/artifacts/:id/access/:personId` | `artifact.share` | |
+| `PUT /api/artifacts/:id/teams/:teamId` | `artifact.share` | `{ permission }`. A token may give `view` or `comment`, and gets 403 for `publish`. Its grant is marked `via_token`, cleared by a person granting it again, as for people above. |
+| `DELETE /api/artifacts/:id/teams/:teamId` | `artifact.share` | |
 | `POST /api/artifacts/:id/links` | `artifact.share` (and `org.settings.linkSharing`) | `{ permission, expiresIn?: "1d"\|"7d"\|"30d"\|null }` → `{ link, url }` |
 | `DELETE /api/artifacts/:id/links/:linkId` | `artifact.share` | Revoke; guests lose access at once. |
 
@@ -347,6 +362,6 @@ Both are on viewer origins only, never the Live-preview origin. Issuer, resource
 
 | Method, path | Notes |
 |---|---|
-| `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. A stream closes after 5 minutes and the browser reconnects, which rechecks access. 10 streams per caller. |
+| `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. Access is checked again on each 25-second heartbeat, with the caller as they are now, so a stream closes within one heartbeat of a removed person, an ended session, a revoked token or a lost team. A stream also closes after 5 minutes and the browser reconnects. 10 streams per caller. |
 | `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. `keys.p256dh` must be an uncompressed P-256 point (65 bytes) and `keys.auth` 16 bytes, base64url. 10 devices per person; ended sessions' devices are removed daily. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |
