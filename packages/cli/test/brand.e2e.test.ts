@@ -40,7 +40,7 @@ describe("brand", () => {
       .where(eq(pages.pageKey, "doc"))
       .orderBy(desc(versions.id))
       .limit(1);
-    return (row?.meta as { theme?: { accent?: string } }).theme;
+    return (row?.meta as { theme?: { accent?: string } } | undefined)?.theme;
   };
   const template = async (slug: string, extra: object = {}) => {
     const dir = mkdtempSync(join(tmpdir(), "artifacts-brand-use-"));
@@ -92,8 +92,8 @@ describe("brand", () => {
       join(folder, "escape.json"),
       JSON.stringify({ name: "x", theme: {}, fonts: [{ family: "A", weight: "400", src: "../secret" }] }),
     );
-    const escape = await cli(["brand", "preview", "escape.json"], env(), folder);
-    expect(escape.stderr).toContain("Keep fonts beside");
+    const outside = await cli(["brand", "preview", "escape.json"], env(), folder);
+    expect(outside.stderr).toContain("Keep fonts beside");
   });
 
   test("an agent goes from a design guide to a reviewed sample; a person applies it", async () => {

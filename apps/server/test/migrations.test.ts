@@ -43,7 +43,7 @@ describe("migrations", () => {
       const [row] =
         await check`select count(*)::int as n from information_schema.tables where table_schema = 'public'`;
       await check.end();
-      expect(row?.n).toBe(31);
+      expect(row?.n).toBe(32);
     } finally {
       await fresh.drop();
     }
