@@ -88,6 +88,8 @@ test("activity lists what happened, and filters", async ({ page }, info) => {
   await page.goto("/activity");
   await expect(page.getByText(/published Camera Buddy roadmap/).first()).toBeVisible();
   await shot(page, info.project.name, "05-5-activity");
+  // In the page's column, a filter that takes spare height swells whenever the list is short.
+  await expect(page.locator(".seg")).toHaveCSS("flex-grow", "0");
   await page.getByRole("button", { name: "Agents" }).click();
   await expect(page.locator(".av.agent").first()).toBeVisible();
 });
