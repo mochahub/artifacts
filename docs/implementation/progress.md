@@ -165,6 +165,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 83. **The stack ships as 0.2.0, not a patch.** It changes `init`'s default and adds a lint error, and raising `packages/cli/package.json` is how `release.yml` takes a chosen version.
 
 84. **Every token is shown as an agent.** A comment from a token with no detected agent used to read as the person's own. Now the server marks it, and shows it as "Zahin's agent". Rows from before this have no mark, and can't be told apart. Pushes for a publish stay tied to a named agent, so someone at their own terminal isn't told what they just did.
+85. **Brand in Settings: a hand-set brand is a proposal with no sample.** Reusing the row means it can be applied again after going back to the default, with no migration. Saving a name again replaces it, so tweaking doesn't fill the list. It takes no font hashes, because `orgBrand` would presign any blob: fonts stay only if the brand applied now already has them and the theme still names them.
 
 ## Needs you
 

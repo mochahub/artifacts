@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { Brand, BrandFont, BrandProposal, MAX_FONT_BYTES, OrgBrand } from "@artifacts/schema";
+import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import { TEMPLATES } from "@artifacts/schema/templates";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
@@ -10,16 +11,6 @@ import type { LocalBrand } from "../brand/cache.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { signedIn } from "./account.ts";
 import { kitFiles, previewRoot, publishRoot } from "./write.ts";
-
-export const BRAND_PROMPT = `Make Artifacts look like our brand.
-
-1. Read our brand guide: <paste a link, or the path to it>.
-2. Run: artifacts skill install, then read references/brand.md in the artifacts skill.
-3. Write a brand.json with our colours, fonts, corner radius and type. Only use font files we're licensed to embed and redistribute: they ship inside every published artifact, so ask me if you can't tell.
-4. Run: artifacts brand preview brand.json, and look at the contact sheet. Fix anything that doesn't look like us, or that fails contrast.
-5. Run: artifacts brand propose brand.json, and give me the link.
-
-A person applies it in Settings, Brand. You can't apply it yourself.`;
 
 const FontFile = BrandFont.omit({ hash: true, format: true }).extend({ src: z.string().min(1) });
 const BrandFile = Brand.omit({ fonts: true }).extend({ fonts: z.array(FontFile).default([]) });

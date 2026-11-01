@@ -1,5 +1,12 @@
-import { type BrandProposal, Brand as BrandSchema, type OrgBrand, ProposeBrand } from "@artifacts/schema";
-import { and, desc, eq } from "drizzle-orm";
+import {
+  type BrandProposal,
+  Brand as BrandSchema,
+  type OrgBrand,
+  ProposeBrand,
+  SaveBrand,
+} from "@artifacts/schema";
+import { FONT_STACKS } from "@artifacts/schema/theme-css";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
@@ -45,6 +52,7 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       .where(eq(brandProposals.orgId, c.get("org").id))
       .orderBy(desc(brandProposals.createdAt))
       .limit(50);
+    const applied = c.get("org").brand;
     const list: BrandProposal[] = rows.map(({ row, by, slug, project }) => ({
       id: row.id,
       name: row.name,
@@ -54,6 +62,7 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       agent: row.agent,
       createdAt: row.createdAt.toISOString(),
       appliedAt: row.appliedAt?.toISOString() ?? null,
+      current: Bun.deepEquals(row.brand, applied),
     }));
     return c.json(list);
   });
@@ -98,6 +107,51 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       createdAt: clock.now(),
     });
     return c.json({ id });
+  });
+
+  /**
+   * A brand a person sets by hand, in Settings. It's kept as a proposal with no sample, so it can be
+   * applied again later, and saving a name again replaces that one. No token can reach this (04).
+   */
+  routes.put("/api/brand", { action: "brand.apply" }, async (c) => {
+    const body = await parseBody(c, SaveBrand);
+    const orgId = c.get("org").id;
+    const caller = c.get("caller");
+    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
+    // Only fonts someone already published can stay: a hash sent here would presign any blob.
+    const kept = BrandSchema.nullable().safeParse(c.get("org").brand ?? null).data?.fonts ?? [];
+    const named = [body.theme.font, body.theme.display].filter((name) => name !== undefined);
+    const fonts = kept.filter((font) => named.includes(font.family));
+    for (const name of named) {
+      if (!Object.hasOwn(FONT_STACKS, name) && !fonts.some((font) => font.family === name)) {
+        throw new ApiError("invalid", `${name} isn't a font here. An agent can add your own.`);
+      }
+    }
+    const brand = { ...body, fonts };
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(brandProposals)
+        .where(
+          and(
+            eq(brandProposals.orgId, orgId),
+            eq(brandProposals.name, brand.name),
+            isNull(brandProposals.artifactId),
+            isNull(brandProposals.agent),
+          ),
+        );
+      await tx.insert(brandProposals).values({
+        id: Bun.randomUUIDv7(),
+        orgId,
+        name: brand.name,
+        brand,
+        proposedBy: caller.person.id,
+        createdAt: clock.now(),
+        appliedAt: clock.now(),
+        appliedBy: caller.person.id,
+      });
+      await tx.update(org).set({ brand }).where(eq(org.id, orgId));
+    });
+    return c.json({ ok: true });
   });
 
   /** A person's decision, in Settings. No token can reach this (04). */

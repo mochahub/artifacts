@@ -2,6 +2,8 @@
 
 Use this when someone asks you to make Artifacts match their brand guide. Everything starts with a good default, so this is optional.
 
+For colours, corners and built-in fonts, a person can also do this by hand in Settings, Brand. You're needed for a brand guide, or for font files.
+
 ## 1. Write `brand.json`
 
 Put it in a folder with any font files. Read the guide for real values, and don't invent them.

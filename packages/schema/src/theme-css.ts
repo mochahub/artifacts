@@ -47,6 +47,12 @@ function luminance(value: string) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/** WCAG's ratio between two colours, from 1 to 21. */
+export function contrast(one: string, two: string) {
+  const [high, low] = [luminance(one), luminance(two)].sort((a, b) => b - a) as [number, number];
+  return (high + 0.05) / (low + 0.05);
+}
+
 /** Whichever of near-black or white reads better on a colour. */
 export const onColor = (value: string) => {
   const light = luminance(value);
@@ -67,21 +73,29 @@ function neutralTokens(neutrals: Neutrals | undefined) {
 const block = (selector: string, tokens: readonly (readonly [string, string])[]) =>
   tokens.length > 0 ? `${selector}{${tokens.map(([name, value]) => `${name}:${value}`).join(";")}}` : "";
 
-/** The tokens a theme sets, as a stylesheet that goes after every other one on a canvas page. */
-export function themeCss(theme: ThemeValues | undefined): string {
-  if (!theme) return "";
+function baseTokens(theme: ThemeValues) {
   const accent = hex(theme.accent);
   const radius = within(theme.radius, 0, 32);
   const scale = within(theme.scale, 0.85, 1.25);
   const font = fontStack(theme.font);
   const display = fontStack(theme.display);
-  const tokens: (readonly [string, string])[] = [
+  return [
     ...(accent ? [["--art-accent", accent] as const, ["--art-on-accent", onColor(accent)] as const] : []),
     ...(font ? [["--art-ui", font] as const] : []),
     ...(display ? [["--art-display", display] as const] : []),
     ...(radius === null ? [] : [["--art-radius", `${radius}px`] as const]),
     ...(scale === null ? [] : [["--art-scale", String(scale)] as const]),
   ];
+}
+
+/** A light theme's tokens as style properties, for a preview that mustn't restyle the page around it. */
+export const themeStyle = (theme: ThemeValues): Record<string, string> =>
+  Object.fromEntries([...baseTokens(theme), ...neutralTokens(theme.neutrals)]);
+
+/** The tokens a theme sets, as a stylesheet that goes after every other one on a canvas page. */
+export function themeCss(theme: ThemeValues | undefined): string {
+  if (!theme) return "";
+  const tokens = baseTokens(theme);
   const light = neutralTokens(theme.neutrals);
   const dark = neutralTokens(theme.neutralsDark);
   return [

@@ -169,10 +169,11 @@ Compact, paged answers for agents, which the CLI's `search`, `list`, `read` and 
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/brand` | `brand.read` | `{ brand, fonts: [{ hash, url }] }`. `brand` is null for the default look; `url` is a presigned GET. |
-| `DELETE /api/brand` | `brand.apply` | Back to the default look. |
-| `GET /api/brand/proposals` | `brand.read` | The latest 50: `[{ id, name, brand, sample: { project, slug } \| null, proposedBy, agent, createdAt, appliedAt }]`. |
+| `PUT /api/brand` | `brand.apply` (a person) | `{ name, theme }`, set by hand in Settings, and applied at once. It's kept as a proposal with no sample, and saving a name again replaces that proposal. `fonts` is refused: `theme.font` and `theme.display` name a built-in font, or a family of the brand applied now, whose files stay. |
+| `DELETE /api/brand` | `brand.apply` | Back to the default look. Proposals stay, so any can be applied again. |
+| `GET /api/brand/proposals` | `brand.read` | The latest 50: `[{ id, name, brand, sample: { project, slug } \| null, proposedBy, agent, createdAt, appliedAt, current }]`. `current` is true for any that match the brand applied now. |
 | `POST /api/brand/proposals` | `brand.propose` | `{ brand, project, slug, agent? }`, naming a published sample the caller may publish to. Each font's hash must be a file in its latest version → `{ id }`. Changes nothing until it's applied. |
-| `POST /api/brand/proposals/:id/apply` | `brand.apply` (a person) | Copies it to `org.brand`. |
+| `POST /api/brand/proposals/:id/apply` | `brand.apply` (a person) | Copies it to `org.brand`, as often as you like. |
 
 ## Lifecycle: archive and delete
 
