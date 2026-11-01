@@ -17,11 +17,12 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 | 08 | [Micro apps](08-micro-apps.md) | **Contract** | Bridge messages, data store rules and limits, the backend sandbox, request flow |
 | 09 | [Deploying](09-deploy.md) | **Contract** | Images, environment variables, the Railway template, Compose, releases |
 | 10 | [Testing and acceptance](10-testing-and-acceptance.md) | Guide | Test layers, fixtures, what the agent verifies versus the user |
-| 11 | [Build order](11-milestones.md) | Guide | Spikes S1–S8, milestones M0–M11 |
+| 11 | [Build order](11-milestones.md) | Guide | Spikes S1–S8, milestones M0–M16 |
 | — | [Spike results](spikes.md) | Record | What each M0 spike found, and the design changes it caused |
 | — | [Load notes](load-notes.md) | Record | Local measurements of the app under load |
 | — | [HANDOFF.md](HANDOFF.md) | Prompt | The brief for the building agent |
 | — | [HANDOFF-M2-M11.md](HANDOFF-M2-M11.md) | Prompt | The brief for building M2–M11 autonomously |
+| — | [HANDOFF-M12-M16.md](HANDOFF-M12-M16.md) | Prompt | The brief for the hosted library, templates, brand and connector |
 
 Also in `docs/`:
 - [hosting-evaluation.md](../hosting-evaluation.md): self-hosted versus a hosted service

@@ -570,3 +570,7 @@ Rules: [SPEC.md §5.5](SPEC.md#55-archive-and-delete).
 | CLI commands | [07 The CLI and the skill](implementation/07-cli-and-skill.md) |
 | Micro apps | [08 Micro apps](implementation/08-micro-apps.md) |
 | Deploying and releases | [09 Deploying](implementation/09-deploy.md) |
+
+## Agents: the library and the connector
+
+Agents reach hosted work three ways, all ending in the same functions in `apps/server/src/library/` and the same `can()`: the CLI (`search`, `list`, `read`, `view`), the local `artifacts mcp`, and the hosted MCP at `/api/mcp`. The hosted one signs in through our own OAuth server (`apps/server/src/oauth/`). Rendering stays on the client: `artifacts pack` writes a publish to a folder, files go straight to the bucket, and the server commits by hash. [03](implementation/03-api.md#oauth-and-the-hosted-mcp) has the details.

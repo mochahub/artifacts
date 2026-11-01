@@ -22,6 +22,7 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M13 Templates, guides and theme | `m13-templates` | see PR | see PR |
 | M14 Brand setup | `m14-brand` | see PR | see PR |
 | M15 OAuth, hosted MCP and publishing | `m15-connector` | see PR | see PR |
+| M16 Articles without the CLI | `m16-articles` | see PR | see PR |
 
 ## Verified
 
@@ -56,6 +57,8 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M14 (2026-10-31):** `packages/cli/test/brand.e2e.test.ts` runs the real CLI from a sample `brand.json` to a preview, a published sample every template appears in, a reviewer's comment on it, and a person applying it. Tokens, including the owner's, get 403 on applying and on clearing. Precedence, taking a brand off, a font that isn't in the sample, and rendering from the cache with the server stopped are all covered. The font file in the test is a stand-in, so no real font has been drawn through this path.
 
 - **M15 (2026-11-01):** a scripted OAuth client, with no browser, covers discovery from a 401, registration, PKCE, code exchange, refresh, revocation, and every negative case in the brief (`apps/server/test/api/oauth.test.ts`). `packages/cli/test/connector.e2e.test.ts` runs the whole loop with a real CLI that has no sign-in: pack, upload, commit, search, read, view, read comments, reply. **No real client has connected:** nothing here has met Claude Code or Codex.
+
+- **M16 (2026-11-01):** `apps/server/test/api/articles.test.ts` publishes from a plain HTTP client with no filesystem or shell, then reads it through the viewer's route, `read`, search and `pull`'s bundle. An XSS payload comes out as a CLI publish's does, and the stored HTML is unchanged by sanitizing it again. That test also found that M13's `:::stats`, `:::compare` and `:::steps` never survived the allowlist, because the attribute name didn't match. Fixed on `m13-templates`, with a test.
 
 ## Decisions to review
 
@@ -148,6 +151,11 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 74. **M15, a connector is listed per consent,** so reconnecting a client adds a row rather than replacing one.
 75. **M15, no CORS on the token endpoint.** A browser-only client couldn't finish. Native and server-side clients are unaffected.
 76. **M15, the local MCP** answers `server/discover` as well as `initialize`.
+
+77. **M16, no images through the article tool.** A client with no files has no way to give them, and the brief allowed limiting it. `artifacts pack` covers them.
+78. **M16, article-only means one page called `doc`.** Anything else would lose its other pages, so it's refused.
+79. **M16, the pipeline moved to `packages/schema`,** which already held the sanitizer. Its packages moved with it; there are no new ones.
+80. **M16, Mermaid is refused,** because drawing it needs a browser, which the server doesn't run.
 
 ## Needs you
 

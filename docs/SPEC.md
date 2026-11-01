@@ -770,7 +770,8 @@ A hosted MCP server at `<viewer domain>/api/mcp` makes a remote box easy to set 
 - **Sign-in** is OAuth 2.1 with our own server as the authorization server, on the existing email, password and passkey sign-in, plus a consent screen. Connectors appear in Settings and can be ended there. Scopes are read, comment and publish. A connector can't resolve, decide, delete or manage. CLI tokens also work as a static bearer.
 - **Tools:** search, list, read, view, status, comments, reply and versions, with the same permission checks as the API, and two for publishing. Templates and guides are resources, so a connected agent has the guidance without the skill.
 - **Publishing:** the client renders, and the server stays browserless. `artifacts pack` lints, renders and writes a publish to a local folder; files go straight to the bucket, and a commit payload goes as a blob and is committed by hash, so neither passes through the model.
-- **What's still needed on a box:** the CLI and WebKit, to render canvases. Reading, commenting and replying need neither.
+- **Articles with no CLI:** a tool publishes Markdown with a required summary, with no filesystem or shell, through the same commit and sanitizer as the CLI. It takes text only: images, diagrams and embeds need the CLI.
+- **What's still needed on a box:** the CLI and WebKit, to render canvases or anything with images. Reading, commenting, replying and publishing text articles need neither.
 - It's opt-in: `artifacts mcp install` adds it. The local `artifacts mcp` stays, for tools on the same machine.
 
 ## 11. Repo layout (this repo)

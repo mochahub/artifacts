@@ -89,7 +89,7 @@ The **contact sheet** `.artifacts/contact-sheet.png` tiles every 1x render with 
 
 ## Building articles (CLI)
 
-Pipeline: unified, then `remark-parse`, `remark-gfm` and `remark-directive`. Custom plugins handle:
+The pipeline is in `packages/schema/src/article.ts`, which the CLI uses and the server uses for `artifacts_publish_article` (03). Pipeline: unified, then `remark-parse`, `remark-gfm` and `remark-directive`. Custom plugins handle:
 - **callouts:** `> [!NOTE]`
 - **figures:** an image followed by an italic paragraph becomes `figure` with `figcaption`
 - **verdict badges:** `{Verified}`, `{Unverified}`

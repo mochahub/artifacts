@@ -21,7 +21,7 @@ artifacts mcp install                       # Claude Code and Codex, opt-in
 claude mcp add --transport http artifacts https://art.example.com/api/mcp
 ```
 
-It can search, read and view hosted work, read comments, reply and publish. On a box with no sign-in, a CLI token in an environment variable works too: `artifacts mcp install --token-env ARTIFACTS_MCP_TOKEN`. Publishing a canvas still needs the CLI and WebKit on that box, because rendering happens on the client: `artifacts pack` does it, and needs no sign-in.
+It can search, read and view hosted work, read comments, reply, publish text articles with no CLI at all, and publish anything else with one. On a box with no sign-in, a CLI token in an environment variable works too: `artifacts mcp install --token-env ARTIFACTS_MCP_TOKEN`. Publishing a canvas still needs the CLI and WebKit on that box, because rendering happens on the client: `artifacts pack` does it, and needs no sign-in.
 
 ## Requirements
 
