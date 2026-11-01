@@ -13,6 +13,7 @@ import {
 } from "../components/review.tsx";
 import { Sheet } from "../components/sheets.tsx";
 import { plural } from "../format.ts";
+import { tapped } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { readStored, writeStored } from "../storage.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
@@ -66,14 +67,15 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
   const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
   const openThread = all.find((thread) => thread.id === openId.value) ?? null;
 
-  // ?c=<n> opens a thread, once.
-  const deepLinked = useRef(false);
+  // ?c=<n> opens a thread, once for each link or tapped notification.
+  const deepLinked = useRef("");
+  const link = `${location.search}/${tapped.value}`;
   useEffect(() => {
     const n = Number(new URLSearchParams(location.search).get("c"));
-    if (deepLinked.current || !n || all.length === 0) return;
+    if (deepLinked.current === link || !n || all.length === 0) return;
     const thread = all.find((entry) => entry.n === n);
     if (!thread) return;
-    deepLinked.current = true;
+    deepLinked.current = link;
     openId.value = thread.id;
   });
   const openCount = all.filter((thread) => thread.status === "open").length;

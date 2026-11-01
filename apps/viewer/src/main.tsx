@@ -1,10 +1,10 @@
 import { useSignal } from "@preact/signals";
 import { render } from "preact";
 import { useEffect } from "preact/hooks";
-import { ErrorBoundary, LocationProvider, Route, Router } from "preact-iso";
+import { ErrorBoundary, LocationProvider, Route, Router, useLocation } from "preact-iso";
 import { InstallSheet } from "./components/install.tsx";
 import { Sheet } from "./components/sheets.tsx";
-import { askInstall } from "./notify.ts";
+import { askInstall, followTapped } from "./notify.ts";
 import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
 import { ArtifactPage } from "./routes/artifact.tsx";
@@ -52,6 +52,39 @@ function QuickSearch() {
   );
 }
 
+// iOS can show the app before the worker hears of the tap, and a window still waking can miss its message.
+const TAP_CHECKS_MS = [400, 1500, 3000];
+
+/** A tap can land while starting, on coming back, or with the app already open. */
+function TappedNotifications() {
+  const { route } = useLocation();
+  useEffect(() => {
+    const follow = () =>
+      followTapped((url) => {
+        if (url !== location.pathname + location.search) route(url);
+      });
+    let checks: ReturnType<typeof setTimeout>[] = [];
+    const watch = () => {
+      checks.forEach(clearTimeout);
+      follow();
+      checks = TAP_CHECKS_MS.map((ms) => setTimeout(follow, ms));
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") watch();
+    };
+    watch();
+    document.addEventListener("visibilitychange", onVisible);
+    navigator.serviceWorker?.addEventListener("message", follow);
+    navigator.serviceWorker?.startMessages();
+    return () => {
+      checks.forEach(clearTimeout);
+      document.removeEventListener("visibilitychange", onVisible);
+      navigator.serviceWorker?.removeEventListener("message", follow);
+    };
+  }, []);
+  return null;
+}
+
 function App() {
   if (!ready.value) return null;
   if (bootFailed.value) {
@@ -89,6 +122,7 @@ function App() {
           <Route default component={NotFound} />
         </Router>
         <QuickSearch />
+        <TappedNotifications />
         {askInstall.value && (
           <InstallSheet
             onClose={() => {
