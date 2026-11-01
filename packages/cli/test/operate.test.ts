@@ -139,7 +139,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
 
   test("upgrade --server moves the service to the release's image", async () => {
     const { env: e, log } = env();
-    const result = await cli(["upgrade", "--server", "--to", "0.1.0", "--json"], {
+    const result = await cli(["upgrade", "--server", "--to", VERSION, "--json"], {
       ...e,
       ARTIFACTS_RAILWAY_POLL_MS: "20",
     });
@@ -147,10 +147,10 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(result.code).toBe(0);
     expect(JSON.parse(result.stdout.slice(result.stdout.indexOf("{")))).toEqual({
       cli: VERSION,
-      server: "0.1.0",
+      server: VERSION,
     });
     expect(readFileSync(log, "utf8")).toContain(
-      "service source connect --image ghcr.io/mochahub/artifacts:0.1.0 --service artifacts",
+      `service source connect --image ghcr.io/mochahub/artifacts:${VERSION} --service artifacts`,
     );
   });
 
