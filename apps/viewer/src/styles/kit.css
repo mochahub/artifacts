@@ -519,10 +519,13 @@
 }
 .seg {
   display: flex;
-  flex: 1;
+  flex: none;
   background: var(--soft);
   border-radius: 99px;
   padding: 3px;
+}
+.row > .seg {
+  flex: 1;
 }
 .seg button {
   flex: 1;
@@ -1387,7 +1390,6 @@
   }
   .panel .seg {
     margin: 0 12px 10px;
-    flex: none;
   }
 }
 .hint {
