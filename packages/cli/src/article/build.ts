@@ -85,7 +85,7 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       };
       if (!directive.type.endsWith("Directive")) return;
       if (directive.type === "containerDirective" && COMPONENTS.has(directive.name ?? "")) {
-        directive.data = { hName: "div", hProperties: { "data-component": directive.name } };
+        directive.data = { hName: "div", hProperties: { dataComponent: directive.name } };
       } else if (directive.name === "frame") {
         directive.data = {
           hName: "div",
