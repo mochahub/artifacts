@@ -16,6 +16,7 @@ import { plural } from "../format.ts";
 import { tapped } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { readStored, writeStored } from "../storage.ts";
+import { useLiquidChrome, usePool } from "./liquid.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
 
 export type ArticlePage = {
@@ -42,6 +43,9 @@ const stored = (key: string, fallback: string) => readStored(`artifacts.read.${k
 
 export function ArticleView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
   const body = useRef<HTMLDivElement>(null);
+  const capsule = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const pool = useRef<HTMLElement>(null);
   const contents = useSignal(false);
   const settings = useSignal(false);
   const changes = useSignal(false);
@@ -59,8 +63,10 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
   const theme = useSignal(stored("theme", "auto"));
   const changedCount = page.blocks.filter((block) => block.changed).length;
   const loaded = useSignal(0);
+  useLiquidChrome({ capsule, bar, body, loaded: loaded.value });
   const draft = useSignal<Draft | null>(null);
   const picking = useSignal(false);
+  usePool(bar, pool, [changes.value, picking.value]);
   const selection = useSignal<{ draft: Draft; x: number; y: number } | null>(null);
   const openId = useSignal<string | null>(null);
   const listOpen = useSignal(false);
@@ -211,7 +217,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         </div>
         <div ref={body} />
       </article>
-      <div class="capsule glass">
+      <div ref={capsule} class="capsule glass liquid">
         <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
           <Menu />
         </button>
@@ -235,7 +241,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         </button>
       </div>
       {settings.value && (
-        <div class="popover glass">
+        <div class="popover glass liquid thick">
           <span class="gh">Text size</span>
           <div class="seg">
             {SIZES.map((value, index) => (
@@ -284,7 +290,8 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           </div>
         </div>
       )}
-      <div class="vbar glass">
+      <div ref={bar} class="vbar glass liquid">
+        <i ref={pool} class="pool" />
         <button
           type="button"
           class="vb"
@@ -293,7 +300,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           }}
         >
           <List />
-          Contents
+          <span class="l">Contents</span>
         </button>
         <button
           type="button"
@@ -304,7 +311,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           }}
         >
           <Triangle />
-          Changes
+          <span class="l">Changes</span>
         </button>
         <i class="vsep" />
         {canComment && (
@@ -317,7 +324,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
             }}
           >
             <MessageCircle />
-            Comment
+            <span class="l">Comment</span>
           </button>
         )}
         <button
@@ -328,11 +335,11 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           }}
         >
           <MessagesSquare />
-          Comments
+          <span class="l">Comments</span>
           {openCount > 0 && <b class="count">{openCount}</b>}
         </button>
       </div>
-      {picking.value && <div class="hint glass">Tap a paragraph</div>}
+      {picking.value && <div class="hint glass liquid thick">Tap a paragraph</div>}
       {selection.value && !draft.value && (
         <button
           type="button"
