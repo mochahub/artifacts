@@ -56,4 +56,8 @@ describe("articles", () => {
     const built = build("::chart{src=c.json}\n", root, { "c.json": "h" });
     expect(built.problems.map((problem) => problem.rule)).toEqual(["files/missing"]);
   });
+  test("stats, compare and steps survive the allowlist", () => {
+    const built = build(":::stats\n- **41%** fewer\n:::\n", "/nowhere", {});
+    expect(built.html).toContain('data-component="stats"');
+  });
 });
