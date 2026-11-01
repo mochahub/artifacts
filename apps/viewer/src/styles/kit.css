@@ -1146,12 +1146,14 @@
 }
 .article [data-component="steps"] > ol > li {
   counter-increment: step;
-  display: grid;
-  grid-template-columns: 2.2rem 1fr;
+  position: relative;
+  padding-left: 2.2rem;
   margin-bottom: 12px;
 }
 .article [data-component="steps"] > ol > li::before {
   content: counter(step);
+  position: absolute;
+  left: 0;
   font: 700 1.3em / 1.2 var(--theme-display, var(--serif));
 }
 .article [data-verdict] {
