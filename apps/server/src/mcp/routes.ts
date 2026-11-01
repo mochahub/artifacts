@@ -610,6 +610,12 @@ export function mcpRoutes(routes: Routes, deps: Deps, services: Services) {
     if (!(caller.kind === "cliToken" || caller.kind === "orgToken")) {
       throw new ApiError("unauthenticated", "Sign in first.");
     }
+    // A bearer skips the CSRF guard, but the transport has its own rule: DNS rebinding comes from a
+    // browser, which always says where it is. Native clients send no Origin.
+    const origin = c.req.header("origin");
+    if (origin && !(await deps.origins()).includes(origin)) {
+      throw new ApiError("forbidden", "This request came from another site.");
+    }
     const raw = await c.req.text();
     if (raw.length > MAX_REQUEST) throw new ApiError("too_large", "That's too long.", { limit: MAX_REQUEST });
     let message: { id?: unknown; method?: string; params?: Record<string, unknown> };
