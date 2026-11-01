@@ -39,6 +39,8 @@ export function setupRoutes(routes: Routes, deps: Deps) {
         name: body.orgName,
         homeDomain,
         settings: DEFAULT_ORG_SETTINGS,
+        googleClientId: body.google?.clientId ?? null,
+        googleClientSecret: body.google?.clientSecret ?? null,
         pseudonymKey: randomBytes(32),
       });
       const [person] = await tx

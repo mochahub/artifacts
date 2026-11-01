@@ -8,6 +8,7 @@ import {
   blobs,
   deviceCodes,
   frames,
+  googleStates,
   invites,
   oauthClients,
   oauthCodes,
@@ -151,6 +152,8 @@ export async function expireLeftovers(deps: Deps) {
     );
   // Their push subscriptions go with them (cascade): a dead device would otherwise count toward a person's ten.
   await deps.db.delete(sessions).where(lt(sessions.expiresAt, now));
+  await deps.db.delete(googleStates).where(lt(googleStates.expiresAt, now));
+
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
   await expireLogs(deps);

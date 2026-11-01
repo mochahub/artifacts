@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -69,6 +70,7 @@ export const activityKind = pgEnum("activity_kind", [
   "team_member_added",
   "team_member_removed",
   "project_access_changed",
+  "identity_linked",
 ]);
 
 // Organization and people
@@ -82,6 +84,12 @@ export const org = pgTable("org", {
   vapidPrivate: text("vapid_private"),
   lastDigestAt: time("last_digest_at"),
   brand: jsonb("brand"),
+  /** Stored as is, like `vapid_private`: tying it to SESSION_SECRET would stop that being rotated (04). */
+  googleClientId: text("google_client_id"),
+  googleClientSecret: text("google_client_secret"),
+  /** Off until an admin has finished a round trip with these credentials. */
+  googleEnabled: boolean("google_enabled").notNull().default(false),
+  googleTestedBy: uuid("google_tested_by").references((): AnyPgColumn => people.id),
   pseudonymKey: bytea("pseudonym_key").notNull(),
   createdAt: createdAt(),
 });
@@ -135,6 +143,44 @@ export const passkeys = pgTable("passkeys", {
   lastUsedAt: time("last_used_at"),
 });
 
+/** A sign-in from outside. `subject` is the provider's own id: email can change and isn't unique. */
+export const identities = pgTable(
+  "identities",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    email: text("email").notNull(),
+    hostedDomain: text("hosted_domain"),
+    createdAt: createdAt(),
+    lastUsedAt: time("last_used_at"),
+  },
+  (t) => [
+    unique("identities_org_provider_subject_unique").on(t.orgId, t.provider, t.subject),
+    unique("identities_person_provider_unique").on(t.personId, t.provider),
+  ],
+);
+
+/** Who an admin removed, by a hash of Google's id: a Workspace's open door mustn't let them back in. */
+export const removedIdentities = pgTable(
+  "removed_identities",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    provider: text("provider").notNull(),
+    subjectHash: text("subject_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.provider, t.subjectHash] })],
+);
+
 export const webauthnChallenges = pgTable("webauthn_challenges", {
   id: id(),
   orgId: uuid("org_id")
@@ -162,6 +208,25 @@ export const sessions = pgTable("sessions", {
   expiresAt: time("expires_at").notNull(),
   userAgent: text("user_agent"),
   ip: text("ip"),
+});
+
+/** One Google round trip, for 10 minutes and one use. `browser_hash` ties it to the cookie that started it. */
+export const googleStates = pgTable("google_states", {
+  id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  stateHash: text("state_hash").notNull().unique(),
+  browserHash: text("browser_hash").notNull(),
+  nonce: text("nonce").notNull(),
+  codeVerifier: text("code_verifier").notNull(),
+  intent: text("intent").notNull(),
+  sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+  personId: uuid("person_id").references(() => people.id),
+  inviteId: uuid("invite_id").references(() => invites.id, { onDelete: "cascade" }),
+  next: text("next").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  expiresAt: time("expires_at").notNull(),
 });
 
 export const guests = pgTable("guests", {

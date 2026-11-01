@@ -9,7 +9,7 @@ import {
 import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { personView, startSession } from "../auth/sessions.ts";
-import { passkeys, passwords, people, sessions, webauthnChallenges } from "../db/schema.ts";
+import { identities, passkeys, passwords, people, sessions, webauthnChallenges } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { isUuid } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
@@ -232,15 +232,17 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
 
   routes.delete("/api/me/passkeys/:id", { action: "account.manage", recentAuth: true }, async (c) => {
     const row = await ownPasskey(c as ApiContext);
-    const [others, password] = await Promise.all([
+    const [others, password, linked] = await Promise.all([
       db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, row.personId)),
       db
         .select({ id: passwords.personId })
         .from(passwords)
         .where(eq(passwords.personId, row.personId))
         .limit(1),
+      db.select({ id: identities.id }).from(identities).where(eq(identities.personId, row.personId)),
     ]);
-    if (others.length <= 1 && password.length === 0) {
+    const google = c.get("org").googleEnabled && linked.length > 0;
+    if (others.length <= 1 && password.length === 0 && !google) {
       throw new ApiError("conflict", "This is your only way to sign in. Add another first.");
     }
     await db.delete(passkeys).where(eq(passkeys.id, row.id));

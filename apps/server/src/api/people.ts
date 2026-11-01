@@ -15,6 +15,7 @@ import {
   activity,
   artifactAccess,
   artifacts,
+  identities,
   invites,
   org,
   passkeys,
@@ -22,6 +23,7 @@ import {
   people,
   projectAccess,
   projects,
+  removedIdentities,
   resetLinks,
   sessions,
   shareLinks,
@@ -34,6 +36,7 @@ import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
 import { isUuid, projectGrants } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
+import { acceptInvite, findLiveInvite } from "./join.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 import { latestRelease } from "./updates.ts";
 
@@ -206,7 +209,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       )
       .orderBy(desc(invites.createdAt));
     const ids = rows.map((row) => row.id);
-    const [withPassword, withPasskey, shares, memberships, onProjects] = await Promise.all([
+    const [withPassword, withPasskey, shares, memberships, onProjects, linked] = await Promise.all([
       ids.length
         ? db.select({ id: passwords.personId }).from(passwords).where(inArray(passwords.personId, ids))
         : [],
@@ -250,12 +253,16 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
             .where(inArray(projectAccess.personId, ids))
             .orderBy(asc(projects.name))
         : [],
+      ids.length
+        ? db.select({ id: identities.personId }).from(identities).where(inArray(identities.personId, ids))
+        : [],
     ]);
     return c.json({
       people: rows.map((row) => ({
         ...personView(row),
         password: withPassword.some((entry) => entry.id === row.id),
         passkeys: withPasskey.filter((entry) => entry.id === row.id).length,
+        google: linked.some((entry) => entry.id === row.id),
         shares: shares
           .filter((entry) => entry.personId === row.id)
           .map(({ title, permission }) => ({ title, permission })),
@@ -310,6 +317,21 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       await tx.delete(sessions).where(eq(sessions.personId, person.id));
       await tx.delete(teamMembers).where(eq(teamMembers.personId, person.id));
       await tx.delete(projectAccess).where(eq(projectAccess.personId, person.id));
+      const linked = await tx.delete(identities).where(eq(identities.personId, person.id)).returning();
+      if (linked.length > 0) {
+        await tx
+          .insert(removedIdentities)
+          .values(
+            linked.map(({ orgId, provider, subject }) => ({
+              orgId,
+              provider,
+              subjectHash: sha256(subject),
+              createdAt: now,
+            })),
+          )
+          .onConflictDoNothing();
+      }
+
       await tx
         .update(tokens)
         .set({ revokedAt: now })
@@ -446,30 +468,8 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     return c.json({ url: inviteUrl(secret) });
   });
 
-  async function liveInvite(c: ApiContext) {
-    const [row] = await db
-      .select()
-      .from(invites)
-      .where(
-        and(
-          eq(invites.orgId, c.get("org").id),
-          eq(invites.tokenHash, sha256(c.req.param("token") as string)),
-        ),
-      )
-      .limit(1);
-    if (!row || row.acceptedAt || row.revokedAt || row.expiresAt <= clock.now()) {
-      throw new ApiError("gone", "This invite has expired or was already used. Ask for a new one.");
-    }
-    if (row.artifactId) {
-      const [target] = await db
-        .select({ deletedAt: artifacts.deletedAt })
-        .from(artifacts)
-        .where(eq(artifacts.id, row.artifactId))
-        .limit(1);
-      if (!target || target.deletedAt) throw new ApiError("gone", "This invite no longer works.");
-    }
-    return row;
-  }
+  const liveInvite = (c: ApiContext) =>
+    findLiveInvite(deps, c.get("org").id, { tokenHash: sha256(c.req.param("token") as string) });
 
   routes.get("/api/invites/:token", { public: true }, async (c) => {
     const row = await liveInvite(c as ApiContext);
@@ -506,87 +506,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     const invite = await liveInvite(c as ApiContext);
     const body = await parseBody(c, AcceptInvite);
     const hash = body.password ? await Bun.password.hash(body.password, { algorithm: "argon2id" }) : null;
-    const now = clock.now();
-    const person = await db.transaction(async (tx) => {
-      // Single use, even if the link is opened twice at once.
-      const taken = await tx
-        .update(invites)
-        .set({ acceptedAt: now })
-        .where(and(eq(invites.id, invite.id), isNull(invites.acceptedAt)))
-        .returning({ id: invites.id });
-      if (taken.length === 0) throw new ApiError("gone", "This invite was already used.");
-      const [existing] = await tx
-        .select({ id: people.id })
-        .from(people)
-        .where(
-          and(
-            eq(people.orgId, invite.orgId),
-            sql`lower(${people.email}) = lower(${invite.email})`,
-            isNull(people.removedAt),
-          ),
-        )
-        .limit(1);
-      if (existing) throw new ApiError("conflict", "That email already has an account. Sign in instead.");
-      const [row] = await tx
-        .insert(people)
-        .values({
-          id: Bun.randomUUIDv7(),
-          orgId: invite.orgId,
-          email: invite.email,
-          name: body.name,
-          role: invite.role,
-        })
-        .returning();
-      if (!row) throw new Error("no person row");
-      if (hash) await tx.insert(passwords).values({ personId: row.id, orgId: invite.orgId, hash });
-      if (invite.artifactId && invite.permission) {
-        await tx.insert(artifactAccess).values({
-          artifactId: invite.artifactId,
-          orgId: invite.orgId,
-          personId: row.id,
-          permission: invite.permission,
-          grantedBy: invite.createdBy,
-          viaToken: invite.viaToken,
-        });
-      }
-      if (invite.projectId && invite.projectPermission) {
-        await tx.insert(projectAccess).values({
-          id: Bun.randomUUIDv7(),
-          orgId: invite.orgId,
-          projectId: invite.projectId,
-          personId: row.id,
-          permission: invite.projectPermission,
-          grantedBy: invite.createdBy,
-        });
-      }
-      if (invite.teamIds?.length) {
-        // A team deleted since the invite was made is skipped, not an error for the person joining.
-        const live = await tx
-          .select({ id: teams.id })
-          .from(teams)
-          .where(and(eq(teams.orgId, invite.orgId), inArray(teams.id, invite.teamIds)));
-        if (live.length > 0) {
-          await tx.insert(teamMembers).values(
-            live.map((team) => ({
-              teamId: team.id,
-              personId: row.id,
-              orgId: invite.orgId,
-              addedBy: invite.createdBy,
-            })),
-          );
-        }
-      }
-      await tx.insert(activity).values({
-        id: Bun.randomUUIDv7(),
-        orgId: invite.orgId,
-        artifactId: invite.artifactId,
-        actorPersonId: row.id,
-        kind: "joined",
-        payload: { role: invite.role },
-        createdAt: now,
-      });
-      return row;
-    });
+    const person = await db.transaction((tx) =>
+      acceptInvite(tx, invite, { name: body.name, passwordHash: hash, now: clock.now() }),
+    );
     await startSession(c, deps, person.orgId, person.id);
     return c.json({ person: personView(person) });
   });

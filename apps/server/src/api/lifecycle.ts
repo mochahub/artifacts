@@ -92,6 +92,7 @@ const ADMIN_ACTIVITY = [
   "team_member_added",
   "team_member_removed",
   "project_access_changed",
+  "identity_linked",
 ];
 
 export function lifecycleRoutes(routes: Routes, deps: Deps) {

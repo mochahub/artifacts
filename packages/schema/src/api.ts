@@ -66,6 +66,8 @@ export const Meta = z.object({
   publicUrl: z.string(),
   contentUrl: z.string().nullable(),
   viewerOrigins: z.array(z.string()),
+  /** Whether "Continue with Google" shows. Absent from older servers. */
+  google: z.boolean().optional(),
 });
 export type Meta = z.infer<typeof Meta>;
 
@@ -80,6 +82,8 @@ export const SetupRequest = z.object({
   password: Password,
   clientName: z.string().min(1),
   agent: z.string().optional(),
+  /** Stored, and off until an admin tests it in Settings. */
+  google: z.object({ clientId: z.string().min(1), clientSecret: z.string().min(1) }).optional(),
 });
 export const SetupResponse = z.object({ person: Person, token: z.string() });
 export const RecoverRequest = z.object({ setupToken: z.string(), email: Email });
@@ -102,6 +106,16 @@ export const SessionRow = z.object({
 export const ChangePassword = z.object({ password: Password });
 export const AddPasskeyVerify = PasskeyVerify.extend({ name: z.string().optional() });
 export const RenamePasskey = z.object({ name: z.string().min(1) });
+export const IdentityList = z.object({
+  identities: z.array(
+    z.object({ id: Id, provider: z.string(), email: z.string(), lastUsedAt: Time.nullable() }),
+  ),
+  /** What the person can confirm themselves with, for the re-auth sheet. */
+  passkeys: z.number().int(),
+  password: z.boolean(),
+  google: z.boolean(),
+});
+export type IdentityList = z.infer<typeof IdentityList>;
 export const Reauth = z.union([z.object({ password: z.string() }), PasskeyVerify]);
 
 // Invites, resets and joining
@@ -179,7 +193,20 @@ export const OrgLimits = z.object({
   writesPerSecond: z.number().int().positive(),
 });
 
+/** The parts of the address that belong to a Google Workspace, never a consumer account. */
+export const CONSUMER_DOMAINS = ["gmail.com", "googlemail.com"];
 const ProjectAccessDefault = z.enum(["org", "restricted"]);
+/** Opt-in: someone whose verified `hd` claim is this domain can join without an invite. */
+export const GoogleAutoJoin = z.object({
+  domain: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/)
+    .refine((domain) => !CONSUMER_DOMAINS.includes(domain), "That's not a Workspace domain."),
+  role: z.enum(["member", "reviewer"]),
+  teamIds: z.array(Id).max(50).default([]),
+});
 const StoredSettings = z.object({
   defaultVisibility: Visibility,
   linkSharing: z.boolean(),
@@ -189,8 +216,31 @@ const StoredSettings = z.object({
 /** What a new project starts as. A default here, so settings stored before it still parse. */
 export const OrgSettings = StoredSettings.extend({
   defaultProjectAccess: ProjectAccessDefault.default("org"),
+  /** Set through PATCH /api/org/google only, which needs a recent sign-in. */
+  googleAutoJoin: GoogleAutoJoin.nullable().default(null),
 });
 export type OrgSettings = z.infer<typeof OrgSettings>;
+
+export const SaveGoogle = z.object({
+  clientId: z.string().trim().min(1).max(300),
+  /** Left out to keep the one already stored. */
+  clientSecret: z.string().trim().min(1).max(300).optional(),
+});
+export const PatchGoogle = z.object({
+  enabled: z.boolean().optional(),
+  autoJoin: GoogleAutoJoin.nullable().optional(),
+});
+export const GoogleSettings = z.object({
+  clientId: z.string().nullable(),
+  /** Whether there is one. The secret itself is never sent back. */
+  hasSecret: z.boolean(),
+  enabled: z.boolean(),
+  /** Whether the person asking has finished a round trip with these credentials. */
+  tested: z.boolean(),
+  redirectUris: z.array(z.string()),
+  autoJoin: GoogleAutoJoin.nullable(),
+});
+export type GoogleSettings = z.infer<typeof GoogleSettings>;
 
 const MB = 1024 * 1024;
 
@@ -199,6 +249,7 @@ export const DEFAULT_ORG_SETTINGS: OrgSettings = {
   defaultVisibility: "org",
   linkSharing: true,
   defaultProjectAccess: "org",
+  googleAutoJoin: null,
   limits: {
     dataValueBytes: 64 * 1024,
     dataKeysPerScope: 1000,

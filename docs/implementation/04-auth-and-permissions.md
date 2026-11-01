@@ -42,14 +42,15 @@ Precedence when several are present: Bearer token, then session cookie, then gue
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
 - Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
-- A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
+- A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey and linked Google account of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
 
 ## Removing a person
 
 `DELETE /api/people/:id` sets `removed_at` and, in the same transaction, ends everything that person could still act through:
 
 - their sessions and their own tokens (`tokens.person_id`), as `revoked_at`
-- their `team_members` rows and their own `project_access` rows
+- their `team_members` rows, their own `project_access` rows and their `identities`
+
 - the invites and reset links they issued that are still unused
 - the **organization tokens they created** (`tokens` with `kind = org` and `created_by` = them), as `revoked_at`, so a token an admin made can't outlive the admin
 - the **share links they created** (`share_links.created_by` = them), as `revoked_at`, the same as revoking the link from the Share sheet. A guest's access is read from the link on every request, so guests who came in by those links lose access at once; nothing else is needed.
@@ -74,10 +75,38 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 - **User verification is required** (`userVerification: "required"` in options, and `requireUserVerification: true` when verifying, for registration and sign-in). A passkey can be someone's only credential, so it has to prove the person and not just the device.
 - **Challenges** live in `webauthn_challenges` for 5 minutes and are single use.
 
+## Google sign-in
+
+Optional. Sign-in is email with a password or a passkey, or Google once an admin turns it on. With it off, its routes answer nothing and the sign-in page doesn't change.
+
+- **Setup:** the client's ID and secret come from `artifacts setup` or Settings, Sign-in. They're stored in `org`, never returned by an API, and not encrypted with `SESSION_SECRET`. There's one redirect URI per viewer origin, including the home domain, because session cookies are host-only and Google matches exactly. Google can only be turned on after a round trip by the admin who turns it on, and new credentials turn it off.
+- **The flow:** authorization code with PKCE (S256), `state` and `nonce`. `state` is single use, held for 10 minutes in `google_states`, and bound to the browser by the `art_google` cookie, whose hash is on the row: without that, someone could send a callback link and sign a person into the sender's account. It's `HttpOnly`, host-only and `SameSite=Lax`, because Google's redirect back is a navigation from another site.
+- **The ID token** comes straight from Google's token endpoint over TLS, so no JWT library or signature check is needed. `iss`, `aud`, `azp`, `exp` and `nonce` are checked, and `email_verified` must be true.
+- **Accounts match on `sub`,** because `email` can change and isn't unique.
+
+| Situation | Result |
+|---|---|
+| Known `sub` | Signed in |
+| Email matches an existing person | "Sign in once the usual way to connect Google." Linked from Settings after that, with a recent sign-in. |
+| On an invite link, and the Google email matches the invite | Account created, linked |
+| On an invite link, and the email differs | Refused |
+| Workspace auto-join is on, the `hd` claim is that domain, and nobody here or removed has the email | Account created with the chosen role and teams, linked |
+| No match | Refused: "Ask an admin for an invite." |
+
+**Email alone never links an existing account.** Nothing proves that a person owns their email (SPEC 7.3). A member could invite `victim@acme.com` as an outside person, accept the link themselves and keep the 30-day session, so linking automatically would hand the real person an account the attacker can still enter. A link happens only while accepting an invite, or for a person with a recent sign-in, in the session that started the round trip. Someone with no password or passkey asks an admin for a reset link first.
+
+**Workspace auto-join** is opt-in, off by default, and set only through `PATCH /api/org/google`. It checks the `hd` claim and never sends the `hd` parameter. `gmail.com` and `googlemail.com` are refused when it's set and again when it's used. The role is `member` or `reviewer`. Someone an admin removed can't come back this way, by their email or by any Google account they had linked: removal keeps a hash of its `sub`.
+
+**Re-authentication.** A Google round trip counts as a recent sign-in, with a passkey offered first when there is one. Google doesn't document `prompt=login` or `max_age`, so it uses `login_hint=<sub>` and `prompt=select_account`, requires the same `sub`, and is bound to the current session. That proves a live Google session in this browser, which is weaker than a password. Because it's a redirect, the person comes back to the same page and taps again.
+
+**Known limit.** Suspending someone in Google Workspace doesn't reach Artifacts. Their session lasts up to 30 days from last use, and CLI tokens continue. Offboarding still means removing them here.
+
 ## Sessions and "recent sign-in"
 
-- A session is created by password, passkey, invite acceptance, reset, or setup. Each sets `auth_at = now`.
-- These actions need `recentAuth`: adding or removing a passkey, changing a password, creating an org token, purging (artifact or version), and approving a device code. The API answers 401 `recent_auth_required`. The viewer then shows a re-auth sheet (passkey or password → `POST /api/auth/reauth`) and retries.
+
+- A session is created by password, passkey, Google, invite acceptance, reset, or setup. Each sets `auth_at = now`.
+
+- These actions need `recentAuth`: adding or removing a passkey, changing a password, creating an org token, purging (artifact or version), and approving a device code. The API answers 401 `recent_auth_required`. The viewer then shows a re-auth sheet (a passkey, a password → `POST /api/auth/reauth`, or a Google round trip) and retries. It offers what the person has, with a passkey first. Connecting Google and changing the Google client need a recent sign-in too.
 - Sessions are per domain (host-only cookies), so another viewer domain means signing in again.
 
 ## Setup mode
@@ -263,6 +292,9 @@ A second generated table covers every caller against an open and a restricted pr
 | Looking up, approving or denying a device code (`/api/device/:userCode…`) | 30 per signed-in person per 15 minutes |
 | `POST /api/s/:token/guest` | 20 per IP per hour |
 | `POST /api/auth/passkey/options` | 60 per IP per 15 minutes (each call stores a challenge for 5 minutes) |
+| `GET /api/auth/google/start` | 60 per IP per 15 minutes (each call stores a state for 10 minutes) |
+| `GET /api/auth/google/callback` | 60 per IP per 15 minutes |
+
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
