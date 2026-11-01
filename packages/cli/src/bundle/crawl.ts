@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, relative, sep } from "node:path";
 import type { Manifest } from "@artifacts/schema";
+import { cleanUrl } from "@artifacts/schema/article";
 import { init, parse as parseModule } from "es-module-lexer";
 import { Parser } from "htmlparser2";
 import postcss from "postcss";
@@ -40,6 +41,8 @@ const TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
   ".txt": "text/plain",
 };
+
+export { cleanUrl };
 export const typeOf = (path: string) => TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
 
 export type Crawled = { files: Map<string, string>; problems: Problem[] };
@@ -64,16 +67,6 @@ function classify(reference: string): "skip" | "absolute" | "relative" {
   if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("//") || url.startsWith("/")) return "absolute";
   return "relative";
 }
-
-/** A stray `%` ("100%.png") isn't valid percent-encoding; it stays as written and fails as a missing file. */
-export const cleanUrl = (url: string) => {
-  const bare = url.trim().split(/[?#]/)[0] as string;
-  try {
-    return decodeURI(bare);
-  } catch {
-    return bare;
-  }
-};
 
 export function htmlRefs(html: string) {
   const refs: string[] = [];

@@ -1,10 +1,15 @@
 import {
+  ArticleTheme,
+  Brand,
   normalizeRepo,
   PublishCommit,
   PublishPrepare,
+  Summary,
+  Tags,
   type Thread,
   UNTRUSTED_NOTICE,
 } from "@artifacts/schema";
+import { buildArticle } from "@artifacts/schema/article";
 import { GUIDES, TEMPLATES } from "@artifacts/schema/templates";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
@@ -13,7 +18,7 @@ import type { Deps } from "../api/deps.ts";
 import type { ApiContext, ApiVars, Routes } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { people, versions } from "../db/schema.ts";
+import { pages, people, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { libraryCards } from "../library/cards.ts";
 import { readArtifact, viewArtifact } from "../library/read.ts";
@@ -26,7 +31,7 @@ import {
   loadArtifact,
 } from "../library/routes.ts";
 import { MCP_PATH, OAUTH_SCOPES, requestOrigin } from "../oauth/origin.ts";
-import { blobKey, verifyBlobs } from "../publish/blobs.ts";
+import { blobKey, putBlob, verifyBlobs } from "../publish/blobs.ts";
 import type { Publisher } from "../publish/routes.ts";
 import type { reviewRoutes } from "../review/routes.ts";
 import { VERSION } from "../version.ts";
@@ -39,6 +44,10 @@ const MAX_REQUEST = 4 * 1024 * 1024;
 const MAX_PAYLOAD = 32 * 1024 * 1024;
 /** A picture a model can use. Past this, it should ask for a smaller size. */
 const MAX_IMAGE = 2 * 1024 * 1024;
+/** A long report is well under this. It's text a model writes, and the request itself has a limit. */
+const MAX_MARKDOWN = 1024 * 1024;
+const ARTICLE_PAGE = "doc";
+const ARTICLES_PER_MINUTE = 30;
 
 const INSTRUCTIONS = [
   "Artifacts is this team's library of published plans, research, designs and prototypes.",
@@ -334,6 +343,125 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           agent: version.agent,
           publishedAt: version.publishedAt.toISOString(),
         }));
+      },
+    },
+    {
+      name: "artifacts_publish_article",
+      description:
+        "Publish Markdown as an article, with no CLI. No local images, Mermaid or embeds. Republishing makes a new version.",
+      scope: "publish",
+      properties: {
+        project: { type: "string", description: "Project slug" },
+        slug: { type: "string", description: "Artifact slug" },
+        title: { type: "string", description: "Title" },
+        summary: { type: "string", description: "What it holds and why it mattered, up to 280 characters" },
+        markdown: { type: "string", description: "The article" },
+        tags: { type: "array", description: "Up to 8" },
+        message: { type: "string", description: "What changed" },
+        repo,
+      },
+      required: ["project", "slug", "title", "summary", "markdown"],
+      async run({ c, caller, orgId, input }) {
+        const fields = PublishPrepare.pick({ project: true, slug: true, title: true }).safeParse(input);
+        if (!fields.success) throw new ToolError("project, slug or title isn't valid.");
+        const summary = Summary.safeParse(input.summary);
+        if (!summary.success) throw new ToolError("summary is required, up to 280 characters.");
+        const tags = Tags.optional().safeParse(input.tags);
+        if (!tags.success) throw new ToolError("tags: up to 8, each up to 32 characters.");
+        const markdown = typeof input.markdown === "string" ? input.markdown : "";
+        if (!markdown.trim()) throw new ToolError("markdown is required.");
+        if (Buffer.byteLength(markdown) > MAX_MARKDOWN) {
+          throw new ApiError("too_large", "That article is too long.", { limit: MAX_MARKDOWN });
+        }
+        const { project, slug, title } = fields.data;
+        // Before anything is stored: the permission check, and the same one prepare and commit run.
+        const existing = await publisher.target(c, project, slug);
+        if (existing) {
+          const rows = await deps.db
+            .select({ key: pages.pageKey, kind: pages.kind })
+            .from(pages)
+            .innerJoin(versions, eq(versions.id, pages.versionId))
+            .where(and(eq(versions.artifactId, existing.id), eq(versions.n, existing.latestVersion)));
+          if (rows.length !== 1 || rows[0]?.kind !== "article" || rows[0]?.key !== ARTICLE_PAGE) {
+            throw new ToolError(
+              "That artifact has other pages, which this would replace. Use artifacts pack.",
+            );
+          }
+        }
+        const who = "tokenId" in caller ? caller.tokenId : "none";
+        deps.limits.hit(`article:${who}`, ARTICLES_PER_MINUTE, 60_000);
+        const built = buildArticle({
+          path: "doc.md",
+          source: markdown,
+          readFile: () => "",
+          blobHash: () => undefined,
+          frameHash: () => undefined,
+          mermaid: new Map(),
+        });
+        const problem = built.problems.find((entry) => entry.severity === "error");
+        if (problem) {
+          throw new ToolError(
+            `${problem.message} This tool takes text only: images, Mermaid and embeds need artifacts pack.`,
+          );
+        }
+        const encode = (text: string) => new TextEncoder().encode(text);
+        const manifest = JSON.stringify(
+          {
+            project,
+            slug,
+            title,
+            summary: summary.data,
+            ...(tags.data ? { tags: tags.data } : {}),
+            pages: [{ id: ARTICLE_PAGE, kind: "article", src: "doc.md", title }],
+          },
+          null,
+          2,
+        );
+        const types: [string, string, string][] = [
+          ["doc.md", markdown, "text/markdown"],
+          ["artifact.json", manifest, "application/json"],
+          [`__articles/${ARTICLE_PAGE}.html`, built.html, "text/html; charset=utf-8"],
+        ];
+        const stored = await Promise.all(
+          types.map(async ([path, body, type]) => {
+            const bytes = encode(body);
+            return { path, sha256: await putBlob(deps, orgId, bytes, type), size: bytes.length, type };
+          }),
+        );
+        const repoName = normalizeRepo(str(input.repo, "repo"));
+        const prepared = await publisher.prepare(c, { project, slug, title, repo: repoName, files: stored });
+        const brand = Brand.safeParse(c.get("org").brand);
+        const theme = ArticleTheme.safeParse(brand.success ? brand.data.theme : {});
+        return publisher.commit(c, {
+          uploadId: prepared.uploadId,
+          message: str(input.message, "message", 2000) ?? null,
+          name: null,
+          summary: summary.data,
+          tags: tags.data ?? null,
+          notes: {},
+          agent: "Connector",
+          files: Object.fromEntries(
+            stored.map((file) => [file.path, { hash: file.sha256, size: file.size, type: file.type }]),
+          ),
+          backendHash: null,
+          pages: [
+            {
+              key: ARTICLE_PAGE,
+              kind: "article",
+              title,
+              group: null,
+              position: 0,
+              meta: {
+                htmlHash: stored[2]?.sha256,
+                outline: built.outline,
+                readingMinutes: built.readingMinutes,
+                ...(theme.success && Object.keys(theme.data).length > 0 ? { theme: theme.data } : {}),
+              },
+            },
+          ],
+          frames: [],
+          blocks: built.blocks.map((block) => ({ ...block, pageKey: ARTICLE_PAGE })),
+        });
       },
     },
     {

@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@artifacts/schema";
+import { buildArticle, mermaidSources } from "@artifacts/schema/article";
 import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
-import { buildArticle, mermaidSources } from "../article/build.ts";
 import type { LocalBrand } from "../brand/cache.ts";
 import { typeOf } from "../bundle/crawl.ts";
 import type { Problem } from "../bundle/manifest.ts";
@@ -333,7 +333,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
       const built = buildArticle({
         path: page.src,
         source: readFileSync(join(root, page.src), "utf8"),
-        root,
+        readFile: (path) => readFileSync(join(root, path), "utf8"),
         blobHash: (path) => files.get(path)?.hash,
         frameHash: (ref) => frameHashes.get(ref),
         mermaid: new Map(Object.entries(helper.mermaid)),

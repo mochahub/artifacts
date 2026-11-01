@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildArticle } from "../src/article/build.ts";
+import { buildArticle } from "@artifacts/schema/article";
 
 function build(source: string, root: string, bundle: Record<string, string>) {
   return buildArticle({
     path: "README.md",
     source,
-    root,
+    readFile: (path: string) => readFileSync(join(root, path), "utf8"),
     blobHash: (path) => bundle[path],
     frameHash: () => undefined,
     mermaid: new Map(),

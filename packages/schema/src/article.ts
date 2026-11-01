@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
-import { ARTICLE_SCHEMA } from "@artifacts/schema/sanitize";
 import type { Element, ElementContent, Nodes, Root } from "hast";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeParse from "rehype-parse";
@@ -14,8 +12,18 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
-import { cleanUrl } from "../bundle/crawl.ts";
 import { chartSvg } from "./chart.ts";
+import { ARTICLE_SCHEMA } from "./sanitize.ts";
+
+/** A stray `%` ("100%.png") isn't valid percent-encoding; it stays as written and fails as a missing file. */
+export const cleanUrl = (url: string) => {
+  const bare = url.trim().split(/[?#]/)[0] as string;
+  try {
+    return decodeURI(bare);
+  } catch {
+    return bare;
+  }
+};
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const normalizeText = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -29,7 +37,8 @@ export type ArticleInput = {
   /** Markdown path in the bundle, for relative image paths. */
   path: string;
   source: string;
-  root: string;
+  /** A chart's JSON, for a file already in the bundle. A caller with no files has none to give. */
+  readFile(path: string): string;
   /** Bundle path to blob hash. */
   blobHash(path: string): string | undefined;
   /** "page/board/frame" to the frame's 2x render hash. */
@@ -69,7 +78,10 @@ const element = (
 
 const parseFragment = (html: string) => unified().use(rehypeParse, { fragment: true }).parse(html) as Root;
 
-/** The Markdown pipeline in 05. Output is sanitized here, and again by the server. */
+/**
+ * The Markdown pipeline in 05, for the CLI and for articles published through the MCP. Output is
+ * sanitized here, and again by the server at commit whichever way it came.
+ */
 export function buildArticle(input: ArticleInput): ArticleOutput {
   const blocks: ArticleOutput["blocks"] = [];
   const outline: ArticleOutput["outline"] = [];
@@ -85,7 +97,7 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       };
       if (!directive.type.endsWith("Directive")) return;
       if (directive.type === "containerDirective" && COMPONENTS.has(directive.name ?? "")) {
-        directive.data = { hName: "div", hProperties: { "data-component": directive.name } };
+        directive.data = { hName: "div", hProperties: { dataComponent: directive.name } };
       } else if (directive.name === "frame") {
         directive.data = {
           hName: "div",
@@ -159,8 +171,7 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
             .split(sep)
             .join("/");
           try {
-            if (input.blobHash(path))
-              svg = chartSvg(JSON.parse(readFileSync(join(input.root, path), "utf8")));
+            if (input.blobHash(path)) svg = chartSvg(JSON.parse(input.readFile(path)));
           } catch {
             // A chart file that isn't the shape ::chart wants is reported below, not a crash.
           }
