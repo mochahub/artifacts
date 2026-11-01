@@ -7,8 +7,7 @@ ignores it). Boards are re-read on every load, so edits show up on refresh.
 
     python3 -I server.py --port 8788
 
-/board/<name> shows one board on its own, for screenshots. To review boards on
-a phone, publish them as an artifact and use its link.
+/board/<name> shows one board on its own, for screenshots.
 """
 import argparse
 import html

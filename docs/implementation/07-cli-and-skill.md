@@ -174,7 +174,7 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
 **Body, in order:**
 1. **Start every session with `artifacts status --json`.** If changes were requested, read the note and the open comments before anything else.
 2. **Check what's already there:** `artifacts search` before research, design or prototyping.
-3. **Publish by default:** publishing to the org's hosted library needs no approval. Plans, research reports, mocks, comparisons and prototypes someone should read or review get published without asking, and the agent hands over the artifact link, not a local one, unless the user asks for local. Work that needs motion or interaction is a `prototype` page. Not throwaway output. `share --link`, `share --invite`, changing visibility and deleting still need an explicit request.
+3. **Publish by default:** publishing to the org's hosted library needs no approval. Plans, research reports, mocks, comparisons and prototypes someone should read or review get published without asking, and the agent hands over the artifact link, not a local one, unless the user asks for local. Work that needs motion or interaction is a `prototype` page. Not throwaway output. `share --link`, `share --invite`, changing visibility, deleting and `data clear` still need an explicit request.
 4. **Structure:**
    - one artifact per deliverable; pages for its parts (the plan as an article, research as articles grouped "Research", mocks as a canvas)
    - stable `data-frame` and heading ids, and never renaming ids that have comments

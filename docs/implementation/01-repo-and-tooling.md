@@ -77,7 +77,6 @@ The mock boards are HTML in `docs/mocks/boards/` that use `docs/mocks/kit.css` a
 
 ```
 cd docs && python3 -I review/server.py --port 8788
-# to review on a phone, publish the boards as an artifact and use its link
 ```
 
 - `review/comments.json` holds review comments (git-ignored).

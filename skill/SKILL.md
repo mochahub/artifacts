@@ -49,7 +49,7 @@ Publishing to your org's hosted library, a new artifact or a new version, is a n
 - If the work needs motion or interaction, publish it as a page with `"kind": "prototype"`. It runs live on a phone, so it doesn't need a local server. Test it in a sandboxed iframe first, with `artifacts dev`: see "The sandbox" in `references/micro-apps.md`.
 - Don't publish throwaway output.
 
-Some things reach outside the org or destroy data, so they still need an explicit request: `artifacts share --link`, `artifacts share --invite`, changing visibility, and deleting.
+Some things reach outside the org or destroy data, so they still need an explicit request: `artifacts share --link`, `artifacts share --invite`, changing visibility, deleting, and `artifacts data clear`.
 
 ## 4. Structure
 
