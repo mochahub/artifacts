@@ -13,6 +13,7 @@ type Preview = {
   role: string;
   email: string;
   artifact?: { title: string };
+  teams?: string[];
 };
 
 /** One screen: a passkey is the default, because it's one tap on a phone (06·6). */
@@ -75,6 +76,7 @@ export function Join() {
       <p class="sub">
         {invite.invitedBy} invited you{" "}
         {invite.artifact ? `to ${invite.artifact.title}` : `as a ${invite.role}`}
+        {invite.teams?.length ? `, in ${invite.teams.join(" and ")}` : ""}
       </p>
       <h1 class="h1">Join {invite.orgName}</h1>
       <label class="gh" for="join-name">

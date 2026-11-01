@@ -1,5 +1,6 @@
 import { useSignal } from "@preact/signals";
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -9,15 +10,17 @@ import {
   Lock,
   Plus,
   Trash2,
+  Users,
   X,
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect } from "preact/hooks";
-import { useRoute } from "preact-iso";
+import { useLocation, useRoute } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
 import { ReauthSheet } from "../components/reauth.tsx";
+import { LEVELS, Picker } from "../components/share.tsx";
 import { Sheet } from "../components/sheets.tsx";
-import { ago } from "../format.ts";
+import { ago, plural } from "../format.ts";
 import {
   canPush,
   clearOffline,
@@ -32,23 +35,26 @@ import { me, meta } from "../session.ts";
 import { SignedIn } from "./guard.tsx";
 
 const ADMIN = () => me.value?.role === "owner" || me.value?.role === "admin";
+const MEMBER_OR_UP = () => ADMIN() || me.value?.role === "member";
 const message = (failure: unknown) =>
   failure instanceof ApiFailure ? failure.message : "Something went wrong.";
 
 function Frame({
   title,
   back = "/settings",
+  backLabel = "Settings",
   children,
 }: {
   title: string;
   back?: string;
+  backLabel?: string;
   children: ComponentChildren;
 }) {
   return (
     <main class="main">
       <a class="back" href={back}>
         <ChevronLeft />
-        Settings
+        {backLabel}
       </a>
       <h1 class="h1">{title}</h1>
       {children}
@@ -89,6 +95,7 @@ function Index() {
   const rows = [
     ["/settings/sign-in", "Sign-in", "Passkeys, password and sessions"],
     ["/settings/notifications", "Notifications", "On this device"],
+    ...(MEMBER_OR_UP() ? [["/settings/teams", "Teams", "Who works together, and what they share"]] : []),
     ...(admin
       ? [
           ["/settings/people", "People", "Members, outside people and invites"],
@@ -290,6 +297,7 @@ type PersonRow = {
   password: boolean;
   passkeys: number;
   shares: { title: string; permission: string }[];
+  teams: { slug: string; name: string; role: string }[];
 };
 type InviteRow = { id: string; email: string; role: string; expiresAt: string };
 type PeopleList = { people: PersonRow[]; invites: InviteRow[] };
@@ -306,11 +314,17 @@ function People() {
   const role = useSignal("member");
   const link = useSignal<string | null>(null);
   const error = useSignal<string | null>(null);
+  const teams = usePoll<TeamList>("/api/teams", 60_000);
+  const joining = useSignal<string[]>([]);
 
   async function invite() {
     error.value = null;
     try {
-      const { url } = await post<{ url: string }>("/api/invites", { email: email.value, role: role.value });
+      const { url } = await post<{ url: string }>("/api/invites", {
+        email: email.value,
+        role: role.value,
+        teamIds: joining.value,
+      });
       link.value = url;
       copy(url);
       await list.refresh();
@@ -338,6 +352,7 @@ function People() {
           inviting.value = true;
           link.value = null;
           email.value = "";
+          joining.value = [];
         }}
       >
         <Plus />
@@ -472,6 +487,32 @@ function People() {
                 ? "Admins manage people and settings."
                 : "Members publish, comment and share their own work."}
           </p>
+          {(teams.data.value?.teams.length ?? 0) > 0 && <span class="gh">Teams</span>}
+          {(teams.data.value?.teams.length ?? 0) > 0 && (
+            <div class="group">
+              {teams.data.value?.teams.map((team) => {
+                const on = joining.value.includes(team.id);
+                return (
+                  <button
+                    type="button"
+                    class="li btn-li"
+                    key={team.id}
+                    aria-pressed={on}
+                    onClick={() => {
+                      joining.value = on
+                        ? joining.value.filter((id) => id !== team.id)
+                        : [...joining.value, team.id];
+                    }}
+                  >
+                    <div class="grow">
+                      <div class="tt">{team.name}</div>
+                    </div>
+                    {on && <Check />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {link.value && (
             <div class="card" style="padding:10px 14px">
               <div class="mono" style="font-size:14px;overflow-wrap:anywhere">
@@ -511,6 +552,21 @@ function People() {
                   .join(" and ") || "None yet"}
               </span>
             </div>
+            {person.teams.length > 0 && (
+              <div class="li">
+                <div class="grow">
+                  <div class="tt">Teams</div>
+                </div>
+                <span class="ss">
+                  {person.teams.map((team, i) => (
+                    <span key={team.slug}>
+                      {i > 0 && ", "}
+                      <a href={`/settings/teams/${team.slug}`}>{team.name}</a>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            )}
           </div>
           {person.role !== "outside" && (
             <div class="seg">
@@ -567,6 +623,280 @@ function People() {
             }
           >
             Remove {person.name} from {meta.value?.orgName}
+          </button>
+        </Sheet>
+      )}
+    </Frame>
+  );
+}
+
+type TeamRow = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  members: number;
+  role: "lead" | "member" | null;
+};
+type TeamList = { teams: TeamRow[] };
+type TeamPage = {
+  team: TeamRow;
+  members: { id: string; name: string; email: string; role: "lead" | "member"; orgRole: string }[];
+  shared: { id: string; project: string; slug: string; title: string; level: keyof typeof LEVELS }[];
+  permissions: { manage: boolean; members: boolean };
+};
+
+function Teams() {
+  const list = usePoll<TeamList>("/api/teams", 60_000);
+  const creating = useSignal(false);
+  const name = useSignal("");
+  const about = useSignal("");
+  const error = useSignal<string | null>(null);
+  const { route } = useLocation();
+  async function create() {
+    error.value = null;
+    try {
+      const { team } = await post<{ team: TeamRow }>("/api/teams", {
+        name: name.value,
+        description: about.value || null,
+      });
+      route(`/settings/teams/${team.slug}`);
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  }
+  const rows = list.data.value?.teams ?? [];
+  return (
+    <Frame title="Teams">
+      {ADMIN() && (
+        <button
+          type="button"
+          class="btn ink"
+          onClick={() => {
+            creating.value = true;
+            name.value = "";
+            about.value = "";
+          }}
+        >
+          <Plus />
+          New team
+        </button>
+      )}
+      {rows.length > 0 ? (
+        <div class="group">
+          {rows.map((team) => (
+            <a class="li" href={`/settings/teams/${team.slug}`} key={team.id}>
+              <Users />
+              <div class="grow">
+                <div class="tt">{team.name}</div>
+                <div class="ss">
+                  {plural(team.members, "person", "people")}
+                  {team.role === "lead" ? ", you lead it" : team.role ? ", you're in it" : ""}
+                </div>
+              </div>
+              <ChevronRight class="chev" />
+            </a>
+          ))}
+        </div>
+      ) : (
+        list.data.value && (
+          <div class="empty">
+            No teams yet. A team shares work in one step, and anyone added later gets the same access.
+          </div>
+        )
+      )}
+      {creating.value && (
+        <Sheet
+          title="New team"
+          onClose={() => {
+            creating.value = false;
+          }}
+        >
+          <label class="gh" for="team-name">
+            Name
+          </label>
+          <input
+            id="team-name"
+            class="field"
+            maxLength={60}
+            value={name.value}
+            onInput={(e) => {
+              name.value = e.currentTarget.value;
+            }}
+          />
+          <label class="gh" for="team-about">
+            What it's for
+          </label>
+          <input
+            id="team-about"
+            class="field"
+            maxLength={280}
+            value={about.value}
+            onInput={(e) => {
+              about.value = e.currentTarget.value;
+            }}
+          />
+          {error.value && <p class="err">{error.value}</p>}
+          <button type="button" class="btn ink" disabled={!name.value.trim()} onClick={create}>
+            Create team
+          </button>
+        </Sheet>
+      )}
+    </Frame>
+  );
+}
+
+function TeamDetail({ slug }: { slug: string }) {
+  const { route } = useLocation();
+  const page = usePoll<TeamPage>(`/api/teams/${encodeURIComponent(slug)}`, 60_000);
+  const error = useSignal<string | null>(null);
+  const renaming = useSignal<string | null>(null);
+  const act = async (work: () => Promise<unknown>) => {
+    error.value = null;
+    try {
+      await work();
+      await page.refresh();
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  };
+  const body = page.data.value;
+  if (page.error.value?.status === 404) return <Frame title="No such team">{null}</Frame>;
+  if (!body) return null;
+  const path = `/api/teams/${encodeURIComponent(slug)}`;
+  const { team, members, shared, permissions } = body;
+  return (
+    <Frame title={team.name} back="/settings/teams" backLabel="Teams">
+      {team.description && <p class="sub">{team.description}</p>}
+      {permissions.members && (
+        <Picker
+          teams={false}
+          placeholder="Add a person"
+          skip={members.map((member) => member.id)}
+          onPick={(choice) =>
+            act(() => api(`${path}/members/${choice.id}`, { method: "PUT", json: { role: "member" } }))
+          }
+        />
+      )}
+      <span class="gh">{plural(team.members, "person", "people")}</span>
+      {members.length > 0 && (
+        <div class="group">
+          {members.map((member) => (
+            <div class="li" key={member.id}>
+              <span class={`av${member.id === me.value?.id ? " you" : ""}`}>{member.name[0]}</span>
+              <div class="grow">
+                <div class="tt">{member.name}</div>
+                <div class="ss">
+                  {member.email}
+                  {["outside", "reviewer"].includes(member.orgRole) && `, ${roleName(member.orgRole)}`}
+                </div>
+              </div>
+              {permissions.members && !["outside", "reviewer"].includes(member.orgRole) ? (
+                <select
+                  class="level"
+                  aria-label={`Role for ${member.name}`}
+                  value={member.role}
+                  onChange={(e) => {
+                    const role = e.currentTarget.value;
+                    act(() => api(`${path}/members/${member.id}`, { method: "PUT", json: { role } }));
+                  }}
+                >
+                  <option value="member">Member</option>
+                  <option value="lead">Lead</option>
+                </select>
+              ) : (
+                member.role === "lead" && <span class="word">Lead</span>
+              )}
+              {permissions.members && (
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-label={`Remove ${member.name}`}
+                  onClick={() => act(() => api(`${path}/members/${member.id}`, { method: "DELETE" }))}
+                >
+                  <X />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <p class="fn">
+        Anyone added here gets what the team has. Reviewers and outside people stop at commenting.
+      </p>
+      {shared.length > 0 && <span class="gh">Shared with this team</span>}
+      {shared.length > 0 && (
+        <div class="group">
+          {shared.map((row) => (
+            <a class="li" href={`/${row.project}/${row.slug}`} key={row.id}>
+              <div class="grow">
+                <div class="tt">{row.title}</div>
+                <div class="ss">{LEVELS[row.level]}</div>
+              </div>
+              <ChevronRight class="chev" />
+            </a>
+          ))}
+        </div>
+      )}
+      {error.value && <p class="err">{error.value}</p>}
+      {permissions.manage && (
+        <>
+          <button
+            type="button"
+            class="btn soft"
+            onClick={() => {
+              renaming.value = team.name;
+            }}
+          >
+            Rename {team.name}
+          </button>
+          <button
+            type="button"
+            class="btn soft"
+            style="color:var(--warn-word)"
+            onClick={() =>
+              act(async () => {
+                if (!confirm(`Delete ${team.name}? Everyone in it loses what the team was given.`)) return;
+                await api(path, { method: "DELETE" });
+                route("/settings/teams");
+              })
+            }
+          >
+            Delete {team.name}
+          </button>
+        </>
+      )}
+      {renaming.value !== null && (
+        <Sheet
+          title="Rename"
+          onClose={() => {
+            renaming.value = null;
+          }}
+        >
+          <label class="gh" for="team-rename">
+            Name
+          </label>
+          <input
+            id="team-rename"
+            class="field"
+            maxLength={60}
+            value={renaming.value}
+            onInput={(e) => {
+              renaming.value = e.currentTarget.value;
+            }}
+          />
+          <button
+            type="button"
+            class="btn ink"
+            disabled={!renaming.value.trim()}
+            onClick={() =>
+              act(async () => {
+                await api(path, { method: "PATCH", json: { name: renaming.value } });
+                renaming.value = null;
+              })
+            }
+          >
+            Save
           </button>
         </Sheet>
       )}
@@ -919,6 +1249,7 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
   "sign-in": SignIn,
   notifications: Notifications,
   people: People,
+  teams: Teams,
   domains: Domains,
   org: OrgSettings,
   brand: BrandSettings,
@@ -928,9 +1259,5 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
 export function Settings() {
   const { params } = useRoute();
   const Page = PAGES[params.section ?? ""] ?? Index;
-  return (
-    <SignedIn>
-      <Page />
-    </SignedIn>
-  );
+  return <SignedIn>{params.slug ? <TeamDetail slug={params.slug} /> : <Page />}</SignedIn>;
 }

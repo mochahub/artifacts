@@ -58,6 +58,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/settings/sign-in` | Passkeys, password, sessions (06·3) |
 | `/settings/notifications` | Web Push on this device |
 | `/settings/people` | People and invites (06·4, 06·5, 06·8) |
+| `/settings/teams`, `/settings/teams/:slug` | Teams: the list, and one team's members, leads and what's shared with it. Members and up. |
 | `/settings/domains` | Domains, read-only (06·9) |
 | `/settings/deleted` | Recently deleted (07·3) |
 | `/settings/tokens` | Org tokens (admins) |
@@ -118,7 +119,7 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 3. **Home on desktop:** a left rail with Review, Activity and projects; ⌘K search; a "waiting on you" card grid; recently viewed as a table; an Activity column.
 
 ### 05 · Share, decide, get notified
-1. **Share:** link permission (View / View and comment), expiry, "Copy link"; live links, each revoked by its own row (links are stored hashed, so one can't be shown again); people with access.
+1. **Share:** who has access: Everyone in the organization or Only people added, then one field that finds people and teams, or takes an address for an outside invite. Each row says where its access came from: a team links to its page, and inherited rows can't be edited here. Levels are always the same words: Can view, Can comment, Can publish, Can manage. A team an agent added can be confirmed in place. Below that: link permission (View / View and comment), expiry, "Copy link"; live links, each revoked by its own row (links are stored hashed, so one can't be shown again).
 2. **A guest arrives:** the cover; "Zahin shared this with you"; title, description, a "Your name" field, then "Start reviewing".
 3. **Decide:** Approve or Request changes, a note field, the open comments that will go with it, and "Request changes". Fine print: "Claude sees this the next time it runs `artifacts status`".
 4. **Notifications** (Phase 2): an iOS lock-screen example.
