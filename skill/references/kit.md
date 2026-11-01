@@ -22,24 +22,25 @@
 
 **Templates:** `artifacts init --template <name>` copies an editable starter: `design-review`, `presentation`, `case-study`, `prd`, `rfc`, `research-report` or `weekly-status`. Each has a guide in `references/templates/`. They're starting points, so skip them whenever your own design serves better.
 
-**Article components** work from Markdown:
+**Article components** work from Markdown. Leave a blank line between a table and the closing `:::`, or the fence reads as a table row:
 
 ```markdown
 :::stats
 - **41%** fewer steps
 - **2.3×** faster
-  :::
+:::
 
 :::compare
 | Option one    | Option two    |
 | ------------- | ------------- |
 | Where it wins | Where it wins |
-| :::           |
+
+:::
 
 :::steps
 1. **First.** What happens.
 2. **Then.** What happens next.
-   :::
+:::
 ```
 
 **Rules that lint enforces:** seed any randomness, never draw `Date.now()`, ship every font and image in the bundle, and keep touch targets apart.
