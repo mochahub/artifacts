@@ -31,10 +31,16 @@ export function asBun(args: string[], cwd: string, env: Record<string, string> =
 export function ensureHelper(out: Output): string {
   const dir = helperDir();
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "render.mjs"), helper);
-  writeFileSync(join(dir, "sandbox-child.js"), child);
-  writeFileSync(join(dir, "sandbox-prelude.js"), prelude);
-  writeFileSync(join(dir, "sandbox-host.js"), host);
+  // Only when changed: another process may be starting one of these right now.
+  for (const [name, text] of [
+    ["render.mjs", helper],
+    ["sandbox-child.js", child],
+    ["sandbox-prelude.js", prelude],
+    ["sandbox-host.js", host],
+  ] as const) {
+    const path = join(dir, name);
+    if (!existsSync(path) || readFileSync(path, "utf8") !== text) writeFileSync(path, text);
+  }
   const marker = join(dir, ".installed");
   if (existsSync(marker) && readFileSync(marker, "utf8") === PACKAGES.join("\n")) return dir;
 

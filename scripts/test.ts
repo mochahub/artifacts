@@ -1,5 +1,7 @@
 // `bun run test`: starts the test stack, then runs every unit, data-model and API test.
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ensureHelper } from "../packages/cli/src/render/install.ts";
 
 const compose = ["docker", "compose", "-f", "deploy/compose/docker-compose.test.yml"];
 
@@ -10,14 +12,18 @@ const up = Bun.spawnSync([...compose, "up", "-d", "--wait", "--force-recreate"],
 });
 if (!up.success) process.exit(up.exitCode ?? 1);
 
+// Once, before the workers: the CLI tests share this folder, and they'd each try to install into it.
+process.env.ARTIFACTS_HELPER_DIR = join(tmpdir(), "artifacts-test-helper");
+ensureHelper({ say: console.log } as unknown as Parameters<typeof ensureHelper>[0]);
+
 const hits = `${tmpdir()}/artifacts-route-hits-${process.pid}`;
 await Bun.write(hits, "");
 const tests = Bun.spawnSync(
-  ["bun", "test", "--timeout=30000", "apps", "packages", ...process.argv.slice(2)],
+  ["bun", "test", "--parallel=4", "--timeout=30000", "apps", "packages", ...process.argv.slice(2)],
   {
     stdout: "inherit",
     stderr: "inherit",
-    env: { ...process.env, ARTIFACTS_ROUTE_HITS: hits },
+    env: { ...process.env, ARTIFACTS_ROUTE_HITS: hits, ARTIFACTS_TEST_PARALLEL: "1" },
   },
 );
 if (!tests.success) process.exit(tests.exitCode ?? 1);
