@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { PublishPrepared } from "@artifacts/schema";
-import { sha256 } from "../src/auth/secrets.ts";
-import { people, tokens } from "../src/db/schema.ts";
+import { randomSecret, sha256 } from "../src/auth/secrets.ts";
+import { people, sessions, tokens } from "../src/db/schema.ts";
 import type { TestServer } from "./helpers.ts";
 
 export const hash = (body: string) => createHash("sha256").update(body).digest("hex");
@@ -161,4 +161,33 @@ export async function makePerson(
     createdBy: id,
   });
   return secret;
+}
+
+/** A person with a CLI token and a browser session, for routes only a session can use. */
+export async function makeAccount(
+  t: TestServer,
+  orgId: string,
+  role: "member" | "reviewer" | "outside" | "admin",
+) {
+  const token = await makePerson(t, orgId, role);
+  const id = token.slice("art_test".length);
+  const secret = randomSecret();
+  const now = t.clock.now();
+  await t.server.db.insert(sessions).values({
+    id: Bun.randomUUIDv7(),
+    orgId,
+    tokenHash: sha256(secret),
+    personId: id,
+    domain: "viewer.test",
+    authAt: now,
+    lastSeenAt: now,
+    expiresAt: new Date(now.getTime() + 30 * 24 * 3600_000),
+  });
+  return {
+    id,
+    token,
+    cookie: `art_session=${secret}`,
+    email: `p${people_n}@example.com`,
+    name: `P${people_n}`,
+  };
 }

@@ -37,14 +37,14 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 5. **Review is the core feature.** Anchored comments, threads, resolve, version-aware pins, and an agent API to read comments and reply to them.
 6. **Looks stunning by default.** A shared design kit (device frames, article typography, components) means an agent's first draft already looks polished. Each project can theme it.
 7. **Quality gates.** Lint, render and size budgets run before anything is published.
-8. **People and teams.** Each deployment is one organization. A publisher is a person or the organization: artifacts are private to their publisher or visible to the whole organization, depending on an organization setting, and any single artifact can be shared with people outside.
+8. **People and teams.** Each deployment is one organization, and people can belong to any number of teams inside it. A publisher is a person or the organization: artifacts are private to their publisher or visible to the whole organization, depending on an organization setting, and any single artifact can be shared with a team or with people outside. A project is open to the organization, or restricted to chosen people and teams.
 9. **Micro apps when needed.** An artifact can be just pages, or a small app: a frontend, an optional backend that ships in the same bundle, and an optional data folder (§7.9). Most artifacts use none of the extras.
 
 ### Non-goals (for now)
 - Editing in the browser. Agents and repos are where content is written; the viewer is for reading and reviewing.
 - Real-time co-editing, or a Figma replacement.
 - A hosted, multi-tenant service, for now. Artifacts is open source that each team deploys for itself: one click from the Railway template, or Docker Compose anywhere (§14, [hosting evaluation](hosting-evaluation.md)).
-- Sign-in through outside providers (Google, GitHub, SSO). Accounts use email with a password or a passkey, so a deploy needs no OAuth app. Our server does issue OAuth tokens itself, for connectors (§10.4), on that same sign-in.
+
 - Sending email. Invite, reset and share links are copied and sent by hand, so a deploy needs no email provider.
 - Long-running servers, background jobs and SQL databases for artifacts. An artifact's backend answers requests and stops (§7.9).
 
@@ -303,7 +303,8 @@ On Railway, those are three things in one project from the template: the app ser
 | Member | Publish, see every organization-visible artifact, comment, share, archive and delete their own artifacts |
 | Reviewer | See and comment on organization-visible artifacts; can't publish |
 
-**Sign-in is email with a password, a passkey, or both.** No outside OAuth provider is involved.
+**Sign-in is email with a password, a passkey, or both, or optionally Google.** A deploy needs no OAuth app: Google is off until an admin sets up a client, tests it and turns it on. GitHub, SAML and SCIM aren't supported.
+
 - **Passwords:**
   - argon2id hashes (`Bun.password`) and a 12-character minimum.
   - Rate limits with backoff, per account and per IP.
@@ -317,10 +318,12 @@ On Railway, those are three things in one project from the template: the app ser
   - People can see and end their sessions.
   - Adding a passkey, changing a password or creating a token needs a sign-in within the last 10 minutes.
 
-**No open sign-up.** Accounts only come from invites:
+**No open sign-up, unless an admin opts in.** Accounts come from invites. The one exception is **Workspace auto-join**, an opt-in setting that's off by default: an admin names a Google Workspace domain, a role and teams, and someone whose Google `hd` claim is that domain can join without an invite. It reads the claim, never a request parameter, and never allows `gmail.com`.
+
 - **Organization invites,** from an admin with a role. The link is single-use and expires in 7 days. The admin copies it and sends it themselves. The invitee picks a password, a passkey or both.
 - **Artifact invites,** from whoever shared the artifact, also as a copied link. They create an outside account that can only reach the artifacts shared with it.
-- **Email addresses are sign-in names.** Nothing checks that a person owns their address; the admin who sent the link vouches for it.
+- **Email addresses are sign-in names.** Nothing checks that a person owns their address; the admin who sent the link vouches for it. So a Google account with the same address never takes over an existing account: a link happens while accepting an invite for that address, or for someone who has just signed in the usual way.
+
 
 **Password reset.** An admin issues a one-time reset link that lasts an hour (`artifacts org reset-link <email>` or the person's page) and sends it. A person with a passkey can also sign in with it and change their password. Owner recovery is in §7.4.
 
@@ -336,7 +339,11 @@ On Railway, those are three things in one project from the template: the app ser
 - **The content domain is never listed.** Bundle scripts run there and must not be able to ask for passkeys. The server refuses to start if it's listed.
 - Sign-in sessions are per domain: opening the other domain means signing in again, with the same passkey.
 
-**Visibility inside the organization.** Each artifact is **Only me** (the publisher, plus anyone they add) or **Organization** (every member and reviewer). An organization setting picks the default for new artifacts, and the manifest's `visibility` or the viewer can override it per artifact.
+**Visibility inside the organization.** A project is open to the organization or restricted. Add people or teams to give them a level. Reviewers and outside people never go above commenting. Admins see everything. Each artifact is **Only me** (the publisher, plus anyone they add) or **Organization** (everyone who can see its project: in an open project, every member and reviewer). An organization setting picks the default for new artifacts, and the manifest's `visibility` or the viewer can override it per artifact.
+
+**Teams.** A team is a named group of people inside the organization, and an artifact can be shared with it at a level, as with a person. Anyone added to a team later gets the same access. A person added directly keeps exactly that level, so a direct "view" still narrows one person. Reviewers and outside people stop at commenting however they got there. Admins make teams, and a team's leads choose who's in it, in a browser: agents can read teams and share their own work with one, up to commenting, but can't change a team. People who can publish can search the people directory, by name or email, in a browser.
+
+**Project access.** People and teams can be given a level on a whole project: **view**, **comment**, **publish** adds new artifacts, and **manage** also publishes to any artifact, archives, deletes and changes who has access. Whoever creates a project manages it. Project grants never reach an **Only me** artifact. Making a project restricted hides it from everyone else, including search, and takes it away from organization tokens that don't name it. Links and outside invites in a restricted project need `manage`. An organization setting picks what new projects start as. Managing a project is for people in a browser: an agent's token still only manages what its person published.
 
 **Sharing outside, per artifact:**
 - **People:** invite someone by email address as a viewer or commenter, and send them the printed link. A member of the organization can also be added as a **publisher** of that one artifact, so their agent can publish new versions; only the artifact's publisher or an admin can do that, because publishing a backend can read everyone's saved data. They sign in to an outside account that sees only what's shared with it.
@@ -795,7 +802,7 @@ docs/            this spec, evaluations, implementation guides, mocks and the re
 | **0: Direction** (days) | Pick the name. Mock the viewer (canvas, article, comments) on phone and desktop. Review the mocks with the current local canvas. Lock the kit's visual direction. | You've approved the viewer mocks |
 | **1: MVP** | One container (Bun + Hono) with Postgres and S3-compatible storage, MIT licensed. The Railway template and Docker Compose. Email + password and passkey sign-in, `artifacts setup` for the first owner, invites, the four roles, the organization visibility setting, and per-artifact external sharing (people and links). CLI `setup, upgrade, domain, login, init, dev, lint, render, publish, comments, reply, share, org invite, archive, delete, undelete`. Archive, delete with Recently deleted, and file clean-up (§5.5). Version history: name, preview, compare and restore (§6). Status that follows the review, and project search, sort and filter (§5.1). Canvas viewer (image level of detail, pins, frames list). Article viewer (outline, block and quote comments). Version picker and "changed" badges. Approve or request changes, and `artifacts status`. Kit v1. Skill v1. | **Acceptance:** the CameraBuddy roadmap (plan, seven research reports, four boards) is published, reviewed on your iPhone over 5G, and an agent completes a full comment → fix → republish → reply round trip from a fresh session. On a machine with only the CLI installed, `artifacts setup` deploys to Railway, claims the server and installs the skill in under 10 minutes. A teammate joins through an invite and sees organization artifacts but not your private ones, and someone outside comments through a link |
 | **2: Live review and micro apps** | Realtime comments over server-sent events, Web Push and the install prompt, version compare (side by side, swipe, changes), Micro apps (§7.9): Try it, artifact data and files, and backends in the app's sandbox with `artifacts logs`; the prototype and gallery kinds, ⌘K search, MCP server, OG unfurls | Comments show up live on the second device; you get a push notification when the agent replies. Outside teams deploy the template and publish within 15 minutes |
-| **3: Breadth** | Decks, PDF and zip export, Android frames, groups inside an organization, audit log export. If hosting is ever approved (§14): multi-tenancy, abuse tooling, billing, SSO | — |
+| **3: Breadth** | Decks, PDF and zip export, Android frames, audit log export. If hosting is ever approved (§14): multi-tenancy, abuse tooling, billing, SSO | — |
 
 ## 13. Mocks
 
@@ -806,7 +813,8 @@ The viewer is mocked in [`mocks/boards/`](mocks/boards/) on seven boards: find a
 Decided 2026-10-29. Artifacts is open source (MIT), and each team deploys its own copy:
 - **Recommended path:** `artifacts setup`, which deploys the Railway template for you.
 - **Anywhere else:** Docker Compose.
-- **Sign-in:** email with a password or a passkey, so there's no OAuth app to register.
+- **Sign-in:** email with a password or a passkey, so there's no OAuth app to register unless you want Google.
+
 - **First owner:** created by `artifacts setup` (§7.4).
 
 Why self-hosted rather than a hosted service is in [hosting-evaluation.md](hosting-evaluation.md). In short:

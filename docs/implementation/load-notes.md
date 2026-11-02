@@ -11,6 +11,10 @@ From 2026-10-30, on the Docker image on one Apple Silicon Mac, with client, app,
 
 One backend runs one request at a time (08), so it handled about 43 requests a second here and refused the rest. That's the design working: it queues 4, then says `busy`. The normal limit of 120 requests a minute per caller means it takes about 20 people at full rate to reach this.
 
+## Team grants (M17, 2026-11-01)
+
+Lists stay at one query per concern: `visibleTo` adds one query, for the caller's own team grants, joined on `team_members(person_id)`. `toResource` loads everyone's, and adds one join per artifact. `/api/activity` looks at up to 200 rows, so it and the daily digest now load their artifacts in one batch, which is fewer queries than before M17. An event stream runs two lookups and the artifact's three on each 25-second heartbeat. Not measured under load.
+
 ## Search (M12, 2026-10-31)
 
 `visible()` reads one row per artifact on every search, list and read, because `can()` decides in code. `GET /api/library/search` with `limit=20`, median of five, on the test stack on one Apple Silicon Mac, with 20 article blocks per artifact:

@@ -15,6 +15,9 @@ const PUBLIC_ROUTES = [
   "POST /api/device/poll",
   "POST /api/auth/passkey/options",
   "POST /api/auth/passkey/verify",
+  "GET /api/auth/google/start",
+  "GET /api/auth/google/callback",
+
   "GET /api/invites/:token",
   "POST /api/invites/:token/accept",
   "GET /api/s/:token",

@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
+import type { GoogleProvider } from "../src/auth/google.ts";
 import { parseEnv } from "../src/env.ts";
 import { startServer } from "../src/server.ts";
 
@@ -100,6 +101,8 @@ export async function startTestServer(
   options: {
     pushAllow?: (endpoint: string) => boolean;
     clientMetadata?: (url: URL) => Promise<unknown>;
+    heartbeatMs?: number;
+    google?: GoogleProvider;
   } = {},
 ) {
   const database = await createDatabase();
@@ -111,6 +114,8 @@ export async function startTestServer(
     jobs: false,
     pushAllow: options.pushAllow,
     clientMetadata: options.clientMetadata,
+    google: options.google,
+    heartbeatMs: options.heartbeatMs,
     onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
   });
   const base = `http://127.0.0.1:${server.ports.viewer}`;

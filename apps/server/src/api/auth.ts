@@ -4,6 +4,7 @@ import type { Caller } from "../auth/caller.ts";
 import { sha256 } from "../auth/secrets.ts";
 import { clearCookie, personView, SESSION_COOKIE, startSession } from "../auth/sessions.ts";
 import {
+  identities,
   oauthGrants,
   passkeys as passkeyRows,
   passwords,
@@ -103,6 +104,11 @@ export function authRoutes(
     await db.update(sessions).set({ authAt: clock.now() }).where(eq(sessions.id, caller.sessionId));
     return c.json({ ok: true });
   });
+
+  // Answers recent_auth_required, so the viewer can confirm someone before a redirect it can't retry.
+  routes.post("/api/auth/reauth/check", { action: "account.manage", recentAuth: true }, (c) =>
+    c.json({ ok: true }),
+  );
 
   routes.get("/api/me", { action: "account.read" }, (c) => {
     const caller = c.get("caller");
@@ -259,7 +265,7 @@ export function authRoutes(
     if (!person) throw new ApiError("gone", "This reset link no longer works.");
     await setPassword(link.orgId, person.id, password);
     // A reset is the way back from a suspected takeover, so nothing the attacker holds may outlive it:
-    // sessions, CLI tokens and passkeys all end. (A routine password change leaves the last two alone.)
+    // sessions, CLI tokens, passkeys and linked Google accounts all end. (A routine password change leaves the last two alone.)
     // Org tokens aren't personal, so they stay.
     const now = clock.now();
     await db.transaction(async (tx) => {
@@ -276,6 +282,7 @@ export function authRoutes(
         );
       await revokeGrants(tx, person.id, now);
       await tx.delete(passkeyRows).where(eq(passkeyRows.personId, person.id));
+      await tx.delete(identities).where(eq(identities.personId, person.id));
     });
     await startSession(c, deps, link.orgId, person.id);
     return c.json({ person: personView(person) });

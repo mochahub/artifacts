@@ -113,6 +113,7 @@ function App() {
           <Route path="/settings" component={Settings} />
           <Route path="/settings/deleted" component={RecentlyDeleted} />
           <Route path="/settings/:section" component={Settings} />
+          <Route path="/settings/teams/:slug" component={Settings} />
           <Route path="/:project" component={ProjectPage} />
           <Route path="/:project/:artifact" component={ArtifactPage} />
           <Route path="/:project/:artifact/compare" component={ComparePage} />

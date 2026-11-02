@@ -244,3 +244,37 @@ Plus the re-anchoring unit tests.
 - An MCP tool publishes Markdown with a required `summary`, with no CLI and no renderer.
 
 **Agent checks:** publish from a client with no filesystem or shell, then read it through the viewer and `read`; an XSS payload is sanitized the same way as a CLI publish.
+
+## M17 · Teams
+
+**Build:**
+- **Data:** `teams`, `team_members` and `artifact_team_access`, with grants expanded when an artifact is loaded and one `effective()` in `can.ts`.
+- **API:** team routes, people search for members and up in a browser, and teams on organization invites.
+- **Viewer:** Settings, Teams, and teams in the Share sheet, with the source of each person's access.
+- **CLI:** `artifacts teams`, `share --team`.
+- **Realtime:** event streams check access again on each heartbeat.
+
+**Agent checks:** the existing matrix unchanged, new team rows, `via_token` on team grants, removal and revocation.
+**User checks:** create a team and share with it from a phone.
+
+## M18 · Project access
+
+**Build:**
+- **Data:** `project_access`, `projects.restricted`, `defaultProjectAccess`, and creators getting `manage`.
+- **Publishing:** `project.publish` in `target()`, with a refusal that says no more than a taken name.
+- **Viewer:** the project Share sheet, the restrict confirmation, project invites and the team filter.
+- **Rules:** links and outside invites in restricted projects, organization tokens, and the audience line in `publish` and MCP.
+
+**Agent checks:** the leak tests in the scope, across every caller; open projects matching M17's matrix exactly.
+**User checks:** restrict a real project, then confirm from a second account that it's gone from search and from the connector.
+
+## M19 · Google sign-in
+
+**Build:**
+- **Sign-in:** `identities`, the code flow, sign-in and invite buttons, and the linking step.
+- **Setup:** Google in `artifacts setup` and Settings, Sign-in, with Test.
+- **Re-authentication:** through Google, bound to the session.
+- **Clean-up:** reset and removal delete identities.
+
+**Agent checks:** a scripted fake Google through every row of the flow table, with the negative cases.
+**User checks:** a real Google client on the Railway server, and passkey and Google on the same account on an iPhone.

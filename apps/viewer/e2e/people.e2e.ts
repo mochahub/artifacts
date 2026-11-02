@@ -17,7 +17,7 @@ test("invite someone, they join, and see organization work", async ({ page, brow
   await page.goto("/settings/people");
   await expect(page.getByText(OWNER.email)).toBeVisible();
   await shot(page, info.project.name, "06-4-people");
-  await page.getByRole("button", { name: "Invite" }).click();
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Reviewer", exact: true }).click();
   await page.getByRole("button", { name: "Copy invite link" }).click();

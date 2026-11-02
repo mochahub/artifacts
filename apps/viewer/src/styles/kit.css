@@ -1116,6 +1116,54 @@
 .num {
   font-variant-numeric: tabular-nums;
 }
+.li:has(> .level) {
+  gap: 8px;
+}
+.addrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.addrow .field {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.addrow .group {
+  order: 3;
+  flex: 1 0 100%;
+}
+.sheet .field,
+.sheet .addrow {
+  flex: none;
+}
+select.field {
+  min-height: 48px;
+}
+.level {
+  flex: none;
+  width: 132px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tx2);
+  font: 16px var(--ui);
+}
+.linkish {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tx);
+  font: 600 15px var(--ui);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.tt a,
+.ss a {
+  color: inherit;
+}
 .gh.split {
   display: flex;
   justify-content: space-between;

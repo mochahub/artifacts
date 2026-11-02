@@ -10,7 +10,15 @@ type Item = {
   actor: string;
   agent: string | null;
   artifact: { title: string; slug: string; project: string } | null;
-  payload: { version?: number; title?: string; thread?: number; from?: number };
+  payload: {
+    version?: number;
+    title?: string;
+    thread?: number;
+    from?: number;
+    team?: string;
+    person?: string;
+    project?: string;
+  };
   createdAt: string;
 };
 
@@ -35,6 +43,12 @@ const VERBS: Record<string, string> = {
   shared: "shared",
   joined: "joined",
   recovered: "recovered an owner account",
+  team_created: "created the team",
+  team_deleted: "deleted the team",
+  team_member_added: "added someone to",
+  team_member_removed: "removed someone from",
+  project_access_changed: "changed who has access to",
+  identity_linked: "connected Google",
 };
 
 const day = (iso: string) =>
@@ -76,7 +90,12 @@ function Feed() {
             {items
               .filter((item) => day(item.createdAt) === label)
               .map((item) => {
-                const title = item.artifact?.title ?? item.payload.title ?? "";
+                const title =
+                  item.artifact?.title ??
+                  item.payload.title ??
+                  item.payload.project ??
+                  item.payload.team ??
+                  "";
                 const version = item.payload.version ? ` v${item.payload.version}` : "";
                 return (
                   <a

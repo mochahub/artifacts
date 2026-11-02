@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -34,13 +35,15 @@ const createdAt = () => time("created_at").notNull().defaultNow();
 export const role = pgEnum("role", ["owner", "admin", "member", "reviewer", "outside"]);
 export const visibility = pgEnum("visibility", ["me", "org"]);
 export const permission = pgEnum("permission", ["view", "comment", "publish"]);
+export const projectPermission = pgEnum("project_permission", ["view", "comment", "publish", "manage"]);
 export const tokenKind = pgEnum("token_kind", ["cli", "org", "oauth"]);
-export const inviteKind = pgEnum("invite_kind", ["org", "artifact"]);
+export const inviteKind = pgEnum("invite_kind", ["org", "artifact", "project"]);
 export const pageKind = pgEnum("page_kind", ["canvas", "article", "prototype", "gallery", "deck"]);
 export const threadStatus = pgEnum("thread_status", ["open", "fixed", "resolved"]);
 export const anchorState = pgEnum("anchor_state", ["ok", "updated", "orphaned", "moved_version"]);
 export const decisionKind = pgEnum("decision_kind", ["approved", "changes_requested"]);
 export const deviceStatus = pgEnum("device_status", ["pending", "approved", "denied", "used"]);
+export const teamRole = pgEnum("team_role", ["lead", "member"]);
 export const activityKind = pgEnum("activity_kind", [
   "published",
   "restored",
@@ -62,6 +65,12 @@ export const activityKind = pgEnum("activity_kind", [
   "shared",
   "joined",
   "recovered",
+  "team_created",
+  "team_deleted",
+  "team_member_added",
+  "team_member_removed",
+  "project_access_changed",
+  "identity_linked",
 ]);
 
 // Organization and people
@@ -75,6 +84,12 @@ export const org = pgTable("org", {
   vapidPrivate: text("vapid_private"),
   lastDigestAt: time("last_digest_at"),
   brand: jsonb("brand"),
+  /** Stored as is, like `vapid_private`: tying it to SESSION_SECRET would stop that being rotated (04). */
+  googleClientId: text("google_client_id"),
+  googleClientSecret: text("google_client_secret"),
+  /** Off until an admin has finished a round trip with these credentials. */
+  googleEnabled: boolean("google_enabled").notNull().default(false),
+  googleTestedBy: uuid("google_tested_by").references((): AnyPgColumn => people.id),
   pseudonymKey: bytea("pseudonym_key").notNull(),
   createdAt: createdAt(),
 });
@@ -128,6 +143,44 @@ export const passkeys = pgTable("passkeys", {
   lastUsedAt: time("last_used_at"),
 });
 
+/** A sign-in from outside. `subject` is the provider's own id: email can change and isn't unique. */
+export const identities = pgTable(
+  "identities",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    email: text("email").notNull(),
+    hostedDomain: text("hosted_domain"),
+    createdAt: createdAt(),
+    lastUsedAt: time("last_used_at"),
+  },
+  (t) => [
+    unique("identities_org_provider_subject_unique").on(t.orgId, t.provider, t.subject),
+    unique("identities_person_provider_unique").on(t.personId, t.provider),
+  ],
+);
+
+/** Who an admin removed, by a hash of Google's id: a Workspace's open door mustn't let them back in. */
+export const removedIdentities = pgTable(
+  "removed_identities",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    provider: text("provider").notNull(),
+    subjectHash: text("subject_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.provider, t.subjectHash] })],
+);
+
 export const webauthnChallenges = pgTable("webauthn_challenges", {
   id: id(),
   orgId: uuid("org_id")
@@ -157,6 +210,25 @@ export const sessions = pgTable("sessions", {
   ip: text("ip"),
 });
 
+/** One Google round trip, for 10 minutes and one use. `browser_hash` ties it to the cookie that started it. */
+export const googleStates = pgTable("google_states", {
+  id: id(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  stateHash: text("state_hash").notNull().unique(),
+  browserHash: text("browser_hash").notNull(),
+  nonce: text("nonce").notNull(),
+  codeVerifier: text("code_verifier").notNull(),
+  intent: text("intent").notNull(),
+  sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+  personId: uuid("person_id").references(() => people.id),
+  inviteId: uuid("invite_id").references(() => invites.id, { onDelete: "cascade" }),
+  next: text("next").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  expiresAt: time("expires_at").notNull(),
+});
+
 export const guests = pgTable("guests", {
   id: id(),
   orgId: uuid("org_id")
@@ -166,6 +238,47 @@ export const guests = pgTable("guests", {
   createdAt: createdAt(),
   lastSeenAt: time("last_seen_at").notNull(),
 });
+
+// Teams
+
+export const teams = pgTable(
+  "teams",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+  },
+  (t) => [unique("teams_org_slug_unique").on(t.orgId, t.slug)],
+);
+
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    role: teamRole("role").notNull().default("member"),
+    addedBy: uuid("added_by")
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.personId] }), index("team_members_person_idx").on(t.personId)],
+);
 
 // Projects and artifacts (declared before the tables that reference them)
 
@@ -196,12 +309,45 @@ export const projects = pgTable(
     slug: text("slug").notNull(),
     name: text("name").notNull(),
     repo: text("repo"),
+    /** Off by default: an open project is everyone's, as every project was before this column. */
+    restricted: boolean("restricted").notNull().default(false),
+    createdBy: uuid("created_by").references(() => people.id),
+    /** The organization token that made it, which can always reach it (04). */
+    createdByToken: uuid("created_by_token").references(() => tokens.id),
     createdAt: createdAt(),
     updatedAt: time("updated_at").notNull().defaultNow(),
   },
   (t) => [
     unique("projects_org_slug_unique").on(t.orgId, t.slug),
     index("projects_org_repo_idx").on(t.orgId, sql`lower(${t.repo})`),
+  ],
+);
+
+/** Access to a whole project, for a person or a team. */
+export const projectAccess = pgTable(
+  "project_access",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    personId: uuid("person_id").references(() => people.id),
+    teamId: uuid("team_id").references(() => teams.id),
+    permission: projectPermission("permission").notNull(),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("project_access_one_subject", sql`(${t.personId} is null) <> (${t.teamId} is null)`),
+    unique("project_access_project_person_unique").on(t.projectId, t.personId),
+    unique("project_access_project_team_unique").on(t.projectId, t.teamId),
+    index("project_access_person_idx").on(t.personId),
+    index("project_access_team_idx").on(t.teamId),
   ],
 );
 
@@ -262,6 +408,33 @@ export const artifactAccess = pgTable(
   (t) => [primaryKey({ columns: [t.artifactId, t.personId] })],
 );
 
+/** A team's access to one artifact. A separate table, because `artifact_access` requires a person. */
+export const artifactTeamAccess = pgTable(
+  "artifact_team_access",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    permission: permission("permission").notNull(),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => people.id),
+    /** As on `artifact_access`: a token made it and no person has confirmed it (04). */
+    viaToken: boolean("via_token").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artifactId, t.teamId] }),
+    index("artifact_team_access_team_idx").on(t.teamId),
+  ],
+);
+
 export const shareLinks = pgTable("share_links", {
   id: id(),
   orgId: uuid("org_id")
@@ -311,6 +484,11 @@ export const invites = pgTable("invites", {
   permission: permission("permission"),
   /** Created by a token; the `artifact_access` row it becomes carries the flag over. */
   viaToken: boolean("via_token").notNull().default(false),
+  /** Teams to join on accepting. Not a reference: a team deleted meanwhile is skipped. */
+  teamIds: uuid("team_ids").array(),
+  /** For `project` invites: the outside account gets this grant. */
+  projectId: uuid("project_id").references(() => projects.id),
+  projectPermission: projectPermission("project_permission"),
   tokenHash: text("token_hash").notNull().unique(),
   createdBy: uuid("created_by")
     .notNull()

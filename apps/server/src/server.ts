@@ -7,6 +7,7 @@ import type { Deps } from "./api/deps.ts";
 import { mountApi } from "./api/index.ts";
 import { metaRoutes, viewerOrigins } from "./api/meta.ts";
 import { type ApiVars, Routes } from "./api/routes.ts";
+import type { GoogleProvider } from "./auth/google.ts";
 import { RateLimits } from "./auth/rate-limit.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { createContentApp } from "./content/app.ts";
@@ -38,6 +39,9 @@ export type StartOptions = {
   jobs?: boolean;
   pushAllow?: (endpoint: string) => boolean;
   clientMetadata?: MetadataFetch;
+  google?: GoogleProvider;
+  /** Tests shorten this, so a stream's recheck doesn't take 25 seconds. */
+  heartbeatMs?: number;
 };
 
 const PRIVATE_PEER = /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$|^f[cd]/;
@@ -91,7 +95,7 @@ export async function startServer(env: Env, options: StartOptions) {
     return homeDomain;
   };
 
-  const events = new Events(env.databaseUrl);
+  const events = new Events(env.databaseUrl, undefined, options.heartbeatMs);
   await events.start();
 
   const deps: Deps = {
@@ -107,6 +111,7 @@ export async function startServer(env: Env, options: StartOptions) {
     events,
     pushAllow: options.pushAllow,
     clientMetadata: options.clientMetadata,
+    google: options.google,
   };
   deps.sandbox = new SandboxPool(
     org?.settings.sandboxProcesses ?? DEFAULT_ORG_SETTINGS.sandboxProcesses,

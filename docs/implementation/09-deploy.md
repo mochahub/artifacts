@@ -54,7 +54,21 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 
 **Rotating `SESSION_SECRET`** signs everyone out and invalidates open content tokens (short-lived). Nothing stored depends on it, so it's safe to rotate after a suspected leak. `org.pseudonym_key`, in Postgres, is never rotated, because `me` data is keyed by pseudonym.
 
+**Google sign-in** is optional, and needs no environment variables: the client is set during `artifacts setup` or in Settings, and stored in `org` (02). There's one redirect URI per viewer origin, including the home domain, because session cookies are host-only and Google matches exactly, with no wildcards: `<origin>/api/auth/google/callback`. Settings lists them. `artifacts domain add` prints the new one when Google is on: until it's added to the client, sign-in on that domain fails with a redirect mismatch. Live previews never get one. Google requires a public suffix and refuses raw IP addresses, with an exception for localhost, so a LAN address won't work.
+
+To make the client, in the [Google Cloud console](https://console.cloud.google.com/):
+
+1. Make a project for Artifacts, so the consent screen doesn't borrow another product's name.
+2. In Google Auth Platform, set the app name and the contact emails. Choose **External**, unless the project belongs to a Google Workspace organization and only its members will sign in. Internal needs that organization, and refuses everyone else with `org_internal`.
+3. Under Audience, publish the app. It needs no verification: `openid`, `email` and `profile` aren't sensitive scopes. Only showing a name and logo on the consent screen needs Google's lighter brand verification.
+4. Under Branding, add each host's authorized domain. For your own domain that's the registered one, such as `example.com`. `up.railway.app` and `ts.net` are on the public suffix list, so there it's your whole Railway host, or `<tailnet>.ts.net`.
+5. Under Clients, make a **Web application** client, and paste each URI from Settings under **Authorized redirect URIs**, not JavaScript origins. Copy the secret now: Google shows it once.
+6. In Settings, Sign-in, save the client, press Test, and turn it on. Google says client changes can take from 5 minutes to a few hours, so an early `redirect_uri_mismatch` may only mean waiting.
+
+A client with no activity for six months is deleted by Google, after a warning by email. When a sign-in fails after Google's own page, the server log names Google's reason.
+
 ## Railway template (`deploy/railway/`)
+
 
 | Service | Source | Domains | Variables | Settings |
 |---|---|---|---|---|

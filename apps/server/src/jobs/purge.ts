@@ -4,6 +4,7 @@ import {
   activity,
   artifactAccess,
   artifacts,
+  artifactTeamAccess,
   artifactUsage,
   backendLogs,
   blocks,
@@ -71,6 +72,7 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
     await tx.delete(views).where(eq(views.artifactId, artifact.id));
     await tx.delete(guestViews).where(eq(guestViews.artifactId, artifact.id));
     await tx.delete(artifactAccess).where(eq(artifactAccess.artifactId, artifact.id));
+    await tx.delete(artifactTeamAccess).where(eq(artifactTeamAccess.artifactId, artifact.id));
     await tx.delete(artifactUsage).where(eq(artifactUsage.artifactId, artifact.id));
     await tx.delete(backendLogs).where(eq(backendLogs.artifactId, artifact.id));
     const links = await tx

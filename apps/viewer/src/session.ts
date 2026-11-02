@@ -18,6 +18,10 @@ export async function refreshMe() {
   }
 }
 
+export async function refreshMeta() {
+  meta.value = await api<Meta>("/api/meta");
+}
+
 export async function boot() {
   try {
     meta.value = await api<Meta>("/api/meta");

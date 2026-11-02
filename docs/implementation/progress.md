@@ -1,6 +1,6 @@
-# Progress: building M2–M16
+# Progress: building M2–M19
 
-A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF-M12-M16.md) for the current brief, then this.
+A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google.md](SCOPE-teams-projects-google.md) for the current brief, then this.
 
 ## Status
 
@@ -23,6 +23,9 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 | M14 Brand setup | `m14-brand` | PR #23 | see the PR |
 | M15 OAuth, hosted MCP and publishing | `m15-connector` | PR #24 | see the PR |
 | M16 Articles without the CLI | `m16-articles` | PR #25 | see the PR |
+| M17 Teams | `m17-teams` | PR #29 | see the PR |
+| M18 Project access | `m18-project-access` | PR #33 | see the PR |
+| M19 Google sign-in | `m19-google` | PR #36 | see the PR |
 
 ## Verified
 
@@ -61,6 +64,12 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 - **M16 (2026-11-01):** `apps/server/test/api/articles.test.ts` publishes from a plain HTTP client with no filesystem or shell, then reads it through the viewer's route, `read`, search and `pull`'s bundle. An XSS payload comes out as a CLI publish's does, and the stored HTML is unchanged by sanitizing it again. That test also found that M13's `:::stats`, `:::compare` and `:::steps` never survived the allowlist, because the attribute name didn't match. Fixed on `m13-templates`, with a test.
 
 - **M13 follow-up (2026-11-01):** rendering a template's article by eye found what no test had: `:::steps` collapsed to one word a line, and a `:::` after a table showed on the page. The second was Biome, which formats Markdown and had rewritten the fence into a table cell, so `packages/kit/src/templates` and `skill/references/kit.md` are now outside it, and a test checks every template. **Don't run `biome check --write` on Markdown that uses directives.**
+
+- **M17 (2026-11-01):** the existing matrix is unchanged: all 3,828 results for the old callers and actions were dumped from `5400f6e` and compared after the change, with no differences. New rows cover team grants at each level, the role cap, token-made rows alone and tied, and who runs a team. `apps/server/test/api/teams.test.ts` and `events.test.ts` cover every team route, sharing, `via_token`, removal, revocation, and streams closing within a heartbeat for a session and a token. `packages/cli/test/teams.e2e.test.ts` runs the real CLI. A WebKit e2e makes a team and shares with it at iPhone size and desktop, with screenshots in `docs/mocks/shots/08-*`.
+
+- **M18 (2026-11-01):** open projects match M17 exactly: all 7,524 results dumped from M17 compared with no differences. The matrix now has an open and a restricted dimension, and a second table of every caller against a project. `apps/server/test/api/projects.test.ts` covers the leak list across session and token: search, snippets, counts, project lists, activity, home, push digest, MCP and bundle. An independent review (subagent) raised eight findings and three smaller issues. Six were fixed with a test that failed first. The commit race and the permission checks outside `can()` were changed without one. What's left is under Known gaps.
+
+- **M19 (2026-11-01):** `apps/server/test/api/google.test.ts` runs a scripted fake Google, injected through `Deps`, through every row of the flow table and the negative cases: wrong, reused, expired and other-browser `state`, wrong `nonce`, `aud`, `azp` and `iss`, an expired token, `email_verified` false or missing, re-auth with a different `sub` or from another session, Workspace auto-join including `gmail.com` and a removed person, and reset and removal deleting identities. An independent review (subagent) found no high-severity bugs and two medium ones. Those two and three low ones were fixed with a test that failed first. The re-auth message and the device code were fixed in the viewer, with no failing test first. **It has never met the real Google.** Nothing here was run against a real client, and the Google screens in the e2e use mocked answers.
 
 ## Decisions to review
 
@@ -167,6 +176,47 @@ A fresh agent can resume from this file alone. Read [HANDOFF-M12-M16.md](HANDOFF
 84. **Every token is shown as an agent.** A comment from a token with no detected agent used to read as the person's own. Now the server marks it, and shows it as "Zahin's agent". Rows from before this have no mark, and can't be told apart. Pushes for a publish stay tied to a named agent, so someone at their own terminal isn't told what they just did.
 85. **Brand in Settings: a hand-set brand is a proposal with no sample.** Reusing the row means it can be applied again after going back to the default, with no migration. Saving a name again replaces it, so tweaking doesn't fill the list. It takes no font hashes, because `orgBrand` would presign any blob: fonts stay only if the brand applied now already has them and the theme still names them.
 
+85. **M17, a publisher keeps managing after a demotion.** The scope applies the role cap to rule 2, but today a member made a reviewer still manages what they published, and "nothing changes on upgrade" wins. The cap holds for every grant, which is what the rule is for. To change: the publisher line in `effective()`.
+86. **M17, a team lead must be a member or above.** The scope doesn't say. Leading hands out the team's access, including project `manage`, and a role capped at commenting shouldn't do that. The route refuses it, and `can()` also ignores a lead who has since become a reviewer.
+87. **M17, people search includes outside people.** A lead has to find one to add them to a team, and the user decided outside people can join.
+88. **M17, a token sees a team's name, size and shared work, but not its members.** The user's decision keeps the directory in the browser, and a member list is the same data by another route.
+89. **M17, a team's page lists only shared work the caller can see.** Anything else would name a private artifact to any member.
+90. **M17, `inherit()` lives in `can.ts`.** Both loaders call it, so what a grant adds up to is pure, and the matrix runs through it.
+91. **M17, `/api/activity` and the digest load artifacts in one batch.** The scope expected up to 200 extra lookups; the batch is fewer queries than before.
+92. **M17, a token can't refresh an invite that has teams,** as well as not making one. A fresh link is the same way in.
+93. **M17, team rows an agent added show "Confirm so they can approve"** in the Share sheet, which grants the same level again as a person.
+
+94. **M18, project "Can publish" counts as a comment on an artifact,** worked out in `inherit()`, so `can()` needs no special case and the matrix covers it.
+95. **M18, a new action, `artifact.share_outside`.** The scope wants links and outside invites to need `manage` in a restricted project, and `artifact.share` is also true for the publisher. It covers adding an existing outside person, and sharing with a team that has one in it, which the M18 review found was a way round.
+96. **M18, purging stays with the publisher and admins, and so does `data.export`.** The scope's list for `manage` stops at archive and delete, and purging can't be undone. A project manager who deletes can restore.
+97. **M18, a new route, `POST /api/projects/:slug/access`.** The scope says an unknown email becomes an outside invite, and `POST /api/invites` is for admins, while project managers can be members. Invite kind `project` is new too.
+98. **M18, a token can read project access, as `artifacts project access` needs, without addresses or team members.** A member list and addresses are the directory, which the user kept in the browser. The same goes for `inherited` on an artifact's access; a reviewer who published loses it in the browser too.
+99. **M18, `audience` on status goes to those who can share the artifact,** and organization tokens. Anyone else needn't learn who was let in. A publish always gets it. `Only the publisher` leaves out admins, who can see everything anyway.
+100. **M18, `findOrg` fills in defaults instead of casting.** It didn't parse `settings` at all, so a stored row without `defaultProjectAccess` had no value. `PatchOrg` no longer uses `OrgSettings.partial()`, because Zod fills a `.default()` inside `.partial()`, and saving one setting would have reset this one to `org`.
+101. **M18, the Tokens page gained a project chooser.** A restricted project has to be named on a token, and Settings had no way to name one.
+102. **M18, brand proposals hide a sample the caller can't see,** and proposing one answers the same for a hidden artifact as for none. Neither was in the scope; both named restricted artifacts.
+103. **M18, a token can't issue a reset link for someone who leads a team or manages a project.** A session is what a token may never have for those powers. This extends 24.
+104. **M18, the commit checks `project.publish` again inside its transaction** for a new artifact, because a project can appear or be restricted after `target()` looked. A concurrent first publish to an open project still works, as it did.
+
+105. **M19, three columns beyond the scope on `org`:** `google_enabled` and `google_tested_by`, because "only after a round trip by that admin" has to be stored somewhere, and new credentials clear both.
+106. **M19, a new route, `POST /api/auth/reauth/check`.** The re-auth sheet retries a call, and a redirect isn't one, so the viewer confirms someone first and then follows the link.
+107. **M19, `email_verified` is required on every path, including a known `sub`.** The scope requires it for a match by email; the brief says to match on `sub` and require it, so a known account whose email Google no longer vouches for is refused.
+108. **M19, a test links nobody and signs nobody in.** It proves the credentials. An admin connects their own account afterwards.
+109. **M19, one Google account per person,** by a unique index. The scope's Settings lists "the linked account".
+110. **M19, a linked Google account can have any address.** The person has just proved they hold the account, so it needn't match.
+111. **M19, session-bound round trips refuse a request from another site** by `Sec-Fetch-Site`. Sign-in has to start with a link because of CSP, and a link can be followed from anywhere. Linking stays safe without this, because of `state`, but a forced re-auth shouldn't be possible.
+112. **M19, auto-join refuses anyone with a removed person's email.** Otherwise an open door on the domain would undo offboarding. To re-add them, invite them.
+113. **M19, an invite's name comes from Google,** not the field on the page, because a link can't carry it.
+114. **M19, the invite secret isn't kept in `google_states`,** so a failed invite round trip lands on `/sign-in`, not back on the invite. The link still works.
+115. **M19, auto-join's teams can be set by the API, not yet in Settings,** which sets the domain only, as a member. Choosing a role and teams there can come later.
+
+116. **M19, a new table, `removed_identities`.** The scope has removal delete identities, and it does. But a Google account can have any address (110), so the email check alone would let someone removed back in through auto-join. It holds only a hash of `sub`, and only auto-join reads it.
+117. **M19, someone with no password or passkey can't turn Google off, replace the client or remove it.** They'd be unable to confirm it's them, or undo it.
+118. **M19, a test only counts for the credentials it used,** so ones saved while it ran stay unproved.
+119. **M19, `google_states` cascades from invites,** and the daily job clears expired rows. Without that, an abandoned invite round trip would have blocked purging that invite's artifact.
+120. **The Share sheet's left option is a fixed word:** Org, or Project inside a restricted project, where Org would overstate who has access. Names vary in length and the segment has to fit. The user's call, from the phone review.
+121. **Compared with Perpetua's Google sign-in, which has run against real Google.** Same endpoints, scopes, PKCE, nonce and `prompt`. Two things came over: `email_verified` also reads as the string `"true"`, and a refused exchange logs Google's error word, so a first real client's `redirect_uri_mismatch` is visible. Perpetua also checks the ID token's signature. Here it stays a TLS read from the token endpoint, which OpenID Connect allows and needs no JWT library.
+
 ## Needs you
 
 In this order. Nothing here has been done or tested by the agent.
@@ -198,6 +248,14 @@ In this order. Nothing here has been done or tested by the agent.
 18. **Windows:** the CLI, including credentials, is untested.
 19. **MCP:** add `artifacts mcp` to a real client. It's tested against the protocol, not a client.
 
+**Teams, project access and Google (M17 to M19; none of this has been checked by you yet)**
+20a. **A real Google client on the Railway server.** Steps are in 09, Google sign-in. Register `https://docs.internal.mochahubstudios.com/api/auth/google/callback` and `https://artifacts-production-4b17.up.railway.app/api/auth/google/callback`. Nothing has run against real Google yet.
+20b. Answered from Google's documentation in 09: no app verification is needed for these scopes, and Internal only works for a Workspace organization's own members.
+20c. **Hosts:** both `up.railway.app` and `ts.net` are on the public suffix list, so these hosts pass Google's written redirect rules. Confirm in the console when making the client: nothing here has tried them. A LAN address won't pass, and localhost is an exception.
+20d. **Passkey and Google on the same account on a real iPhone,** including an app added to the Home Screen, which may open Google somewhere that doesn't share its cookies. If it does, the callback can't find `art_google` and says the attempt expired, so the failure is safe: use a passkey there.
+20e. **Restrict a real project,** then confirm from a second account that it's gone from search and the connector.
+20f. **A taste review of the Share sheet and Teams settings on a phone.** Screens are in `docs/mocks/shots/08-*`, `09-*` and `10-*`. From the first review: the Share sheet's left option is now a fixed word, Org, or Project inside a restricted project.
+
 **Connectors (none of this has been tried with a real client)**
 20. **Claude Code:** `claude mcp add --transport http artifacts <url>/api/mcp`, then sign in with `/mcp`.
 21. **Codex:** add the server, run `codex mcp login artifacts`, and try `bearer_token_env_var` on a remote box.
@@ -206,6 +264,18 @@ In this order. Nothing here has been done or tested by the agent.
 24. **Template taste:** review `docs/images/templates.webp` and the contact sheets on a phone.
 
 ## Known gaps
+
+- **Two admins saving settings at the same moment** can overwrite each other, because `PATCH /api/org` writes the whole JSON.
+- **An invite to a removed person's address stays live.** That's true of passwords too.
+- **Starting a second Google round trip in the same browser** ends the first: there's one `art_google` cookie.
+
+- **Auto-join and Google round trips can't be retried:** the re-auth redirect returns to the page, and the person taps again (04).
+- **Turning Google off leaves Google-only people with no way in** until an admin issues a reset link.
+
+- **A project manager can't make a link for their own `me` artifact in a restricted project.** Project grants don't reach `me`, so `can()` doesn't see them there. An admin can, or they can make it `org`. It fails closed.
+- **`/api/deleted` shows what someone deleted, after they lose access to it,** until it's purged: only the title of something they could already see.
+- **Taking `manage` from someone leaves their pending project invites live.** An admin sees them in Settings, People, and can revoke them.
+- **A few body-dependent token guards sit in routes, not `can()`:** a token giving a team `publish`, inviting into a team, and the reset-link guard. They follow `guardTokenInvite`, because `can()` doesn't see a request's body.
 
 - **Search is English-stemmed, and rows are read for every search.** Numbers are in [load-notes.md](load-notes.md).
 - **Working folders are per git worktree.** `.artifacts/work/` isn't shared between worktrees of one repo. `artifacts pull` is the way across.

@@ -40,6 +40,46 @@ function docPipeTables(): Record<string, string[]> {
 
 /** Tables 02 describes in a sentence. Kept by hand; `docMentions` below catches a renamed column. */
 const SENTENCE_TABLES: Record<string, string[]> = {
+  removed_identities: ["org_id", "provider", "subject_hash", "created_at"],
+
+  identities: [
+    "id",
+    "org_id",
+    "person_id",
+    "provider",
+    "subject",
+    "email",
+    "hosted_domain",
+    "created_at",
+    "last_used_at",
+  ],
+  google_states: [
+    "id",
+    "org_id",
+    "state_hash",
+    "browser_hash",
+    "nonce",
+    "code_verifier",
+    "intent",
+    "session_id",
+    "person_id",
+    "invite_id",
+    "next",
+    "redirect_uri",
+    "expires_at",
+  ],
+
+  teams: ["id", "org_id", "slug", "name", "description", "created_by", "created_at"],
+  team_members: ["team_id", "person_id", "org_id", "role", "added_by", "created_at"],
+  artifact_team_access: [
+    "artifact_id",
+    "team_id",
+    "org_id",
+    "permission",
+    "granted_by",
+    "via_token",
+    "created_at",
+  ],
   passwords: ["person_id", "org_id", "hash", "updated_at"],
   webauthn_challenges: ["id", "org_id", "challenge", "kind", "person_id", "expires_at"],
   guest_links: ["guest_id", "org_id", "share_link_id", "name", "created_at", "expires_at"],
@@ -53,7 +93,28 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "expires_at",
     "used_at",
   ],
-  projects: ["id", "org_id", "slug", "name", "repo", "created_at", "updated_at"],
+  projects: [
+    "id",
+    "org_id",
+    "slug",
+    "name",
+    "repo",
+    "restricted",
+    "created_by",
+    "created_by_token",
+    "created_at",
+    "updated_at",
+  ],
+  project_access: [
+    "id",
+    "org_id",
+    "project_id",
+    "person_id",
+    "team_id",
+    "permission",
+    "granted_by",
+    "created_at",
+  ],
   artifact_access: [
     "artifact_id",
     "org_id",
@@ -141,7 +202,7 @@ describe("the database matches 02-data-model.md", () => {
       from pg_type t join pg_enum e on e.enumtypid = t.oid group by t.typname`;
     const actual = Object.fromEntries(rows.map((row) => [row.typname, row.labels]));
     expect(actual).toEqual(docEnums());
-    expect(Object.keys(actual)).toHaveLength(11);
+    expect(Object.keys(actual)).toHaveLength(13);
   });
 
   test("every table", async () => {
@@ -197,7 +258,7 @@ describe("the database matches 02-data-model.md", () => {
       where contype = 'f' and confrelid = 'org'::regclass
         and conkey = array[(select attnum from pg_attribute where attrelid = conrelid and attname = 'org_id')]`;
     const names = (rows: postgres.Row[]) => rows.map((row) => row.table_name as string).sort();
-    expect(tables).toHaveLength(35);
+    expect(tables).toHaveLength(42);
     expect(names(columns)).toEqual(names(tables));
     expect(names(references)).toEqual(names(tables));
   });

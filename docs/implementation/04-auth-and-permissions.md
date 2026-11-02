@@ -42,13 +42,15 @@ Precedence when several are present: Bearer token, then session cookie, then gue
   - 5 failures per account per 15 minutes, then 1 attempt per minute, doubling to a 1-hour cap
   - 30 attempts per IP per 15 minutes
 - Changing or resetting a password ends every other session of that person, and every reset link of theirs that is still unused.
-- A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
+- A **reset** (through a reset link, which is also how `POST /api/recover` ends) goes further, because it is the way back from a suspected takeover. It ends every session, revokes every CLI token of that person (`revoked_at`, as `DELETE /api/tokens/:id` does) and deletes every passkey and linked Google account of theirs, so nothing an attacker holds survives. The person signs in again with the new password and registers passkeys and CLI logins afresh. Organization tokens aren't personal and are untouched. A routine password change by a signed-in person leaves their CLI tokens and passkeys as they are.
 
 ## Removing a person
 
 `DELETE /api/people/:id` sets `removed_at` and, in the same transaction, ends everything that person could still act through:
 
 - their sessions and their own tokens (`tokens.person_id`), as `revoked_at`
+- their `team_members` rows, their own `project_access` rows and their `identities`
+
 - the invites and reset links they issued that are still unused
 - the **organization tokens they created** (`tokens` with `kind = org` and `created_by` = them), as `revoked_at`, so a token an admin made can't outlive the admin
 - the **share links they created** (`share_links.created_by` = them), as `revoked_at`, the same as revoking the link from the Share sheet. A guest's access is read from the link on every request, so guests who came in by those links lose access at once; nothing else is needed.
@@ -73,10 +75,38 @@ Libraries: `@simplewebauthn/server` and `@simplewebauthn/browser`.
 - **User verification is required** (`userVerification: "required"` in options, and `requireUserVerification: true` when verifying, for registration and sign-in). A passkey can be someone's only credential, so it has to prove the person and not just the device.
 - **Challenges** live in `webauthn_challenges` for 5 minutes and are single use.
 
+## Google sign-in
+
+Optional. Sign-in is email with a password or a passkey, or Google once an admin turns it on. With it off, its routes answer nothing and the sign-in page doesn't change.
+
+- **Setup:** the client's ID and secret come from `artifacts setup` or Settings, Sign-in. They're stored in `org`, never returned by an API, and not encrypted with `SESSION_SECRET`. There's one redirect URI per viewer origin, including the home domain, because session cookies are host-only and Google matches exactly. Google can only be turned on after a round trip by the admin who turns it on, and new credentials turn it off.
+- **The flow:** authorization code with PKCE (S256), `state` and `nonce`. `state` is single use, held for 10 minutes in `google_states`, and bound to the browser by the `art_google` cookie, whose hash is on the row: without that, someone could send a callback link and sign a person into the sender's account. It's `HttpOnly`, host-only and `SameSite=Lax`, because Google's redirect back is a navigation from another site.
+- **The ID token** comes straight from Google's token endpoint over TLS, so no JWT library or signature check is needed. `iss`, `aud`, `azp`, `exp` and `nonce` are checked, and `email_verified` must be true.
+- **Accounts match on `sub`,** because `email` can change and isn't unique.
+
+| Situation | Result |
+|---|---|
+| Known `sub` | Signed in |
+| Email matches an existing person | "Sign in once the usual way to connect Google." Linked from Settings after that, with a recent sign-in. |
+| On an invite link, and the Google email matches the invite | Account created, linked |
+| On an invite link, and the email differs | Refused |
+| Workspace auto-join is on, the `hd` claim is that domain, and nobody here or removed has the email | Account created with the chosen role and teams, linked |
+| No match | Refused: "Ask an admin for an invite." |
+
+**Email alone never links an existing account.** Nothing proves that a person owns their email (SPEC 7.3). A member could invite `victim@acme.com` as an outside person, accept the link themselves and keep the 30-day session, so linking automatically would hand the real person an account the attacker can still enter. A link happens only while accepting an invite, or for a person with a recent sign-in, in the session that started the round trip. Someone with no password or passkey asks an admin for a reset link first.
+
+**Workspace auto-join** is opt-in, off by default, and set only through `PATCH /api/org/google`. It checks the `hd` claim and never sends the `hd` parameter. `gmail.com` and `googlemail.com` are refused when it's set and again when it's used. The role is `member` or `reviewer`. Someone an admin removed can't come back this way, by their email or by any Google account they had linked: removal keeps a hash of its `sub`.
+
+**Re-authentication.** A Google round trip counts as a recent sign-in, with a passkey offered first when there is one. Google doesn't document `prompt=login` or `max_age`, so it uses `login_hint=<sub>` and `prompt=select_account`, requires the same `sub`, and is bound to the current session. That proves a live Google session in this browser, which is weaker than a password. Because it's a redirect, the person comes back to the same page and taps again.
+
+**Known limit.** Suspending someone in Google Workspace doesn't reach Artifacts. Their session lasts up to 30 days from last use, and CLI tokens continue. Offboarding still means removing them here.
+
 ## Sessions and "recent sign-in"
 
-- A session is created by password, passkey, invite acceptance, reset, or setup. Each sets `auth_at = now`.
-- These actions need `recentAuth`: adding or removing a passkey, changing a password, creating an org token, purging (artifact or version), and approving a device code. The API answers 401 `recent_auth_required`. The viewer then shows a re-auth sheet (passkey or password → `POST /api/auth/reauth`) and retries.
+
+- A session is created by password, passkey, Google, invite acceptance, reset, or setup. Each sets `auth_at = now`.
+
+- These actions need `recentAuth`: adding or removing a passkey, changing a password, creating an org token, purging (artifact or version), and approving a device code. The API answers 401 `recent_auth_required`. The viewer then shows a re-auth sheet (a passkey, a password → `POST /api/auth/reauth`, or a Google round trip) and retries. It offers what the person has, with a passkey first. Connecting Google and changing the Google client need a recent sign-in too.
 - Sessions are per domain (host-only cookies), so another viewer domain means signing in again.
 
 ## Setup mode
@@ -133,7 +163,7 @@ CLI tokens work as a static bearer at the same endpoint, for clients with no OAu
 
 - **CLI tokens** from the device flow or setup get `publish comment read manage data`.
 - **Org tokens:** the admin picks scopes and projects.
-- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner or itself. Those come from the viewer.
+- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner, itself, or anyone who leads a team or manages a project. Those come from the viewer.
 
 ## The permission function
 
@@ -147,15 +177,45 @@ Can the caller see an artifact at all (`artifact.read`)?
 
 | Caller | Can see when |
 |---|---|
-| owner, admin | Always, including `me` artifacts (admins manage the deployment) |
-| member, reviewer | `visibility = org`, **or** they published it, **or** they're in `artifact_access` |
-| outside | They're in `artifact_access` |
+| owner, admin | Always, including `me` artifacts and restricted projects (admins manage the deployment) |
+| member, reviewer | `visibility = org` in an open project, **or** they published it, **or** they're in `artifact_access`, **or** a team they're in has the artifact, **or** they hold a grant on an `org` artifact's project |
+| outside | They're in `artifact_access`, or a team they're in has the artifact, or they hold a grant on an `org` artifact's project |
 | guest | Their `guest_links` row for a link on this artifact is unexpired and the link isn't revoked or expired |
 | cliToken | As its person, and the token has `read` |
-| orgToken | `visibility = org` and the project is in its `project_ids` (or all), and it has `read` |
+| orgToken | `visibility = org`, it has `read`, and it reaches the project: named in its `project_ids`, or any open project when that's null, or a project it created |
 | content | The token's artifact and version |
 
-**Access a token granted** (`artifacts share --invite` or `--add` run with a CLI token) is stored with `via_token = true`, on the invite and on the `artifact_access` row it becomes. An agent could otherwise invite an address it controls, open the link itself, and approve its own version. Such a person can read and comment as the permission allows, but `artifact.decide` and `thread.resolve` (which includes reopening) are refused with `forbidden` while the row is all their right to comment rests on. A person who may comment by role (owner, admin, the publisher, or a member or reviewer on an org-visible artifact) is unaffected. A person creating or changing the row (the Share sheet adding the address again, with any permission) sets `via_token = false`, which is the confirmation. A token repeating a grant with the same permission leaves the flag as it is; a token changing the permission sets it. The artifact answer reports `permissions.decide` so the viewer can hide the buttons.
+**What a person can do with an artifact** comes from one function, `effective()` in `can.ts`, and the first of these that applies wins:
+
+| # | Rule | Result |
+|---|---|---|
+| 1 | Owner or admin | Everything, including restricted projects and `me` artifacts |
+| 2 | Publisher, or a member with `manage` on the project, for `org` artifacts | Manage the artifact |
+| 3 | In `artifact_access` | Exactly that level |
+| 4 | Anything else | The highest of: `comment` for a member or reviewer on an org-visible artifact in an open project, project grants, and team grants on the artifact |
+
+Reviewers and outside people stop at `comment`, however a grant was made, including a project `manage` grant. Grants only add, apart from rule 3: a direct `view` row is how to narrow one person, and it holds against a team's `comment`. An artifact's resource carries `inherited`, one row per person, expanded from teams and the project when it's loaded, so callers build nothing and a push to many people needs no query per person. `level` is the best a grant gives, and `confirmed` is the best one a person made. Someone who published and was then made a reviewer keeps managing their own artifacts, as they always have.
+
+**Project levels:**
+
+| Level | On a project | On an artifact |
+|---|---|---|
+| Can view | See its `org` artifacts | See it |
+| Can comment | Also comment, approve and resolve | Same |
+| Can publish | Also add **new** artifacts | Also publish new versions |
+| Can manage | Also publish to any artifact, archive and delete, and change who has access | Not offered: the publisher and project managers hold this |
+
+Project "Can publish" doesn't allow new versions of other people's artifacts: a new version can carry a backend, and a backend can read every person's `me` data. On one artifact it counts as a comment. Project grants never reach `me` artifacts. Purging stays with the publisher and admins, and so does `data.export`.
+
+**Tokens stay narrower than their person.** Project `manage` works in a browser session only. A CLI token gets `comment` from it, still manages only what its person published, and can't publish to anyone else's artifact.
+
+**Open and restricted projects.** A project is open to the organization unless `projects.restricted` is set. A restricted project is visible only to admins, its grant holders, publishers of artifacts in it, and people added to one of its artifacts; those last two see only those artifacts. Links and outside invites (`artifact.share_outside`) need project `manage` there, in a browser, or a link would undo the restriction.
+
+**Organization tokens.** `project_ids = null` means every open project, so restricting a project takes it away from broad tokens, and that failure is visible. A restricted project must be named on the token. A token always reaches a project it created itself (`projects.created_by_token`), or CI would fail on its second run when `defaultProjectAccess` is `restricted`. Admins manage those projects, since no person created them.
+
+**Teams.** Anyone in a team gets what the team was given, including people added later, on an artifact or a whole project. Outside people can be in a team, capped as above. Tokens can't change teams, memberships, project access or restriction, so only a person can add one. Leads add and remove members of their own team, and a lead must be a member or above: leading hands out access, which a role capped at commenting shouldn't do. A lead who becomes a reviewer stops leading without anything being deleted.
+
+**Access a token granted** (`artifacts share --invite`, `--add` or `--team` run with a CLI token) is stored with `via_token = true`, on the invite and on the `artifact_access` or `artifact_team_access` row it becomes. An agent could otherwise invite an address it controls, open the link itself, and approve its own version. Such a person can read and comment as the permission allows, but `artifact.decide` and `thread.resolve` (which includes reopening) are refused with `forbidden` while the row is all their right to comment rests on. A person with any other right to comment that a person gave is unaffected: a role (owner, admin, the publisher, or a member or reviewer on an org-visible artifact), a direct row, or a team's row. So a token-made grant tied with a person-made one can't block them. A person creating or changing the row (the Share sheet adding the address again, with any permission) sets `via_token = false`, which is the confirmation. A token repeating a grant with the same permission leaves the flag as it is; a token changing the permission sets it. The artifact answer reports `permissions.decide` so the viewer can hide the buttons.
 
 Someone in `artifact_access` with `view` can only view, whatever their role: on a `me` artifact, a member added with `view` can't comment.
 
@@ -173,9 +233,14 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `thread.resolve`, `artifact.decide` | People only (not guests, not tokens) who can comment, except someone whose only right to comment is access a token granted (`via_token`, below) |
 | `artifact.publish` | The publisher, admins, owner; members the publisher or an admin added with `publish` in `artifact_access`; cliToken (`publish`) as its person, when that person may publish; orgToken (`publish`, project allowed). Reviewers and outside people never. Not on archived artifacts. Publishing a backend can read every person's `me` data, which is why this isn't open to every member. |
 | `project.create` | Members and up; tokens with `publish` (cli) or `org` (org token) |
-| `artifact.manage`, `artifact.share` | The publisher, admins, owner; cliToken with `manage` as the publisher. `share` also requires `org.settings.linkSharing` for links. Only these callers can add someone with `publish`, and only organization members can receive it. |
+| `project.read` | On a project: anyone who can see it, as above. Without one, as `home.read`. |
+| `project.publish` | Add a new artifact to a project: members and up in an open project; `publish` or above in a restricted one, and admins; cliToken with `publish` as its person; orgToken with `org`, where it reaches the project |
+| `project.access.read` | `manage` on the project, admins, owner; a cliToken with `read` as its person, which gets the grants without addresses or who's in each team |
+| `project.access.write`, `project.update` | `manage` on the project, admins, owner, as people. Never a token. |
+| `artifact.manage`, `artifact.share` | The publisher, admins, owner, and members with `manage` on the project as people; cliToken with `manage` as the publisher. `share` also requires `org.settings.linkSharing` for links. Only these callers can add someone with `publish`, and only organization members can receive it. |
+| `artifact.share_outside` | Links, outside invites, adding an outside person, and sharing with a team that has one in it. As `artifact.share` in an open project. In a restricted one: admins, owner and members with project `manage`, as people. |
 | `artifact.archive`, `artifact.delete` | Same as `manage` (archive and delete are undoable) |
-| `artifact.purge` | The publisher or an admin, as a **person** with `recentAuth`. Never a token. |
+| `artifact.purge` | The publisher or an admin, as a **person** with `recentAuth`. Never a token, and not a project manager, who can delete but not erase. |
 | `deleted.read` | People, and cliTokens with `manage`: their own deletions; admins: all. Agents can undelete, so they need to find what they deleted. |
 | `data.read` | Anyone with `artifact.read` (for `me`, only their own key space) |
 | `data.write` | Anyone with `artifact.comment`, on their own `me` space or `shared`. Not on archived artifacts. A backend's `env.DATA` writes follow the same rule for the caller of that request: read-only for viewers and on archived artifacts (08). |
@@ -186,17 +251,22 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `brand.read` | As `home.read`: what renders use. |
 | `brand.propose` | Members and up; cliToken with `publish`. A proposal changes nothing. Not org tokens, which have no person to answer for it. |
 | `brand.apply` | Setting a brand by hand, applying a proposal, or clearing the brand. Admins, owner, as people. Never a token: it changes how everyone's work looks, and an agent's scopes hold only what a person can undo for one artifact. |
-| `people.invite` | Admins, owner; an admin's cliToken with `manage`. `artifacts org invite` and `org reset-link` need this (SPEC §10). |
+| `people.invite` | Admins, owner; an admin's cliToken with `manage`. `artifacts org invite` and `org reset-link` need this (SPEC §10). A token can't invite anyone into a team. |
+| `people.search` | Members and up, as people. Names and emails, outside people included, because a picker needs them. Never a token: the directory doesn't go to agents. |
+| `team.read` | Members and up; cliToken with `read`. A token sees a team's name, size and shared work, not its members. |
+| `team.manage` | Admins, owner, as people: create, rename, delete. |
+| `team.members` | The team's leads, admins, owner, as people. |
 
 ### Test matrix
 
 `apps/server/test/permissions.test.ts` generates every combination of:
-- caller: owner, admin, member (publisher), member (added with `publish`), member (other), member (added by a token), reviewer, outside (added), outside (added by a token), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous
+- caller: owner, admin, member (publisher), member (added with `publish`), member (other), member (added by a token), reviewer, outside (added), outside (added by a token), outside (not added), guest (view link), guest (comment link), guest (revoked link), cliToken (publisher), orgToken (allowed project), orgToken (other project), anonymous, people and tokens holding access through a team or a project at each level, including a token-made team row alone and tied with a person's, reviewers and outside people with project `manage`, and organization tokens over all projects and on a project they made
 - visibility: `me`, `org`
+- project: open, restricted
 - lifecycle: active, archived, deleted
 - every action in the table above
 
-The expected result is computed from a second, deliberately simple table in the test, not from `can()`. A mismatch fails the test, so a regression shows up as a matrix diff.
+A second generated table covers every caller against an open and a restricted project, for the actions about a project. The expected result is computed from a deliberately simple table in the test, not from `can()`. A mismatch fails the test, so a regression shows up as a matrix diff.
 
 ## CSRF, hosts and headers
 
@@ -222,6 +292,9 @@ The expected result is computed from a second, deliberately simple table in the 
 | Looking up, approving or denying a device code (`/api/device/:userCode…`) | 30 per signed-in person per 15 minutes |
 | `POST /api/s/:token/guest` | 20 per IP per hour |
 | `POST /api/auth/passkey/options` | 60 per IP per 15 minutes (each call stores a challenge for 5 minutes) |
+| `GET /api/auth/google/start` | 60 per IP per 15 minutes (each call stores a state for 10 minutes) |
+| `GET /api/auth/google/callback` | 60 per IP per 15 minutes |
+
 | Comments | 30 per caller per minute |
 | Data writes | `org.settings.limits.writesPerSecond` (default 10) per caller per artifact |
 | Backend requests (`/t/…/api/*`) | `org.settings.limits.backendRequestsPerMinute` (default 120) per caller per artifact |
@@ -231,6 +304,7 @@ The expected result is computed from a second, deliberately simple table in the 
 | `POST /api/recover` | 5 per IP per hour |
 | `POST /api/setup` | 20 per IP per hour, while in setup mode |
 | Search (`GET /api/search`) | 60 per caller per minute |
+| People search (`GET /api/people/search`) | 60 per person per minute |
 | Compare (`GET /api/artifacts/:id/compare`) | 30 per caller per minute, for diffs not yet made |
 | Event streams (`GET /api/events`) | 10 open per caller |
 

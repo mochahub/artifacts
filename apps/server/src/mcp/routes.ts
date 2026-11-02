@@ -18,8 +18,9 @@ import type { Deps } from "../api/deps.ts";
 import type { ApiContext, ApiVars, Routes } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { pages, people, versions } from "../db/schema.ts";
+import { pages, people, projects, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { audienceOf } from "../library/audience.ts";
 import { libraryCards } from "../library/cards.ts";
 import { readArtifact, viewArtifact } from "../library/read.ts";
 import {
@@ -277,7 +278,29 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         const loaded = await load(context, deps);
         const [card] = await libraryCards(deps, context.caller, [loaded]);
         const { views } = await review.listThreads(loaded.row.id, { status: "open" });
-        return { version: loaded.row.latestVersion, outcome: card?.outcome, open: views.map(threadJson) };
+        const [place] = await deps.db
+          .select({ name: projects.name })
+          .from(projects)
+          .where(eq(projects.id, loaded.row.projectId))
+          .limit(1);
+        // For whoever answers for the work, as in GET /api/artifacts/:id/status.
+        const answers =
+          context.caller.kind === "orgToken" || can(context.caller, "artifact.share", loaded.resource);
+        return {
+          version: loaded.row.latestVersion,
+          outcome: card?.outcome,
+          open: views.map(threadJson),
+          ...(answers
+            ? {
+                audience: await audienceOf(
+                  deps,
+                  context.c.get("org").name,
+                  { ...loaded.resource, row: loaded.row },
+                  place?.name ?? "",
+                ),
+              }
+            : {}),
+        };
       },
     },
     {

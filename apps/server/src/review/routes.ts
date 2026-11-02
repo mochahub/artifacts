@@ -14,9 +14,20 @@ import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { activity, artifacts, blocks, comments, decisions, frames, threads, versions } from "../db/schema.ts";
+import {
+  activity,
+  artifacts,
+  blocks,
+  comments,
+  decisions,
+  frames,
+  projects,
+  threads,
+  versions,
+} from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
+import { audienceOf } from "../library/audience.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { notifyReply } from "../push/notify.ts";
 import { cropAround } from "./crop.ts";
@@ -548,7 +559,13 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
       .where(and(eq(threads.artifactId, artifactId), inArray(threads.status, ["open", "fixed"])))
       .orderBy(asc(threads.n));
     const views = await threadViews(rows);
+    const caller = c.get("caller");
+    const [place] = await db.select().from(projects).where(eq(projects.id, resource.projectId)).limit(1);
     return etagJson(c, {
+      // For whoever answers for the work: anyone else needn't learn who else was let in.
+      ...(can(caller, "artifact.share", resource) || caller.kind === "orgToken"
+        ? { audience: await audienceOf(deps, c.get("org").name, resource, place?.name ?? "") }
+        : {}),
       version: resource.row.latestVersion,
       decision: latest?.kind ?? null,
       decisionVersion: latest?.version ?? null,

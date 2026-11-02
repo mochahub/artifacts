@@ -11,13 +11,16 @@ import { authRoutes } from "./auth.ts";
 import type { Deps } from "./deps.ts";
 import { deviceRoutes } from "./device.ts";
 import { fileRoutes } from "./files.ts";
+import { googleRoutes } from "./google.ts";
 import { lifecycleRoutes } from "./lifecycle.ts";
 import { listRoutes } from "./lists.ts";
 import { passkeyRoutes } from "./passkeys.ts";
 import { peopleRoutes } from "./people.ts";
+import { projectRoutes } from "./projects.ts";
 import type { Routes } from "./routes.ts";
 import { setupRoutes } from "./setup.ts";
 import { sharingRoutes } from "./sharing.ts";
+import { teamRoutes } from "./teams.ts";
 import { versionRoutes } from "./versions.ts";
 
 /** Every /api route on the viewer port. */
@@ -25,8 +28,12 @@ export function mountApi(routes: Routes, deps: Deps) {
   setupRoutes(routes, deps);
   const passkeys = passkeyRoutes(routes, deps);
   authRoutes(routes, deps, passkeys);
+  googleRoutes(routes, deps);
+
   peopleRoutes(routes, deps);
   sharingRoutes(routes, deps);
+  teamRoutes(routes, deps);
+  projectRoutes(routes, deps);
   deviceRoutes(routes, deps);
   const publisher = createPublisher(deps);
   publishRoutes(routes, publisher);

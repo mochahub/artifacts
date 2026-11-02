@@ -1,3 +1,4 @@
+import type { GoogleSettings, IdentityList } from "@artifacts/schema";
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import {
   contrast,
@@ -8,6 +9,7 @@ import {
 } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -18,15 +20,17 @@ import {
   Lock,
   Plus,
   Trash2,
+  Users,
   X,
 } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect } from "preact/hooks";
-import { useRoute } from "preact-iso";
+import { useLocation, useRoute } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
-import { ReauthSheet } from "../components/reauth.tsx";
+import { googleLink, ReauthSheet } from "../components/reauth.tsx";
+import { LEVELS, Picker } from "../components/share.tsx";
 import { Sheet } from "../components/sheets.tsx";
-import { ago } from "../format.ts";
+import { ago, plural } from "../format.ts";
 import {
   canPush,
   clearOffline,
@@ -37,27 +41,30 @@ import {
 } from "../notify.ts";
 import { addPasskey, passkeyName } from "../passkey.ts";
 import { usePoll } from "../poll.ts";
-import { me, meta } from "../session.ts";
+import { me, meta, refreshMeta } from "../session.ts";
 import { SignedIn } from "./guard.tsx";
 
 const ADMIN = () => me.value?.role === "owner" || me.value?.role === "admin";
+const MEMBER_OR_UP = () => ADMIN() || me.value?.role === "member";
 const message = (failure: unknown) =>
   failure instanceof ApiFailure ? failure.message : "Something went wrong.";
 
 function Frame({
   title,
   back = "/settings",
+  backLabel = "Settings",
   children,
 }: {
   title: string;
   back?: string;
+  backLabel?: string;
   children: ComponentChildren;
 }) {
   return (
     <main class="main">
       <a class="back" href={back}>
         <ChevronLeft />
-        Settings
+        {backLabel}
       </a>
       <h1 class="h1">{title}</h1>
       {children}
@@ -98,6 +105,7 @@ function Index() {
   const rows = [
     ["/settings/sign-in", "Sign-in", "Passkeys, password and sessions"],
     ["/settings/notifications", "Notifications", "On this device"],
+    ...(MEMBER_OR_UP() ? [["/settings/teams", "Teams", "Who works together, and what they share"]] : []),
     ...(admin
       ? [
           ["/settings/people", "People", "Members, outside people and invites"],
@@ -157,9 +165,25 @@ type Session = {
   current: boolean;
 };
 
+const GOOGLE_ANSWERS: Record<string, string> = {
+  linked: "Google is connected.",
+  "in-use": "That Google account is already connected to someone here, or you have one connected.",
+  recent: "Sign in again, then connect Google.",
+  failed: "Google didn't finish. Try again.",
+  cancelled: "Cancelled.",
+  unverified: "Google hasn't verified that email address.",
+  expired: "That took too long. Try again.",
+  off: "Google sign-in is turned off here.",
+  tested: "That worked. You can turn Google on.",
+  mismatch: "That's a different Google account.",
+  confirmed: "Confirmed. Tap again to carry on.",
+};
+
 function SignIn() {
   const keys = usePoll<Keys>("/api/me/passkeys", 60_000);
   const sessions = usePoll<Session[]>("/api/me/sessions", 60_000);
+  const google = usePoll<IdentityList>("/api/me/identities", 60_000);
+  const { query } = useLocation();
   const recent = useRecent();
   const changing = useSignal(false);
   const password = useSignal("");
@@ -203,7 +227,65 @@ function SignIn() {
         Add a passkey
       </button>
       <p class="fn">Works on {others}.</p>
+      {ADMIN() && (
+        <div class="group">
+          <a class="li" href="/settings/google">
+            <div class="grow">
+              <div class="tt">Google sign-in</div>
+              <div class="ss">For everyone in {meta.value?.orgName}</div>
+            </div>
+            <ChevronRight class="chev" />
+          </a>
+        </div>
+      )}
       {recent.error.value && <p class="err">{recent.error.value}</p>}
+      {google.data.value?.google && (
+        <>
+          <span class="gh">Google</span>
+          {google.data.value.identities.length > 0 ? (
+            <div class="group">
+              {google.data.value.identities.map((row) => (
+                <div class="li" key={row.id}>
+                  <div class="grow">
+                    <div class="tt" style="overflow-wrap:anywhere">
+                      {row.email}
+                    </div>
+                    <div class="ss">{row.lastUsedAt ? `Used ${ago(row.lastUsedAt)}` : "Not used yet"}</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label={`Remove ${row.email}`}
+                    onClick={() =>
+                      recent.run(async () => {
+                        await api(`/api/me/identities/${row.id}`, { method: "DELETE" });
+                        await google.refresh();
+                      })
+                    }
+                  >
+                    <Trash2 />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              class="btn soft"
+              onClick={() =>
+                recent.run(async () => {
+                  // Asks for a recent sign-in first, because a redirect can't come back to a retry.
+                  await post("/api/auth/reauth/check");
+                  location.href = googleLink("link", "/settings/sign-in");
+                })
+              }
+            >
+              Connect Google
+            </button>
+          )}
+        </>
+      )}
+      {query.google && GOOGLE_ANSWERS[query.google] && <p class="fn">{GOOGLE_ANSWERS[query.google]}</p>}
       <span class="gh">Password</span>
       <div class="group">
         <button
@@ -299,6 +381,9 @@ type PersonRow = {
   password: boolean;
   passkeys: number;
   shares: { title: string; permission: string }[];
+  google: boolean;
+  teams: { slug: string; name: string; role: string }[];
+  projects: { slug: string; name: string; permission: keyof typeof LEVELS }[];
 };
 type InviteRow = { id: string; email: string; role: string; expiresAt: string };
 type PeopleList = { people: PersonRow[]; invites: InviteRow[] };
@@ -315,11 +400,17 @@ function People() {
   const role = useSignal("member");
   const link = useSignal<string | null>(null);
   const error = useSignal<string | null>(null);
+  const teams = usePoll<TeamList>("/api/teams", 60_000);
+  const joining = useSignal<string[]>([]);
 
   async function invite() {
     error.value = null;
     try {
-      const { url } = await post<{ url: string }>("/api/invites", { email: email.value, role: role.value });
+      const { url } = await post<{ url: string }>("/api/invites", {
+        email: email.value,
+        role: role.value,
+        teamIds: joining.value,
+      });
       link.value = url;
       copy(url);
       await list.refresh();
@@ -347,6 +438,7 @@ function People() {
           inviting.value = true;
           link.value = null;
           email.value = "";
+          joining.value = [];
         }}
       >
         <Plus />
@@ -481,6 +573,32 @@ function People() {
                 ? "Admins manage people and settings."
                 : "Members publish, comment and share their own work."}
           </p>
+          {(teams.data.value?.teams.length ?? 0) > 0 && <span class="gh">Teams</span>}
+          {(teams.data.value?.teams.length ?? 0) > 0 && (
+            <div class="group">
+              {teams.data.value?.teams.map((team) => {
+                const on = joining.value.includes(team.id);
+                return (
+                  <button
+                    type="button"
+                    class="li btn-li"
+                    key={team.id}
+                    aria-pressed={on}
+                    onClick={() => {
+                      joining.value = on
+                        ? joining.value.filter((id) => id !== team.id)
+                        : [...joining.value, team.id];
+                    }}
+                  >
+                    <div class="grow">
+                      <div class="tt">{team.name}</div>
+                    </div>
+                    {on && <Check />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {link.value && (
             <div class="card" style="padding:10px 14px">
               <div class="mono" style="font-size:14px;overflow-wrap:anywhere">
@@ -515,11 +633,45 @@ function People() {
                 <div class="tt">Sign-in</div>
               </div>
               <span class="ss">
-                {[person.password ? "Password" : null, person.passkeys ? "Passkey" : null]
+                {[
+                  person.password ? "Password" : null,
+                  person.passkeys ? "Passkey" : null,
+                  person.google ? "Google" : null,
+                ]
                   .filter(Boolean)
                   .join(" and ") || "None yet"}
               </span>
             </div>
+            {person.teams.length > 0 && (
+              <div class="li">
+                <div class="grow">
+                  <div class="tt">Teams</div>
+                </div>
+                <span class="ss">
+                  {person.teams.map((team, i) => (
+                    <span key={team.slug}>
+                      {i > 0 && ", "}
+                      <a href={`/settings/teams/${team.slug}`}>{team.name}</a>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            )}
+            {person.projects.length > 0 && (
+              <div class="li">
+                <div class="grow">
+                  <div class="tt">Projects</div>
+                </div>
+                <span class="ss">
+                  {person.projects.map((project, i) => (
+                    <span key={project.slug}>
+                      {i > 0 && ", "}
+                      <a href={`/${project.slug}`}>{project.name}</a>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            )}
           </div>
           {person.role !== "outside" && (
             <div class="seg">
@@ -583,10 +735,445 @@ function People() {
   );
 }
 
+type TeamRow = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  members: number;
+  role: "lead" | "member" | null;
+};
+type TeamList = { teams: TeamRow[] };
+type TeamPage = {
+  team: TeamRow;
+  members: { id: string; name: string; email: string; role: "lead" | "member"; orgRole: string }[];
+  shared: { id: string; project: string; slug: string; title: string; level: keyof typeof LEVELS }[];
+  permissions: { manage: boolean; members: boolean };
+};
+
+function Teams() {
+  const list = usePoll<TeamList>("/api/teams", 60_000);
+  const creating = useSignal(false);
+  const name = useSignal("");
+  const about = useSignal("");
+  const error = useSignal<string | null>(null);
+  const { route } = useLocation();
+  async function create() {
+    error.value = null;
+    try {
+      const { team } = await post<{ team: TeamRow }>("/api/teams", {
+        name: name.value,
+        description: about.value || null,
+      });
+      route(`/settings/teams/${team.slug}`);
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  }
+  const rows = list.data.value?.teams ?? [];
+  return (
+    <Frame title="Teams">
+      {ADMIN() && (
+        <button
+          type="button"
+          class="btn ink"
+          onClick={() => {
+            creating.value = true;
+            name.value = "";
+            about.value = "";
+          }}
+        >
+          <Plus />
+          New team
+        </button>
+      )}
+      {rows.length > 0 ? (
+        <div class="group">
+          {rows.map((team) => (
+            <a class="li" href={`/settings/teams/${team.slug}`} key={team.id}>
+              <Users />
+              <div class="grow">
+                <div class="tt">{team.name}</div>
+                <div class="ss">
+                  {plural(team.members, "person", "people")}
+                  {team.role === "lead" ? ", you lead it" : team.role ? ", you're in it" : ""}
+                </div>
+              </div>
+              <ChevronRight class="chev" />
+            </a>
+          ))}
+        </div>
+      ) : (
+        list.data.value && (
+          <div class="empty">
+            No teams yet. A team shares work in one step, and anyone added later gets the same access.
+          </div>
+        )
+      )}
+      {creating.value && (
+        <Sheet
+          title="New team"
+          onClose={() => {
+            creating.value = false;
+          }}
+        >
+          <label class="gh" for="team-name">
+            Name
+          </label>
+          <input
+            id="team-name"
+            class="field"
+            maxLength={60}
+            value={name.value}
+            onInput={(e) => {
+              name.value = e.currentTarget.value;
+            }}
+          />
+          <label class="gh" for="team-about">
+            What it's for
+          </label>
+          <input
+            id="team-about"
+            class="field"
+            maxLength={280}
+            value={about.value}
+            onInput={(e) => {
+              about.value = e.currentTarget.value;
+            }}
+          />
+          {error.value && <p class="err">{error.value}</p>}
+          <button type="button" class="btn ink" disabled={!name.value.trim()} onClick={create}>
+            Create team
+          </button>
+        </Sheet>
+      )}
+    </Frame>
+  );
+}
+
+function TeamDetail({ slug }: { slug: string }) {
+  const { route } = useLocation();
+  const page = usePoll<TeamPage>(`/api/teams/${encodeURIComponent(slug)}`, 60_000);
+  const error = useSignal<string | null>(null);
+  const renaming = useSignal<string | null>(null);
+  const act = async (work: () => Promise<unknown>) => {
+    error.value = null;
+    try {
+      await work();
+      await page.refresh();
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  };
+  const body = page.data.value;
+  if (page.error.value?.status === 404) return <Frame title="No such team">{null}</Frame>;
+  if (!body) return null;
+  const path = `/api/teams/${encodeURIComponent(slug)}`;
+  const { team, members, shared, permissions } = body;
+  return (
+    <Frame title={team.name} back="/settings/teams" backLabel="Teams">
+      {team.description && <p class="sub">{team.description}</p>}
+      {permissions.members && (
+        <Picker
+          teams={false}
+          placeholder="Add a person"
+          skip={members.map((member) => member.id)}
+          onPick={(choice) =>
+            act(() => api(`${path}/members/${choice.id}`, { method: "PUT", json: { role: "member" } }))
+          }
+        />
+      )}
+      <span class="gh">{plural(team.members, "person", "people")}</span>
+      {members.length > 0 && (
+        <div class="group">
+          {members.map((member) => (
+            <div class="li" key={member.id}>
+              <span class={`av${member.id === me.value?.id ? " you" : ""}`}>{member.name[0]}</span>
+              <div class="grow">
+                <div class="tt">{member.name}</div>
+                <div class="ss">
+                  {member.email}
+                  {["outside", "reviewer"].includes(member.orgRole) && `, ${roleName(member.orgRole)}`}
+                </div>
+              </div>
+              {permissions.members && !["outside", "reviewer"].includes(member.orgRole) ? (
+                <select
+                  class="level"
+                  aria-label={`Role for ${member.name}`}
+                  value={member.role}
+                  onChange={(e) => {
+                    const role = e.currentTarget.value;
+                    act(() => api(`${path}/members/${member.id}`, { method: "PUT", json: { role } }));
+                  }}
+                >
+                  <option value="member">Member</option>
+                  <option value="lead">Lead</option>
+                </select>
+              ) : (
+                member.role === "lead" && <span class="word">Lead</span>
+              )}
+              {permissions.members && (
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-label={`Remove ${member.name}`}
+                  onClick={() => act(() => api(`${path}/members/${member.id}`, { method: "DELETE" }))}
+                >
+                  <X />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <a class="fn" href={`/projects?team=${team.slug}`}>
+        See its projects
+      </a>
+      <p class="fn">
+        Anyone added here gets what the team has. Reviewers and outside people stop at commenting.
+      </p>
+      {shared.length > 0 && <span class="gh">Shared with this team</span>}
+      {shared.length > 0 && (
+        <div class="group">
+          {shared.map((row) => (
+            <a class="li" href={`/${row.project}/${row.slug}`} key={row.id}>
+              <div class="grow">
+                <div class="tt">{row.title}</div>
+                <div class="ss">{LEVELS[row.level]}</div>
+              </div>
+              <ChevronRight class="chev" />
+            </a>
+          ))}
+        </div>
+      )}
+      {error.value && <p class="err">{error.value}</p>}
+      {permissions.manage && (
+        <>
+          <button
+            type="button"
+            class="btn soft"
+            onClick={() => {
+              renaming.value = team.name;
+            }}
+          >
+            Rename {team.name}
+          </button>
+          <button
+            type="button"
+            class="btn soft"
+            style="color:var(--warn-word)"
+            onClick={() =>
+              act(async () => {
+                if (!confirm(`Delete ${team.name}? Everyone in it loses what the team was given.`)) return;
+                await api(path, { method: "DELETE" });
+                route("/settings/teams");
+              })
+            }
+          >
+            Delete {team.name}
+          </button>
+        </>
+      )}
+      {renaming.value !== null && (
+        <Sheet
+          title="Rename"
+          onClose={() => {
+            renaming.value = null;
+          }}
+        >
+          <label class="gh" for="team-rename">
+            Name
+          </label>
+          <input
+            id="team-rename"
+            class="field"
+            maxLength={60}
+            value={renaming.value}
+            onInput={(e) => {
+              renaming.value = e.currentTarget.value;
+            }}
+          />
+          <button
+            type="button"
+            class="btn ink"
+            disabled={!renaming.value.trim()}
+            onClick={() =>
+              act(async () => {
+                await api(path, { method: "PATCH", json: { name: renaming.value } });
+                renaming.value = null;
+              })
+            }
+          >
+            Save
+          </button>
+        </Sheet>
+      )}
+    </Frame>
+  );
+}
+
+function GoogleSetup() {
+  const settings = usePoll<GoogleSettings>("/api/org/google", 60_000);
+  const { query } = useLocation();
+  const recent = useRecent();
+  const clientId = useSignal<string | null>(null);
+  const secret = useSignal("");
+  const domain = useSignal<string | null>(null);
+  const body = settings.data.value;
+  if (!body) return null;
+  const change = (json: unknown) =>
+    recent.run(async () => {
+      await api("/api/org/google", { method: "PATCH", json });
+      await settings.refresh();
+      await refreshMeta();
+    });
+  return (
+    <Frame title="Google sign-in" back="/settings/sign-in" backLabel="Sign-in">
+      <p class="sub">
+        Optional. People still need an invite, and passwords and passkeys keep working. Create a client in
+        Google Cloud, of type Web application, and add these as its redirect URIs:
+      </p>
+      <div class="group">
+        {body.redirectUris.map((uri) => (
+          <button type="button" class="li btn-li" key={uri} onClick={() => copy(uri)}>
+            <div class="grow">
+              <div class="mono" style="font-size:14px;overflow-wrap:anywhere">
+                {uri}
+              </div>
+            </div>
+            <Copy />
+          </button>
+        ))}
+      </div>
+      <label class="gh" for="google-id">
+        Client ID
+      </label>
+      <input
+        id="google-id"
+        class="field"
+        autocomplete="off"
+        value={clientId.value ?? body.clientId ?? ""}
+        onInput={(e) => {
+          clientId.value = e.currentTarget.value;
+        }}
+      />
+      <label class="gh" for="google-secret">
+        Client secret
+      </label>
+      <input
+        id="google-secret"
+        class="field"
+        type="password"
+        autocomplete="off"
+        placeholder={body.hasSecret ? "Saved, and never shown again" : ""}
+        value={secret.value}
+        onInput={(e) => {
+          secret.value = e.currentTarget.value;
+        }}
+      />
+      <button
+        type="button"
+        class="btn soft"
+        disabled={!(clientId.value ?? body.clientId) || (!body.hasSecret && !secret.value)}
+        onClick={() =>
+          recent.run(async () => {
+            await api("/api/org/google", {
+              method: "PUT",
+              json: {
+                clientId: clientId.value ?? body.clientId,
+                ...(secret.value ? { clientSecret: secret.value } : {}),
+              },
+            });
+            secret.value = "";
+            await settings.refresh();
+            await refreshMeta();
+          })
+        }
+      >
+        Save
+      </button>
+      {query.google && GOOGLE_ANSWERS[query.google] && <p class="fn">{GOOGLE_ANSWERS[query.google]}</p>}
+      {body.clientId && body.hasSecret && (
+        <>
+          <span class="gh">Test</span>
+          <p class="fn">
+            Sign in to Google once to prove these work. Google can only be turned on after that, by the admin
+            who ran it. Saving new credentials turns it off again.
+          </p>
+          <button
+            type="button"
+            class="btn soft"
+            onClick={() =>
+              recent.run(async () => {
+                await post("/api/auth/reauth/check");
+                location.href = googleLink("test", "/settings/google");
+              })
+            }
+          >
+            {body.tested ? "Test again" : "Test"}
+          </button>
+          <span class="gh">For everyone</span>
+          <div class="seg">
+            {[true, false].map((value) => (
+              <button
+                type="button"
+                key={String(value)}
+                aria-pressed={body.enabled === value}
+                disabled={value && !body.tested && !body.enabled}
+                onClick={() => change({ enabled: value })}
+              >
+                {value ? "On" : "Off"}
+              </button>
+            ))}
+          </div>
+          <span class="gh">Join without an invite</span>
+          <label class="gh" for="google-domain">
+            Google Workspace domain
+          </label>
+          <input
+            id="google-domain"
+            class="field"
+            autocomplete="off"
+            placeholder="Off"
+            value={domain.value ?? body.autoJoin?.domain ?? ""}
+            onInput={(e) => {
+              domain.value = e.currentTarget.value;
+            }}
+          />
+          <p class="fn">
+            Off unless you set it. Anyone Google says belongs to this Workspace can then join as a member.
+            Consumer addresses such as gmail.com can't be used.
+          </p>
+          <button
+            type="button"
+            class="btn soft"
+            onClick={() => {
+              const value = (domain.value ?? body.autoJoin?.domain ?? "").trim();
+              change({
+                autoJoin: value
+                  ? { domain: value, role: body.autoJoin?.role ?? "member", teamIds: [] }
+                  : null,
+              });
+            }}
+          >
+            Save domain
+          </button>
+        </>
+      )}
+      {recent.error.value && <p class="err">{recent.error.value}</p>}
+      {recent.sheet}
+    </Frame>
+  );
+}
+
 type Org = {
   newVersion: string | null;
   name: string;
-  settings: { defaultVisibility: "me" | "org"; linkSharing: boolean };
+  settings: {
+    defaultVisibility: "me" | "org";
+    linkSharing: boolean;
+    defaultProjectAccess: "org" | "restricted";
+  };
   domains: { home: string; publicUrl: string; moreUrls: string[]; contentUrl: string | null };
 };
 
@@ -1052,6 +1639,19 @@ function OrgSettings() {
           </button>
         ))}
       </div>
+      <span class="gh">New projects are visible to</span>
+      <div class="seg">
+        {(["org", "restricted"] as const).map((value) => (
+          <button
+            type="button"
+            key={value}
+            aria-pressed={body.settings.defaultProjectAccess === value}
+            onClick={() => save({ settings: { defaultProjectAccess: value } })}
+          >
+            {value === "org" ? "Organization" : "Only people added"}
+          </button>
+        ))}
+      </div>
       <span class="gh">Share links</span>
       <div class="seg">
         {[true, false].map((value) => (
@@ -1077,6 +1677,8 @@ function Tokens() {
   const recent = useRecent();
   const name = useSignal("");
   const made = useSignal<string | null>(null);
+  const projects = usePoll<{ id: string; name: string; restricted?: boolean }[]>("/api/projects", 60_000);
+  const chosen = useSignal<string[]>([]);
   return (
     <Frame title="Tokens">
       <p class="sub">
@@ -1093,6 +1695,44 @@ function Tokens() {
           name.value = e.currentTarget.value;
         }}
       />
+      <span class="gh">Projects</span>
+      <div class="group">
+        <button
+          type="button"
+          class="li btn-li"
+          onClick={() => {
+            chosen.value = [];
+          }}
+        >
+          <div class="grow">
+            <div class="tt">Every open project</div>
+            <div class="ss">And any it creates. A restricted project has to be chosen below.</div>
+          </div>
+          {chosen.value.length === 0 && <Check />}
+        </button>
+        {projects.data.value?.map((project) => {
+          const on = chosen.value.includes(project.id);
+          return (
+            <button
+              type="button"
+              class="li btn-li"
+              key={project.id}
+              aria-pressed={on}
+              onClick={() => {
+                chosen.value = on
+                  ? chosen.value.filter((id) => id !== project.id)
+                  : [...chosen.value, project.id];
+              }}
+            >
+              <div class="grow">
+                <div class="tt">{project.name}</div>
+                {project.restricted && <div class="ss">Restricted</div>}
+              </div>
+              {on && <Check />}
+            </button>
+          );
+        })}
+      </div>
       <button
         type="button"
         class="btn ink"
@@ -1102,9 +1742,11 @@ function Tokens() {
             const { token } = await post<{ token: string }>("/api/tokens", {
               name: name.value,
               scopes: ["publish", "read", "org"],
+              ...(chosen.value.length > 0 ? { projectIds: chosen.value } : {}),
             });
             made.value = token;
             name.value = "";
+            chosen.value = [];
             await list.refresh();
           })
         }
@@ -1206,6 +1848,8 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
   "sign-in": SignIn,
   notifications: Notifications,
   people: People,
+  teams: Teams,
+  google: GoogleSetup,
   domains: Domains,
   org: OrgSettings,
   brand: BrandSettings,
@@ -1215,9 +1859,5 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
 export function Settings() {
   const { params } = useRoute();
   const Page = PAGES[params.section ?? ""] ?? Index;
-  return (
-    <SignedIn>
-      <Page />
-    </SignedIn>
-  );
+  return <SignedIn>{params.slug ? <TeamDetail slug={params.slug} /> : <Page />}</SignedIn>;
 }

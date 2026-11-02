@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { GoogleProvider } from "../auth/google.ts";
 import type { RateLimits } from "../auth/rate-limit.ts";
 import type { Clock } from "../clock.ts";
 import type { Db } from "../db/index.ts";
@@ -27,4 +28,6 @@ export type Deps = {
   pushAllow?: (endpoint: string) => boolean;
   /** Tests stand in for the internet here: the real fetch refuses every address a test could use. */
   clientMetadata?: MetadataFetch;
+  /** Tests stand in for Google here. They never call it. */
+  google?: GoogleProvider;
 };
