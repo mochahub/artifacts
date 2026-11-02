@@ -1,6 +1,7 @@
 import { useSignal } from "@preact/signals";
+import { AgentMark } from "../components/cards.tsx";
 import { Shell } from "../components/shell.tsx";
-import { agentInitials, agentShort, ago } from "../format.ts";
+import { agentShort, ago } from "../format.ts";
 import { usePoll } from "../poll.ts";
 import { SignedIn } from "./guard.tsx";
 
@@ -103,11 +104,7 @@ function Feed() {
                     key={item.id}
                     href={item.artifact ? `/${item.artifact.project}/${item.artifact.slug}` : undefined}
                   >
-                    {item.agent ? (
-                      <span class="av agent">{agentInitials(item.agent)}</span>
-                    ) : (
-                      <span class="av">{item.actor[0]}</span>
-                    )}
+                    {item.agent ? <AgentMark /> : <span class="av">{item.actor[0]}</span>}
                     <div class="grow">
                       <div class="tt" style="font-weight:400">
                         <b>{item.agent ? agentShort(item.agent) : item.actor}</b> {VERBS[item.kind]} {title}

@@ -130,6 +130,7 @@ test("a gallery opens into a lightbox and steps through", async ({ page }, info)
   await light.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("dialog", { name: "First light" })).toBeVisible();
   await page.screenshot({
+    animations: "disabled",
     path: `../../docs/mocks/shots/${info.project.name === "iphone" ? "" : "desktop-"}gallery.png`,
   });
   await page.getByRole("button", { name: "Close" }).click();
@@ -147,6 +148,7 @@ test("compare: side by side, swipe, and changes with numbered regions", async ({
   await page.getByRole("button", { name: "Changes" }).click();
   await expect(page.locator(".diff .region").first()).toBeVisible();
   await page.screenshot({
+    animations: "disabled",
     path: `../../docs/mocks/shots/${info.project.name === "iphone" ? "" : "desktop-"}compare-changes.png`,
   });
 });
@@ -173,7 +175,7 @@ test("after a first comment on iPhone, the install sheet shows once", async ({ p
   await comment("First one");
   const prompt = page.getByRole("dialog", { name: "Get notified when an agent replies" });
   await expect(prompt.getByText("Add to Home Screen")).toBeVisible();
-  await page.screenshot({ path: "../../docs/mocks/shots/05-6-install.png" });
+  await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/05-6-install.png" });
   await prompt.getByRole("button", { name: "Not now" }).click();
   await comment("Second one");
   await page.waitForTimeout(300);

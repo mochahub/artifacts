@@ -12,7 +12,7 @@ import {
 } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { isMissing } from "../api.ts";
-import { AgentMark, StatusWord } from "../components/cards.tsx";
+import { StatusWord } from "../components/cards.tsx";
 import { ArchivedBanner, ArtifactMenu } from "../components/manage.tsx";
 import { DecideSheet } from "../components/review.tsx";
 import { ShareSheet } from "../components/share.tsx";
@@ -97,9 +97,8 @@ function Detail() {
       </div>
       <ArchivedBanner artifact={artifact} onChanged={() => remote.refresh()} />
       <h1 class="h1">{artifact.title}</h1>
-      <div class="row ss">
-        {artifact.agent && <AgentMark agent={artifact.agent} small />}
-        <span class="grow">
+      <div class="byline">
+        <span>
           <b>v{artifact.latestVersion}</b> by {agentShort(artifact.agent ?? artifact.publishedBy)},{" "}
           {ago(artifact.publishedAt)}
         </span>

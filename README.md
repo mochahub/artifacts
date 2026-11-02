@@ -47,7 +47,7 @@ Or `bun add -g @artifacts/cli`, once a release has been published to npm. Nobody
 artifacts setup
 ```
 
-This deploys to Railway (app, Postgres and a bucket), claims the server, makes you the owner, signs this machine in and installs the skill for Claude Code and Codex.
+This deploys to Railway (app, Postgres and a bucket), claims the server, makes you the owner, signs this machine in and installs the skill for Claude Code and Codex. It also offers [Stageshow](https://github.com/benjitaylor/skills), a third-party skill for product demos, which stays off unless you say yes.
 
 **Docker, on a machine you run:**
 

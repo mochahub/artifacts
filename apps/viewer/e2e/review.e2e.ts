@@ -2,8 +2,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop") await page.screenshot({ path: `../../docs/mocks/shots/desktop-${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "desktop")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
 };
 
 /** Taps the canvas at the middle of a frame, as a pointer would. */
@@ -175,6 +177,25 @@ test("comment on a passage: select text, then the quote travels and highlights",
   await page.locator(".mm").first().click();
   await expect(page.getByRole("dialog").locator(".quote")).toHaveText("first finding");
   expect(errors).toEqual([]);
+});
+
+test("comment on a whole paragraph: the selection ends in the next block", async ({ page }, info) => {
+  await page.goto(`/camerabuddy/roadmap/research-0${info.project.name === "iphone" ? 3 : 4}`);
+  const paragraph = page.locator('[data-block="findings/p1"]');
+  await expect(paragraph).toBeVisible();
+  // What a triple-click leaves: from the paragraph's first word to offset 0 of the block after it.
+  await paragraph.evaluate((el) => {
+    const range = document.createRange();
+    range.setStart(el.firstChild as Text, 0);
+    range.setEnd(el.nextElementSibling as Element, 0);
+    const selection = document.getSelection() as Selection;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.locator(".selbtn").click();
+  await expect(page.getByRole("dialog", { name: "New comment" }).locator(".quote")).toHaveText(
+    "The first finding is plain and short.",
+  );
 });
 
 test("comment on a block: tap Comment, then a paragraph", async ({ page }, info) => {

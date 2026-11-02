@@ -2,8 +2,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop") await page.screenshot({ path: `../../docs/mocks/shots/desktop-${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "desktop")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
 };
 
 const transform = (page: Page) =>
@@ -238,7 +240,7 @@ test("the reader's glass draws back on the way down and fits its ink to a pictur
   await expect(root).toHaveClass(/reading/);
   await expect(bar).toHaveCSS("height", "52px");
   await expect(bar).toHaveAttribute("data-tone", /dark|light/);
-  if (process.env.GLASS_SHOT) await page.screenshot({ path: process.env.GLASS_SHOT });
+  if (process.env.GLASS_SHOT) await page.screenshot({ animations: "disabled", path: process.env.GLASS_SHOT });
 
   await page.evaluate(() => scrollBy(0, -40));
   await expect(root).not.toHaveClass(/reading/);

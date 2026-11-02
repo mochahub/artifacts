@@ -130,7 +130,7 @@ The server holds what's published, so source doesn't have to be in git. `artifac
 - **Status nobody has to set.** Each artifact shows whose turn it is, worked out from the review: **Waiting on you** (a new version, or a reply, since your last decision), **With Claude** (you asked for changes and the agent hasn't published since), **Approved vN**, or **Not reviewed yet**.
 - **Projects:** search, sort (recent activity or name) and filter by status.
 - **Light and dark mode:** follows the system, with an override switch.
-- **Marks:** yellow is a person's (pins, highlights, open counts); violet is an agent's (new versions, replies, changed frames and paragraphs). Labels are coloured words, not tinted pills; only counts get a filled badge. Agents sign with initials in a violet square, never a sparkle icon, and nothing uses a coloured bar down a card's edge.
+- **Marks:** yellow is a person's (pins, highlights, open counts); blue is an agent's (new versions, replies, changed frames and paragraphs). Labels are coloured words, not tinted pills; only counts get a filled badge. Agents sign with a blue pencil, never a sparkle icon or initials in a coloured square, and nothing uses a coloured bar down a card's edge.
 - **Home and Activity:** Home lists the artifacts waiting on you (a new version since you last looked, or replies to you). Activity is a feed of publishes, comments and decisions across projects, which you can filter to agents or people.
 - **Installable:** a PWA you can add to the Home Screen. A service worker caches the versions you've viewed, so they open offline.
 - **Links:**
@@ -154,7 +154,7 @@ The server holds what's published, so source doesn't have to be in git. `artifac
   - The images stay pixel-identical while you pan, and memory stays bounded.
 - **Comment mode:** tap a spot to drop a pin, which stores the frame id plus x and y as 0–1 fractions. A bottom sheet opens above the keyboard (positioned with `visualViewport`) and never covers the toolbar.
 - **Frames list:** jump to any frame, with a dot on frames that have open comments or changed in this version.
-- **Compare (Phase 2):** side by side, swipe, or **Changes**: the regions whose pixels differ between the two renders, each outlined in violet and numbered. An agent can label a frame's change when it publishes (`--note "live-view=Moved MF above the strip"`), and the label appears next to that region.
+- **Compare (Phase 2):** side by side, swipe, or **Changes**: the regions whose pixels differ between the two renders, each outlined in blue and numbered. An agent can label a frame's change when it publishes (`--note "live-view=Moved MF above the strip"`), and the label appears next to that region.
 
 ### 5.3 Article
 - **Readable at any width:**

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentInitials, agentPrompt, agentShort, ago, initials, plural } from "./format.ts";
+import { agentPrompt, agentShort, ago, initials, plural } from "./format.ts";
 
 // Local times, so the answers hold in any time zone the tests run in.
 const at = (month: number, day: number, hour = 12, minute = 0, year = 2026) =>
@@ -63,9 +63,7 @@ describe("small formatters", () => {
     expect(initials("")).toBe("");
   });
 
-  test("agent marks", () => {
-    expect(agentInitials("Claude Code")).toBe("Cl");
-    expect(agentInitials("Codex")).toBe("Cx");
+  test("agent names", () => {
     expect(agentShort("Claude Code")).toBe("Claude");
   });
 });

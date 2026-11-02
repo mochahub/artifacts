@@ -67,7 +67,9 @@ function List() {
           ))}
         </div>
       )}
-      <p class="fn center">A project appears the first time an agent publishes from its repo.</p>
+      {data.value?.length === 0 && !q.value && (
+        <p class="fn center">A project appears the first time an agent publishes from its repo.</p>
+      )}
     </Shell>
   );
 }

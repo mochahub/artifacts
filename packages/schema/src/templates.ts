@@ -4,6 +4,7 @@ import guideBrand from "../../../skill/references/brand.md" with { type: "text" 
 import guideKit from "../../../skill/references/kit.md" with { type: "text" };
 import guideManifest from "../../../skill/references/manifest.md" with { type: "text" };
 import guideMicroApps from "../../../skill/references/micro-apps.md" with { type: "text" };
+import guideStageshow from "../../../skill/references/stageshow.md" with { type: "text" };
 import guideCaseStudy from "../../../skill/references/templates/case-study.md" with { type: "text" };
 import guideDesignReview from "../../../skill/references/templates/design-review.md" with { type: "text" };
 import guidePrd from "../../../skill/references/templates/prd.md" with { type: "text" };
@@ -127,6 +128,7 @@ export const GUIDES: Record<string, string> = {
   kit: guideKit,
   manifest: guideManifest,
   "micro-apps": guideMicroApps,
+  stageshow: guideStageshow,
   theme: guideTheme,
   writing: guideWriting,
 };

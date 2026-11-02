@@ -8,7 +8,7 @@ test("sign in, and stay signed in across a reload", async ({ page }, info) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   if (info.project.name === "iphone")
-    await page.screenshot({ path: "../../docs/mocks/shots/06-2-sign-in.png" });
+    await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-2-sign-in.png" });
   // The heading paints before the effects that fetch, and WebKit reports a fetch begun while the page
   // unloads as an access control failure. Once the page has its data, those effects have run.
   const loaded = Promise.all(
@@ -62,7 +62,7 @@ test("approve the CLI by typing its code", async ({ page, request }, info) => {
   await expect(page.getByText("Sam's MacBook Pro")).toBeVisible();
   await expect(page.getByText(userCode)).toBeVisible();
   if (info.project.name === "iphone")
-    await page.screenshot({ path: "../../docs/mocks/shots/06-7-approve-cli.png" });
+    await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-7-approve-cli.png" });
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Approved");
 

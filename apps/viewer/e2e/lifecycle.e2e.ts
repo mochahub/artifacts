@@ -3,7 +3,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { publishCopy } from "./seed.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
 };
 test.describe.configure({ timeout: 120_000 });
 

@@ -344,7 +344,11 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         <button
           type="button"
           class="btn mark selbtn"
-          style={{ left: `${Math.max(12, selection.value.x)}px`, top: `${selection.value.y}px` }}
+          style={{
+            left: `${Math.max(12, selection.value.x)}px`,
+            // A long paragraph can end below the screen. This keeps the button on it, above the bar.
+            top: `min(${selection.value.y}px, calc(100dvh - env(safe-area-inset-bottom) - 138px))`,
+          }}
           onClick={() => {
             draft.value = selection.value?.draft ?? null;
             selection.value = null;

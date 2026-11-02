@@ -37,9 +37,6 @@ export function initials(name: string): string {
   return name.slice(0, 2).replace(/^./, (c) => c.toUpperCase());
 }
 
-/** Agents sign with initials in a violet square, never a sparkle. */
-export const agentInitials = (agent: string) =>
-  /codex/i.test(agent) ? "Cx" : /claude/i.test(agent) ? "Cl" : /agent$/i.test(agent) ? "Ag" : initials(agent);
 export const agentShort = (agent: string) => agent.replace(/ Code$/, "");
 
 /**

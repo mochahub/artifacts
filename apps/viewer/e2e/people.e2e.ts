@@ -2,7 +2,8 @@ import { type Browser, expect, type Page, test } from "@playwright/test";
 import { OWNER } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
 };
 const stranger = (browser: Browser, project: string) =>
   browser.newContext({

@@ -21,6 +21,14 @@ const lint = async (name: string, env: Record<string, string>) => {
   };
 };
 
+test("only outermost elements are frames, so a component's own data-frame is left alone", async () => {
+  const { env } = sandbox();
+  const result = await cli(["render", "--json"], env, fixture("nested"));
+  expect(result.code).toBe(0);
+  const { frames } = JSON.parse(result.stdout) as { frames: number };
+  expect(frames).toBe(1);
+}, 60_000);
+
 describe("lint catches seeded problems", () => {
   const { env } = sandbox();
   const cases = [

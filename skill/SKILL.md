@@ -65,6 +65,8 @@ Some things reach outside the org or destroy data, so they still need an explici
 
 `artifacts init --template <name>` starts from an editable template for daily work: `design-review`, `presentation`, `case-study`, `prd`, `rfc`, `research-report` or `weekly-status`, each with a guide in `references/templates/`. They suggest a structure, and they're never required: what you make and how it looks is your call. `references/theme.md` covers colours and fonts, and `references/brand.md` fitting Artifacts to a company's brand.
 
+For product demos, feature cards and cursor walkthroughs, use Stageshow if it's installed, and read `references/stageshow.md` to publish what it makes. If it isn't installed, build with the kit and don't ask for it.
+
 ## 6. Writing
 
 Follow `references/writing.md` for articles.

@@ -1,12 +1,12 @@
 /* Ported from docs/mocks/kit.css, the reference for the look.
-   Colour has two jobs: yellow is a person's mark, violet is an agent's change. */
+   Colour has two jobs: yellow is a person's highlighter, blue is an agent's editing pencil. */
 :root {
   --mark: #ffd84d;
   --mark-ink: #2a2100;
   --mark-hl: rgba(255, 216, 77, 0.5);
   --mark-word: #8a6a00;
-  --agent: #8f7cff;
-  --agent-word: #5b47e0;
+  --agent: #2b8cd6;
+  --agent-word: #16689f;
   --ok: #2fb36b;
   --ok-word: #1d8a50;
   --warn: #ff7a59;
@@ -32,6 +32,7 @@
   --tx2: #5e6470;
   --tx3: #9aa0aa;
   --sep: #e4e6ea;
+  --lift: 0 0 0 0.5px var(--sep), 0 1px 2px rgba(18, 20, 24, 0.05), 0 8px 20px -12px rgba(18, 20, 24, 0.14);
 
   --ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
   --serif: ui-serif, "New York", "Iowan Old Style", Charter, Georgia, serif;
@@ -45,7 +46,7 @@
   :root:not([data-theme="light"]) {
     --mark-hl: rgba(255, 216, 77, 0.3);
     --mark-word: var(--mark);
-    --agent-word: var(--agent);
+    --agent-word: #7cc4ee;
     --ok-word: var(--ok);
     --warn-word: var(--warn);
     --soft: rgba(255, 255, 255, 0.1);
@@ -68,6 +69,7 @@
     --tx2: #a0a6b1;
     --tx3: #6b717c;
     --sep: rgba(255, 255, 255, 0.08);
+    --lift: 0 0 0 0.5px var(--sep);
   }
 }
 
@@ -75,7 +77,7 @@
 :root[data-theme="dark"] {
   --mark-hl: rgba(255, 216, 77, 0.3);
   --mark-word: var(--mark);
-  --agent-word: var(--agent);
+  --agent-word: #7cc4ee;
   --ok-word: var(--ok);
   --warn-word: var(--warn);
   --soft: rgba(255, 255, 255, 0.1);
@@ -98,6 +100,7 @@
   --tx2: #a0a6b1;
   --tx3: #6b717c;
   --sep: rgba(255, 255, 255, 0.08);
+  --lift: 0 0 0 0.5px var(--sep);
 }
 
 /* The canvas is dark whatever the theme, and so is what floats on it. */
@@ -106,12 +109,13 @@
   --tx2: #a0a6b1;
   --tx3: #6b717c;
   --sep: rgba(255, 255, 255, 0.08);
+  --lift: 0 0 0 0.5px var(--sep);
   --card: #20232a;
   --bg: #15171c;
   --soft: rgba(255, 255, 255, 0.1);
   --sheet: rgba(34, 36, 42, 0.96);
   --glass: rgba(36, 38, 44, 0.72);
   --glass-line: rgba(255, 255, 255, 0.16);
-  --agent-word: var(--agent);
+  --agent-word: #7cc4ee;
   --mark-word: var(--mark);
 }

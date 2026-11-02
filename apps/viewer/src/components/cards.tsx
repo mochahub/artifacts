@@ -1,15 +1,17 @@
 import type { ArtifactCard } from "@artifacts/schema";
-import { Check } from "lucide-preact";
-import { agentInitials, agentShort, ago, plural, renderUrl } from "../format.ts";
+import { Check, Pencil } from "lucide-preact";
+import { agentShort, ago, plural, renderUrl } from "../format.ts";
 
-export function AgentMark({ agent, small }: { agent: string; small?: boolean }) {
-  return <span class={`av agent${small ? " sm" : ""}`}>{agentInitials(agent)}</span>;
-}
+/** An agent edits in blue pencil. It isn't a person, so it gets no initial, and no sparkle. */
+export const AgentMark = () => (
+  <span class="av agent">
+    <Pencil />
+  </span>
+);
 
 export function Byline({ card }: { card: ArtifactCard }) {
   return (
     <div class="who">
-      {card.agent && <AgentMark agent={card.agent} small />}
       {agentShort(card.agent ?? card.publishedBy)} published v{card.latestVersion}, {ago(card.publishedAt)}
     </div>
   );
