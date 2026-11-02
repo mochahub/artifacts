@@ -3,10 +3,11 @@ import { useSignal } from "@preact/signals";
 import { Check, Copy, X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { ApiFailure, api, post } from "../api.ts";
-import { agentInitials, agentPrompt, agentShort, ago } from "../format.ts";
+import { agentPrompt, agentShort, ago } from "../format.ts";
 import { askInstall, shouldAsk } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { me } from "../session.ts";
+import { AgentMark } from "./cards.tsx";
 import { Sheet } from "./sheets.tsx";
 
 const message = (failure: unknown) =>
@@ -117,7 +118,7 @@ function Message({ comment }: { comment: Comment }) {
   return (
     <div class="msg">
       {agent ? (
-        <span class="av agent">{agentInitials(agent)}</span>
+        <AgentMark />
       ) : (
         <span class={`av${comment.author.name === me.value?.name ? " you" : ""}`}>
           {comment.author.name[0]}

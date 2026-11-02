@@ -1,6 +1,6 @@
 import type { ProjectArtifacts } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, Search, Share } from "lucide-preact";
+import { ChevronLeft, ChevronsUpDown, Search, Share } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { ArtifactTile } from "../components/cards.tsx";
 import { ProjectShareSheet } from "../components/share.tsx";
@@ -83,17 +83,19 @@ function Project() {
             </button>
           ))}
         </div>
-        <select
-          class="sort"
-          aria-label="Sort"
-          value={sort.value}
-          onChange={(e) => {
-            sort.value = e.currentTarget.value;
-          }}
-        >
-          <option value="recent">Recent</option>
-          <option value="name">Name</option>
-        </select>
+        <label class="sort">
+          <select
+            aria-label="Sort"
+            value={sort.value}
+            onChange={(e) => {
+              sort.value = e.currentTarget.value;
+            }}
+          >
+            <option value="recent">Recent</option>
+            <option value="name">Name</option>
+          </select>
+          <ChevronsUpDown />
+        </label>
       </div>
       <div class="grid">
         {data.value?.artifacts.map((card) => (

@@ -3,7 +3,7 @@ type Chart = { type: "bar" | "line"; labels: string[]; series: { name: string; v
 const WIDTH = 640;
 const HEIGHT = 320;
 const PAD = 36;
-/** A neutral, colour-blind-safe order; the viewer's marks stay yellow and violet. */
+/** A neutral, colour-blind-safe order; the viewer's marks stay yellow and blue. */
 const COLORS = ["#2a78d6", "#d9792a", "#1f9d8b", "#a64fa8"];
 
 const esc = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);

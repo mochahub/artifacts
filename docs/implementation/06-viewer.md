@@ -21,12 +21,12 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 
 **Colour has two jobs:**
 - **Yellow `#ffd84d`** is a person's mark: comment pins, highlighted commented text, open counts, the Resolve and Post buttons.
-- **Violet `#8f7cff`** is an agent's change: version numbers, "Changed in v5", changed-frame outlines, changed-paragraph dots, agent replies.
+- **Blue `#2b8cd6`** is an agent's change: version numbers, "Changed in v5", changed-frame outlines, changed-paragraph dots, agent replies.
 
 **Forbidden:** the user rejected these patterns, so they must not appear:
 - a coloured bar down the edge of a card, thread or quote
-- sparkle icons for AI or agents (agents sign with initials in a violet rounded square: "Cl" for Claude, "Cx" for Codex)
-- tinted pill backgrounds on word labels (labels are coloured words; only numeric counts get a filled badge: yellow for open marks, violet for agent counts)
+- sparkle icons for AI or agents, and initials in a coloured square (agents sign with a blue pencil in a soft disc)
+- tinted pill backgrounds on word labels (labels are coloured words; only numeric counts get a filled badge: yellow for open marks, blue for agent counts)
 - middle dots joining text ("A · B"; use commas or separate lines)
 - "›" or "→" appended to link text (a version range like "v4 → v5" is fine)
 - gradient washes as decoration
@@ -75,15 +75,15 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 ### 01 · Find and open
 1. **Review (home).**
    - **Data:** `GET /api/home`.
-   - **Card:** cover thumbnails, title, "<agent> published vN, <time>", then coloured word counts: violet "3 frames changed" and "4 replies to you", yellow "5 open".
+   - **Card:** cover thumbnails, title, "<agent> published vN, <time>", then coloured word counts: blue "3 frames changed" and "4 replies to you", yellow "5 open".
    - **Below:** recently viewed.
    - **Tab bar** (Review with a count badge, Projects, Activity, Search) floats above Safari's bar.
 2. **Projects.** Search field, then rows with an initials tile (neutral, not per-project colours), artifact count and time, and a yellow count badge for open comments.
 3. **A project.** Search, sort (Recent / Name), filter tabs, and a grid of artifact cards (cover, title, page count or kind, status word: Waiting on you, With Claude, Approved v2, Not reviewed yet). Status is computed (02 "Derived state").
 4. **An artifact and its pages.**
    - **Header:** title, description, "vN by <agent>, <time>" and the status.
-   - **"What changed in vN"** as plain text with a violet heading.
-   - **"N pages"** list with violet dots for changed pages and yellow counts.
+   - **"What changed in vN"** as plain text with a blue heading.
+   - **"N pages"** list with blue dots for changed pages and yellow counts.
    - **Primary:** "Review changes" (opens the first changed page at its first change). Secondary: Approve.
 5. **Page switcher.** Opened from the title bar on any page: a sheet listing every page grouped as in the manifest, with changed dots and open counts.
 6. **Version history.** A sheet listing versions: number, name or date, who. Tapping a row expands it to Restore, Compare and Name. The current version is marked; approved ones say "Approved".
@@ -91,23 +91,23 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 ### 02 · Canvas review
 1. **Overview.**
    - **Layout:** all boards on the canvas; board titles above each; frames as images.
-   - **Changed frames:** violet outline.
+   - **Changed frames:** blue outline.
    - **Pins:** yellow numbered pins.
-   - **Title bar:** a floating capsule with the menu, page and artifact title, "v5" in violet, Share.
+   - **Title bar:** a floating capsule with the menu, page and artifact title, "v5" in blue, Share.
    - **Bottom toolbar:** Move, Comment | Frames, Comments (count).
 2. **One frame.** Double-tap fits a frame; swipe for the next. "Try it" (Phase 2) in the title bar swaps in the live frame. Resolved pins turn grey.
 3. **Comment.**
    - **Placing a pin:** Comment mode, then tap a spot to place a draft pin.
    - **The sheet:** sits on the keyboard, positioned with `visualViewport`, and never covers the toolbar.
    - **Panning:** the canvas pans so the pin stays visible above the sheet.
-4. **Agent reply.** The thread sheet: the pin number, the frame name, "Fixed in v5" in violet; the comments; the crop of the changed area with "Compare v4 and v5"; then Reply and Resolve.
-5. **Frames.** A sheet with All / Open / Changed tabs; rows with a thumbnail, name, violet dot and yellow count.
-6. **Compare** (Phase 2). Side by side / Swipe / Changes. Changes outlines each changed region in violet with a numbered marker, plus the agent's `--note` text.
+4. **Agent reply.** The thread sheet: the pin number, the frame name, "Fixed in v5" in blue; the comments; the crop of the changed area with "Compare v4 and v5"; then Reply and Resolve.
+5. **Frames.** A sheet with All / Open / Changed tabs; rows with a thumbnail, name, blue dot and yellow count.
+6. **Compare** (Phase 2). Side by side / Swipe / Changes. Changes outlines each changed region in blue with a numbered marker, plus the agent's `--note` text.
 
 ### 03 · Read and annotate
 1. **Reading.** Serif column (about 68 characters); a banner offering "N sections changed since you read vK" with Show; title, meta; content.
 2. **Changes and tables.**
-   - **Changes:** with Changes on, edited paragraphs get a violet dot in the margin.
+   - **Changes:** with Changes on, edited paragraphs get a blue dot in the margin.
    - **Tables:** they scroll sideways.
    - **Commented passages:** highlighted yellow, with the comment number in the margin.
 3. **Comment on a passage.** Select text: Safari's own menu stays above the selection; the viewer shows its own yellow **Comment** button below it. (A website can't add to Safari's selection menu.) Or tap Comment in the toolbar, then a paragraph.
@@ -185,7 +185,7 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 - **Rendering:** fetch the sanitized HTML (03), insert it, then decorate:
   - attach comment counts to `[data-block]`
   - highlight anchored quotes with the CSS Custom Highlight API where available, falling back to `<mark>` wrapping
-  - mark changed blocks with a violet dot
+  - mark changed blocks with a blue dot
 - **Text-quote comments:** take the selection, find its block and character offsets, and build `{ exact, prefix (32 chars), suffix (32 chars) }`.
 - **Reading position:** per page, sent with `POST /seen` at most every 10 seconds.
 - **Settings:** size, theme and typeface in `localStorage` per device.

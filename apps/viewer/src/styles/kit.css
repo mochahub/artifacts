@@ -27,6 +27,7 @@
   margin: 0;
   font: 700 34px / 1.12 var(--serif);
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 .h1.m {
   font-size: 30px;
@@ -46,7 +47,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--tx2);
-  margin: 2px 0 -8px 4px;
+  margin: 2px 0 -8px;
   display: block;
 }
 .mono {
@@ -90,13 +91,19 @@
 .card {
   background: var(--card);
   border-radius: 20px;
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
+}
+a.card {
+  transition: transform 140ms ease-out;
+}
+a.card:active {
+  transform: scale(0.985);
 }
 .group {
   background: var(--card);
   border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
 }
 .li {
   position: relative;
@@ -115,6 +122,37 @@
   left: 16px;
   right: 0;
   border-top: 0.5px solid var(--sep);
+}
+/* Pressing fills the row inside its card, so a fill never runs under the card's corners or a rule. */
+a.li[href]::after,
+button.li::after,
+.vrow::after,
+.thread-row::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 14px;
+  background: var(--soft);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+a.li[href]:active::after,
+button.li:active::after,
+.vrow:active::after,
+.thread-row:active::after {
+  opacity: 1;
+}
+@media (hover: hover) {
+  a.li[href]:hover::after,
+  button.li:hover::after,
+  .vrow:hover::after,
+  .thread-row:hover::after {
+    opacity: 1;
+  }
+  .rail a:not([aria-current]):hover {
+    color: var(--tx);
+  }
 }
 .li > svg {
   flex: none;
@@ -151,6 +189,11 @@
   background: none;
   cursor: pointer;
   text-decoration: none;
+  transition: transform 140ms ease-out;
+}
+.btn:active:not(:disabled),
+.round:active {
+  transform: scale(0.97);
 }
 .btn svg {
   width: 20px;
@@ -319,6 +362,9 @@
   width: 20px;
   height: 20px;
 }
+.top .back {
+  margin-right: auto;
+}
 .round {
   width: 38px;
   height: 38px;
@@ -331,6 +377,7 @@
   color: var(--tx);
   cursor: pointer;
   text-decoration: none;
+  transition: transform 140ms ease-out;
 }
 .round svg {
   width: 19px;
@@ -346,12 +393,18 @@
   line-height: 1.25;
 }
 .who {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   font-size: 15px;
   color: var(--tx2);
   margin-top: 3px;
+}
+.byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  font-size: 15px;
+  color: var(--tx2);
 }
 .words {
   display: flex;
@@ -392,6 +445,7 @@
   font-weight: 700;
   background: var(--mark);
   color: var(--mark-ink);
+  font-variant-numeric: tabular-nums;
 }
 .dot {
   width: 10px;
@@ -410,31 +464,22 @@
   flex: none;
   font-size: 15px;
   font-weight: 700;
+  text-transform: uppercase;
   background: #3b4250;
   color: #fff;
 }
 .av.you {
-  background: #e9e2c9;
-  color: #3a3220;
+  background: var(--mark);
+  color: var(--mark-ink);
 }
 .av.agent {
-  border-radius: 10px;
-  background: var(--agent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  background: var(--soft);
+  color: var(--agent-word);
 }
-.av.sm {
-  width: 24px;
-  height: 24px;
-  font-size: 11px;
+.av svg {
+  width: 18px;
+  height: 18px;
 }
-.av.agent.sm {
-  border-radius: 7px;
-  font-size: 10.5px;
-}
-
 .card.pad {
   display: flex;
   flex-direction: column;
@@ -462,11 +507,16 @@
   object-fit: cover;
   object-position: top;
 }
+/* Pinned from the top, and tall enough that a phone frame shows its first screen, not a slice of it. */
 .cover {
-  height: 106px;
+  aspect-ratio: 8 / 9;
+  max-height: 200px;
+  width: 100%;
 }
-.cover img {
-  object-position: center;
+.card.pad .cover {
+  aspect-ratio: auto;
+  height: 256px;
+  max-height: none;
 }
 .kind {
   width: 40px;
@@ -482,8 +532,14 @@
   font-weight: 800;
 }
 .kind svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
+}
+/* The icon says what a page is. A tile around it would only be one more box. */
+.kind:has(> svg) {
+  width: 24px;
+  background: none;
+  box-shadow: none;
 }
 .chev {
   flex: none;
@@ -500,7 +556,7 @@
   padding: 0 16px;
   border-radius: 99px;
   background: var(--card);
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
   color: var(--tx3);
 }
 .search svg {
@@ -525,7 +581,14 @@
   padding: 3px;
 }
 .row > .seg {
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.row > .seg button {
+  flex: none;
+  padding: 0 6px;
 }
 .seg button {
   flex: 1;
@@ -545,11 +608,28 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .sort {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  color: var(--tx2);
+}
+.sort select {
+  appearance: none;
   border: 0;
   background: none;
-  color: var(--tx2);
-  font: 15px var(--ui);
+  color: inherit;
+  font: 14px var(--ui);
   min-height: 44px;
+  padding: 0 16px 0 0;
+}
+.sort svg {
+  position: absolute;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
 }
 .grid {
   display: grid;
@@ -592,7 +672,7 @@
   padding: 12px 16px;
   border-radius: 16px;
   background: var(--card);
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
   font-size: 15px;
 }
 .changed-h {
@@ -939,6 +1019,9 @@
   padding: 14px 10px 4px;
 }
 @media (min-width: 900px) {
+  .row > .seg button {
+    padding: 0 14px;
+  }
   .rail {
     display: flex;
   }
@@ -1084,6 +1167,7 @@
   flex: none;
 }
 .vrow {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1167,7 +1251,7 @@ select.field {
 .gh.split {
   display: flex;
   justify-content: space-between;
-  margin-right: 4px;
+  gap: 12px;
 }
 
 /* Canvas */
@@ -1576,6 +1660,7 @@ select.field {
   flex: 1;
 }
 .thread-row {
+  position: relative;
   width: 100%;
   display: flex;
   gap: 12px;
@@ -2005,7 +2090,6 @@ select.field {
   font-size: 15px;
   font-weight: 600;
   color: var(--tx2);
-  margin-left: 4px;
 }
 .more summary::-webkit-details-marker {
   display: none;
@@ -2016,4 +2100,49 @@ select.field {
 }
 .more[open] summary svg {
   transform: rotate(90deg);
+}
+
+/* A capital or digit centres on its own ink: a plain line box leaves it a pixel or two low. */
+@supports (text-box: trim-both cap alphabetic) {
+  .count,
+  .av:not(.agent) {
+    display: inline-block;
+    text-align: center;
+    text-box: trim-both cap alphabetic;
+  }
+  .count {
+    padding-block: calc((24px - 1cap) / 2);
+  }
+  .tab .count,
+  .vb .count {
+    padding-block: calc((20px - 1cap) / 2);
+  }
+  .av:not(.agent) {
+    padding-block: calc((34px - 1cap) / 2);
+  }
+}
+
+/* A sheet rises because something asked for it. Nothing moves on its own. */
+@media (prefers-reduced-motion: no-preference) {
+  .sheet,
+  .compose {
+    animation: rise 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .dim {
+    animation: fade 200ms ease-out;
+  }
+  .selbtn {
+    animation: fade 140ms ease-out;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
 }

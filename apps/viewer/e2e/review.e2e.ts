@@ -2,8 +2,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop") await page.screenshot({ path: `../../docs/mocks/shots/desktop-${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "desktop")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
 };
 
 /** Taps the canvas at the middle of a frame, as a pointer would. */
