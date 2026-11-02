@@ -1,4 +1,5 @@
-import { TeamDetail, TeamList } from "@artifacts/schema";
+import { ProjectAccessList, TeamDetail, TeamList } from "@artifacts/schema";
+import { findRoot, loadManifest } from "../bundle/manifest.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { signedIn } from "./account.ts";
 import { resolveArtifact } from "./review.ts";
@@ -43,6 +44,47 @@ export async function teamsCommand(server: string | undefined, out: Output) {
         `${team.slug}  ${team.name} (${team.members} ${team.members === 1 ? "person" : "people"}${yours})`,
       );
     }
+  });
+}
+
+const LEVEL_WORDS = {
+  view: "can view",
+  comment: "can comment",
+  publish: "can publish",
+  manage: "can manage",
+};
+
+/** Who has a project. Read-only: tokens can't change it (04). */
+export async function projectCommand(
+  sub: string | undefined,
+  target: string | undefined,
+  server: string | undefined,
+  out: Output,
+) {
+  if (sub !== "access") throw new UsageError("Usage: artifacts project access [<project>]");
+  const project = target ?? loadManifest(findRoot()).manifest?.project;
+  if (!project || !/^[a-z0-9-]{1,40}$/.test(project)) {
+    throw new UsageError("Name a project: artifacts project access <project>");
+  }
+  const client = await signedIn(server);
+  const access = ProjectAccessList.parse(await client.get(`/api/projects/${project}/access`));
+  out.result(access, () => {
+    out.say(
+      `${access.project.name}: ${access.project.restricted ? "restricted" : "open to the organization"}`,
+    );
+    for (const team of access.teams) {
+      out.say(`  ${team.name} (${team.members}), ${LEVEL_WORDS[team.permission]}`);
+    }
+    for (const person of access.people) {
+      out.say(
+        `  ${person.name}, ${LEVEL_WORDS[person.permission]}${person.capped ? ", capped by role" : ""}`,
+      );
+    }
+    for (const person of access.inherited) {
+      const via = person.via === "role" ? "role" : person.sources.map((source) => source.name).join(", ");
+      out.say(`  ${person.name}, ${LEVEL_WORDS[person.level]}, via ${via}`);
+    }
+    out.say("Change this in the viewer. Tokens can't.");
   });
 }
 

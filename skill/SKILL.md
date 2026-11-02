@@ -94,6 +94,8 @@ Archive finished artifacts when asked. Never delete without being asked, and nev
 
 Run `artifacts teams` to see the teams. Run `artifacts share --team <slug> --comment` to share your own work with one, at view or comment. A person has to confirm it before that team can approve, and only a person can let a team publish. You can't change a team or who's in it.
 
+`artifacts publish` prints who can see the work. If that's wrong, say so in your report. Run `artifacts project access` to see who has a project. Only a person can change it, or restrict it. If publishing says a project name is taken, it may be restricted: use another project or ask.
+
 ## 12. Report back
 
 Say the URL, the version, what changed, and which threads you marked fixed.

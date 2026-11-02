@@ -17,6 +17,7 @@ type Item = {
     from?: number;
     team?: string;
     person?: string;
+    project?: string;
   };
   createdAt: string;
 };
@@ -46,6 +47,8 @@ const VERBS: Record<string, string> = {
   team_deleted: "deleted the team",
   team_member_added: "added someone to",
   team_member_removed: "removed someone from",
+  project_access_changed: "changed who has access to",
+  identity_linked: "connected Google",
 };
 
 const day = (iso: string) =>
@@ -87,7 +90,12 @@ function Feed() {
             {items
               .filter((item) => day(item.createdAt) === label)
               .map((item) => {
-                const title = item.artifact?.title ?? item.payload.title ?? item.payload.team ?? "";
+                const title =
+                  item.artifact?.title ??
+                  item.payload.title ??
+                  item.payload.project ??
+                  item.payload.team ??
+                  "";
                 const version = item.payload.version ? ` v${item.payload.version}` : "";
                 return (
                   <a

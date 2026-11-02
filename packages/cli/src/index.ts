@@ -18,7 +18,13 @@ import {
 import { mcpCommand } from "./commands/mcp.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
 import { packCommand, packUpload } from "./commands/pack.ts";
-import { orgCommand, shareCommand, teamsCommand, visibilityCommand } from "./commands/people.ts";
+import {
+  orgCommand,
+  projectCommand,
+  shareCommand,
+  teamsCommand,
+  visibilityCommand,
+} from "./commands/people.ts";
 import {
   archiveCommand,
   commentsCommand,
@@ -78,6 +84,7 @@ const USAGE = `artifacts ${VERSION}
   artifacts share --invite <email> [--comment|--publish]
   artifacts share --team <slug> [--comment]
   artifacts teams
+  artifacts project access [<project>]
 
 Every command takes --json. Commands that talk to a server take --server <url|name>
 (on upgrade, --server means "the server too", and it can't name one).`;
@@ -275,6 +282,8 @@ async function main(argv: string[]) {
       return visibilityCommand(first, positionals[2], values.server, out);
     case "teams":
       return teamsCommand(values.server, out);
+    case "project":
+      return projectCommand(first, positionals[2], values.server, out);
     case "share":
       return shareCommand(
         first,

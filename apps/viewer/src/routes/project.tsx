@@ -1,10 +1,12 @@
 import type { ProjectArtifacts } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, Search } from "lucide-preact";
+import { ChevronLeft, Search, Share } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { ArtifactTile } from "../components/cards.tsx";
+import { ProjectShareSheet } from "../components/share.tsx";
 import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
+import { meta } from "../session.ts";
 import { SignedIn } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
 
@@ -21,7 +23,8 @@ function Project() {
   const status = useSignal("all");
   const sort = useSignal("recent");
   const query = new URLSearchParams({ q: q.value, status: status.value, sort: sort.value });
-  const { data, error } = usePoll<ProjectArtifacts>(
+  const sharing = useSignal(false);
+  const { data, error, refresh } = usePoll<ProjectArtifacts>(
     `/api/projects/${encodeURIComponent(params.project ?? "")}/artifacts?${query}`,
     60_000,
   );
@@ -34,7 +37,24 @@ function Project() {
         Projects
       </a>
       <div>
-        <h1 class="h1">{project?.name}</h1>
+        <div class="row">
+          <h1 class="h1 grow">{project?.name}</h1>
+          {project?.canShare && (
+            <button
+              type="button"
+              class="icon-btn"
+              aria-label="Share"
+              onClick={() => {
+                sharing.value = true;
+              }}
+            >
+              <Share />
+            </button>
+          )}
+        </div>
+        {project && (
+          <div class="ss">{project.restricted ? "Restricted" : `Everyone in ${meta.value?.orgName}`}</div>
+        )}
         {project?.repo && <div class="ss">{project.repo}</div>}
       </div>
       <label class="search">
@@ -81,6 +101,15 @@ function Project() {
         ))}
       </div>
       {data.value?.artifacts.length === 0 && <div class="empty">Nothing here.</div>}
+      {sharing.value && params.project && (
+        <ProjectShareSheet
+          slug={params.project}
+          onClose={() => {
+            sharing.value = false;
+          }}
+          onChanged={refresh}
+        />
+      )}
     </Shell>
   );
 }

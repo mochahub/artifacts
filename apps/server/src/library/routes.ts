@@ -10,7 +10,7 @@ import {
   type VersionBundle,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { artifactParam, toResource } from "../api/artifacts-db.ts";
+import { artifactParam, heldProjects, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import type { ApiContext, Routes } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -106,7 +106,13 @@ export async function libraryProjects(
   const { limit, offset } = paging(input.limit, input.cursor);
   const projectIds = await scopedProjects(deps, orgId, { repo: input.repo });
   const list = await visibleTo(deps, orgId, caller, { projectIds });
-  const ids = [...new Set(list.map(({ row }) => row.projectId))];
+  const held = await heldProjects(deps, orgId, caller);
+  const ids = [
+    ...new Set([
+      ...list.map(({ row }) => row.projectId),
+      ...held.map((row) => row.id).filter((id) => !projectIds || projectIds.includes(id)),
+    ]),
+  ];
   const rows = ids.length
     ? await deps.db
         .select()

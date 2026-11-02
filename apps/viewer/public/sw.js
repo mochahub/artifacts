@@ -9,7 +9,7 @@ const MAX_API = 300;
 // tokens, invites and who an artifact is shared with are never kept: they name other people, and a
 // worker's answer isn't tied to whoever asked.
 const NEVER =
-  /^\/api\/(?:events|auth|me\/|push|health|search|tokens|people|teams|shares|org|invites|reset|device|recover|setup|publish|deleted|artifacts\/[^/]+\/(?:access|teams|data|data-export|files|logs|content-token)(?:\/|$))/;
+  /^\/api\/(?:events|auth|me\/|push|health|search|tokens|people|teams|shares|org|invites|reset|device|recover|setup|publish|deleted|projects\/[^/]+\/access|artifacts\/[^/]+\/(?:access|teams|data|data-export|files|logs|content-token)(?:\/|$))/;
 const ASSETS = /^\/assets\//;
 const RENDER = /^\/api\/artifacts\/[^/]+\/r\/[0-9a-f]{64}$/;
 const ARTICLE = /^\/api\/artifacts\/[^/]+\/v\/\d+\//;

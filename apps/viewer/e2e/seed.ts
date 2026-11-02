@@ -39,13 +39,14 @@ export function seedFixture(token: string) {
 }
 
 /** The fixture again under another slug, for tests that change an artifact's lifecycle. */
-export function publishCopy(slug: string, token: string, twice = false) {
+export function publishCopy(slug: string, token: string, twice = false, project = "camerabuddy") {
   const dir = mkdtempSync(join(tmpdir(), "artifacts-e2e-"));
   cpSync(fixture, dir, { recursive: true });
   const manifest = join(dir, "artifact.json");
   writeFileSync(
     manifest,
     readFileSync(manifest, "utf8")
+      .replace('"project": "camerabuddy"', `"project": "${project}"`)
       .replace('"slug": "roadmap"', `"slug": "${slug}"`)
       .replace('"title": "Camera Buddy roadmap"', `"title": "Roadmap ${slug}"`),
   );

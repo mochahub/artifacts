@@ -11,10 +11,13 @@ type Details = { clientName: string; agent: string | null; createdAt: string; ip
 const message = (failure: unknown) =>
   failure instanceof ApiFailure ? failure.message : "Something went wrong.";
 
+const KEPT_CODE = "artifacts.device-code";
+
 /** Type the code the CLI printed. It's never in the link, so a link alone can't approve a stranger (03). */
 export function Device() {
-  const { route, path } = useLocation();
-  const code = useSignal("");
+  const { route, path, query } = useLocation();
+  // A Google round trip reloads the page. The person typed this, so it only lasts for this tab.
+  const code = useSignal(query.google ? (sessionStorage.getItem(KEPT_CODE) ?? "") : "");
   const details = useSignal<Details | null>(null);
   const error = useSignal<string | null>(null);
   const outcome = useSignal<"approved" | "denied" | null>(null);
@@ -24,8 +27,7 @@ export function Device() {
     if (!me.value) route(`/sign-in?next=${encodeURIComponent(path)}`, true);
   }, [route, path]);
 
-  async function lookUp(event: SubmitEvent) {
-    event.preventDefault();
+  async function find() {
     error.value = null;
     try {
       details.value = await api<Details>(`/api/device/${encodeURIComponent(code.value.trim())}`);
@@ -33,6 +35,15 @@ export function Device() {
       error.value = message(failure);
     }
   }
+  async function lookUp(event: SubmitEvent) {
+    event.preventDefault();
+    await find();
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, for a code kept across a round trip.
+  useEffect(() => {
+    sessionStorage.removeItem(KEPT_CODE);
+    if (code.value) find();
+  }, []);
 
   async function decide(kind: "approve" | "deny") {
     error.value = null;
@@ -40,8 +51,10 @@ export function Device() {
       await post(`/api/device/${encodeURIComponent(code.value.trim())}/${kind}`);
       outcome.value = kind === "approve" ? "approved" : "denied";
     } catch (failure) {
-      if (failure instanceof ApiFailure && failure.code === "recent_auth_required") reauth.value = true;
-      else error.value = message(failure);
+      if (failure instanceof ApiFailure && failure.code === "recent_auth_required") {
+        sessionStorage.setItem(KEPT_CODE, code.value);
+        reauth.value = true;
+      } else error.value = message(failure);
     }
   }
 

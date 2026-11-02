@@ -2,7 +2,7 @@ import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { can, type TeamResource } from "../auth/can.ts";
-import { activity, artifactTeamAccess, people, teamMembers, teams } from "../db/schema.ts";
+import { activity, artifactTeamAccess, people, projectAccess, teamMembers, teams } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
 import { visibleTo } from "../library/visible.ts";
 import { isUuid } from "./artifacts-db.ts";
@@ -121,15 +121,14 @@ export function teamRoutes(routes: Routes, deps: Deps) {
       .from(artifactTeamAccess)
       .where(eq(artifactTeamAccess.teamId, team.id));
     // People search is for browsers, and a member list is the same directory by another route.
-    const members =
-      caller.kind === "person"
-        ? await db
-            .select({ person: people, role: teamMembers.role })
-            .from(teamMembers)
-            .innerJoin(people, eq(people.id, teamMembers.personId))
-            .where(and(eq(teamMembers.teamId, team.id), isNull(people.removedAt)))
-            .orderBy(asc(people.name))
-        : [];
+    const members = can(caller, "people.search", { type: "org" })
+      ? await db
+          .select({ person: people, role: teamMembers.role })
+          .from(teamMembers)
+          .innerJoin(people, eq(people.id, teamMembers.personId))
+          .where(and(eq(teamMembers.teamId, team.id), isNull(people.removedAt)))
+          .orderBy(asc(people.name))
+      : [];
     const [count] = await sizes([team.id]);
     return c.json({
       team: view(team.row, count?.count ?? 0),
@@ -179,6 +178,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
     const team = await findTeam(c as ApiContext);
     await db.transaction(async (tx) => {
       await tx.delete(artifactTeamAccess).where(eq(artifactTeamAccess.teamId, team.id));
+      await tx.delete(projectAccess).where(eq(projectAccess.teamId, team.id));
       await tx.delete(teamMembers).where(eq(teamMembers.teamId, team.id));
       await tx.delete(teams).where(eq(teams.id, team.id));
     });

@@ -3,9 +3,9 @@ import { agentLabel, Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
-import { callerKey } from "../data/store.ts";
 import {
   artifacts,
+  artifactTeamAccess,
   blocks,
   comments,
   decisions,
@@ -13,7 +13,9 @@ import {
   guestViews,
   pages,
   people,
+  projectAccess,
   projects,
+  teams,
   threads,
   versions,
   views,
@@ -22,7 +24,7 @@ import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
 import { rateLimitSearch, searchHits, snippet } from "../library/search.ts";
 import { type Loaded, visibleTo } from "../library/visible.ts";
-import { type ArtifactRow, artifactParam, toResource } from "./artifacts-db.ts";
+import { type ArtifactRow, artifactParam, heldProjects, toProject, toResource } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
@@ -211,6 +213,25 @@ export function listRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
   const artifactById = artifactParam(deps);
 
+  /** Projects a team has, or holds an artifact in. It only ever narrows what the caller already sees. */
+  async function teamProjects(orgId: string, caller: Caller, slug: string) {
+    if (!can(caller, "team.read", { type: "org" })) return new Set<string>();
+    const [direct, through] = await Promise.all([
+      db
+        .select({ id: projectAccess.projectId })
+        .from(projectAccess)
+        .innerJoin(teams, eq(teams.id, projectAccess.teamId))
+        .where(and(eq(teams.orgId, orgId), eq(teams.slug, slug))),
+      db
+        .select({ id: artifacts.projectId })
+        .from(artifactTeamAccess)
+        .innerJoin(teams, eq(teams.id, artifactTeamAccess.teamId))
+        .innerJoin(artifacts, eq(artifacts.id, artifactTeamAccess.artifactId))
+        .where(and(eq(teams.orgId, orgId), eq(teams.slug, slug))),
+    ]);
+    return new Set([...direct, ...through].map((row) => row.id));
+  }
+
   routes.get("/api/search", { action: "home.read" }, async (c) => {
     const q = (c.req.query("q") ?? "").trim().toLowerCase().slice(0, 100);
     if (q.length < 2) return c.json({ artifacts: [], pages: [], comments: [], content: [] });
@@ -307,10 +328,17 @@ export function listRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/projects", { action: "project.list" }, async (c) => {
     const list = await visible(deps, c as ApiContext);
     const cards = await buildCards(deps, c.get("caller"), list);
+    const orgId = c.get("org").id;
+    const held = await heldProjects(deps, orgId, c.get("caller"));
     const projectIds = [...new Set(list.map(({ row }) => row.projectId))];
-    const rows = projectIds.length
+    const seen = projectIds.length
       ? await db.select().from(projects).where(inArray(projects.id, projectIds))
       : [];
+    // A grant shows a project before anything in it is visible, or a new grantee couldn't reach it.
+    const merged = [...seen, ...held.filter((row) => !projectIds.includes(row.id))];
+    const team = c.req.query("team");
+    const onTeam = team ? await teamProjects(orgId, c.get("caller"), team) : null;
+    const rows = onTeam ? merged.filter((row) => onTeam.has(row.id)) : merged;
     const q = c.req.query("q");
     const sort = c.req.query("sort") === "name" ? "name" : "recent";
     const body = rows
@@ -318,7 +346,10 @@ export function listRoutes(routes: Routes, deps: Deps) {
       .map((row) => {
         const own = list.filter((entry) => entry.row.projectId === row.id);
         const live = own.filter((entry) => !entry.row.archivedAt);
-        const updated = own.reduce((latest, entry) => Math.max(latest, entry.row.updatedAt.getTime()), 0);
+        const updated = own.reduce(
+          (latest, entry) => Math.max(latest, entry.row.updatedAt.getTime()),
+          own.length === 0 ? row.updatedAt.getTime() : 0,
+        );
         return {
           id: row.id,
           slug: row.slug,
@@ -329,6 +360,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
             .filter((card) => live.some((entry) => entry.row.id === card.id))
             .reduce((sum, card) => sum + card.counts.open, 0),
           updatedAt: new Date(updated).toISOString(),
+          restricted: row.restricted,
         };
       })
       .sort((a, b) =>
@@ -344,7 +376,10 @@ export function listRoutes(routes: Routes, deps: Deps) {
       .where(and(eq(projects.orgId, c.get("org").id), eq(projects.slug, c.req.param("slug") as string)))
       .limit(1);
     const list = project ? await visible(deps, c as ApiContext, project.id) : [];
-    if (!project || list.length === 0) throw new ApiError("not_found", "Not found.");
+    const place = project ? await toProject(deps, project) : null;
+    const caller = c.get("caller");
+    const holder = "person" in caller && place?.grants.some((row) => row.personId === caller.person.id);
+    if (!project || !place || (list.length === 0 && !holder)) throw new ApiError("not_found", "Not found.");
     const status = c.req.query("status") ?? "all";
     const q = c.req.query("q");
     const cards = (await buildCards(deps, c.get("caller"), list))
@@ -362,7 +397,13 @@ export function listRoutes(routes: Routes, deps: Deps) {
           : b.publishedAt.localeCompare(a.publishedAt),
       );
     return etagJson(c, {
-      project: { slug: project.slug, name: project.name, repo: project.repo },
+      project: {
+        slug: project.slug,
+        name: project.name,
+        repo: project.repo,
+        restricted: project.restricted,
+        canShare: can(caller, "project.access.read", place),
+      },
       artifacts: cards,
     });
   });

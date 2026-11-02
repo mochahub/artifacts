@@ -64,5 +64,15 @@ describe("teams from the CLI", () => {
     expect((await cli(["share", "--team", "../people"], agent(), dir)).code).toBe(2);
     const missing = await cli(["share", "--team", "nobody"], agent(), dir);
     expect(missing.code).toBe(1);
+
+    // Tokens read a project's access, and say who can see what they publish.
+    const access = JSON.parse((await cli(["project", "access", "--json"], agent(), dir)).stdout);
+    expect(access.project).toMatchObject({ slug: "camerabuddy", restricted: false });
+    expect((await cli(["project", "access"], agent(), dir)).stdout).toContain("open to the organization");
+    expect((await cli(["project", "nonsense"], agent(), dir)).code).toBe(2);
+    const again = await cli(["publish", "-m", "Second"], agent(), dir);
+    expect(again.stdout + again.stderr).toContain("visible to  Everyone in Mochahub");
+    const status = JSON.parse((await cli(["status", "--json"], agent(), dir)).stdout);
+    expect(status.audience).toBe("Everyone in Mochahub");
   }, 120_000);
 });

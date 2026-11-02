@@ -87,6 +87,7 @@ describe("what the worker keeps", () => {
     "/api/search",
     "/api/teams",
     "/api/teams/design",
+    "/api/projects/checkout/access",
     "/api/people/search",
     "/api/artifacts/abc/teams/def",
     "/api/events",

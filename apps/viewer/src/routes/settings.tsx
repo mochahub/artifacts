@@ -1,3 +1,4 @@
+import type { GoogleSettings, IdentityList } from "@artifacts/schema";
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import {
   contrast,
@@ -26,7 +27,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect } from "preact/hooks";
 import { useLocation, useRoute } from "preact-iso";
 import { ApiFailure, api, post } from "../api.ts";
-import { ReauthSheet } from "../components/reauth.tsx";
+import { googleLink, ReauthSheet } from "../components/reauth.tsx";
 import { LEVELS, Picker } from "../components/share.tsx";
 import { Sheet } from "../components/sheets.tsx";
 import { ago, plural } from "../format.ts";
@@ -40,7 +41,7 @@ import {
 } from "../notify.ts";
 import { addPasskey, passkeyName } from "../passkey.ts";
 import { usePoll } from "../poll.ts";
-import { me, meta } from "../session.ts";
+import { me, meta, refreshMeta } from "../session.ts";
 import { SignedIn } from "./guard.tsx";
 
 const ADMIN = () => me.value?.role === "owner" || me.value?.role === "admin";
@@ -164,9 +165,25 @@ type Session = {
   current: boolean;
 };
 
+const GOOGLE_ANSWERS: Record<string, string> = {
+  linked: "Google is connected.",
+  "in-use": "That Google account is already connected to someone here, or you have one connected.",
+  recent: "Sign in again, then connect Google.",
+  failed: "Google didn't finish. Try again.",
+  cancelled: "Cancelled.",
+  unverified: "Google hasn't verified that email address.",
+  expired: "That took too long. Try again.",
+  off: "Google sign-in is turned off here.",
+  tested: "That worked. You can turn Google on.",
+  mismatch: "That's a different Google account.",
+  confirmed: "Confirmed. Tap again to carry on.",
+};
+
 function SignIn() {
   const keys = usePoll<Keys>("/api/me/passkeys", 60_000);
   const sessions = usePoll<Session[]>("/api/me/sessions", 60_000);
+  const google = usePoll<IdentityList>("/api/me/identities", 60_000);
+  const { query } = useLocation();
   const recent = useRecent();
   const changing = useSignal(false);
   const password = useSignal("");
@@ -210,7 +227,65 @@ function SignIn() {
         Add a passkey
       </button>
       <p class="fn">Works on {others}.</p>
+      {ADMIN() && (
+        <div class="group">
+          <a class="li" href="/settings/google">
+            <div class="grow">
+              <div class="tt">Google sign-in</div>
+              <div class="ss">For everyone in {meta.value?.orgName}</div>
+            </div>
+            <ChevronRight class="chev" />
+          </a>
+        </div>
+      )}
       {recent.error.value && <p class="err">{recent.error.value}</p>}
+      {google.data.value?.google && (
+        <>
+          <span class="gh">Google</span>
+          {google.data.value.identities.length > 0 ? (
+            <div class="group">
+              {google.data.value.identities.map((row) => (
+                <div class="li" key={row.id}>
+                  <div class="grow">
+                    <div class="tt" style="overflow-wrap:anywhere">
+                      {row.email}
+                    </div>
+                    <div class="ss">{row.lastUsedAt ? `Used ${ago(row.lastUsedAt)}` : "Not used yet"}</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label={`Remove ${row.email}`}
+                    onClick={() =>
+                      recent.run(async () => {
+                        await api(`/api/me/identities/${row.id}`, { method: "DELETE" });
+                        await google.refresh();
+                      })
+                    }
+                  >
+                    <Trash2 />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <button
+              type="button"
+              class="btn soft"
+              onClick={() =>
+                recent.run(async () => {
+                  // Asks for a recent sign-in first, because a redirect can't come back to a retry.
+                  await post("/api/auth/reauth/check");
+                  location.href = googleLink("link", "/settings/sign-in");
+                })
+              }
+            >
+              Connect Google
+            </button>
+          )}
+        </>
+      )}
+      {query.google && GOOGLE_ANSWERS[query.google] && <p class="fn">{GOOGLE_ANSWERS[query.google]}</p>}
       <span class="gh">Password</span>
       <div class="group">
         <button
@@ -306,7 +381,9 @@ type PersonRow = {
   password: boolean;
   passkeys: number;
   shares: { title: string; permission: string }[];
+  google: boolean;
   teams: { slug: string; name: string; role: string }[];
+  projects: { slug: string; name: string; permission: keyof typeof LEVELS }[];
 };
 type InviteRow = { id: string; email: string; role: string; expiresAt: string };
 type PeopleList = { people: PersonRow[]; invites: InviteRow[] };
@@ -556,7 +633,11 @@ function People() {
                 <div class="tt">Sign-in</div>
               </div>
               <span class="ss">
-                {[person.password ? "Password" : null, person.passkeys ? "Passkey" : null]
+                {[
+                  person.password ? "Password" : null,
+                  person.passkeys ? "Passkey" : null,
+                  person.google ? "Google" : null,
+                ]
                   .filter(Boolean)
                   .join(" and ") || "None yet"}
               </span>
@@ -571,6 +652,21 @@ function People() {
                     <span key={team.slug}>
                       {i > 0 && ", "}
                       <a href={`/settings/teams/${team.slug}`}>{team.name}</a>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            )}
+            {person.projects.length > 0 && (
+              <div class="li">
+                <div class="grow">
+                  <div class="tt">Projects</div>
+                </div>
+                <span class="ss">
+                  {person.projects.map((project, i) => (
+                    <span key={project.slug}>
+                      {i > 0 && ", "}
+                      <a href={`/${project.slug}`}>{project.name}</a>
                     </span>
                   ))}
                 </span>
@@ -830,6 +926,9 @@ function TeamDetail({ slug }: { slug: string }) {
           ))}
         </div>
       )}
+      <a class="fn" href={`/projects?team=${team.slug}`}>
+        See its projects
+      </a>
       <p class="fn">
         Anyone added here gets what the team has. Reviewers and outside people stop at commenting.
       </p>
@@ -913,10 +1012,168 @@ function TeamDetail({ slug }: { slug: string }) {
   );
 }
 
+function GoogleSetup() {
+  const settings = usePoll<GoogleSettings>("/api/org/google", 60_000);
+  const { query } = useLocation();
+  const recent = useRecent();
+  const clientId = useSignal<string | null>(null);
+  const secret = useSignal("");
+  const domain = useSignal<string | null>(null);
+  const body = settings.data.value;
+  if (!body) return null;
+  const change = (json: unknown) =>
+    recent.run(async () => {
+      await api("/api/org/google", { method: "PATCH", json });
+      await settings.refresh();
+      await refreshMeta();
+    });
+  return (
+    <Frame title="Google sign-in" back="/settings/sign-in" backLabel="Sign-in">
+      <p class="sub">
+        Optional. People still need an invite, and passwords and passkeys keep working. Create a client in
+        Google Cloud, of type Web application, and add these as its redirect URIs:
+      </p>
+      <div class="group">
+        {body.redirectUris.map((uri) => (
+          <button type="button" class="li btn-li" key={uri} onClick={() => copy(uri)}>
+            <div class="grow">
+              <div class="mono" style="font-size:14px;overflow-wrap:anywhere">
+                {uri}
+              </div>
+            </div>
+            <Copy />
+          </button>
+        ))}
+      </div>
+      <label class="gh" for="google-id">
+        Client ID
+      </label>
+      <input
+        id="google-id"
+        class="field"
+        autocomplete="off"
+        value={clientId.value ?? body.clientId ?? ""}
+        onInput={(e) => {
+          clientId.value = e.currentTarget.value;
+        }}
+      />
+      <label class="gh" for="google-secret">
+        Client secret
+      </label>
+      <input
+        id="google-secret"
+        class="field"
+        type="password"
+        autocomplete="off"
+        placeholder={body.hasSecret ? "Saved, and never shown again" : ""}
+        value={secret.value}
+        onInput={(e) => {
+          secret.value = e.currentTarget.value;
+        }}
+      />
+      <button
+        type="button"
+        class="btn soft"
+        disabled={!(clientId.value ?? body.clientId) || (!body.hasSecret && !secret.value)}
+        onClick={() =>
+          recent.run(async () => {
+            await api("/api/org/google", {
+              method: "PUT",
+              json: {
+                clientId: clientId.value ?? body.clientId,
+                ...(secret.value ? { clientSecret: secret.value } : {}),
+              },
+            });
+            secret.value = "";
+            await settings.refresh();
+            await refreshMeta();
+          })
+        }
+      >
+        Save
+      </button>
+      {query.google && GOOGLE_ANSWERS[query.google] && <p class="fn">{GOOGLE_ANSWERS[query.google]}</p>}
+      {body.clientId && body.hasSecret && (
+        <>
+          <span class="gh">Test</span>
+          <p class="fn">
+            Sign in to Google once to prove these work. Google can only be turned on after that, by the admin
+            who ran it. Saving new credentials turns it off again.
+          </p>
+          <button
+            type="button"
+            class="btn soft"
+            onClick={() =>
+              recent.run(async () => {
+                await post("/api/auth/reauth/check");
+                location.href = googleLink("test", "/settings/google");
+              })
+            }
+          >
+            {body.tested ? "Test again" : "Test"}
+          </button>
+          <span class="gh">For everyone</span>
+          <div class="seg">
+            {[true, false].map((value) => (
+              <button
+                type="button"
+                key={String(value)}
+                aria-pressed={body.enabled === value}
+                disabled={value && !body.tested && !body.enabled}
+                onClick={() => change({ enabled: value })}
+              >
+                {value ? "On" : "Off"}
+              </button>
+            ))}
+          </div>
+          <span class="gh">Join without an invite</span>
+          <label class="gh" for="google-domain">
+            Google Workspace domain
+          </label>
+          <input
+            id="google-domain"
+            class="field"
+            autocomplete="off"
+            placeholder="Off"
+            value={domain.value ?? body.autoJoin?.domain ?? ""}
+            onInput={(e) => {
+              domain.value = e.currentTarget.value;
+            }}
+          />
+          <p class="fn">
+            Off unless you set it. Anyone Google says belongs to this Workspace can then join as a member.
+            Consumer addresses such as gmail.com can't be used.
+          </p>
+          <button
+            type="button"
+            class="btn soft"
+            onClick={() => {
+              const value = (domain.value ?? body.autoJoin?.domain ?? "").trim();
+              change({
+                autoJoin: value
+                  ? { domain: value, role: body.autoJoin?.role ?? "member", teamIds: [] }
+                  : null,
+              });
+            }}
+          >
+            Save domain
+          </button>
+        </>
+      )}
+      {recent.error.value && <p class="err">{recent.error.value}</p>}
+      {recent.sheet}
+    </Frame>
+  );
+}
+
 type Org = {
   newVersion: string | null;
   name: string;
-  settings: { defaultVisibility: "me" | "org"; linkSharing: boolean };
+  settings: {
+    defaultVisibility: "me" | "org";
+    linkSharing: boolean;
+    defaultProjectAccess: "org" | "restricted";
+  };
   domains: { home: string; publicUrl: string; moreUrls: string[]; contentUrl: string | null };
 };
 
@@ -1382,6 +1639,19 @@ function OrgSettings() {
           </button>
         ))}
       </div>
+      <span class="gh">New projects are visible to</span>
+      <div class="seg">
+        {(["org", "restricted"] as const).map((value) => (
+          <button
+            type="button"
+            key={value}
+            aria-pressed={body.settings.defaultProjectAccess === value}
+            onClick={() => save({ settings: { defaultProjectAccess: value } })}
+          >
+            {value === "org" ? "Organization" : "Only people added"}
+          </button>
+        ))}
+      </div>
       <span class="gh">Share links</span>
       <div class="seg">
         {[true, false].map((value) => (
@@ -1407,6 +1677,8 @@ function Tokens() {
   const recent = useRecent();
   const name = useSignal("");
   const made = useSignal<string | null>(null);
+  const projects = usePoll<{ id: string; name: string; restricted?: boolean }[]>("/api/projects", 60_000);
+  const chosen = useSignal<string[]>([]);
   return (
     <Frame title="Tokens">
       <p class="sub">
@@ -1423,6 +1695,44 @@ function Tokens() {
           name.value = e.currentTarget.value;
         }}
       />
+      <span class="gh">Projects</span>
+      <div class="group">
+        <button
+          type="button"
+          class="li btn-li"
+          onClick={() => {
+            chosen.value = [];
+          }}
+        >
+          <div class="grow">
+            <div class="tt">Every open project</div>
+            <div class="ss">And any it creates. A restricted project has to be chosen below.</div>
+          </div>
+          {chosen.value.length === 0 && <Check />}
+        </button>
+        {projects.data.value?.map((project) => {
+          const on = chosen.value.includes(project.id);
+          return (
+            <button
+              type="button"
+              class="li btn-li"
+              key={project.id}
+              aria-pressed={on}
+              onClick={() => {
+                chosen.value = on
+                  ? chosen.value.filter((id) => id !== project.id)
+                  : [...chosen.value, project.id];
+              }}
+            >
+              <div class="grow">
+                <div class="tt">{project.name}</div>
+                {project.restricted && <div class="ss">Restricted</div>}
+              </div>
+              {on && <Check />}
+            </button>
+          );
+        })}
+      </div>
       <button
         type="button"
         class="btn ink"
@@ -1432,9 +1742,11 @@ function Tokens() {
             const { token } = await post<{ token: string }>("/api/tokens", {
               name: name.value,
               scopes: ["publish", "read", "org"],
+              ...(chosen.value.length > 0 ? { projectIds: chosen.value } : {}),
             });
             made.value = token;
             name.value = "";
+            chosen.value = [];
             await list.refresh();
           })
         }
@@ -1537,6 +1849,7 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
   notifications: Notifications,
   people: People,
   teams: Teams,
+  google: GoogleSetup,
   domains: Domains,
   org: OrgSettings,
   brand: BrandSettings,

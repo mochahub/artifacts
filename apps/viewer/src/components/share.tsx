@@ -1,4 +1,4 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, ProjectAccessList } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check, Copy, Eye, Link2Off, MessageCircle, Users, X } from "lucide-preact";
 import { useEffect } from "preact/hooks";
@@ -22,7 +22,7 @@ type Inherited = {
   role: string;
   level: Level;
   via: "publisher" | "role" | "grant";
-  sources: { name: string; slug: string }[];
+  sources: { kind: string; name: string; slug: string }[];
   capped: boolean;
 };
 type Access = {
@@ -30,6 +30,8 @@ type Access = {
   teams: { id: string; slug: string; name: string; permission: Level; viaToken: boolean; members: number }[];
   inherited: Inherited[];
   links: { id: string; permission: string; expiresAt: string | null }[];
+  project: { slug: string; name: string; restricted: boolean } | null;
+  canShareOutside: boolean;
 };
 export type Picked =
   | { kind: "person"; id: string; name: string; email: string; role: string }
@@ -181,7 +183,9 @@ function Reason({ row }: { row: Inherited }) {
       {row.sources.map((source, i) => (
         <span key={source.slug}>
           {i === 0 ? ", via " : " and "}
-          <a href={`/settings/teams/${source.slug}`}>{source.name}</a>
+          <a href={source.kind === "team" ? `/settings/teams/${source.slug}` : `/${source.slug}`}>
+            {source.name}
+          </a>
         </span>
       ))}
       {row.capped && ", capped by role"}
@@ -227,6 +231,8 @@ export function ShareSheet({
   const adding = useSignal<Level>("comment");
   const error = useSignal<string | null>(null);
   const data = access.data.value;
+  // The sheet's own answer: the page's copy comes from a poll, and an older one can land after this.
+  const visibility = useSignal(artifact.visibility);
 
   async function run(work: () => Promise<void>) {
     error.value = null;
@@ -262,6 +268,9 @@ export function ShareSheet({
       await api(`/api/artifacts/${artifact.id}/teams/${id}`, { method: "PUT", json: { permission: level } });
     });
   const levels: Level[] = ["view", "comment", "publish"];
+  const restricted = data?.project?.restricted;
+  // Until it's loaded, the links stay hidden rather than appear and vanish.
+  const outside = data?.canShareOutside === true;
 
   return (
     <Sheet title={`Share ${artifact.title}`} onClose={onClose}>
@@ -271,15 +280,18 @@ export function ShareSheet({
           <button
             type="button"
             key={value}
-            aria-pressed={artifact.visibility === value}
+            aria-pressed={visibility.value === value}
             onClick={() =>
               run(async () => {
                 await api(`/api/artifacts/${artifact.id}`, { method: "PATCH", json: { visibility: value } });
+                visibility.value = value;
                 onChanged();
               })
             }
           >
-            {value === "org" ? `Everyone in ${meta.value?.orgName}` : "Only people added"}
+            {value === "me"
+              ? "Only people added"
+              : `Everyone in ${restricted ? data?.project?.name : meta.value?.orgName}`}
           </button>
         ))}
       </div>
@@ -289,7 +301,8 @@ export function ShareSheet({
           onPick={(choice) =>
             choice.kind === "team" ? setTeam(choice.id, adding.value) : setPerson(choice.email, adding.value)
           }
-          onEmail={(email) => setPerson(email, adding.value)}
+          onEmail={outside ? (email) => setPerson(email, adding.value) : undefined}
+          placeholder={outside ? undefined : "Add a person or team"}
         />
         <LevelSelect
           value={adding.value}
@@ -366,42 +379,53 @@ export function ShareSheet({
       )}
       <InheritedRows rows={data?.inherited ?? []} />
       {error.value && <p class="err">{error.value}</p>}
-      <span class="gh">Anyone with the link</span>
-      <div class="group">
-        {(["view", "comment"] as const).map((value) => (
-          <button
-            type="button"
-            class="li btn-li"
-            key={value}
-            onClick={() => {
-              permission.value = value;
-            }}
-          >
-            {value === "view" ? <Eye /> : <MessageCircle />}
-            <div class="grow">
-              <div class="tt">{value === "view" ? "View" : "View and comment"}</div>
-            </div>
-            {permission.value === value && <Check />}
-          </button>
-        ))}
-      </div>
-      <select
-        class="field"
-        aria-label="Expires"
-        value={expires.value}
-        onChange={(e) => {
-          expires.value = e.currentTarget.value;
-        }}
-      >
-        <option value="">Never expires</option>
-        <option value="1d">Expires in 1 day</option>
-        <option value="7d">Expires in 7 days</option>
-        <option value="30d">Expires in 30 days</option>
-      </select>
-      <button type="button" class="btn ink" onClick={createLink}>
-        <Copy />
-        Copy link
-      </button>
+      {restricted && !outside && (
+        <p class="fn">
+          {data?.project?.name} is restricted, so only its managers can make links or invite outside people.
+        </p>
+      )}
+      {outside && <span class="gh">Anyone with the link</span>}
+      {outside && (
+        <div class="group">
+          {(["view", "comment"] as const).map((value) => (
+            <button
+              type="button"
+              class="li btn-li"
+              key={value}
+              onClick={() => {
+                permission.value = value;
+              }}
+            >
+              {value === "view" ? <Eye /> : <MessageCircle />}
+              <div class="grow">
+                <div class="tt">{value === "view" ? "View" : "View and comment"}</div>
+              </div>
+              {permission.value === value && <Check />}
+            </button>
+          ))}
+        </div>
+      )}
+      {outside && (
+        <select
+          class="field"
+          aria-label="Expires"
+          value={expires.value}
+          onChange={(e) => {
+            expires.value = e.currentTarget.value;
+          }}
+        >
+          <option value="">Never expires</option>
+          <option value="1d">Expires in 1 day</option>
+          <option value="7d">Expires in 7 days</option>
+          <option value="30d">Expires in 30 days</option>
+        </select>
+      )}
+      {outside && (
+        <button type="button" class="btn ink" onClick={createLink}>
+          <Copy />
+          Copy link
+        </button>
+      )}
       {url.value && (
         <div class="card" style="padding:10px 14px">
           <div class="mono" style="font-size:14px;overflow-wrap:anywhere" data-testid="share-url">
@@ -433,6 +457,264 @@ export function ShareSheet({
           ))}
         </div>
       )}
+    </Sheet>
+  );
+}
+
+const list = (names: string[]) =>
+  names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/** What restricting does, said before it happens. Links and invites stay live unless you say otherwise. */
+function RestrictConfirm({
+  access,
+  onConfirm,
+  onCancel,
+}: {
+  access: ProjectAccessList;
+  onConfirm(revokeLinks: boolean): void;
+  onCancel(): void;
+}) {
+  const revoke = useSignal(false);
+  const { impact, project } = access;
+  const live = impact.links + impact.invites;
+  const named = impact.loses > impact.names.length ? [...impact.names, "others"] : impact.names;
+  return (
+    <>
+      <p class="sub">
+        {impact.loses > 0
+          ? `${plural(impact.loses, "person loses", "people lose")} access, including ${list(named)}.`
+          : "Nobody here loses access."}{" "}
+        Anyone who published here, or was added to one artifact, keeps just that. Admins still see it.
+      </p>
+      {impact.tokens > 0 && (
+        <p class="sub">
+          {plural(impact.tokens, "organization token", "organization tokens")} over all projects will stop
+          reaching it. Name this project on a token to keep it working.
+        </p>
+      )}
+      {live > 0 && (
+        <button
+          type="button"
+          class="li btn-li card"
+          aria-pressed={revoke.value}
+          onClick={() => {
+            revoke.value = !revoke.value;
+          }}
+        >
+          <div class="grow">
+            <div class="tt">Revoke links and invites too</div>
+            <div class="ss">
+              {[
+                impact.links ? `${plural(impact.links, "share link")}` : null,
+                impact.invites ? `${plural(impact.invites, "outside invite")}` : null,
+              ]
+                .filter(Boolean)
+                .join(" and ")}{" "}
+              stay live otherwise
+            </div>
+          </div>
+          {revoke.value && <Check />}
+        </button>
+      )}
+      <button type="button" class="btn ink" onClick={() => onConfirm(revoke.value)}>
+        Restrict {project.name}
+      </button>
+      <button type="button" class="btn soft" onClick={onCancel}>
+        Keep it open
+      </button>
+    </>
+  );
+}
+
+/** A whole project's access: the same sheet as an artifact's, a level higher (05·1). */
+export function ProjectShareSheet({
+  slug,
+  onClose,
+  onChanged,
+}: {
+  slug: string;
+  onClose(): void;
+  onChanged(): void;
+}) {
+  const path = `/api/projects/${encodeURIComponent(slug)}/access`;
+  const access = usePoll<ProjectAccessList>(path, 60_000);
+  const adding = useSignal<Level>("comment");
+  const url = useSignal<string | null>(null);
+  const confirming = useSignal(false);
+  const error = useSignal<string | null>(null);
+  const data = access.data.value;
+  const levels: Level[] = ["view", "comment", "publish", "manage"];
+
+  async function run(work: () => Promise<void>) {
+    error.value = null;
+    try {
+      await work();
+      await access.refresh();
+    } catch (failure) {
+      error.value = message(failure);
+    }
+  }
+  const set = (subject: string, level: Level) =>
+    run(() => api(`${path}/${subject}`, { method: "PUT", json: { permission: level } }));
+  const invite = (email: string) =>
+    run(async () => {
+      const made = await post<{ url?: string }>(path, { email, permission: adding.value });
+      if (made.url) {
+        url.value = made.url;
+        copy(made.url);
+      }
+    });
+  const setRestricted = (restricted: boolean, revokeLinks = false) =>
+    run(async () => {
+      await api(path, { method: "PATCH", json: { restricted, revokeLinks } });
+      confirming.value = false;
+      onChanged();
+    });
+
+  if (!data) {
+    return (
+      <Sheet title="Share" onClose={onClose}>
+        {access.error.value && <p class="err">{access.error.value.message}</p>}
+      </Sheet>
+    );
+  }
+  if (confirming.value) {
+    return (
+      <Sheet title={`Restrict ${data.project.name}?`} onClose={onClose}>
+        <RestrictConfirm
+          access={data}
+          onConfirm={(revoke) => setRestricted(true, revoke)}
+          onCancel={() => {
+            confirming.value = false;
+          }}
+        />
+        {error.value && <p class="err">{error.value}</p>}
+      </Sheet>
+    );
+  }
+  const change = data.canChange;
+  return (
+    <Sheet title={`Share ${data.project.name}`} onClose={onClose}>
+      <span class="gh">Who has access</span>
+      <div class="seg">
+        <button
+          type="button"
+          aria-pressed={!data.project.restricted}
+          disabled={!change}
+          onClick={() => data.project.restricted && setRestricted(false)}
+        >
+          Everyone in {meta.value?.orgName}
+        </button>
+        <button
+          type="button"
+          aria-pressed={data.project.restricted}
+          disabled={!change}
+          onClick={() => {
+            if (!data.project.restricted) confirming.value = true;
+          }}
+        >
+          Only people added
+        </button>
+      </div>
+      {change && (
+        <div class="addrow">
+          <Picker
+            skip={[...data.people, ...data.teams].map((row) => row.id)}
+            onPick={(choice) => set(`${choice.kind}:${choice.id}`, adding.value)}
+            onEmail={invite}
+          />
+          <LevelSelect
+            value={adding.value}
+            levels={levels}
+            label="Level for who you add"
+            onChange={(level) => {
+              adding.value = level;
+            }}
+          />
+        </div>
+      )}
+      {url.value && (
+        <div class="card" style="padding:10px 14px">
+          <div class="mono" style="font-size:14px;overflow-wrap:anywhere" data-testid="share-url">
+            {url.value}
+          </div>
+        </div>
+      )}
+      {data.teams.length + data.people.length > 0 && (
+        <div class="group">
+          {data.teams.map((team) => (
+            <div class="li" key={team.id}>
+              <Users />
+              <div class="grow">
+                <div class="tt">
+                  <a href={`/settings/teams/${team.slug}`}>{team.name}</a>
+                </div>
+                <div class="ss">{plural(team.members, "person", "people")}</div>
+              </div>
+              {change ? (
+                <LevelSelect
+                  value={team.permission}
+                  levels={levels}
+                  label={`Level for ${team.name}`}
+                  onChange={(level) => set(`team:${team.id}`, level)}
+                />
+              ) : (
+                <span class="ss">{LEVELS[team.permission]}</span>
+              )}
+              {change && (
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-label={`Remove ${team.name}`}
+                  onClick={() => run(() => api(`${path}/team:${team.id}`, { method: "DELETE" }))}
+                >
+                  <X />
+                </button>
+              )}
+            </div>
+          ))}
+          {data.people.map((person) => (
+            <div class="li" key={person.id}>
+              <span class="av">{person.name[0]}</span>
+              <div class="grow">
+                <div class="tt">{person.name}</div>
+                {(person.role !== "member" || person.capped) && (
+                  <div class="ss">
+                    {roleName(person.role)}
+                    {person.capped && ", capped by role"}
+                  </div>
+                )}
+              </div>
+              {change ? (
+                <LevelSelect
+                  value={person.permission}
+                  levels={person.role === "outside" ? ["view", "comment"] : levels}
+                  label={`Level for ${person.name}`}
+                  onChange={(level) => set(`person:${person.id}`, level)}
+                />
+              ) : (
+                <span class="ss">{LEVELS[person.permission]}</span>
+              )}
+              {change && (
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-label={`Remove ${person.name}`}
+                  onClick={() => run(() => api(`${path}/person:${person.id}`, { method: "DELETE" }))}
+                >
+                  <X />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <InheritedRows rows={data.inherited as Inherited[]} />
+      {error.value && <p class="err">{error.value}</p>}
+      <p class="fn">
+        Reviewers and outside people stop at commenting. Can publish adds new artifacts, and only managers
+        change someone else's.
+      </p>
     </Sheet>
   );
 }

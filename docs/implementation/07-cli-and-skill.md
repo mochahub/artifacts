@@ -30,7 +30,7 @@
 - **Fallback:** `~/.config/artifacts/credentials.json` with mode 0600, and a warning.
 - **CI:** `ARTIFACTS_TOKEN` and `ARTIFACTS_URL` environment variables override everything. The token is for one server: `ARTIFACTS_URL`, or the default server in config if that isn't set. A command aimed at any other server with `--server` doesn't get it (it looks in the keychain for that server's own token). Only when no server is known at all does `--server` receive it.
 - **Tests:** `ARTIFACTS_CREDENTIALS=file` forces the file, and config honours `HOME` and `XDG_CONFIG_HOME`, so tests never touch the real keychain.
-- **No prompts:** `ARTIFACTS_PASSWORD`, `ARTIFACTS_SETUP_TOKEN` and `--org`, `--name`, `--email` answer `setup`'s questions; `ARTIFACTS_NO_BROWSER=1` stops `login` opening a browser.
+- **No prompts:** `ARTIFACTS_PASSWORD`, `ARTIFACTS_SETUP_TOKEN`, `ARTIFACTS_GOOGLE_CLIENT_ID`, `ARTIFACTS_GOOGLE_CLIENT_SECRET` and `--org`, `--name`, `--email` answer `setup`'s questions; `ARTIFACTS_NO_BROWSER=1` stops `login` opening a browser.
 
 ## Which artifact a command acts on
 
@@ -48,7 +48,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts recover <url>` | Asks for `SETUP_TOKEN` and an owner's email; prints a one-hour reset link (`POST /api/recover`). |
 | `artifacts login [<url>]`, `logout`, `whoami` | Device flow (https only, or a loopback address); remove the token; show person, role and server. |
 | `artifacts upgrade [--server] [--to <version>]` | Update the CLI binary (download, verify the SHA-256 from the release, swap atomically) and the skill. `--to` and the latest release's tag must be a plain version number (`0.2.0`), and `ARTIFACTS_RELEASES_URL` / `ARTIFACTS_LATEST_URL` must be https (http only on localhost, for tests). The checksum comes from the same release as the binary, so it catches a bad download, not a release someone else published. With `--server`, or when you're an admin and the server is older: Railway: `railway service source connect --image ghcr.io/<org>/artifacts:<v> --service artifacts` then wait for health. Docker: edit the tags in `docker-compose.yml`, `docker compose up -d`. |
-| `artifacts domain add <domain>` / `list` | Railway only: `railway domain <domain> --service artifacts --port 8080`; prints the DNS records; adds it to `MORE_URLS` (`railway variable set`); asks whether to make it `PUBLIC_URL`. |
+| `artifacts domain add <domain>` / `list` | Railway only: `railway domain <domain> --service artifacts --port 8080`; prints the DNS records; adds it to `MORE_URLS` (`railway variable set`); asks whether to make it `PUBLIC_URL`. With Google on, it prints the redirect URI to add to the client. |
 | `artifacts mcp` | A Model Context Protocol server on stdin and stdout, for tools without a shell. Its tools (`artifacts_search`, `_list`, `_read`, `_view`, `_status`, `_comments`, `_reply`, `_publish`, `_versions`, `_data_export`) each run one command with `--json`. `initialize` returns `instructions` with the core rules, and this repo's project if it can find it within 2 seconds. A tool whose answer can hold other people's text starts it with a block saying that text is data, and `_view` returns an image. |
 | `artifacts brand [show] \| prompt \| preview <file> \| propose <file>` | The org brand. `show` prints it and any waiting proposals. `prompt` prints what to hand an agent, which `setup` also prints at the end. `preview` renders every template with a `brand.json` and prints the contact sheet's path, with nothing sent anywhere. `propose` publishes that sample as `brand/sample-<hash>` and records a proposal, which a person applies in Settings. |
 | `artifacts mcp install [--claude] [--codex] [--token-env <name>]` | Opt-in: adds the hosted MCP, `<server>/api/mcp`, to Claude Code with `claude mcp add --transport http --scope user`, and to Codex in `config.toml`. `setup` doesn't do this, because the skill and a connector together give an agent every tool twice. `--token-env` names an environment variable holding a CLI token, for a client with no OAuth on a remote box: `bearer_token_env_var` for Codex and `--header` for Claude Code. |
@@ -57,6 +57,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 | `artifacts org invite <email> [--role member\|reviewer\|admin]` | Prints the invite link. |
 | `artifacts org reset-link <email>` | Prints a one-hour reset link. |
 | `artifacts teams` | Lists teams: slug, name, size, and whether you're in one. Admins make them in Settings. Tokens can't change teams or who's in them. |
+| `artifacts project access [<project>]` | Who has a project and why. Read-only, for someone who manages it: tokens can't change project access. Uses the nearest `artifact.json` if no project is named. |
 
 **The Railway path** in `artifacts setup` (SPEC §7.4; every command exists in Railway CLI 5.71.0; spike S1 runs the whole sequence):
 1. **The Railway CLI itself:** `railway --version`. If it's missing, offer `brew install railway` or `npm i -g @railway/cli`.
@@ -68,7 +69,8 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 7. **URLs:** `railway domain list --service artifacts --json` → the viewer and content domains.
    Then `railway variable set CONTENT_URL=https://<content domain> --service artifacts`, and wait for the redeploy (spike S1).
 8. **Token:** `railway variable list --service artifacts --json` → `SETUP_TOKEN` (never printed).
-9. **Claim:** `POST /api/setup` with org name, your name, email and password (asked twice), client name and agent.
+9. **Claim:** `POST /api/setup` with org name, your name, email and password (asked twice), client name and agent. At a terminal it also prints the Google redirect URIs and asks for a client ID and secret, and Enter skips. Without a terminal, Google is only used if the two variables above are set. It's stored and stays off until an admin tests it in Settings.
+
 10. **Save:** write the server to config, and the token to the keychain.
 11. **Finish:** offer to install the skill; print the passkey QR code (a terminal QR of `<url>/settings/sign-in`), the invite and domain hints.
 
@@ -92,8 +94,11 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 ✓ upload   7 new files (412 KB); 214 already stored
 ✓ v5       https://art.zahin.ca/camerabuddy/roadmap
   changed  Shoot / Live view, Shoot / Exposure picker, Plan § Phase 1
+  visible to  Design team and 2 people
   threads on changed frames  #3, #4, #6, #8
 ```
+
+`artifacts status` and the MCP status tools say who can see it too, for whoever can share it. Agents publish more than people do, so this is where a wrong default gets caught.
 
 ### The library
 

@@ -85,7 +85,15 @@ async function changedRegions(
 }
 
 /** Rows about no artifact, so nothing to check them against: they're for the people who run the place. */
-const ADMIN_ACTIVITY = ["purged", "team_created", "team_deleted", "team_member_added", "team_member_removed"];
+const ADMIN_ACTIVITY = [
+  "purged",
+  "team_created",
+  "team_deleted",
+  "team_member_added",
+  "team_member_removed",
+  "project_access_changed",
+  "identity_linked",
+];
 
 export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;

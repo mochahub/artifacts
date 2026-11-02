@@ -164,6 +164,7 @@ export async function publishCommand(want: string | undefined, flags: PublishFla
       `✓ upload   ${result.uploaded.files} new files (${Math.round(result.uploaded.bytes / 1024)} KB); ${result.reused} already stored`,
     );
     out.say(`✓ v${result.version}       ${result.url}`);
+    if (result.audience) out.say(`  visible to  ${result.audience}`);
     const changed = [...(result.changes.frames.changed ?? []), ...(result.changes.blocks.changed ?? [])];
     if (changed.length > 0) out.say(`  changed  ${changed.join(", ")}`);
     if (result.threadsOnChanged.length > 0) {

@@ -40,10 +40,10 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | Path | Screen (board · screen) |
 |---|---|
 | `/` | Review home (01·1; desktop 04·3) |
-| `/projects` | Projects (01·2) |
+| `/projects` | Projects (01·2). `?team=<slug>` filters to a team's. |
 | `/activity` | Activity (05·5) |
 | `/search` | Search: artifacts, pages and comments (also ⌘K) |
-| `/:project` | A project: search, sort, filter tabs All / Your turn / Approved / Archived (01·3, 07·4) |
+| `/:project` | A project: search, sort, filter tabs All / Your turn / Approved / Archived (01·3, 07·4), with its access as a label, and a Share sheet for those who manage it. It's a sheet and not `/:project/access`, which would collide with artifact slugs. |
 | `/:project/:artifact` | The artifact and its pages (01·4) |
 | `/:project/:artifact/:page` | A page: canvas (02) or article (03); `?v=5` pins a version; `#frame=live-view`; `?c=<thread n>` opens a thread |
 | `/:project/:artifact/v/:n` and `/:project/:artifact/v/:n/:page` | Same as above, pinned to version n (SPEC §5.1 links) |
@@ -55,14 +55,16 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 | `/device/connect` | Connect an app: the OAuth consent screen, under an already reserved word |
 | `/sign-in` | Sign in (06·2) |
 | `/settings` | Settings index |
-| `/settings/sign-in` | Passkeys, password, sessions (06·3) |
+| `/settings/sign-in` | Passkeys, Google, password, sessions (06·3) |
+| `/settings/google` | Google sign-in, for admins: redirect URIs, client, Test, on or off, Workspace auto-join |
+
 | `/settings/notifications` | Web Push on this device |
 | `/settings/people` | People and invites (06·4, 06·5, 06·8) |
 | `/settings/teams`, `/settings/teams/:slug` | Teams: the list, and one team's members, leads and what's shared with it. Members and up. |
 | `/settings/domains` | Domains, read-only (06·9) |
 | `/settings/deleted` | Recently deleted (07·3) |
 | `/settings/tokens` | Org tokens (admins) |
-| `/settings/org` | Org name, default visibility, link sharing, limits |
+| `/settings/org` | Org name, default visibility, what new projects start as, link sharing, limits |
 
 **Reserved project slugs**, refused by the schema: `api`, `s`, `t`, `join`, `reset`, `device`, `sign-in`, `settings`, `projects`, `activity`, `search`, `setup`, `assets`, `internal`, `well-known`, `favicon.ico`, `manifest.webmanifest`, `sw.js`. A page id of `compare` is refused too, because `/:project/:artifact/compare` is the compare screen.
 
@@ -119,7 +121,7 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 3. **Home on desktop:** a left rail with Review, Activity and projects; ⌘K search; a "waiting on you" card grid; recently viewed as a table; an Activity column.
 
 ### 05 · Share, decide, get notified
-1. **Share:** who has access: Everyone in the organization or Only people added, then one field that finds people and teams, or takes an address for an outside invite. Each row says where its access came from: a team links to its page, and inherited rows can't be edited here. Levels are always the same words: Can view, Can comment, Can publish, Can manage. A team an agent added can be confirmed in place. Below that: link permission (View / View and comment), expiry, "Copy link"; live links, each revoked by its own row (links are stored hashed, so one can't be shown again).
+1. **Share:** who has access: Everyone in the organization or Only people added, then one field that finds people and teams, or takes an address for an outside invite. Each row says where its access came from: a team links to its page, and inherited rows can't be edited here. Levels are always the same words: Can view, Can comment, Can publish, Can manage. A team an agent added can be confirmed in place. The same sheet serves a whole project, and restricting one first says who loses access, how many links and invites stay live, with an option to revoke them, and which organization tokens stop reaching it. In a restricted project, links and outside invites show only for its managers. Below that: link permission (View / View and comment), expiry, "Copy link"; live links, each revoked by its own row (links are stored hashed, so one can't be shown again).
 2. **A guest arrives:** the cover; "Zahin shared this with you"; title, description, a "Your name" field, then "Start reviewing".
 3. **Decide:** Approve or Request changes, a note field, the open comments that will go with it, and "Request changes". Fine print: "Claude sees this the next time it runs `artifacts status`".
 4. **Notifications** (Phase 2): an iOS lock-screen example.
@@ -129,14 +131,16 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 
 ### 06 · Setup, sign-in and people
 1. **Setup mode:** "Almost ready" with the `artifacts setup <url>` command and Copy.
-2. **Sign in:** "Sign in with a passkey" first, then email and password. No sign-up. "Forgot your password? Ask an admin for a reset link."
+2. **Sign in:** "Sign in with a passkey" first, then Continue with Google when it's on, then email and password. No sign-up. "Forgot your password? Ask an admin for a reset link." Google is a link, not a form, and the result comes back as `?google=`.
+
 3. **Sign-in settings:** passkeys (name, added, last used), Add a passkey (recent auth), Change password, "Signed in on" (sessions and CLI tokens, with End).
 4. **People:**
    - **Tabs:** Organization N / Outside N.
    - **Rows:** members with role.
    - **Invited:** pending invites, each with Copy (the link again) and revoke.
 5. **Invite:** email, role (Member / Reviewer / Admin), then "Copy invite link" (no email is sent).
-6. **Accept:** "<name> invited you as a reviewer"; your name, email (fixed); "Create a passkey" or "Use a password instead".
+6. **Accept:** "<name> invited you as a reviewer"; your name, email (fixed); "Create a passkey", Continue with Google when it's on, or "Use a password instead".
+
 7. **Approve the CLI:** the code, the client and agent, what it can do, Approve or Deny.
 8. **Reset a password:** in a person's sheet, "Copy reset link" (one hour). "Remove Jo from Mochahub" is plain text, with a confirmation.
 9. **Domains:** viewer domains (primary for links, home for passkeys) and Live previews (the content domain), read-only, with the browser-support note.

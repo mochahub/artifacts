@@ -68,6 +68,7 @@ export async function statusCommand(target: string | undefined, server: string |
   out.result(
     {
       version: status.version,
+      audience: status.audience,
       decision: status.decision,
       decisionVersion: status.decisionVersion,
       by: artifact.decision?.by ?? null,
@@ -77,6 +78,7 @@ export async function statusCommand(target: string | undefined, server: string |
     },
     () => {
       out.say(`${artifact.title}, v${status.version}`);
+      if (status.audience) out.say(`Visible to ${status.audience}.`);
       if (status.decision === "approved")
         out.say(`Approved v${status.decisionVersion} by ${artifact.decision?.by}.`);
       if (status.decision === "changes_requested") {
