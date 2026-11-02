@@ -40,6 +40,35 @@ function docPipeTables(): Record<string, string[]> {
 
 /** Tables 02 describes in a sentence. Kept by hand; `docMentions` below catches a renamed column. */
 const SENTENCE_TABLES: Record<string, string[]> = {
+  removed_identities: ["org_id", "provider", "subject_hash", "created_at"],
+
+  identities: [
+    "id",
+    "org_id",
+    "person_id",
+    "provider",
+    "subject",
+    "email",
+    "hosted_domain",
+    "created_at",
+    "last_used_at",
+  ],
+  google_states: [
+    "id",
+    "org_id",
+    "state_hash",
+    "browser_hash",
+    "nonce",
+    "code_verifier",
+    "intent",
+    "session_id",
+    "person_id",
+    "invite_id",
+    "next",
+    "redirect_uri",
+    "expires_at",
+  ],
+
   teams: ["id", "org_id", "slug", "name", "description", "created_by", "created_at"],
   team_members: ["team_id", "person_id", "org_id", "role", "added_by", "created_at"],
   artifact_team_access: [
@@ -229,7 +258,7 @@ describe("the database matches 02-data-model.md", () => {
       where contype = 'f' and confrelid = 'org'::regclass
         and conkey = array[(select attnum from pg_attribute where attrelid = conrelid and attname = 'org_id')]`;
     const names = (rows: postgres.Row[]) => rows.map((row) => row.table_name as string).sort();
-    expect(tables).toHaveLength(39);
+    expect(tables).toHaveLength(42);
     expect(names(columns)).toEqual(names(tables));
     expect(names(references)).toEqual(names(tables));
   });

@@ -60,8 +60,8 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | Method, path | Auth | Body → response |
 |---|---|---|
 | `GET /api/health` | none | `{ ok: true, version, setupMode: bool }` (Railway health check) |
-| `GET /api/meta` | none | `{ version, minCliVersion, orgName, homeDomain, publicUrl, contentUrl, viewerOrigins: [] }`. `orgName` and `homeDomain` are null in setup mode; `contentUrl` is null until `CONTENT_URL` is set. |
-| `POST /api/setup` | `setupToken` in body | `{ setupToken, orgName, name, email, password, clientName, agent? }` → `{ person, token }`. Only in setup mode; creates org (with `home_domain` = request `Host`), owner, password and a CLI token. 403 if the token is wrong (constant-time compare), 409 once set up. |
+| `GET /api/meta` | none | `{ version, minCliVersion, orgName, homeDomain, publicUrl, contentUrl, viewerOrigins: [], google }`. `orgName` and `homeDomain` are null in setup mode; `contentUrl` is null until `CONTENT_URL` is set. `google` says whether Continue with Google shows. |
+| `POST /api/setup` | `setupToken` in body | `{ setupToken, orgName, name, email, password, clientName, agent?, google?: { clientId, clientSecret } }` → `{ person, token }`. A Google client is stored, and stays off until an admin tests it. Only in setup mode; creates org (with `home_domain` = request `Host`), owner, password and a CLI token. 403 if the token is wrong (constant-time compare), 409 once set up. |
 | `POST /api/recover` | `setupToken` in body | `{ setupToken, email }` → `{ resetUrl }` for an owner. Rate-limited to 5 per IP per hour. |
 | `GET /.well-known/webauthn` | none | Only on the home domain: `{ "origins": [<other viewer origins>] }` (never the content origin). |
 
@@ -81,8 +81,14 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `POST /api/me/passkeys/options` | session, recent auth | → registration options for `rpId` = home domain (or the current domain when the client says it lacks Related Origin Requests). |
 | `POST /api/me/passkeys/verify` | session, recent auth | `{ challengeId, response, name? }` → `{ passkey }` |
 | `PATCH /api/me/passkeys/:id` | session | `{ name }` |
-| `DELETE /api/me/passkeys/:id` | session, recent auth | Refused if it's the person's only credential. |
+| `DELETE /api/me/passkeys/:id` | session, recent auth | Refused if it's the person's only credential. A linked Google account counts while Google is on. |
 | `POST /api/auth/reauth` | session | `{ password }` or a passkey assertion → refreshes `auth_at`. |
+| `POST /api/auth/reauth/check` | session, recent auth | `{ ok: true }`, or 401 `recent_auth_required`. It lets the viewer confirm someone before a redirect, which it can't retry. |
+| `GET /api/auth/google/start?intent=&next=&invite=` | none | 302 to Google, with a cookie for this round trip. `intent` is `signin` (the default), `invite`, `link`, `reauth` or `test`; the last three need a session, and refuse a request from another site. 404 while Google is off, except `test`. A link, not a form, because of CSP `form-action 'self'`. Viewer origins only. 60 per IP per 15 minutes. |
+| `GET /api/auth/google/callback?state=&code=` | none | Finishes it, then 302 to the viewer with `?google=<result>`: `expired`, `off`, `cancelled`, `failed`, `unverified`, `link-first`, `no-account`, `invite-mismatch`, `invite-gone`, `in-use`, `recent`, `mismatch`, `linked`, `confirmed` or `tested`. The redirect URI is this path on each viewer origin. 60 per IP per 15 minutes. |
+| `GET /api/me/identities` | session | `{ identities: [{ id, provider, email, lastUsedAt }], passkeys, password, google }`: what the person can confirm themselves with, for the re-auth sheet. |
+| `DELETE /api/me/identities/:id` | session, recent auth | Refused if it's the person's only way in. |
+
 
 ### Invites, resets and joining
 
@@ -91,7 +97,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `GET /api/invites/:token` | none | Preview: `{ orgName, invitedBy, role, email, artifact?: { title }, project?: { name }, teams?: [name] }`; 410 if used or expired. |
 | `POST /api/invites/:token/accept` | none | `{ name, password? }` → creates the person, sets `art_session`; the viewer then offers passkey registration. |
 | `GET /api/reset/:token` | none | Preview: `{ email }` or 410. |
-| `POST /api/reset/:token` | none | `{ password }` → sets it, ends the person's other sessions, signs in. |
+| `POST /api/reset/:token` | none | `{ password }` → sets it, ends the person's other sessions, deletes their linked Google account, signs in. |
 
 ### Device flow (CLI sign-in)
 
@@ -117,10 +123,14 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 |---|---|---|
 | `GET /api/org` | `org.read` | Name, settings, domains (read-only view of `PUBLIC_URL`, `MORE_URLS`, `CONTENT_URL`, home domain). |
 | `PATCH /api/org` | `org.manage` | `{ name?, settings? }` |
-| `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. Each person lists `teams: [{ slug, name, role }]` and `projects: [{ slug, name, permission }]`. |
+| `GET /api/org/google` | `org.manage` | `{ clientId, hasSecret, enabled, tested, redirectUris, autoJoin }`. The secret is never returned. `tested` is about the admin asking. |
+| `PUT /api/org/google` | `org.manage`, recent auth | `{ clientId, clientSecret? }`. Saving turns Google off and clears the test. 409 for someone with no password or passkey, here and on turning it off or removing it, because they'd lose their way in. |
+| `PATCH /api/org/google` | `org.manage`, recent auth | `{ enabled?, autoJoin? }`. `enabled: true` is 409 until this admin has finished a test. `autoJoin` is `{ domain, role, teamIds }` or null: `role` is `member` or `reviewer`, and `gmail.com` and `googlemail.com` are refused. |
+| `DELETE /api/org/google` | `org.manage`, recent auth | Removes the client. Linked accounts stay, unused. |
+| `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. Each person lists `teams: [{ slug, name, role }]`, `projects: [{ slug, name, permission }]` and `google`, whether one is linked. |
 | `GET /api/people/search?q=` | `people.search` | `{ people: [{ id, name, email, role }] }`, 20 at most, matching a name or an email, outside people included. Under 2 characters finds nothing. Members and up, in a browser only. 60 a minute per person. |
 | `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. An admin or owner who becomes a member or reviewer also loses the invites and reset links they issued that are still unused. |
-| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
+| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, deletes their teams, project grants and linked Google account, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
 | `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner, itself, or anyone who leads a team or manages a project. |
 | `POST /api/invites` | `people.invite` | `{ email, role, teamIds? }` → `{ invite, url }`. `teamIds` are joined on accepting, and a team deleted meanwhile is skipped. A token gets 403 for an invite with teams. |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |

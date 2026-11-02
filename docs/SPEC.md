@@ -44,7 +44,7 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 - Editing in the browser. Agents and repos are where content is written; the viewer is for reading and reviewing.
 - Real-time co-editing, or a Figma replacement.
 - A hosted, multi-tenant service, for now. Artifacts is open source that each team deploys for itself: one click from the Railway template, or Docker Compose anywhere (§14, [hosting evaluation](hosting-evaluation.md)).
-- Sign-in through outside providers (Google, GitHub, SSO). Accounts use email with a password or a passkey, so a deploy needs no OAuth app. Our server does issue OAuth tokens itself, for connectors (§10.4), on that same sign-in.
+
 - Sending email. Invite, reset and share links are copied and sent by hand, so a deploy needs no email provider.
 - Long-running servers, background jobs and SQL databases for artifacts. An artifact's backend answers requests and stops (§7.9).
 
@@ -302,7 +302,8 @@ On Railway, those are three things in one project from the template: the app ser
 | Member | Publish, see every organization-visible artifact, comment, share, archive and delete their own artifacts |
 | Reviewer | See and comment on organization-visible artifacts; can't publish |
 
-**Sign-in is email with a password, a passkey, or both.** No outside OAuth provider is involved.
+**Sign-in is email with a password, a passkey, or both, or optionally Google.** A deploy needs no OAuth app: Google is off until an admin sets up a client, tests it and turns it on. GitHub, SAML and SCIM aren't supported.
+
 - **Passwords:**
   - argon2id hashes (`Bun.password`) and a 12-character minimum.
   - Rate limits with backoff, per account and per IP.
@@ -316,10 +317,12 @@ On Railway, those are three things in one project from the template: the app ser
   - People can see and end their sessions.
   - Adding a passkey, changing a password or creating a token needs a sign-in within the last 10 minutes.
 
-**No open sign-up.** Accounts only come from invites:
+**No open sign-up, unless an admin opts in.** Accounts come from invites. The one exception is **Workspace auto-join**, an opt-in setting that's off by default: an admin names a Google Workspace domain, a role and teams, and someone whose Google `hd` claim is that domain can join without an invite. It reads the claim, never a request parameter, and never allows `gmail.com`.
+
 - **Organization invites,** from an admin with a role. The link is single-use and expires in 7 days. The admin copies it and sends it themselves. The invitee picks a password, a passkey or both.
 - **Artifact invites,** from whoever shared the artifact, also as a copied link. They create an outside account that can only reach the artifacts shared with it.
-- **Email addresses are sign-in names.** Nothing checks that a person owns their address; the admin who sent the link vouches for it.
+- **Email addresses are sign-in names.** Nothing checks that a person owns their address; the admin who sent the link vouches for it. So a Google account with the same address never takes over an existing account: a link happens while accepting an invite for that address, or for someone who has just signed in the usual way.
+
 
 **Password reset.** An admin issues a one-time reset link that lasts an hour (`artifacts org reset-link <email>` or the person's page) and sends it. A person with a passkey can also sign in with it and change their password. Owner recovery is in §7.4.
 
@@ -809,7 +812,8 @@ The viewer is mocked in [`mocks/boards/`](mocks/boards/) on seven boards: find a
 Decided 2026-10-29. Artifacts is open source (MIT), and each team deploys its own copy:
 - **Recommended path:** `artifacts setup`, which deploys the Railway template for you.
 - **Anywhere else:** Docker Compose.
-- **Sign-in:** email with a password or a passkey, so there's no OAuth app to register.
+- **Sign-in:** email with a password or a passkey, so there's no OAuth app to register unless you want Google.
+
 - **First owner:** created by `artifacts setup` (§7.4).
 
 Why self-hosted rather than a hosted service is in [hosting-evaluation.md](hosting-evaluation.md). In short:

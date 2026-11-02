@@ -27,7 +27,7 @@
 | `decision_kind` | `approved`, `changes_requested` |
 | `device_status` | `pending`, `approved`, `denied`, `used` |
 | `team_role` | `lead`, `member` |
-| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed` |
+| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed`, `identity_linked` |
 
 ## Tables
 
@@ -40,10 +40,13 @@
 | `id` | uuid PK | |
 | `name` | text | "Mochahub" |
 | `home_domain` | text not null | Hostname that `artifacts setup` ran against; the passkey RP ID. Never changes (SPEC §7.3). |
-| `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, defaultProjectAccess: "org"\|"restricted", limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
+| `settings` | jsonb not null | `{ defaultVisibility: "org"\|"me", linkSharing: true, defaultProjectAccess: "org"\|"restricted", googleAutoJoin: { domain, role, teamIds } \| null, limits: { dataValueBytes, dataKeysPerScope, dataBytesPerScope, fileBytes, filesBytesPerArtifact, backendCodeBytes, backendTimeoutMs, backendMemoryMb, backendRequestBytes, backendResponseBytes, backendRequestsPerMinute, writesPerSecond }, sandboxProcesses: 2 }`. Defaults in [08-micro-apps.md](08-micro-apps.md#data-store-server). |
 | `vapid_public` | text null | Phase 2. Generated the first time push needs it, not at boot, because there's no `org` row on first boot. |
 | `vapid_private` | text null | Phase 2. Stored as is: anyone who can read this table can already read everything else, and tying it to `SESSION_SECRET` would stop that secret being rotated. |
 | `last_digest_at` | timestamptz null | Phase 2. When the daily push digest last went out, so a restart doesn't send it again. |
+| `google_client_id`, `google_client_secret` | text null | The Google client. Stored as is, like `vapid_private`, and outside `settings`, so `/api/org` never returns it. Not encrypted with `SESSION_SECRET`, which 04 promises only touches sessions and content tokens. |
+| `google_enabled` | boolean not null default false | Whether people can use it. |
+| `google_tested_by` | uuid null FK people | Who finished a round trip with these credentials. Only they can turn it on, and new credentials clear it. |
 | `brand` | jsonb null | The applied brand: `{ name, theme, fonts: [{ family, weight, style, format, hash }] }`. Null means the default look. Only a person changes it (04). |
 | `pseudonym_key` | bytea not null | 32 random bytes generated at setup. Keys the per-artifact caller pseudonyms (08). Separate from `SESSION_SECRET` so that secret can be rotated; never rotated itself, because `me` data is keyed by pseudonym. |
 | `created_at` | timestamptz | |
@@ -77,6 +80,12 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `rp_id` | text not null | Usually `org.home_domain`; another viewer domain when made in a browser without Related Origin Requests (SPEC §7.3). |
 | `name` | text | "iCloud Keychain", editable. |
 | `created_at`, `last_used_at` | timestamptz | |
+
+**`identities`**: a sign-in from outside. `id`, `org_id`, `person_id`, `provider` text (`google`), `subject` text (Google's `sub`: email can change and isn't unique), `email` text (the last one seen, for display), `hosted_domain` text null (the `hd` claim), `created_at`, `last_used_at`. Unique `(org_id, provider, subject)` and `(person_id, provider)`. A reset or removing the person deletes these (04).
+
+**`removed_identities`**: PK `(org_id, provider, subject_hash)`, `created_at`. A SHA-256 of the `subject` of each identity a removed person had, so Workspace auto-join can refuse them after their row in `identities` is gone. Re-inviting them still works.
+
+**`google_states`**: one round trip, for 10 minutes and one use. `id`, `org_id`, `state_hash` unique, `browser_hash` (of the cookie that started it), `nonce`, `code_verifier`, `intent` text (`signin`, `invite`, `link`, `reauth`, `test`), `session_id` null (cascades), `person_id` null, `invite_id` null (cascades), `next` text (a path on this site), `redirect_uri`, `expires_at`. Deleted when used, or once expired, by the next round trip or the daily job.
 
 **`webauthn_challenges`**: `id` uuid PK, `org_id`, `challenge` text, `kind` text (`register` \| `authenticate`), `person_id` uuid null, `expires_at` (5 minutes). Deleted when used or expired.
 

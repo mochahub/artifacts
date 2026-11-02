@@ -24,7 +24,7 @@ describe("migrations", () => {
   test("apply to an empty database", async () => {
     expect(await tables()).toBe(0);
     await runMigrations(database.url);
-    expect(await tables()).toBe(40);
+    expect(await tables()).toBe(43);
   });
 
   test("apply again without error or change", async () => {
@@ -32,7 +32,7 @@ describe("migrations", () => {
     await runMigrations(database.url);
     const after = await sql`select count(*)::int as n from drizzle.__drizzle_migrations`;
     expect(after).toEqual(before);
-    expect(await tables()).toBe(40);
+    expect(await tables()).toBe(43);
   });
 
   test("two replicas booting together both succeed", async () => {
@@ -43,7 +43,7 @@ describe("migrations", () => {
       const [row] =
         await check`select count(*)::int as n from information_schema.tables where table_schema = 'public'`;
       await check.end();
-      expect(row?.n).toBe(40);
+      expect(row?.n).toBe(43);
     } finally {
       await fresh.drop();
     }

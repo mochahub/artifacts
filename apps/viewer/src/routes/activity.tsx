@@ -48,6 +48,7 @@ const VERBS: Record<string, string> = {
   team_member_added: "added someone to",
   team_member_removed: "removed someone from",
   project_access_changed: "changed who has access to",
+  identity_linked: "connected Google",
 };
 
 const day = (iso: string) =>

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { findOrg } from "../../../apps/server/src/db/index.ts";
 import {
   OWNER,
   signIn,
@@ -49,6 +50,35 @@ describe("the account commands against a real server", () => {
     const stored = join(box.home, ".config/artifacts/credentials.json");
     expect(statSync(stored).mode & 0o777).toBe(0o600);
     expect(Object.keys(JSON.parse(readFileSync(stored, "utf8")))).toEqual([url]);
+  });
+
+  test("setup can bring a Google client, which stays off until someone tests it", async () => {
+    const port = testPort();
+    const other = `http://127.0.0.1:${port}`;
+    const server = await startTestServer({ PUBLIC_URL: other, MORE_URLS: "", PORT: String(port) });
+    const apart = sandbox();
+    try {
+      const result = await cli(
+        ["setup", other, "--org", "Mochahub", "--name", OWNER.name, "--email", OWNER.email, "--no-skill"],
+        {
+          ...apart.env,
+          ARTIFACTS_SETUP_TOKEN: SETUP_TOKEN,
+          ARTIFACTS_PASSWORD: OWNER.password,
+          ARTIFACTS_GOOGLE_CLIENT_ID: "client-id",
+          ARTIFACTS_GOOGLE_CLIENT_SECRET: "client-secret",
+        },
+      );
+      expect(result.code).toBe(0);
+      expect(result.stdout + result.stderr).toContain(`${other}/settings/google`);
+      expect(result.stdout + result.stderr).not.toContain("client-secret");
+      expect(await findOrg(server.server.db)).toMatchObject({
+        googleClientId: "client-id",
+        googleClientSecret: "client-secret",
+        googleEnabled: false,
+      });
+    } finally {
+      await server.stop();
+    }
   });
 
   test("whoami --json puts only JSON on stdout", async () => {

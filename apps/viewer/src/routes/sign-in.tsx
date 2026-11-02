@@ -8,6 +8,20 @@ import { safeNext } from "../next.ts";
 import { canUseHomePasskey, signInWithPasskey } from "../passkey.ts";
 import { me, meta } from "../session.ts";
 
+/** What each way back from Google means, in the words of the flow in 04. */
+const GOOGLE_ANSWERS: Record<string, string> = {
+  "link-first": "Sign in once the usual way to connect Google.",
+  "no-account": "Ask an admin for an invite.",
+  "invite-mismatch": "That Google account's email doesn't match the invite.",
+  "invite-gone": "That invite has expired or was already used. Ask for a new one.",
+  "in-use": "That Google account is already connected to someone here.",
+  unverified: "Google hasn't verified that email address.",
+  expired: "That took too long. Try again.",
+  cancelled: "Google sign-in was cancelled.",
+  off: "Google sign-in is turned off here.",
+  failed: "Google sign-in didn't work. Try again.",
+};
+
 export function SignIn() {
   const { route, query } = useLocation();
   const email = useSignal("");
@@ -56,6 +70,7 @@ export function SignIn() {
         <b>{meta.value?.orgName}</b>
       </div>
       <h1 class="h1">Sign in</h1>
+      {query.google && GOOGLE_ANSWERS[query.google] && <p class="err">{GOOGLE_ANSWERS[query.google]}</p>}
       <button type="button" class="btn ink" onClick={withPasskey}>
         <ScanFace />
         Sign in with a passkey
@@ -63,6 +78,14 @@ export function SignIn() {
       {!related.value && (
         <a class="fn center" href={`https://${meta.value?.homeDomain}/sign-in`}>
           Sign in on {meta.value?.homeDomain}
+        </a>
+      )}
+      {meta.value?.google && (
+        <a
+          class="btn soft"
+          href={`/api/auth/google/start?intent=signin&next=${encodeURIComponent(safeNext(query.next))}`}
+        >
+          Continue with Google
         </a>
       )}
       <p class="fn center">or use your password</p>

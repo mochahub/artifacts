@@ -36,12 +36,12 @@ test("restrict a project: it says what happens, and it's gone for everyone else"
   page,
   browser,
 }, info) => {
-  const run = info.project.name;
+  const run = `${info.project.name}${info.repeatEachIndex}`;
   const slug = `locked-${run}`;
   const project = `vault-${run}`;
   publishCopy(slug, token(), false, project);
-  const nora = await join(page, browser, run, `nora-${run}@example.com`, `Nora ${run}`);
-  const kai = await join(page, browser, run, `kai-${run}@example.com`, `Kai ${run}`);
+  const nora = await join(page, browser, info.project.name, `nora-${run}@example.com`, `Nora ${run}`);
+  const kai = await join(page, browser, info.project.name, `kai-${run}@example.com`, `Kai ${run}`);
   await nora.page.goto(`/${project}/${slug}`);
   await expect(nora.page.getByRole("heading", { level: 1 })).toHaveText(`Roadmap ${slug}`);
 
@@ -53,13 +53,13 @@ test("restrict a project: it says what happens, and it's gone for everyone else"
   await expect(page.locator(".sheet .group .li").getByText(`Kai ${run}`)).toBeVisible();
   await page.getByRole("button", { name: "Only people added" }).click();
   await expect(page.getByText(/access, including/)).toBeVisible();
-  await shot(page, run, "09-2-restrict");
+  await shot(page, info.project.name, "09-2-restrict");
   await page.getByRole("button", { name: /^Restrict / }).click();
   await expect(page.getByRole("button", { name: "Only people added" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await shot(page, run, "09-1-project-share");
+  await shot(page, info.project.name, "09-1-project-share");
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByText("Restricted")).toBeVisible();
 

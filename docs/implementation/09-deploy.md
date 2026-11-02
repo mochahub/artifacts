@@ -54,7 +54,10 @@ Pin exact Bun and `quickjs-emscripten` versions in the repo (`.bun-version`, the
 
 **Rotating `SESSION_SECRET`** signs everyone out and invalidates open content tokens (short-lived). Nothing stored depends on it, so it's safe to rotate after a suspected leak. `org.pseudonym_key`, in Postgres, is never rotated, because `me` data is keyed by pseudonym.
 
+**Google sign-in** is optional, and needs no environment variables: the client is set during `artifacts setup` or in Settings, and stored in `org` (02). There's one redirect URI per viewer origin, including the home domain, because session cookies are host-only and Google matches exactly, with no wildcards: `<origin>/api/auth/google/callback`. Settings lists them. `artifacts domain add` prints the new one when Google is on: until it's added to the client, sign-in on that domain fails with a redirect mismatch. Live previews never get one. Google requires a public suffix and refuses raw IP addresses, with an exception for localhost, so a LAN address won't work.
+
 ## Railway template (`deploy/railway/`)
+
 
 | Service | Source | Domains | Variables | Settings |
 |---|---|---|---|---|
