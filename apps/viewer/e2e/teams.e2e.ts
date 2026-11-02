@@ -18,7 +18,7 @@ test.describe.configure({ timeout: 120_000 });
 /** Invites someone and signs them in, in a browser of their own. */
 async function join(page: Page, browser: Browser, project: string, email: string, name: string) {
   await page.goto("/settings/people");
-  await page.getByRole("button", { name: "Invite" }).click();
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Copy invite link" }).click();
   const url = await page.locator(".sheet .mono").textContent();
