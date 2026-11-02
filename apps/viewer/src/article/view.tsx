@@ -355,6 +355,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         </button>
       )}
       <CommentsPanel
+        artifact={artifact}
         threads={all}
         onOpen={(thread) => {
           openId.value = thread.id;
@@ -388,6 +389,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
       )}
       {listOpen.value && (
         <CommentsSheet
+          artifact={artifact}
           threads={all}
           onOpen={(thread) => {
             listOpen.value = false;

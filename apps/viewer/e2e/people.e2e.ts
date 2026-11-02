@@ -66,6 +66,9 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
   await sheet.getByLabel("Comment").fill(`From a guest ${info.project.name}`);
   await sheet.getByRole("button", { name: "Post" }).click();
   await expect(guest.locator(".mm").first()).toBeVisible();
+  if (info.project.name === "iphone") await guest.getByRole("button", { name: "Comments" }).click();
+  await expect(guest.getByText(`From a guest ${info.project.name}`).last()).toBeVisible();
+  await expect(guest.getByRole("button", { name: "Copy prompt for your agent" })).toHaveCount(0);
 
   const revoke = page.getByRole("button", { name: "Revoke this link" });
   while ((await revoke.count()) > 0) {

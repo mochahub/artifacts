@@ -1,9 +1,9 @@
 import type { Anchor, Artifact, Comment, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { Check, X } from "lucide-preact";
+import { Check, Copy, X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { ApiFailure, api, post } from "../api.ts";
-import { agentInitials, agentShort, ago } from "../format.ts";
+import { agentInitials, agentPrompt, agentShort, ago } from "../format.ts";
 import { askInstall, shouldAsk } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { me } from "../session.ts";
@@ -253,6 +253,52 @@ export function ThreadSheet({
 
 type Tab = "open" | "fixed" | "resolved";
 
+/** Nothing reaches an agent by itself, so this copies what a person pastes into theirs. */
+function CopyPrompt({ artifact, ink }: { artifact: Artifact; ink?: boolean }) {
+  const state = useSignal<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const prompt = agentPrompt(artifact, location.origin);
+  async function copy() {
+    clearTimeout(timer.current);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      state.value = "copied";
+      timer.current = setTimeout(() => {
+        state.value = "idle";
+      }, 2600);
+    } catch {
+      state.value = "failed";
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        class={`btn ${ink ? "ink" : "soft"} copy-prompt${state.value === "copied" ? " done" : ""}`}
+        aria-live="polite"
+        onClick={copy}
+      >
+        {state.value === "copied" ? <Check /> : <Copy />}
+        {state.value === "copied" ? "Copied. Paste it to your agent" : "Copy prompt for your agent"}
+      </button>
+      {state.value === "failed" && (
+        <>
+          <p class="fn">Couldn't copy. Press and hold to select this.</p>
+          <pre class="term copy-prompt-text">{prompt}</pre>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Shown to the people who can decide. Guests have no agent to paste into. */
+function OpenPrompt({ artifact, tab, threads }: { artifact: Artifact; tab: Tab; threads: Thread[] }) {
+  const open = threads.some((thread) => thread.status === "open");
+  const canDecide = artifact.permissions.comment && artifact.permissions.decide !== false && me.value;
+  return tab === "open" && open && canDecide ? <CopyPrompt artifact={artifact} /> : null;
+}
+
 function ThreadRows({ list, onOpen }: { list: Thread[]; onOpen(thread: Thread): void }) {
   if (list.length === 0) return <div class="empty">Nothing here.</div>;
   return (
@@ -291,10 +337,12 @@ function Tabs({ tab, threads }: { tab: { value: Tab }; threads: Thread[] }) {
 }
 
 export function CommentsSheet({
+  artifact,
   threads,
   onOpen,
   onClose,
 }: {
+  artifact: Artifact;
   threads: Thread[];
   onOpen(thread: Thread): void;
   onClose(): void;
@@ -304,22 +352,35 @@ export function CommentsSheet({
     <Sheet title="Comments" onClose={onClose}>
       <Tabs tab={tab} threads={threads} />
       <ThreadRows list={threads.filter((thread) => thread.status === tab.value)} onOpen={onOpen} />
+      <OpenPrompt artifact={artifact} tab={tab.value} threads={threads} />
     </Sheet>
   );
 }
 
 /** The right panel on wide screens (board 04). */
-export function CommentsPanel({ threads, onOpen }: { threads: Thread[]; onOpen(thread: Thread): void }) {
+export function CommentsPanel({
+  artifact,
+  threads,
+  onOpen,
+}: {
+  artifact: Artifact;
+  threads: Thread[];
+  onOpen(thread: Thread): void;
+}) {
   const tab = useSignal<Tab>("open");
   return (
     <aside class="panel" aria-label="Comments">
       <Tabs tab={tab} threads={threads} />
       <ThreadRows list={threads.filter((thread) => thread.status === tab.value)} onOpen={onOpen} />
+      <OpenPrompt artifact={artifact} tab={tab.value} threads={threads} />
     </aside>
   );
 }
 
-/** Approve or Request changes (05·3). Nothing is pushed to the agent; it reads this next time it runs. */
+/**
+ * Approve or Request changes (05·3). Nothing is pushed to the agent; it reads this next time it runs,
+ * so Request changes stays open to offer the prompt that starts that run.
+ */
 export function DecideSheet({
   artifact,
   onClose,
@@ -332,6 +393,7 @@ export function DecideSheet({
   const kind = useSignal<"approved" | "changes_requested">("approved");
   const note = useSignal("");
   const error = useSignal<string | null>(null);
+  const requested = useSignal(false);
   async function submit() {
     try {
       await post(`/api/artifacts/${artifact.id}/decisions`, {
@@ -340,9 +402,21 @@ export function DecideSheet({
         note: note.value || null,
       });
       onDone();
+      if (kind.value === "approved") onClose();
+      else requested.value = true;
     } catch (failure) {
       error.value = message(failure);
     }
+  }
+  if (requested.value) {
+    return (
+      <Sheet title="Changes requested" onClose={onClose}>
+        <p class="copy-prompt-note">
+          Your agent won't see this until you tell it. Paste this prompt where it's working.
+        </p>
+        <CopyPrompt artifact={artifact} ink />
+      </Sheet>
+    );
   }
   return (
     <Sheet title={`Decide on v${artifact.latestVersion}`} onClose={onClose}>

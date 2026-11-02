@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentInitials, agentShort, ago, initials, plural } from "./format.ts";
+import { agentInitials, agentPrompt, agentShort, ago, initials, plural } from "./format.ts";
 
 // Local times, so the answers hold in any time zone the tests run in.
 const at = (month: number, day: number, hour = 12, minute = 0, year = 2026) =>
@@ -67,5 +67,17 @@ describe("small formatters", () => {
     expect(agentInitials("Claude Code")).toBe("Cl");
     expect(agentInitials("Codex")).toBe("Cx");
     expect(agentShort("Claude Code")).toBe("Claude");
+  });
+});
+
+describe("agentPrompt", () => {
+  test("names the artifact for the CLI, and links to the server it came from", () => {
+    expect(agentPrompt({ project: "camerabuddy", slug: "roadmap" }, "https://art.example.com")).toBe(
+      [
+        "Address the open comments on camerabuddy/roadmap using the artifacts skill.",
+        "If the source isn't in this repo, run `artifacts pull camerabuddy/roadmap` first.",
+        "https://art.example.com/camerabuddy/roadmap",
+      ].join("\n"),
+    );
   });
 });

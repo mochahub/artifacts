@@ -291,7 +291,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         </button>
       </div>
       {commenting.value && <div class="hint glass">Tap a spot to comment</div>}
-      <CommentsPanel threads={all} onOpen={select} />
+      <CommentsPanel artifact={artifact} threads={all} onOpen={select} />
       {draft.value && (
         <CommentSheet
           artifact={artifact}
@@ -322,6 +322,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
       )}
       {listOpen.value && (
         <CommentsSheet
+          artifact={artifact}
           threads={all}
           onOpen={select}
           onClose={() => {

@@ -120,11 +120,12 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 ### 05 · Share, decide, get notified
 1. **Share:** link permission (View / View and comment), expiry, "Copy link"; live links, each revoked by its own row (links are stored hashed, so one can't be shown again); people with access.
 2. **A guest arrives:** the cover; "Zahin shared this with you"; title, description, a "Your name" field, then "Start reviewing".
-3. **Decide:** Approve or Request changes, a note field, the open comments that will go with it, and "Request changes". Fine print: "Claude sees this the next time it runs `artifacts status`".
+3. **Decide:** Approve or Request changes, a note field, the open comments that will go with it, and "Request changes". Fine print: "Claude sees this the next time it runs `artifacts status`". After Request changes, the sheet stays open with "Copy prompt for your agent".
 4. **Notifications** (Phase 2): an iOS lock-screen example.
 5. **Activity:** All / Agents / People; grouped by day.
 6. **Install** (Phase 2): asked once after the first comment: "Tap ⋯ then Share, then Add to Home Screen". Verify the Safari menu path on a real iPhone; it's an open item.
-7. **The agent's side:** terminal reference for `status`, `comments`, `publish` and `reply` (CLI, 07).
+7. **Copy prompt for your agent:** on the Open tab of the comments sheet and panel while anything is open, and after Request changes, for people who can decide. It copies three lines: address the open comments on `<project>/<slug>` with the artifacts skill, `artifacts pull` if the source isn't in the repo, and the link. It never includes comment text, because guests can write comments and pasted text reads as the person's own instructions. If the copy fails, the prompt appears to select by hand.
+8. **The agent's side:** terminal reference for `status`, `comments`, `publish` and `reply` (CLI, 07).
 
 ### 06 · Setup, sign-in and people
 1. **Setup mode:** "Almost ready" with the `artifacts setup <url>` command and Copy.
