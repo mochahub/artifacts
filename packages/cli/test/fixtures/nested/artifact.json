@@ -1,0 +1,15 @@
+{
+  "project": "demo",
+  "slug": "nested",
+  "title": "nested",
+  "summary": "Fixture: nested.",
+  "pages": [
+    {
+      "id": "mocks",
+      "kind": "canvas",
+      "boards": [{ "id": "main", "title": "Main", "src": "board.html" }],
+      "styles": [],
+      "scripts": []
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import kit from "../../../../skill/references/kit.md" with { type: "text" };
 import lint from "../../../../skill/references/lint.md" with { type: "text" };
 import manifest from "../../../../skill/references/manifest.md" with { type: "text" };
 import microApps from "../../../../skill/references/micro-apps.md" with { type: "text" };
+import stageshow from "../../../../skill/references/stageshow.md" with { type: "text" };
 import templateCaseStudy from "../../../../skill/references/templates/case-study.md" with { type: "text" };
 import templateDesignReview from "../../../../skill/references/templates/design-review.md" with {
   type: "text",
@@ -34,6 +35,7 @@ const FILES: Record<string, string> = {
   "references/lint.md": lint,
   "references/manifest.md": manifest,
   "references/micro-apps.md": microApps,
+  "references/stageshow.md": stageshow,
   "references/theme.md": theme,
   "references/templates/design-review.md": templateDesignReview,
   "references/templates/presentation.md": templatePresentation,

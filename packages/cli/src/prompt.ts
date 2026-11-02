@@ -39,9 +39,9 @@ export async function askSecret(question: string): Promise<string> {
   }
 }
 
-export async function confirm(question: string): Promise<boolean> {
-  const answer = (await ask(`${question} [Y/n]`)).toLowerCase();
-  return answer === "" || answer === "y" || answer === "yes";
+export async function confirm(question: string, fallback = true): Promise<boolean> {
+  const answer = (await ask(`${question} ${fallback ? "[Y/n]" : "[y/N]"}`)).toLowerCase();
+  return answer === "" ? fallback : answer === "y" || answer === "yes";
 }
 
 export const closePrompts = () => lines?.return?.();

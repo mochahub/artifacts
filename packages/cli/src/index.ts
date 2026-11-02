@@ -43,12 +43,13 @@ import { KeychainBlocked } from "./credentials/index.ts";
 import { CliError, createOutput, UsageError } from "./output.ts";
 import { closePrompts } from "./prompt.ts";
 import { installSkill } from "./skill/install.ts";
+import { installStageshow } from "./skill/stageshow.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE = `artifacts ${VERSION}
 
   artifacts setup [<url>] [--docker [--dir <path>] [--image <ref>] [--port <n>]]
-                  [--org <name>] [--name <you>] [--email <you>] [--no-skill]
+                  [--org <name>] [--name <you>] [--email <you>] [--no-skill] [--stageshow]
   artifacts login [<url>] | logout | whoami
   artifacts recover <url>
   artifacts doctor
@@ -69,7 +70,7 @@ const USAGE = `artifacts ${VERSION}
   artifacts status [<project>/<slug>]
   artifacts comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]
   artifacts reply <n> "<text>" [--fixed]
-  artifacts skill install [--claude] [--codex]
+  artifacts skill install [--claude] [--codex] [--stageshow]
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
   artifacts dev [--port 4321]
   artifacts mcp | mcp install [--claude] [--codex] [--token-env <name>]
@@ -124,6 +125,7 @@ const OPTIONS = {
   claude: { type: "boolean" },
   codex: { type: "boolean" },
   "no-skill": { type: "boolean" },
+  stageshow: { type: "boolean" },
   "in-repo": { type: "boolean" },
   template: { type: "string" },
   "token-env": { type: "string" },
@@ -200,6 +202,7 @@ async function main(argv: string[]) {
           name: values.name,
           email: values.email,
           skill: !values["no-skill"],
+          stageshow: values.stageshow,
         },
         out,
       );
@@ -230,8 +233,10 @@ async function main(argv: string[]) {
     case "reply":
       return replyCommand(first, positionals[2], { fixed: values.fixed, server: values.server }, out);
     case "skill": {
-      if (first !== "install") throw new UsageError("Usage: artifacts skill install [--claude] [--codex]");
+      if (first !== "install")
+        throw new UsageError("Usage: artifacts skill install [--claude] [--codex] [--stageshow]");
       const dirs = installSkill({ claude: values.claude, codex: values.codex }, out);
+      if (values.stageshow) await installStageshow(out);
       return out.result({ installed: dirs }, () => {});
     }
     case "data":
