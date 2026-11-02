@@ -17,7 +17,7 @@ test.describe.configure({ timeout: 120_000 });
 
 async function join(page: Page, browser: Browser, project: string, email: string, name: string) {
   await page.goto("/settings/people");
-  await page.getByRole("button", { name: "Invite" }).click();
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Copy invite link" }).click();
   const url = await page.locator(".sheet .mono").textContent();
@@ -72,8 +72,8 @@ test("restrict a project: it says what happens, and it's gone for everyone else"
   await expect(kai.page.getByRole("heading", { level: 1 })).toHaveText(`Roadmap ${slug}`);
 
   await page.getByRole("button", { name: "Share" }).click();
-  await page.getByRole("button", { name: "Everyone in Mochahub" }).click();
-  await expect(page.getByRole("button", { name: "Everyone in Mochahub" })).toHaveAttribute(
+  await page.getByRole("button", { name: "Org", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Org", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );

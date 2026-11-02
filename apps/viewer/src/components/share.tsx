@@ -5,7 +5,6 @@ import { useEffect } from "preact/hooks";
 import { api, message, post } from "../api.ts";
 import { plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
-import { meta } from "../session.ts";
 import { Sheet } from "./sheets.tsx";
 
 export type Level = "view" | "comment" | "publish" | "manage";
@@ -289,9 +288,7 @@ export function ShareSheet({
               })
             }
           >
-            {value === "me"
-              ? "Only people added"
-              : `Everyone in ${restricted ? data?.project?.name : meta.value?.orgName}`}
+            {value === "me" ? "Only people added" : restricted ? "Project" : "Org"}
           </button>
         ))}
       </div>
@@ -603,7 +600,7 @@ export function ProjectShareSheet({
           disabled={!change}
           onClick={() => data.project.restricted && setRestricted(false)}
         >
-          Everyone in {meta.value?.orgName}
+          Org
         </button>
         <button
           type="button"
