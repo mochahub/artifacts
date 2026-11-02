@@ -214,6 +214,8 @@ A fresh agent can resume from this file alone. Read [SCOPE-teams-projects-google
 117. **M19, someone with no password or passkey can't turn Google off, replace the client or remove it.** They'd be unable to confirm it's them, or undo it.
 118. **M19, a test only counts for the credentials it used,** so ones saved while it ran stay unproved.
 119. **M19, `google_states` cascades from invites,** and the daily job clears expired rows. Without that, an abandoned invite round trip would have blocked purging that invite's artifact.
+120. **The Share sheet's left option is a fixed word:** Org, or Project inside a restricted project, where Org would overstate who has access. Names vary in length and the segment has to fit. The user's call, from the phone review.
+121. **Compared with Perpetua's Google sign-in, which has run against real Google.** Same endpoints, scopes, PKCE, nonce and `prompt`. Two things came over: `email_verified` also reads as the string `"true"`, and a refused exchange logs Google's error word, so a first real client's `redirect_uri_mismatch` is visible. Perpetua also checks the ID token's signature. Here it stays a TLS read from the token endpoint, which OpenID Connect allows and needs no JWT library.
 
 ## Needs you
 
@@ -247,12 +249,12 @@ In this order. Nothing here has been done or tested by the agent.
 19. **MCP:** add `artifacts mcp` to a real client. It's tested against the protocol, not a client.
 
 **Teams, project access and Google (M17 to M19; none of this has been checked by you yet)**
-20a. **A real Google client on the Railway server,** including the redirect URIs. Settings, Sign-in, Google sign-in lists them. Then press Test, and turn it on.
-20b. **App verification:** whether a client using only `openid`, `email` and `profile` needs Google's verification, and how Internal and External consent screens differ.
-20c. **Hosts:** whether `*.up.railway.app` and `*.ts.net` hosts pass Google's redirect rules. A LAN address won't, and localhost is an exception.
-20d. **Passkey and Google on the same account on a real iPhone,** including an app added to the Home Screen, which may open Google somewhere that doesn't share its cookies.
+20a. **A real Google client on the Railway server.** Steps are in 09, Google sign-in. Register `https://docs.internal.mochahubstudios.com/api/auth/google/callback` and `https://artifacts-production-4b17.up.railway.app/api/auth/google/callback`. Nothing has run against real Google yet.
+20b. Answered from Google's documentation in 09: no app verification is needed for these scopes, and Internal only works for a Workspace organization's own members.
+20c. **Hosts:** both `up.railway.app` and `ts.net` are on the public suffix list, so these hosts pass Google's written redirect rules. Confirm in the console when making the client: nothing here has tried them. A LAN address won't pass, and localhost is an exception.
+20d. **Passkey and Google on the same account on a real iPhone,** including an app added to the Home Screen, which may open Google somewhere that doesn't share its cookies. If it does, the callback can't find `art_google` and says the attempt expired, so the failure is safe: use a passkey there.
 20e. **Restrict a real project,** then confirm from a second account that it's gone from search and the connector.
-20f. **A taste review of the Share sheet and Teams settings on a phone.** Screens are in `docs/mocks/shots/08-*`, `09-*` and `10-*`.
+20f. **A taste review of the Share sheet and Teams settings on a phone.** Screens are in `docs/mocks/shots/08-*`, `09-*` and `10-*`. From the first review: the Share sheet's left option is now a fixed word, Org, or Project inside a restricted project.
 
 **Connectors (none of this has been tried with a real client)**
 20. **Claude Code:** `claude mcp add --transport http artifacts <url>/api/mcp`, then sign in with `/mcp`.
