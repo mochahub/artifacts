@@ -35,10 +35,14 @@ export const googleProvider: GoogleProvider = {
         client_secret: clientSecret,
       }),
     });
-    if (!response.ok) throw new Error(`Google answered ${response.status}`);
-    const { id_token: idToken } = (await response.json()) as { id_token?: unknown };
-    if (typeof idToken !== "string") throw new Error("Google sent no ID token");
-    return idToken;
+    const body = (await response.json().catch(() => null)) as { id_token?: unknown; error?: unknown } | null;
+    if (!response.ok) {
+      // Only Google's own word for it, such as redirect_uri_mismatch: this ends up in the logs.
+      const reason = typeof body?.error === "string" ? ` ${body.error.slice(0, 80)}` : "";
+      throw new Error(`Google answered ${response.status}${reason}`);
+    }
+    if (typeof body?.id_token !== "string") throw new Error("Google sent no ID token");
+    return body.id_token;
   },
 };
 
@@ -76,6 +80,7 @@ export function readIdToken(
     email,
     name: typeof name === "string" && name.trim() ? name.trim() : null,
     hostedDomain: typeof hd === "string" && hd ? hd.toLowerCase() : null,
-    emailVerified: claims.email_verified === true,
+    // Google's token info endpoint spells this as a string, so don't depend on which one comes back.
+    emailVerified: claims.email_verified === true || claims.email_verified === "true",
   };
 }

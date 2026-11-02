@@ -432,6 +432,19 @@ describe("Google sign-in", () => {
       expect(landed(await signedInWith({ email_verified: undefined }))).toBe("/sign-in?google=unverified");
     });
 
+    test("email_verified as the string Google's token info uses", async () => {
+      expect(landed(await signedInWith({ email_verified: "false" }))).toBe("/sign-in?google=unverified");
+      expect(
+        landed(
+          await signedInWith({
+            email_verified: "true",
+            email: "new-person@example.com",
+            sub: "string-verified",
+          }),
+        ),
+      ).toBe("/sign-in?google=no-account");
+    });
+
     test("a wrong aud", async () => {
       expect(landed(await signedInWith({ aud: "someone-elses-client" }))).toBe("/sign-in?google=failed");
     });
