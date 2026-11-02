@@ -1231,6 +1231,10 @@
   margin: 0;
   flex: none;
 }
+/* Not positioned, so this would stretch across the sheet. The row is the tap target here. */
+.pin.static::before {
+  display: none;
+}
 .th.frame {
   width: 44px;
   height: 56px;
@@ -1596,6 +1600,33 @@
 .status-note {
   font-size: 15px;
   color: var(--tx2);
+}
+.copy-prompt-note {
+  margin: 0;
+  font-size: 15px;
+  color: var(--tx2);
+}
+.copy-prompt {
+  flex: none;
+}
+.panel .copy-prompt {
+  width: auto;
+  margin: 12px;
+}
+.panel .fn,
+.panel .copy-prompt-text {
+  margin: 0 12px 12px;
+}
+.copy-prompt.done svg {
+  color: var(--ok);
+}
+.copy-prompt-text {
+  flex: none;
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  -webkit-user-select: all;
+  user-select: all;
 }
 @media (min-width: 1100px) {
   .panel {

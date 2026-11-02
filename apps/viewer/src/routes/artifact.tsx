@@ -186,10 +186,7 @@ function Detail() {
           onClose={() => {
             deciding.value = false;
           }}
-          onDone={() => {
-            deciding.value = false;
-            remote.refresh();
-          }}
+          onDone={() => remote.refresh()}
         />
       )}
       {history.value && (
