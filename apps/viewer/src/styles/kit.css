@@ -616,6 +616,231 @@
   border: 0.5px solid var(--glass-line);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
+/* Liquid Glass, for the reader's chrome. iOS Safari can't bend what's behind a page element: it accepts
+   backdrop-filter: url() and draws nothing, and drops the blur beside it. So this is clarity, a lit rim and
+   movement. The layers are pseudo-elements, siblings under the content: a backdrop-filter on a child of
+   another one sees only its parent. */
+@property --liquid-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+:root {
+  --liquid-spring: linear(0, 0.18 6%, 0.55 13%, 0.9 22%, 1.08 31%, 1.12 38%, 1.07 48%, 1 62%, 0.985 75%, 1);
+  --liquid-time: 0.5s;
+}
+.liquid {
+  --liquid-alpha: 0.2;
+  --liquid-blur: 6px;
+  --liquid-sat: 1.9;
+  --tx2: var(--liquid-ink-2);
+  --agent-word: var(--liquid-agent);
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  box-shadow: none;
+  isolation: isolate;
+}
+/* Words that must stay readable over anything: the settings and the hint. */
+.liquid.thick {
+  --liquid-alpha: 0.82;
+  --liquid-blur: 14px;
+  --liquid-sat: 1.7;
+}
+.liquid::before,
+.liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.liquid::before {
+  background: rgb(var(--liquid-tint) / var(--liquid-alpha));
+  backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-sat)) brightness(var(--liquid-bright));
+  -webkit-backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-sat))
+    brightness(var(--liquid-bright));
+  box-shadow: var(--liquid-inner), var(--liquid-drop);
+  transition: background-color 0.25s ease;
+}
+/* The light turns a little as the page moves. On the rim alone, so a frame restyles only the rim. */
+.liquid::after {
+  padding: 1.25px;
+  background: conic-gradient(
+    from calc(295deg + var(--liquid-angle)),
+    var(--liquid-rim-hi),
+    var(--liquid-rim-lo) 22%,
+    var(--liquid-rim-lo) 42%,
+    var(--liquid-rim-hi) 52%,
+    var(--liquid-rim-lo) 66%,
+    var(--liquid-rim-lo) 88%,
+    var(--liquid-rim-hi)
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: liquid-light linear both;
+  animation-timeline: scroll(root);
+}
+@keyframes liquid-light {
+  to {
+    --liquid-angle: 70deg;
+  }
+}
+/* The ink follows the picture behind the glass (article/liquid.ts). */
+.liquid[data-tone="dark"] {
+  --liquid-tint: 16 18 24;
+  --liquid-bright: 0.8;
+  --liquid-ink-2: #e1e4ea;
+  --liquid-agent: #d6ceff;
+  --liquid-rim-hi: rgba(255, 255, 255, 0.7);
+  --tx: #f5f6f8;
+  color: var(--tx);
+}
+.liquid[data-tone="light"] {
+  --liquid-tint: 255 255 255;
+  --liquid-bright: 1.15;
+  --liquid-ink-2: #2c3037;
+  --liquid-agent: #2a1e96;
+  --liquid-rim-hi: rgba(255, 255, 255, 0.95);
+  --tx: #121418;
+  color: var(--tx);
+}
+.liquid.capsule,
+.liquid.vbar {
+  transition:
+    color 0.2s ease,
+    min-height var(--liquid-time) var(--liquid-spring),
+    height var(--liquid-time) var(--liquid-spring);
+}
+.liquid .where span {
+  max-height: 18px;
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease;
+}
+.liquid .round {
+  background: none;
+  transition: transform var(--liquid-time) var(--liquid-spring);
+}
+.liquid .round:active {
+  transform: scale(1.12);
+}
+.liquid .vb {
+  transition: width var(--liquid-time) var(--liquid-spring);
+  -webkit-tap-highlight-color: transparent;
+}
+.liquid .vb[aria-pressed="true"] {
+  background: none;
+  color: inherit;
+}
+.liquid .vb svg {
+  transition: transform var(--liquid-time) var(--liquid-spring);
+}
+.liquid .vb:active svg,
+.liquid .icon-btn:active svg {
+  transform: scale(1.14);
+}
+.liquid .vb .l {
+  display: block;
+  max-height: 16px;
+  line-height: 16px;
+  overflow: hidden;
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease;
+}
+/* The bead under the pressed control. */
+.pool {
+  position: absolute;
+  z-index: -1;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: var(--w, 74px);
+  border-radius: 99px;
+  background: var(--liquid-pool);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--x, 0)) scale(0.82);
+  transition:
+    transform var(--liquid-time) var(--liquid-spring),
+    width var(--liquid-time) var(--liquid-spring),
+    opacity 0.18s ease,
+    background-color 0.18s ease;
+}
+.pool.on {
+  opacity: 1;
+  transform: translateX(var(--x, 0)) scale(1);
+}
+.pool.down {
+  transform: translateX(var(--x, 0)) scale(1.06, 1.1);
+}
+.pool.mark {
+  background: rgba(255, 216, 77, 0.5);
+}
+/* Scrolling down draws the chrome back to its essentials. Without labels, the bar can go thinner still. */
+:root.reading .liquid.capsule {
+  min-height: 44px;
+}
+:root.reading .liquid .where span {
+  max-height: 0;
+  opacity: 0;
+}
+:root.reading .liquid .where b {
+  font-size: 15px;
+}
+:root.reading .liquid.vbar {
+  --liquid-alpha: 0.42;
+  --liquid-blur: 4px;
+  height: 52px;
+}
+:root.reading .liquid .vb {
+  width: 52px;
+  gap: 0;
+}
+:root.reading .liquid .vb .l {
+  max-height: 0;
+  opacity: 0;
+}
+:root.reading .liquid .vsep {
+  margin: 12px 2px;
+}
+.popover.liquid {
+  transform-origin: calc(100% - 32px) -18px;
+  animation: liquid-grow var(--liquid-time) var(--liquid-spring);
+}
+.popover.liquid .seg {
+  background: rgb(var(--liquid-tint) / 0.5);
+}
+@keyframes liquid-grow {
+  from {
+    transform: scale(0.28);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --liquid-spring: ease;
+    --liquid-time: 0.01s;
+  }
+  .liquid::after {
+    animation: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .liquid::before {
+    background: var(--card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--tx2);
+  }
+  .liquid::after {
+    display: none;
+  }
+}
 .tabbar {
   position: fixed;
   left: calc(env(safe-area-inset-left) + 18px);

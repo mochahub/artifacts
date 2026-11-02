@@ -68,6 +68,33 @@ describe("lint catches seeded problems", () => {
     expect(result.code).toBe(1);
   }, 60_000);
 
+  test("render with no frames names no contact sheet, and leaves no old one", async () => {
+    const dir = copyFixture(fixture("small"));
+    const sheet = join(dir, ".artifacts/contact-sheet.png");
+    expect((await cli(["render"], env, dir)).code).toBe(0);
+    expect(existsSync(sheet)).toBe(true);
+
+    writeFileSync(join(dir, "plan.md"), "# Plan\n\nText.\n");
+    writeFileSync(join(dir, "app.html"), "<!doctype html><p>Live</p>");
+    writeFileSync(
+      join(dir, "artifact.json"),
+      JSON.stringify({
+        project: "probe",
+        slug: "no-frames",
+        title: "No frames",
+        summary: "An article and a prototype.",
+        pages: [
+          { id: "plan", kind: "article", src: "plan.md" },
+          { id: "app", kind: "prototype", src: "app.html" },
+        ],
+      }),
+    );
+    const json = await cli(["render", "--json"], env, dir);
+    expect(JSON.parse(json.stdout)).toMatchObject({ frames: 0, contactSheet: null });
+    expect(existsSync(sheet)).toBe(false);
+    expect((await cli(["render"], env, dir)).stdout).not.toContain("Look at it");
+  }, 60_000);
+
   test("a broken manifest reports its path", async () => {
     const dir = copyFixture(fixture("small"));
     writeFileSync(join(dir, "artifact.json"), '{ "project": "API", "slug": "x", "pages": [] }');

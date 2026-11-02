@@ -6,10 +6,8 @@ comment pins, and keeps comments in comments.json next to this file (git
 ignores it). Boards are re-read on every load, so edits show up on refresh.
 
     python3 -I server.py --port 8788
-    tailscale serve --bg --https=8788 http://127.0.0.1:8788
 
-/board/<name> shows one board on its own, for screenshots. Stop sharing with
-`tailscale serve --https=8788 off`.
+/board/<name> shows one board on its own, for screenshots.
 """
 import argparse
 import html

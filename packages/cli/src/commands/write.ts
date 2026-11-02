@@ -105,10 +105,11 @@ export async function renderCommand(want: string | undefined, out: Output) {
     printProblems(problems, out);
     throw new CliError("Fix the problems above, then render again.");
   }
-  out.result({ frames: rendered.frames.length, contactSheet: rendered.contactSheet, problems }, () => {
+  const contactSheet = rendered.frames.length > 0 ? rendered.contactSheet : null;
+  out.result({ frames: rendered.frames.length, contactSheet, problems }, () => {
     printProblems(problems, out);
     out.say(`✓ render   ${rendered.frames.length} frames in WebKit at 1x, 2x and 3x`);
-    out.say(`Look at it: ${rendered.contactSheet}`);
+    if (contactSheet) out.say(`Look at it: ${contactSheet}`);
   });
 }
 

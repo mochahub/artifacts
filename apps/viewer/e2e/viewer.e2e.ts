@@ -217,6 +217,35 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   expect(errors).toEqual([]);
 });
 
+test("the reader's glass draws back on the way down and fits its ink to a picture", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "iphone", "phone only");
+  const errors = watchErrors(page);
+  await page.goto("/camerabuddy/roadmap/plan");
+  const root = page.locator("html");
+  const bar = page.locator(".vbar");
+  const picture = page.locator(".article img").first();
+  await expect(picture).toBeAttached();
+  await expect(root).not.toHaveClass(/reading/);
+  await expect(bar.getByText("Contents")).toBeVisible();
+
+  await picture.evaluate((image) => {
+    const box = image.getBoundingClientRect();
+    const barTop = (document.querySelector(".vbar") as HTMLElement).getBoundingClientRect().top;
+    scrollTo(0, scrollY + box.top + box.height / 2 - barTop - 26);
+  });
+  await expect(root).toHaveClass(/reading/);
+  await expect(bar).toHaveCSS("height", "52px");
+  await expect(bar).toHaveAttribute("data-tone", /dark|light/);
+  if (process.env.GLASS_SHOT) await page.screenshot({ path: process.env.GLASS_SHOT });
+
+  await page.evaluate(() => scrollBy(0, -40));
+  await expect(root).not.toHaveClass(/reading/);
+  await expect(bar).toHaveCSS("height", "68px");
+  expect(errors).toEqual([]);
+});
+
 test("a pinned version shows that version", async ({ page }) => {
   await page.goto("/camerabuddy/roadmap/v/1/plan");
   await expect(page.locator(".capsule .vchip")).toHaveText("v1");

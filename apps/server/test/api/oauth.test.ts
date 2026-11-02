@@ -452,6 +452,7 @@ describe("OAuth and the hosted MCP", () => {
     ).json()) as { result: { protocolVersion: string; instructions: string } };
     expect(hello.result.protocolVersion).toBe("2025-06-18");
     expect(hello.result.instructions).toContain("git remote");
+    expect(hello.result.instructions).toContain("publish it without asking");
     const meta = { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } };
     const modern = { "MCP-Protocol-Version": "2026-07-28" };
     const discover = (await (
@@ -493,6 +494,7 @@ describe("OAuth and the hosted MCP", () => {
     };
     const uris = list.result.resources.map((resource) => resource.uri);
     expect(uris).toContain("artifacts://guides/templates/rfc");
+    expect(uris).toContain("artifacts://guides/micro-apps");
     expect(uris).toContain("artifacts://templates/rfc/doc.md");
     const read = (await (await mcp(owner, "resources/read", { uri: "artifacts://guides/theme" })).json()) as {
       result: { contents: { text: string }[] };
