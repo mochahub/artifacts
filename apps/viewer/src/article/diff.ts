@@ -254,6 +254,8 @@ function ghost(old: Element) {
     el.removeAttribute("data-block");
     el.removeAttribute("id");
   }
+  // Hidden until Changes is on, so not fetched until then.
+  for (const img of copy.querySelectorAll("img")) img.loading = "lazy";
   copy.classList.add("chg-gone");
   copy.setAttribute("aria-label", "Removed");
   return copy;

@@ -166,18 +166,13 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   await expect(page.locator('[data-block="phase-0/p2"]')).toBeVisible();
   await expect(page.locator('[data-verdict="verified"]')).toBeVisible();
   await expect(page.locator(".article svg").first()).toBeVisible();
-  await expect(page.locator(".article figure img").first()).toHaveJSProperty("complete", true);
-  await page
-    .locator(".article figure img")
-    .first()
-    .evaluate((img: HTMLImageElement) => img.decode());
-  expect(
-    await page
-      .locator(".article figure img")
-      .first()
-      .evaluate((img: HTMLImageElement) => img.naturalWidth),
-  ).toBeGreaterThan(0);
-  await expect(page.getByText("Changed in 1 place since v1.")).toBeVisible();
+  // Visible: a picture v2 replaced is kept, hidden, until Changes is on.
+  const figure = page.locator(".article figure img").filter({ visible: true }).first();
+  await expect(figure).toHaveJSProperty("complete", true);
+  await figure.evaluate((img: HTMLImageElement) => img.decode());
+  expect(await figure.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  // The fixture's v2 rewords a sentence and swaps a board picture, which an embedded frame may show.
+  await expect(page.getByText(/^Changed in \d+ places? since v1\.$/)).toBeVisible();
   await shot(page, info.project.name, "03-1-reading");
 
   // The words v2 added, marked where they are; hidden until Changes is on.
@@ -230,7 +225,7 @@ test("the reader's glass draws back on the way down and fits its ink to a pictur
   await page.goto("/camerabuddy/roadmap/plan");
   const root = page.locator("html");
   const bar = page.locator(".vbar");
-  const picture = page.locator(".article img").first();
+  const picture = page.locator(".article img").filter({ visible: true }).first();
   await expect(picture).toBeAttached();
   await expect(root).not.toHaveClass(/reading/);
   await expect(bar.getByText("Contents")).toBeVisible();
