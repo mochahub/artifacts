@@ -177,11 +177,13 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
       .first()
       .evaluate((img: HTMLImageElement) => img.naturalWidth),
   ).toBeGreaterThan(0);
-  await expect(page.getByText("1 section changed since the last version.")).toBeVisible();
+  await expect(page.getByText("Changed in 1 place since v1.")).toBeVisible();
   await shot(page, info.project.name, "03-1-reading");
 
+  // The words v2 added, marked where they are; hidden until Changes is on.
+  await expect(page.locator(".article ins.chg")).toHaveText("a faster");
   await page.getByRole("button", { name: "Show" }).click();
-  await expect(page.locator(".show-changes [data-changed]")).toHaveCount(1);
+  await expect(page.locator(".show-changes ins.chg", { hasText: "a faster" })).toBeInViewport();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   expect(overflow).toBe(false);

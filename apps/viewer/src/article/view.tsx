@@ -16,6 +16,7 @@ import { plural } from "../format.ts";
 import { tapped } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { readStored, writeStored } from "../storage.ts";
+import { firstChange, markChanges } from "./diff.ts";
 import { useLiquidChrome, usePool } from "./liquid.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
 
@@ -32,6 +33,8 @@ type Props = {
   artifact: Artifact;
   page: ArticlePage;
   version: number;
+  /** The version this one is compared with, if any. */
+  previous: number | null;
   latest: boolean;
   threads: Remote<Thread[]>;
   onPages(): void;
@@ -41,7 +44,16 @@ type Props = {
 const SIZES = [17, 19, 21];
 const stored = (key: string, fallback: string) => readStored(`artifacts.read.${key}`) ?? fallback;
 
-export function ArticleView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
+export function ArticleView({
+  artifact,
+  page,
+  version,
+  previous,
+  latest,
+  threads,
+  onPages,
+  onVersions,
+}: Props) {
   const body = useRef<HTMLDivElement>(null);
   const capsule = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -61,7 +73,8 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
   // "theme" until the reader picks: an artifact's own font, and a choice of theirs that isn't stored.
   const font = useSignal(stored("font", page.theme?.font ? "theme" : "serif"));
   const theme = useSignal(stored("theme", "auto"));
-  const changedCount = page.blocks.filter((block) => block.changed).length;
+  // Places changed since `previous`, once both versions are in; "new" when the page wasn't in it.
+  const changed = useSignal<number | "new" | null>(null);
   const loaded = useSignal(0);
   useLiquidChrome({ capsule, bar, body, loaded: loaded.value });
   const draft = useSignal<Draft | null>(null);
@@ -84,6 +97,12 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
     deepLinked.current = link;
     openId.value = thread.id;
   });
+  const toggleChanges = () => {
+    changes.value = !changes.value;
+    // Marks below the fold look like nothing changed on a phone: bring the first one into view.
+    const first = changes.value && body.current ? firstChange(body.current) : null;
+    if (first) requestAnimationFrame(() => first.scrollIntoView({ block: "center", behavior: "smooth" }));
+  };
   const openCount = all.filter((thread) => thread.status === "open").length;
   const canComment = artifact.permissions.comment && latest;
   const where = (key: string) =>
@@ -143,29 +162,27 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
 
   useEffect(() => {
     let live = true;
-    api<string>(`/api/artifacts/${artifact.id}/v/${version}/article/${page.key}`, { text: true }).then(
-      (html) => {
-        if (!live || !body.current) return;
-        // The publisher's theme stops at this element: the review UI around it keeps its own look.
-        for (const [name, value] of Object.entries(articleStyle(page.theme))) {
-          body.current.style.setProperty(name, value);
-        }
+    const article = (n: number) =>
+      api<string>(`/api/artifacts/${artifact.id}/v/${n}/article/${page.key}`, { text: true }).then(
         // Sanitized by the server at commit (05); only `artifacts:blob/` needs mapping.
-        body.current.innerHTML = html.replaceAll("artifacts:blob/", `/api/artifacts/${artifact.id}/r/`);
-        for (const block of page.blocks) {
-          if (block.changed) {
-            body.current
-              .querySelector(`[data-block="${CSS.escape(block.key)}"]`)
-              ?.setAttribute("data-changed", "");
-          }
-        }
-        loaded.value += 1;
-      },
-    );
+        (html) => html.replaceAll("artifacts:blob/", `/api/artifacts/${artifact.id}/r/`),
+      );
+    // A page the version before didn't have answers 404: all of it is new.
+    const before = previous ? article(previous).catch(() => null) : Promise.resolve(undefined);
+    Promise.all([article(version), before]).then(([html, old]) => {
+      if (!live || !body.current) return;
+      // The publisher's theme stops at this element: the review UI around it keeps its own look.
+      for (const [name, value] of Object.entries(articleStyle(page.theme))) {
+        body.current.style.setProperty(name, value);
+      }
+      body.current.innerHTML = html;
+      changed.value = old === undefined ? null : old === null ? "new" : markChanges(body.current, old);
+      loaded.value += 1;
+    });
     return () => {
       live = false;
     };
-  }, [artifact.id, version, page]);
+  }, [artifact.id, version, previous, page]);
   useEffect(() => {
     let sent = 0;
     const onScroll = () => {
@@ -196,18 +213,27 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
             : { "--read-font": font.value === "serif" ? "var(--serif)" : "var(--ui)" }),
         }}
       >
-        {changedCount > 0 && !changes.value && (
+        {(changes.value || (typeof changed.value === "number" && changed.value > 0)) && (
           <div class="banner" style="margin-bottom:16px">
-            <span class="grow">{plural(changedCount, "section")} changed since the last version.</span>
-            <button
-              type="button"
-              class="vchip"
-              onClick={() => {
-                changes.value = true;
-              }}
-            >
-              Show
-            </button>
+            <span class="grow">
+              {changed.value === null
+                ? "This is the first version."
+                : changed.value === "new"
+                  ? `This page is new in v${version}.`
+                  : changed.value === 0
+                    ? `Nothing on this page changed since v${previous}.`
+                    : `Changed in ${plural(changed.value, "place")} since v${previous}.`}
+              {changes.value && typeof changed.value === "number" && changed.value > 0 && (
+                <span class="chg-key">
+                  <ins class="chg">Added</ins> <del class="chg gap-l">Removed</del>
+                </span>
+              )}
+            </span>
+            {typeof changed.value === "number" && changed.value > 0 && (
+              <button type="button" class="vchip" onClick={toggleChanges}>
+                {changes.value ? "Hide" : "Show"}
+              </button>
+            )}
           </div>
         )}
         <div class="meta">
@@ -302,14 +328,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           <List />
           <span class="l">Contents</span>
         </button>
-        <button
-          type="button"
-          class="vb"
-          aria-pressed={changes.value}
-          onClick={() => {
-            changes.value = !changes.value;
-          }}
-        >
+        <button type="button" class="vb" aria-pressed={changes.value} onClick={toggleChanges}>
           <Triangle />
           <span class="l">Changes</span>
         </button>

@@ -1,4 +1,5 @@
 import type { Thread } from "@artifacts/schema";
+import { GONE } from "./diff.ts";
 import { findQuote, type Quote } from "./quote.ts";
 
 const CONTEXT = 32;
@@ -10,7 +11,8 @@ function wrap(block: HTMLElement, quote: Quote, id: string) {
   const nodes: Text[] = [];
   let text = "";
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if ((node as Text).parentElement?.closest(".mm")) continue; // The margin tabs aren't the author's words.
+    // The margin tabs and the removed words aren't the author's words.
+    if ((node as Text).parentElement?.closest(`.mm, ${GONE}`)) continue;
     nodes.push(node as Text);
     text += (node as Text).data;
   }
@@ -64,10 +66,10 @@ export function decorate(root: HTMLElement, threads: Thread[], open: (id: string
   }
 }
 
-/** The range's words, minus the margin tabs: a whole paragraph's selection runs over its tab. */
+/** The range's words, minus the margin tabs and removed words: a paragraph's selection runs over its tab. */
 function words(range: Range) {
   const part = range.cloneContents();
-  for (const tab of part.querySelectorAll(".mm")) tab.remove();
+  for (const tab of part.querySelectorAll(`.mm, ${GONE}`)) tab.remove();
   return collapse(part.textContent ?? "");
 }
 

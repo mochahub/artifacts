@@ -1533,15 +1533,59 @@ select.field {
   position: relative;
   scroll-margin-top: 90px;
 }
-.article.show-changes [data-changed]::before {
-  content: "";
-  position: absolute;
-  left: -15px;
-  top: 0.62em;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--agent);
+/* Changes since the version before (diff.ts): in the page all along, shown only while Changes is on. */
+.article ins.chg {
+  text-decoration: none;
+  color: inherit;
+}
+.article:not(.show-changes) :is(del.chg, .chg-gone) {
+  display: none;
+}
+.article.show-changes ins.chg {
+  background: var(--add-hl);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px var(--add-hl);
+}
+.article del.chg {
+  color: var(--warn-word);
+  background: var(--del-hl);
+  text-decoration: line-through 1.5px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px var(--del-hl);
+}
+.article del.chg.gap-l {
+  margin-inline-start: 0.3em;
+}
+.article del.chg.gap-r {
+  margin-inline-end: 0.3em;
+}
+.article.show-changes .chg-new {
+  background: var(--add-hl);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--add-hl);
+}
+.article.show-changes .chg-gone {
+  background: var(--del-hl);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--del-hl);
+}
+/* A row or an item is tinted edge to edge: a ring would overlap its neighbours. */
+.article.show-changes :is(tr, li):is(.chg-new, .chg-gone) {
+  box-shadow: none;
+  border-radius: 0;
+}
+.article.show-changes .chg-gone,
+.article.show-changes .chg-gone * {
+  color: var(--warn-word);
+  text-decoration: line-through 1.5px;
+}
+.article.show-changes .chg-gone img {
+  opacity: 0.45;
+}
+.article .chg-key {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: 8px;
 }
 .popover {
   position: fixed;
