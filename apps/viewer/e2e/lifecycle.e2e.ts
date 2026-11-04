@@ -64,6 +64,7 @@ test("version history: preview, name, restore and compare", async ({ page }, inf
   const slug = `ver-${info.project.name}`;
   publishCopy(slug, token(), true);
   await page.goto(`/camerabuddy/${slug}`);
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Version history" }).click();
   const sheet = page.getByRole("dialog", { name: "Version history" });
   await sheet.getByRole("button", { name: /^v1/ }).click();
@@ -77,6 +78,7 @@ test("version history: preview, name, restore and compare", async ({ page }, inf
   await expect(page.locator(".tt", { hasText: "mocks/live-view" })).toBeVisible();
 
   await page.goto(`/camerabuddy/${slug}`);
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Version history" }).click();
   await sheet.getByRole("button", { name: /^v1/ }).click();
   await sheet.getByRole("button", { name: "Restore" }).click();

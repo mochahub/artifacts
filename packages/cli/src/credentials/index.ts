@@ -12,10 +12,7 @@ export class KeychainBlocked extends CliError {
   override name = "KeychainBlocked";
 }
 
-/**
- * macOS ties a keychain item to the binary that wrote it, so a replaced CLI opens a dialog, and the
- * call waits for an answer however long that takes. An agent can't answer it.
- */
+/** A keychain call can wait on a dialog however long that takes, and an agent can't answer it. */
 export function waitForKeychain<T>(work: Promise<T>, ms = KEYCHAIN_WAIT_MS): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const blocked = new Promise<never>((_, reject) => {
@@ -23,7 +20,7 @@ export function waitForKeychain<T>(work: Promise<T>, ms = KEYCHAIN_WAIT_MS): Pro
       () =>
         reject(
           new KeychainBlocked(
-            `The system keychain is waiting for permission to use your Artifacts token, and nobody answered in ${Math.round(ms / 1000)} seconds. This happens once after the CLI is replaced.\nChoose Always Allow in the keychain dialog and run this again, or run artifacts login.`,
+            `The system keychain is waiting for permission to use your Artifacts token, and nobody answered in ${Math.round(ms / 1000)} seconds. This happens once, when a token saved by an older CLI moves to the new keychain item.\nChoose Always Allow in the keychain dialog and run this again, or run artifacts login.`,
           ),
         ),
       ms,
@@ -70,11 +67,71 @@ const keychain: Backend = {
   },
 };
 
+/**
+ * macOS lets only the app that wrote a keychain item read it without asking, and it knows an app by
+ * its signature. Our ad hoc signed binary is a new app every release, so `Bun.secrets` asked after
+ * each upgrade. Apple's own `security` tool never changes, so items it writes stay readable, the way
+ * `gh` and Claude Code keep theirs. The token goes in on stdin, never in the arguments `ps` shows.
+ */
+const MAC_SERVICE = "artifacts-cli";
+// `security` exits with the low byte of the OSStatus.
+const NOT_FOUND = 44; // errSecItemNotFound
+const NO_INTERACTION = 36; // errSecInteractionNotAllowed: a locked keychain, over SSH
+
+async function security(args: string[], input?: string) {
+  const child = Bun.spawn(["/usr/bin/security", ...args], {
+    stdin: input === undefined ? "ignore" : new Blob([input]),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, code] = await waitForKeychain(Promise.all([new Response(child.stdout).text(), child.exited]));
+  if (code === NO_INTERACTION) {
+    throw new KeychainBlocked(
+      "The system keychain is locked. Unlock it with security unlock-keychain and run this again.",
+    );
+  }
+  return { code, out: out.trim() };
+}
+
+const findMac = (url: string) => security(["find-generic-password", "-s", MAC_SERVICE, "-a", url, "-w"]);
+
+const macKeychain: Backend = {
+  async get(url) {
+    const found = await findMac(url);
+    if (found.code === 0) return found.out;
+    if (found.code !== NOT_FOUND) throw new Error(`security exited with ${found.code}`);
+    // A token an older CLI saved: reading it asks once, then it moves to an item `security` owns.
+    const legacy = await security(["find-generic-password", "-s", SERVICE, "-a", url]);
+    if (legacy.code !== 0) return null;
+    const token = await keychain.get(url);
+    if (token) await macKeychain.set(url, token);
+    return token;
+  },
+  async set(url, token) {
+    // `security -i` reads quoted words; neither a normalized URL nor a token has these.
+    if (/["\\\s]/.test(url + token)) throw new Error("That token can't go in the keychain.");
+    await security(
+      ["-i"],
+      `add-generic-password -U -s "${MAC_SERVICE}" -a "${url}" -l "Artifacts CLI" -w "${token}"\n`,
+    );
+    // `security -i` exits 0 even when a command fails, so read it back.
+    if ((await findMac(url)).out !== token) throw new Error("security didn't save the token");
+    // Deleting needs no permission, so the old item goes without a dialog.
+    await security(["delete-generic-password", "-s", SERVICE, "-a", url]);
+  },
+  async remove(url) {
+    await security(["delete-generic-password", "-s", MAC_SERVICE, "-a", url]);
+    await security(["delete-generic-password", "-s", SERVICE, "-a", url]);
+  },
+};
+
+const systemKeychain = process.platform === "darwin" ? macKeychain : keychain;
+
 /** Tries the keychain; headless Linux has none, so it falls back to a 0600 file, with a warning (07). */
 async function withFallback<T>(use: (backend: Backend) => Promise<T>): Promise<T> {
   if (process.env.ARTIFACTS_CREDENTIALS === "file") return use(fileBackend);
   try {
-    return await use(keychain);
+    return await use(systemKeychain);
   } catch (error) {
     if (error instanceof KeychainBlocked) throw error;
     console.error(`No system keychain here, so the token is in ${filePath()} (mode 0600).`);

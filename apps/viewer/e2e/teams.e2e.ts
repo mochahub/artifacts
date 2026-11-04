@@ -38,6 +38,7 @@ test("make a team, add someone, and share with it from a phone", async ({ page, 
   const slug = `team-work-${run}`;
   publishCopy(slug, token());
   await page.goto(`/camerabuddy/${slug}`);
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Share" }).click();
   await page.getByRole("button", { name: "Only people added" }).click();
   await expect(page.getByRole("button", { name: "Only people added" })).toHaveAttribute(
@@ -63,6 +64,7 @@ test("make a team, add someone, and share with it from a phone", async ({ page, 
   await shot(page, info.project.name, "08-3-team");
 
   await page.goto(`/camerabuddy/${slug}`);
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Share" }).click();
   await page.getByLabel("Add a person, team or email").fill(`Design ${run}`);
   await page.getByRole("button", { name: new RegExp(`^Design ${run}`) }).click();

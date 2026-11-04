@@ -46,6 +46,7 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
   browser,
 }, info) => {
   await page.goto("/camerabuddy/roadmap");
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Share" }).click();
   await shot(page, info.project.name, "05-1-share");
   await page.getByRole("button", { name: "Copy link" }).click();

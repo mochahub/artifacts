@@ -54,7 +54,8 @@ Some things reach outside the org or destroy data, so they still need an explici
 ## 4. Structure
 
 - `artifacts init` makes a working folder in `.artifacts/work/<slug>/`, which git ignores, because the server keeps what you publish. Commands find it from the repo root. Use `artifacts init --in-repo` only when the source should be committed.
-- One artifact per deliverable, with a page for each part: the plan as an article, research as articles grouped "Research", mocks as a canvas.
+- One artifact per deliverable, with a page for each part. The work decides the pages: designs and mocks go on a canvas, a plan or research goes in an article, grouped "Research" when there are several.
+- Don't add an article to explain a design. Put any notes on the board, beside the frames they explain, and keep them short. Write an article only when there's reasoning that won't fit there.
 - Write a `summary` in `artifact.json`, up to 280 characters: what this holds and why it mattered, including what was decided or rejected. A later agent reads this instead of the artifact, so it matters most for image-only work such as art style studies, where there's little other text. Add up to 8 `tags`.
 - Give every frame a stable `data-frame` id, and write stable headings. Comments attach to them, so never rename an id that has comments.
 - `references/manifest.md` has the schema, with examples.

@@ -1,15 +1,6 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import {
-  ChevronLeft,
-  ChevronRight,
-  CircleCheck,
-  Ellipsis,
-  FileText,
-  History,
-  Images,
-  Share,
-} from "lucide-preact";
+import { ChevronLeft, ChevronRight, CircleCheck, Ellipsis, FileText, Images } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { isMissing } from "../api.ts";
 import { StatusWord } from "../components/cards.tsx";
@@ -62,18 +53,6 @@ function Detail() {
           <ChevronLeft />
           {artifact.project}
         </a>
-        {artifact.permissions.share && (
-          <button
-            type="button"
-            class="round"
-            aria-label="Share"
-            onClick={() => {
-              sharing.value = true;
-            }}
-          >
-            <Share />
-          </button>
-        )}
         <button
           type="button"
           class="round"
@@ -83,16 +62,6 @@ function Detail() {
           }}
         >
           <Ellipsis />
-        </button>
-        <button
-          type="button"
-          class="round"
-          aria-label="Version history"
-          onClick={() => {
-            history.value = true;
-          }}
-        >
-          <History />
         </button>
       </div>
       <ArchivedBanner artifact={artifact} onChanged={() => remote.refresh()} />

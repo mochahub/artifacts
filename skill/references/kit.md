@@ -14,6 +14,14 @@
 
 **Tokens** (`tokens.css`): set `theme` in `artifact.json` (`references/theme.md`), and use `var(--art-accent)` and the other tokens in your own CSS, so a brand reaches your work.
 
+**Notes:** annotate a design on the board, not in an article. Put a short note in its own frame beside the screen it's about:
+
+```html
+<section data-frame="note-pairing" data-device="none" data-title="Note: pairing">
+  <p>Pairing moved here from Settings, so it's the first thing a new owner sees.</p>
+</section>
+```
+
 **Primitives:** `.art-safe` keeps content clear of the status bar and home indicator. Also `.art-list`, `.art-row`, `.art-btn`, `.art-title`, `.art-seg`.
 
 **Components** (`components.css`): `.art-nav` with `.art-iconbtn` and `.art-grow`, `.art-tabbar` (`aria-current` on the active tab), `.art-sheet`, `.art-toggle` (`role="switch"`, `aria-checked`), and `.art-stats`.
