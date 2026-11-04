@@ -46,6 +46,7 @@ test("the artifact shows what changed, with the page switcher and version histor
   await expect(page.getByText("9 pages")).toBeVisible();
   await shot(page, info.project.name, "01-4-artifact");
 
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Version history" }).click();
   await expect(page.getByRole("dialog", { name: "Version history" }).getByText("v1")).toBeVisible();
   await shot(page, info.project.name, "01-6-versions");

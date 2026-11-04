@@ -10,6 +10,7 @@ Start with `artifacts init --template design-review --slug <slug>`. Everything i
 - Title every frame (`data-title`) with what happens there, not the screen's internal name.
 - Put variants side by side on their own board, changing one thing at a time.
 - Start with the brief frame: who it's for, what changed since last time, and the decision you're asking the reviewer for.
+- Write notes on the board, beside the frame they're about, as a small `data-device="none"` frame. Keep them to a line or two, and don't add an article to explain the design.
 - Use real content wherever you have it. Replace everything in the sample, and add or remove frames freely.
 
 Replace the `summary` in `artifact.json` before publishing, and see `../theme.md` for colours and fonts.

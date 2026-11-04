@@ -26,6 +26,7 @@ test("the poll works with no backend; shared counts add up and me stays personal
 
   // A second person, by a comment link: their own `me`, the same `shared`.
   await page.goto(`/demo/${slug}`);
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Share" }).click();
   await page.getByRole("button", { name: "Copy link" }).click();
   const url = (await page.getByTestId("share-url").textContent()) as string;
