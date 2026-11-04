@@ -18,7 +18,11 @@ const PrototypeView = lazy(() => import("../live/prototype.tsx").then((m) => m.P
 const CanvasView = lazy(() => import("../canvas/view.tsx").then((m) => m.CanvasView));
 const ArticleView = lazy(() => import("../article/view.tsx").then((m) => m.ArticleView));
 
-type Version = { n: number; pages: ((CanvasPage | ArticlePage) & { kind: string })[] };
+type Version = {
+  n: number;
+  previous?: number | null;
+  pages: ((CanvasPage | ArticlePage) & { kind: string })[];
+};
 
 function Page() {
   const { params } = useRoute();
@@ -80,7 +84,13 @@ function Page() {
           onVersions={chrome.onVersions}
         />
       ) : page.kind === "article" ? (
-        <ArticleView artifact={artifact} page={page as ArticlePage} version={version} {...chrome} />
+        <ArticleView
+          artifact={artifact}
+          page={page as ArticlePage}
+          version={version}
+          previous={detail.data.value.previous ?? null}
+          {...chrome}
+        />
       ) : (
         <CanvasView artifact={artifact} page={page as CanvasPage} version={version} {...chrome} />
       )}

@@ -235,6 +235,11 @@ describe("lifecycle", () => {
       n: number;
     }[];
     expect(list.map((v) => v.n)).toEqual([3, 1]);
+    // The reader compares v3 with v1 now: the version before it that isn't deleted.
+    const detail = (await (await t.api(`/api/artifacts/${row.id}/versions/3`, { bearer: token })).json()) as {
+      previous: number | null;
+    };
+    expect(detail.previous).toBe(1);
 
     expect((await post(`/api/artifacts/${row.id}/versions/2/undelete`, { bearer: token })).status).toBe(200);
     await post(`/api/artifacts/${row.id}/versions/2/delete`, { bearer: token });

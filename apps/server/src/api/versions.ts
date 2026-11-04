@@ -93,7 +93,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
       : [];
     if (!version) throw new ApiError("not_found", "Not found.");
     const [previous] = await db
-      .select({ id: versions.id })
+      .select({ id: versions.id, n: versions.n })
       .from(versions)
       .where(and(eq(versions.artifactId, id), lt(versions.n, n), isNull(versions.deletedAt)))
       .orderBy(desc(versions.n))
@@ -110,6 +110,8 @@ export function versionRoutes(routes: Routes, deps: Deps) {
 
     return etagJson(c, {
       n: version.n,
+      // The version this one is compared with: the one before it that isn't deleted.
+      previous: previous?.n ?? null,
       notes: version.notes,
       message: version.message,
       pages: pageRows.map((page) => {
