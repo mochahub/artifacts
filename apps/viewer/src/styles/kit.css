@@ -1381,6 +1381,29 @@
     margin: 0 12px 10px;
     flex: none;
   }
+  /* The panel's column is spoken for: the page, the canvas and what floats over them keep to the rest. */
+  .has-panel {
+    --panel-w: 330px;
+    padding-right: var(--panel-w);
+  }
+  .has-panel .cv {
+    right: var(--panel-w);
+  }
+  .has-panel .capsule {
+    right: calc(env(safe-area-inset-right) + 12px + var(--panel-w));
+  }
+  .has-panel .popover {
+    right: calc(14px + var(--panel-w));
+  }
+  .has-panel .vbar,
+  .has-panel .hint,
+  .has-panel .notice {
+    left: calc((100% - var(--panel-w)) / 2);
+  }
+  .has-panel .sheet,
+  .has-panel .compose {
+    right: calc(10px + var(--panel-w));
+  }
 }
 .hint {
   position: fixed;
