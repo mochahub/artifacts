@@ -1,7 +1,9 @@
 import { useSignal } from "@preact/signals";
+import { PlaceholderRows } from "../components/placeholder.tsx";
 import { Shell } from "../components/shell.tsx";
 import { agentInitials, agentShort, ago } from "../format.ts";
 import { usePoll } from "../poll.ts";
+import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
 type Item = {
@@ -42,7 +44,8 @@ const day = (iso: string) =>
 
 function Feed() {
   const filter = useSignal("all");
-  const { data } = usePoll<{ items: Item[] }>(`/api/activity?filter=${filter.value}`, 60_000);
+  const { data, loading } = usePoll<{ items: Item[] }>(`/api/activity?filter=${filter.value}`, 60_000);
+  useTitle("Activity");
   const items = data.value?.items ?? [];
   const days = [...new Set(items.map((item) => day(item.createdAt)))];
   return (
@@ -66,7 +69,8 @@ function Feed() {
           </button>
         ))}
       </div>
-      {data.value && items.length === 0 && <div class="empty">Nothing yet.</div>}
+      {!data.value && <PlaceholderRows rows={4} />}
+      {data.value && !loading.value && items.length === 0 && <div class="empty">Nothing yet.</div>}
       {days.map((label) => (
         <>
           <span class="gh" key={label}>

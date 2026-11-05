@@ -1537,3 +1537,40 @@
   display: grid;
   gap: 8px;
 }
+
+/* Placeholders: the page's shape in the page's grey while the first answer is on its way. */
+.ph-line {
+  display: block;
+  height: 14px;
+  width: 60%;
+  border-radius: 7px;
+  background: var(--soft);
+  margin: 4px 0;
+}
+.ph-line.short {
+  width: 34%;
+  height: 11px;
+}
+.ph-box {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--soft);
+  flex: none;
+}
+.ph-cover {
+  background: var(--soft);
+}
+.ph-page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 96px) 32px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ph-page .ph-line {
+  height: 18px;
+  margin: 0;
+}
+

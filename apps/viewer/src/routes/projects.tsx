@@ -1,14 +1,17 @@
 import type { ProjectRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Search } from "lucide-preact";
+import { PlaceholderRows } from "../components/placeholder.tsx";
 import { ProjectTile, Shell } from "../components/shell.tsx";
 import { ago, plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
+import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
 function List() {
   const q = useSignal("");
   const { data } = usePoll<ProjectRow[]>(`/api/projects?q=${encodeURIComponent(q.value)}`, 60_000);
+  useTitle("Projects");
   return (
     <Shell>
       <h1 class="h1 l">Projects</h1>
@@ -23,6 +26,7 @@ function List() {
           }}
         />
       </label>
+      {!data.value && <PlaceholderRows rows={3} />}
       {data.value && data.value.length > 0 && (
         <div class="group">
           {data.value.map((project) => (
