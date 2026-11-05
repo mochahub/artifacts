@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
+import { box } from "./helpers.ts";
 import { publishCopy } from "./seed.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
@@ -88,6 +89,8 @@ test("activity lists what happened, and filters", async ({ page }, info) => {
   await page.goto("/activity");
   await expect(page.getByText(/published Camera Buddy roadmap/).first()).toBeVisible();
   await shot(page, info.project.name, "05-5-activity");
+  // One pill row, not a column-filling slab: the segmented control never grows down the page.
+  expect((await box(page, ".seg")).h).toBeLessThan(52);
   await page.getByRole("button", { name: "Agents" }).click();
   await expect(page.locator(".av.agent").first()).toBeVisible();
 });

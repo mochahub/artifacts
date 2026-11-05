@@ -14,6 +14,20 @@ export function watchErrors(page: Page) {
   return errors;
 }
 
+/** The element's box, for layout checks: where it is on screen, and that it is on screen. */
+export const box = (page: Page, selector: string) =>
+  page
+    .locator(selector)
+    .first()
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+    });
+
+/** True when the document can be scrolled sideways: something is wider than the screen. */
+export const overflowsSideways = (page: Page) =>
+  page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+
 export async function signIn(page: Page, email = OWNER.email, password = OWNER.password) {
   await page.goto("/sign-in");
   await page.getByLabel("Email").fill(email);

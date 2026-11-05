@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { watchErrors } from "./helpers.ts";
+import { box, watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
   if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
@@ -36,12 +36,18 @@ test("pin a comment, read it, reply and resolve", async ({ page }, info) => {
   await expect(sheet).toBeVisible();
   await expect(sheet.getByLabel("Comment")).toBeFocused();
   await expect(page.locator(".pin.draft")).toBeVisible();
+  // The toolbar steps aside, so its labels don't show through the sheet under Cancel and Post.
+  await expect(page.locator(".vbar")).toHaveCount(0);
   await sheet.getByLabel("Comment").fill(text);
   await shot(page, info.project.name, "02-3-comment");
   await sheet.getByRole("button", { name: "Post" }).click();
 
   const dialog = page.getByRole("dialog").filter({ hasText: text });
   await expect(dialog).toBeVisible();
+  await expect(page.locator(".vbar")).toHaveCount(1);
+  // The same title as an article thread, with the frame underneath it.
+  await expect(dialog.locator(".shead .t")).toContainText(/^Comment \d+/);
+  await expect(dialog.locator(".shead .fn")).toHaveText("Welcome");
   await expect(dialog.locator(".crop")).toBeVisible();
   await expect
     .poll(() => dialog.locator(".crop").evaluate((img: HTMLImageElement) => img.naturalWidth))
@@ -104,8 +110,16 @@ test("comment on a passage: select text, then the quote travels and highlights",
   await expect(sheet).toHaveCount(0);
   await expect(page.locator("mark.hl").first()).toHaveText("first finding");
   await shot(page, info.project.name, "03-4-quote");
+  // The margin tab is whole on a phone: inside the gutter, not past the edge of the screen.
+  const tab = await box(page, ".mm");
+  expect(tab.x).toBeGreaterThanOrEqual(0);
+  expect(tab.right).toBeLessThanOrEqual((page.viewportSize() as { width: number }).width);
+  expect(tab.w).toBeGreaterThanOrEqual(24);
   await page.locator(".mm").first().click();
-  await expect(page.getByRole("dialog").locator(".quote")).toHaveText("first finding");
+  const thread = page.getByRole("dialog");
+  await expect(thread.locator(".quote")).toHaveText("first finding");
+  await expect(thread.locator(".shead .t")).toContainText(/^Comment \d+/);
+  await expect(thread.locator(".shead .fn")).toHaveText(/metering|peaking/);
   expect(errors).toEqual([]);
 });
 
