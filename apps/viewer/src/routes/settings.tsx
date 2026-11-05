@@ -29,6 +29,7 @@ import {
 import { addPasskey, passkeyName } from "../passkey.ts";
 import { usePoll } from "../poll.ts";
 import { me, meta } from "../session.ts";
+import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
 const ADMIN = () => me.value?.role === "owner" || me.value?.role === "admin";
@@ -849,6 +850,7 @@ const PAGES: Record<string, () => preact.JSX.Element | null> = {
 export function Settings() {
   const { params } = useRoute();
   const Page = PAGES[params.section ?? ""] ?? Index;
+  useTitle("Settings");
   return (
     <SignedIn>
       <Page />

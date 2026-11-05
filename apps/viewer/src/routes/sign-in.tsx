@@ -7,9 +7,11 @@ import { ApiFailure, post } from "../api.ts";
 import { safeNext } from "../next.ts";
 import { canUseHomePasskey, signInWithPasskey } from "../passkey.ts";
 import { me, meta } from "../session.ts";
+import { useTitle } from "../title.ts";
 
 export function SignIn() {
   const { route, query } = useLocation();
+  useTitle("Sign in");
   const email = useSignal("");
   const password = useSignal("");
   const error = useSignal<string | null>(null);
