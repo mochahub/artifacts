@@ -1046,10 +1046,12 @@
 
 /* Article */
 .article {
-  max-width: 42rem;
+  /* The gutter holds the margin tabs and change dots, so they're never past the edge of a phone. */
+  --gutter: 32px;
+  max-width: calc(42rem - 48px + 2 * var(--gutter));
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + 82px) calc(env(safe-area-inset-right) + 24px)
-    calc(env(safe-area-inset-bottom) + 108px) calc(env(safe-area-inset-left) + 24px);
+  padding: calc(env(safe-area-inset-top) + 82px) calc(env(safe-area-inset-right) + var(--gutter))
+    calc(env(safe-area-inset-bottom) + 108px) calc(env(safe-area-inset-left) + var(--gutter));
   color: var(--tx);
   font: var(--read-size, 19px) / 1.55 var(--read-font, var(--serif));
 }
@@ -1156,7 +1158,7 @@
 .article.show-changes [data-changed]::before {
   content: "";
   position: absolute;
-  left: -15px;
+  left: calc(12px - var(--gutter));
   top: 0.62em;
   width: 8px;
   height: 8px;
@@ -1322,7 +1324,7 @@
 }
 .mm {
   position: absolute;
-  right: -22px;
+  right: calc(6px - var(--gutter));
   top: 2px;
   width: 24px;
   height: 24px;
@@ -1352,6 +1354,11 @@
 .status-note {
   font-size: 15px;
   color: var(--tx2);
+}
+@media (min-width: 900px) {
+  .article {
+    --gutter: 56px;
+  }
 }
 @media (min-width: 1100px) {
   .panel {
