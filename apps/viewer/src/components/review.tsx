@@ -148,14 +148,15 @@ const stateNote = (thread: Thread) =>
 export function ThreadSheet({
   artifact,
   thread,
-  title,
+  subtitle,
   base,
   threads,
   onClose,
 }: {
   artifact: Artifact;
   thread: Thread;
-  title: string;
+  /** The page or frame the comment sits on. The title is the comment's number, the same everywhere. */
+  subtitle: string;
   base: string;
   threads: Remote<Thread[]>;
   onClose(): void;
@@ -184,7 +185,8 @@ export function ThreadSheet({
 
   return (
     <Sheet
-      title={title}
+      title={`Comment ${thread.n}`}
+      subtitle={subtitle}
       onClose={onClose}
       extra={
         <>

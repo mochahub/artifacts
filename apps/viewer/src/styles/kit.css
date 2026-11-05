@@ -256,8 +256,13 @@
 }
 .shead .t {
   flex: 1;
+  min-width: 0;
   font-size: 20px;
   font-weight: 700;
+}
+.shead .fn {
+  display: block;
+  font-weight: 500;
 }
 .x {
   width: 44px;
@@ -1201,10 +1206,6 @@
 .compose .t {
   font-size: 17px;
   font-weight: 700;
-}
-.compose .fn {
-  display: block;
-  font-weight: 500;
 }
 .compose textarea,
 .replybox textarea {

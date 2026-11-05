@@ -205,7 +205,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
   const changedCount = page.frames.filter((f) => f.changed).length;
 
   return (
-    <div class="on-canvas">
+    <div class="on-canvas has-panel">
       <div class="cv" ref={root} role="application" aria-label={`${page.title ?? page.key} canvas`}>
         <div class="world" ref={world} />
         <div class="overlay" ref={overlay} />
@@ -240,54 +240,57 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
       {trying.value && (
         <TryIt artifact={artifact} frame={trying.value} version={version} engine={engine.current} />
       )}
-      <div class="vbar glass">
-        <button
-          type="button"
-          class="vb"
-          aria-pressed={!commenting.value}
-          onClick={() => {
-            commenting.value = false;
-          }}
-        >
-          <Move />
-          Move
-        </button>
-        {canComment && (
+      {/* The toolbar steps aside for the comment sheet, or its labels show through the glass. */}
+      {!draft.value && (
+        <div class="vbar glass">
           <button
             type="button"
             class="vb"
-            aria-pressed={commenting.value}
+            aria-pressed={!commenting.value}
             onClick={() => {
-              commenting.value = !commenting.value;
+              commenting.value = false;
             }}
           >
-            <MessageCircle />
-            Comment
+            <Move />
+            Move
           </button>
-        )}
-        <i class="vsep" />
-        <button
-          type="button"
-          class="vb"
-          onClick={() => {
-            framesOpen.value = true;
-          }}
-        >
-          <Images />
-          Frames
-        </button>
-        <button
-          type="button"
-          class="vb"
-          onClick={() => {
-            listOpen.value = true;
-          }}
-        >
-          <List />
-          Comments
-          {openCount > 0 && <b class="count">{openCount}</b>}
-        </button>
-      </div>
+          {canComment && (
+            <button
+              type="button"
+              class="vb"
+              aria-pressed={commenting.value}
+              onClick={() => {
+                commenting.value = !commenting.value;
+              }}
+            >
+              <MessageCircle />
+              Comment
+            </button>
+          )}
+          <i class="vsep" />
+          <button
+            type="button"
+            class="vb"
+            onClick={() => {
+              framesOpen.value = true;
+            }}
+          >
+            <Images />
+            Frames
+          </button>
+          <button
+            type="button"
+            class="vb"
+            onClick={() => {
+              listOpen.value = true;
+            }}
+          >
+            <List />
+            Comments
+            {openCount > 0 && <b class="count">{openCount}</b>}
+          </button>
+        </div>
+      )}
       {commenting.value && <div class="hint glass">Tap a spot to comment</div>}
       <CommentsPanel threads={all} onOpen={select} />
       {draft.value && (
@@ -310,7 +313,13 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         <ThreadSheet
           artifact={artifact}
           thread={openThread}
-          title={`${openThread.n}, ${page.frames.find((f) => openThread.anchor?.type === "frame" && f.key === openThread.anchor.frameKey)?.title ?? page.title ?? page.key}`}
+          subtitle={
+            page.frames.find(
+              (f) => openThread.anchor?.type === "frame" && f.key === openThread.anchor.frameKey,
+            )?.title ??
+            page.title ??
+            page.key
+          }
           base={`/${artifact.project}/${artifact.slug}`}
           threads={threads}
           onClose={() => {

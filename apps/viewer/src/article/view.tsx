@@ -1,6 +1,6 @@
 import type { Artifact, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { List, Menu, MessageCircle, MessagesSquare, Triangle } from "lucide-preact";
+import { Diff, List, Menu, MessageCircle, MessagesSquare } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { api, post } from "../api.ts";
 import {
@@ -169,7 +169,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
   }, [artifact.id, version, page.key]);
 
   return (
-    <>
+    <div class="reader has-panel">
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: picking a block is a touch shortcut; selecting text works by keyboard */}
       <article
         class={`article${changes.value ? " show-changes" : ""}${picking.value ? " picking" : ""}`}
@@ -181,6 +181,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
       >
         {changedCount > 0 && !changes.value && (
           <div class="banner" style="margin-bottom:16px">
+            <Diff class="chev" style="color:var(--agent-word)" />
             <span class="grow">{plural(changedCount, "section")} changed since the last version.</span>
             <button
               type="button"
@@ -273,54 +274,57 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           </div>
         </div>
       )}
-      <div class="vbar glass">
-        <button
-          type="button"
-          class="vb"
-          onClick={() => {
-            contents.value = true;
-          }}
-        >
-          <List />
-          Contents
-        </button>
-        <button
-          type="button"
-          class="vb"
-          aria-pressed={changes.value}
-          onClick={() => {
-            changes.value = !changes.value;
-          }}
-        >
-          <Triangle />
-          Changes
-        </button>
-        <i class="vsep" />
-        {canComment && (
+      {/* The toolbar steps aside for a sheet without a dim, or its labels show through the glass. */}
+      {!draft.value && (
+        <div class="vbar glass">
           <button
             type="button"
             class="vb"
-            aria-pressed={picking.value}
             onClick={() => {
-              picking.value = !picking.value;
+              contents.value = true;
             }}
           >
-            <MessageCircle />
-            Comment
+            <List />
+            Contents
           </button>
-        )}
-        <button
-          type="button"
-          class="vb"
-          onClick={() => {
-            listOpen.value = true;
-          }}
-        >
-          <MessagesSquare />
-          Comments
-          {openCount > 0 && <b class="count">{openCount}</b>}
-        </button>
-      </div>
+          <button
+            type="button"
+            class="vb"
+            aria-pressed={changes.value}
+            onClick={() => {
+              changes.value = !changes.value;
+            }}
+          >
+            <Diff />
+            Changes
+          </button>
+          <i class="vsep" />
+          {canComment && (
+            <button
+              type="button"
+              class="vb"
+              aria-pressed={picking.value}
+              onClick={() => {
+                picking.value = !picking.value;
+              }}
+            >
+              <MessageCircle />
+              Comment
+            </button>
+          )}
+          <button
+            type="button"
+            class="vb"
+            onClick={() => {
+              listOpen.value = true;
+            }}
+          >
+            <MessagesSquare />
+            Comments
+            {openCount > 0 && <b class="count">{openCount}</b>}
+          </button>
+        </div>
+      )}
       {picking.value && <div class="hint glass">Tap a paragraph</div>}
       {selection.value && !draft.value && (
         <button
@@ -360,7 +364,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         <ThreadSheet
           artifact={artifact}
           thread={openThread}
-          title={`Comment ${openThread.n}`}
+          subtitle={page.title ?? page.key}
           base={`/${artifact.project}/${artifact.slug}`}
           threads={threads}
           onClose={() => {
@@ -410,6 +414,6 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           </div>
         </Sheet>
       )}
-    </>
+    </div>
   );
 }
