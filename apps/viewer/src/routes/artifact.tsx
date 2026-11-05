@@ -1,25 +1,19 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import {
-  ChevronLeft,
-  ChevronRight,
-  CircleCheck,
-  Ellipsis,
-  FileText,
-  History,
-  Images,
-  Share,
-} from "lucide-preact";
+import { ChevronLeft, ChevronRight, Diff, Ellipsis, FileText, Images, Share } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { isMissing } from "../api.ts";
 import { AgentMark, StatusWord } from "../components/cards.tsx";
 import { ArchivedBanner, ArtifactMenu } from "../components/manage.tsx";
+import { PlaceholderRows } from "../components/placeholder.tsx";
 import { DecideSheet } from "../components/review.tsx";
 import { ShareSheet } from "../components/share.tsx";
 import { VersionSheet } from "../components/sheets.tsx";
+import { Shell } from "../components/shell.tsx";
 import { agentShort, ago, plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
 import { me } from "../session.ts";
+import { useTitle } from "../title.ts";
 import { Deleted } from "./deleted.tsx";
 import { useSignInOn401 } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
@@ -39,75 +33,95 @@ function Detail() {
   const { params } = useRoute();
   const project = params.project ?? "";
   const remote = usePoll<Artifact>(artifactPath(project, params.artifact ?? ""), 10_000);
-  const { data, error } = remote;
+  const { data, error, loading } = remote;
   useSignInOn401(error.value?.status);
   const sharing = useSignal(false);
   const menu = useSignal(false);
   const history = useSignal(false);
   const deciding = useSignal(false);
+  // Another artifact's detail must not stand in for this one while it loads: the shape does.
+  const artifact = loading.value ? null : data.value;
+  useTitle(artifact?.title);
 
   if (error.value?.status === 410) return <Deleted at={error.value.details.deletedAt as string} />;
   if (error.value?.status === 401) return null;
   if (isMissing(error.value)) return <NotFound />;
-  const artifact = data.value;
-  if (!artifact) return null;
+  if (!artifact) {
+    return (
+      <Shell>
+        <a class="back" href={`/${project}`}>
+          <ChevronLeft />
+          Back
+        </a>
+        <span class="ph-line" style="width:70%;height:30px;margin:8px 0" />
+        <span class="ph-line short" />
+        <PlaceholderRows rows={4} />
+      </Shell>
+    );
+  }
   const base = `/${artifact.project}/${artifact.slug}`;
   const first = artifact.pages.find((page) => page.changed) ?? artifact.pages[0];
   const changed = artifact.pages.filter((page) => page.changed);
+  const canDecide = artifact.permissions.comment && artifact.permissions.decide !== false && me.value;
 
   return (
-    <main class="main">
+    <Shell>
       <div class="top">
         <a class="back" href={`/${artifact.project}`}>
           <ChevronLeft />
-          {artifact.project}
+          {artifact.projectName ?? artifact.project}
         </a>
-        {artifact.permissions.share && (
+        <div class="row actions">
+          {artifact.permissions.share && (
+            <button
+              type="button"
+              class="round"
+              aria-label="Share"
+              onClick={() => {
+                sharing.value = true;
+              }}
+            >
+              <Share />
+            </button>
+          )}
           <button
             type="button"
             class="round"
-            aria-label="Share"
+            aria-label="More"
             onClick={() => {
-              sharing.value = true;
+              menu.value = true;
             }}
           >
-            <Share />
+            <Ellipsis />
           </button>
-        )}
-        <button
-          type="button"
-          class="round"
-          aria-label="More"
-          onClick={() => {
-            menu.value = true;
-          }}
-        >
-          <Ellipsis />
-        </button>
-        <button
-          type="button"
-          class="round"
-          aria-label="Version history"
-          onClick={() => {
-            history.value = true;
-          }}
-        >
-          <History />
-        </button>
+        </div>
       </div>
       <ArchivedBanner artifact={artifact} onChanged={() => remote.refresh()} />
       <h1 class="h1">{artifact.title}</h1>
       <div class="row ss">
         {artifact.agent && <AgentMark agent={artifact.agent} small />}
         <span class="grow">
-          <b>v{artifact.latestVersion}</b> by {agentShort(artifact.agent ?? artifact.publishedBy)},{" "}
-          {ago(artifact.publishedAt)}
+          <button
+            type="button"
+            class="vchip"
+            style="padding:4px 0;min-height:0"
+            aria-label="Version history"
+            onClick={() => {
+              history.value = true;
+            }}
+          >
+            v{artifact.latestVersion}
+          </button>{" "}
+          by {agentShort(artifact.agent ?? artifact.publishedBy)}, {ago(artifact.publishedAt)}
         </span>
         <StatusWord card={artifact} />
       </div>
       {changed.length > 0 && (
         <div>
-          <div class="changed-h">What changed in v{artifact.latestVersion}</div>
+          <div class="changed-h row" style="gap:6px">
+            <Diff class="chev" style="color:inherit;width:18px;height:18px" />
+            What changed in v{artifact.latestVersion}
+          </div>
           <div class="ss">{changed.map((page) => page.title ?? page.key).join(", ")}</div>
         </div>
       )}
@@ -134,23 +148,21 @@ function Detail() {
           {artifact.decision.note ? `: ${artifact.decision.note}` : "."}
         </p>
       )}
-      <div class="row">
+      <div class="stack">
         {first && (
           <a class="btn ink" href={`${base}/${first.key}`}>
             {changed.length > 0 ? "Review changes" : "Start reviewing"}
           </a>
         )}
-        {artifact.permissions.comment && artifact.permissions.decide !== false && me.value && (
+        {canDecide && (
           <button
             type="button"
-            class="round"
-            style="width:52px;height:52px"
-            aria-label="Approve or request changes"
+            class="btn soft"
             onClick={() => {
               deciding.value = true;
             }}
           >
-            <CircleCheck />
+            Approve or request changes
           </button>
         )}
       </div>
@@ -200,7 +212,7 @@ function Detail() {
           }}
         />
       )}
-    </main>
+    </Shell>
   );
 }
 

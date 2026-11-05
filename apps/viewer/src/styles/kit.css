@@ -1355,6 +1355,14 @@
   display: flex;
   gap: 10px;
 }
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.top .actions {
+  gap: 8px;
+}
 .status-note {
   font-size: 15px;
   color: var(--tx2);
