@@ -10,11 +10,14 @@ import { usePoll } from "../poll.ts";
 
 export function Sheet({
   title,
+  subtitle,
   onClose,
   children,
   extra,
 }: {
   title: string;
+  /** Where the sheet's subject lives, under the title: a page or a frame. */
+  subtitle?: string;
   onClose(): void;
   children: ComponentChildren;
   extra?: ComponentChildren;
@@ -44,7 +47,10 @@ export function Sheet({
       <div class="sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialog}>
         <div class="grabber" />
         <div class="shead">
-          <div class="t">{title}</div>
+          <div class="t">
+            {title}
+            {subtitle && <span class="fn">{subtitle}</span>}
+          </div>
           {extra}
           <button type="button" class="x" aria-label="Close" onClick={onClose}>
             <X />

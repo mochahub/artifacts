@@ -1,10 +1,12 @@
 import type { ProjectRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { Search } from "lucide-preact";
+import { ChevronsUpDown, Search } from "lucide-preact";
 import { useLocation } from "preact-iso";
+import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
 import { ProjectTile, Shell } from "../components/shell.tsx";
 import { ago, plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
+import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
 type Teams = { teams: { slug: string; name: string }[] };
@@ -13,10 +15,11 @@ function List() {
   const q = useSignal("");
   const { query, route } = useLocation();
   const team = query.team ?? "";
-  const { data } = usePoll<ProjectRow[]>(
+  const { data, error, loading, refresh } = usePoll<ProjectRow[]>(
     `/api/projects?${new URLSearchParams({ q: q.value, ...(team ? { team } : {}) })}`,
     60_000,
   );
+  useTitle("Projects");
   const teams = usePoll<Teams>("/api/teams", 300_000);
   const choices = teams.data.value?.teams ?? [];
   return (
@@ -34,22 +37,30 @@ function List() {
         />
       </label>
       {choices.length > 0 && (
-        <select
-          class="sort"
-          aria-label="Filter by team"
-          value={team}
-          onChange={(e) =>
-            route(e.currentTarget.value ? `/projects?team=${e.currentTarget.value}` : "/projects")
-          }
-        >
-          <option value="">Every team</option>
-          {choices.map((choice) => (
-            <option value={choice.slug} key={choice.slug}>
-              {choice.name}
-            </option>
-          ))}
-        </select>
+        <label class="sort" style="align-self:flex-start">
+          <select
+            aria-label="Filter by team"
+            value={team}
+            onChange={(e) =>
+              route(e.currentTarget.value ? `/projects?team=${e.currentTarget.value}` : "/projects")
+            }
+          >
+            <option value="">Every team</option>
+            {choices.map((choice) => (
+              <option value={choice.slug} key={choice.slug}>
+                {choice.name}
+              </option>
+            ))}
+          </select>
+          <ChevronsUpDown />
+        </label>
       )}
+      {!data.value &&
+        (error.value && !loading ? (
+          <LoadFailed retry={() => refresh().catch(() => {})} />
+        ) : (
+          <PlaceholderRows rows={3} />
+        ))}
       {data.value && data.value.length > 0 && (
         <div class="group">
           {data.value.map((project) => (

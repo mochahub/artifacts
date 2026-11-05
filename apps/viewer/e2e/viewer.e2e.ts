@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { watchErrors } from "./helpers.ts";
+import { box, overflowsSideways, watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
   if (project === "iphone")
@@ -25,6 +25,36 @@ test("projects and a project list the fixture", async ({ page }, info) => {
 
   await page.goto("/camerabuddy");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy");
+  await expect(page.locator(".tile").first()).toBeVisible();
+  // Every filter and the sort control fit on a phone, with nothing past the edge.
+  expect(await overflowsSideways(page)).toBe(false);
+  const width = (page.viewportSize() as { width: number }).width;
+  for (const name of ["All", "Your turn", "Approved", "Archived"]) {
+    const button = page.locator(".seg button", { hasText: name });
+    const b = await button.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { right: r.right, clipped: el.scrollWidth > el.clientWidth };
+    });
+    expect(b.right).toBeLessThanOrEqual(width);
+    expect(b.clipped).toBe(false);
+  }
+  expect((await box(page, ".sort")).right).toBeLessThanOrEqual(width);
+
+  // Retyping never empties the grid: the last list stays until the next answer lands. The one
+  // delayed handler removes itself; unrouting a sleeping handler makes its continue() throw.
+  await page.route(
+    "**/artifacts?*",
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await route.continue();
+    },
+    { times: 1 },
+  );
+  await page.getByLabel("Find in this project").fill("ro");
+  await page.waitForTimeout(200);
+  await expect(page.locator(".tile").first()).toBeVisible();
+  await expect(page.getByText("Nothing here.")).toHaveCount(0);
+
   await page.getByRole("button", { name: "Approved" }).click();
   await expect(page.getByText("Nothing here.")).toBeVisible();
   await page.getByRole("button", { name: "All" }).click();
@@ -40,14 +70,32 @@ test("the artifact shows what changed, with the page switcher and version histor
   page,
 }, info) => {
   const errors = watchErrors(page);
+  // A cold load shows the page's shape, never a blank screen, until the artifact arrives.
+  await page.route(
+    "**/api/artifacts/by-slug/**",
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await route.continue();
+    },
+    { times: 1 },
+  );
   await page.goto("/camerabuddy/roadmap");
+  await expect(page.locator(".ph-line").first()).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy roadmap");
   await expect(page.getByText("What changed in v2")).toBeVisible();
   await expect(page.getByText("9 pages")).toBeVisible();
+  // The detail page lives in the shell: tabs on a phone, the rail on a desktop, and the project by name.
+  await expect(page.getByRole("navigation", { name: "Main" }).first()).toBeVisible();
+  await expect(page.locator(".back")).toHaveText(/Camera Buddy$/);
+  await expect(page.locator(".top .round")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Approve or request changes" })).toHaveText(
+    "Approve or request changes",
+  );
+  await expect(page).toHaveTitle("Camera Buddy roadmap – Mochahub");
   await shot(page, info.project.name, "01-4-artifact");
 
   await page.getByRole("button", { name: "More" }).click();
-  await page.getByRole("button", { name: "Version history" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Version history" }).click();
   await expect(page.getByRole("dialog", { name: "Version history" }).getByText("v1")).toBeVisible();
   await shot(page, info.project.name, "01-6-versions");
   await page.keyboard.press("Escape");
@@ -84,6 +132,21 @@ test("the canvas: every frame drawn, changed marked, fit, frames list and deep l
   await expect(page.locator(".capsule b")).toHaveText("Live view");
   await page.waitForTimeout(500);
   await shot(page, info.project.name, "02-2-one-frame");
+  if (info.project.name === "desktop") {
+    // The comments panel has its column: the canvas, the capsule and the toolbar keep to the rest.
+    const panel = await box(page, ".panel");
+    const canvas = await box(page, ".cv");
+    expect(canvas.right).toBeLessThanOrEqual(panel.x + 1);
+    for (const selector of [".capsule", ".vbar"]) {
+      const b = await box(page, selector);
+      expect(b.x + b.w / 2).toBeCloseTo(panel.x / 2, -1);
+    }
+    // The focused frame and its board's title are both in view, under neither the capsule nor the panel.
+    const frame = await box(page, '.fr[data-frame="live-view"]');
+    const title = await box(page, ".brd:nth-child(2)");
+    expect(frame.right).toBeLessThanOrEqual(panel.x);
+    expect(title.y).toBeGreaterThanOrEqual((await box(page, ".capsule")).bottom);
+  }
 
   // The picture got sharper after decode, without ever going blank.
   await expect(page.locator('.fr[data-frame="live-view"] img')).not.toHaveAttribute(
@@ -173,7 +236,14 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   expect(await figure.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   // The fixture's v2 rewords a sentence and swaps a board picture, which an embedded frame may show.
   await expect(page.getByText(/^Changed in \d+ places? since v1\.$/)).toBeVisible();
+  await expect(page).toHaveTitle("Plan – Camera Buddy roadmap – Mochahub");
   await shot(page, info.project.name, "03-1-reading");
+  if (info.project.name === "desktop") {
+    const panel = await box(page, ".panel");
+    expect((await box(page, ".article")).right).toBeLessThanOrEqual(panel.x);
+    const capsule = await box(page, ".capsule");
+    expect(capsule.x + capsule.w / 2).toBeCloseTo(panel.x / 2, -1);
+  }
 
   // The words v2 added, marked where they are; hidden until Changes is on.
   await expect(page.locator(".article ins.chg")).toHaveText("a faster");

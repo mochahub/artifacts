@@ -207,7 +207,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
   const changedCount = page.frames.filter((f) => f.changed).length;
 
   return (
-    <div class="on-canvas">
+    <div class="on-canvas has-panel">
       <div class="cv" ref={root} role="application" aria-label={`${page.title ?? page.key} canvas`}>
         <div class="world" ref={world} />
         <div class="overlay" ref={overlay} />
@@ -242,7 +242,8 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
       {trying.value && (
         <TryIt artifact={artifact} frame={trying.value} version={version} engine={engine.current} />
       )}
-      <div class="vbar glass">
+      {/* The toolbar steps aside for the comment sheet, or its labels show through the glass. */}
+      <div class={`vbar glass${draft.value ? " hidden" : ""}`}>
         <button
           type="button"
           class="vb"
@@ -312,7 +313,13 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         <ThreadSheet
           artifact={artifact}
           thread={openThread}
-          title={`${openThread.n}, ${page.frames.find((f) => openThread.anchor?.type === "frame" && f.key === openThread.anchor.frameKey)?.title ?? page.title ?? page.key}`}
+          subtitle={
+            page.frames.find(
+              (f) => openThread.anchor?.type === "frame" && f.key === openThread.anchor.frameKey,
+            )?.title ??
+            page.title ??
+            page.key
+          }
           base={`/${artifact.project}/${artifact.slug}`}
           threads={threads}
           onClose={() => {

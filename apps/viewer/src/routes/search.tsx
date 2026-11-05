@@ -1,8 +1,10 @@
 import { useSignal } from "@preact/signals";
 import { Search as SearchIcon } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
+import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
 import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
+import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
 type Hit = { id: string; project: string; slug: string; title: string };
@@ -35,11 +37,14 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
   const query = settled.value.trim();
-  const { data } = usePoll<Results>(
+  const { data, error, loading, refresh } = usePoll<Results>(
     query.length >= 2 ? `/api/search?q=${encodeURIComponent(query)}` : null,
     3_600_000,
   );
   const results = query.length >= 2 ? data.value : null;
+  // A first search shows its shape; a retyped one keeps the last results until the next arrive.
+  const waiting = query.length >= 2 && !results && loading;
+  const failed = query.length >= 2 && !results && !loading && error.value;
   const row = (href: string, title: string, sub: string, key: string) => (
     <a class="li" href={href} key={key} onClick={onPick}>
       <div class="grow">
@@ -51,6 +56,7 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
   const content = results?.content ?? [];
   const none =
     results &&
+    !loading &&
     results.artifacts.length + results.pages.length + results.comments.length + content.length === 0;
   return (
     <>
@@ -66,6 +72,8 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
           }}
         />
       </label>
+      {waiting && <PlaceholderRows rows={3} />}
+      {failed && <LoadFailed retry={() => refresh().catch(() => {})} />}
       {none && <div class="empty">Nothing found.</div>}
       {results && results.artifacts.length > 0 && (
         <>
@@ -127,6 +135,7 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
 }
 
 export function SearchPage() {
+  useTitle("Search");
   return (
     <SignedIn>
       <Shell>

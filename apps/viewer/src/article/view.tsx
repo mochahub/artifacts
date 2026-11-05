@@ -1,7 +1,7 @@
 import type { Artifact, Thread } from "@artifacts/schema";
 import { type ArticleThemeValues, articleStyle } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
-import { List, Menu, MessageCircle, MessagesSquare, Triangle } from "lucide-preact";
+import { Diff, List, Menu, MessageCircle, MessagesSquare } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { api, post } from "../api.ts";
 import {
@@ -201,7 +201,7 @@ export function ArticleView({
   }, [artifact.id, version, page.key]);
 
   return (
-    <>
+    <div class="reader has-panel">
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: picking a block is a touch shortcut; selecting text works by keyboard */}
       <article
         class={`article${changes.value ? " show-changes" : ""}${picking.value ? " picking" : ""}`}
@@ -215,6 +215,7 @@ export function ArticleView({
       >
         {(changes.value || (typeof changed.value === "number" && changed.value > 0)) && (
           <div class="banner" style="margin-bottom:16px">
+            <Diff class="chev" style="color:var(--agent-word)" />
             <span class="grow">
               {changed.value === null
                 ? "This is the first version."
@@ -316,7 +317,7 @@ export function ArticleView({
           </div>
         </div>
       )}
-      <div ref={bar} class="vbar glass liquid">
+      <div ref={bar} class={`vbar glass liquid${draft.value ? " hidden" : ""}`}>
         <i ref={pool} class="pool" />
         <button
           type="button"
@@ -329,7 +330,7 @@ export function ArticleView({
           <span class="l">Contents</span>
         </button>
         <button type="button" class="vb" aria-pressed={changes.value} onClick={toggleChanges}>
-          <Triangle />
+          <Diff />
           <span class="l">Changes</span>
         </button>
         <i class="vsep" />
@@ -402,7 +403,7 @@ export function ArticleView({
         <ThreadSheet
           artifact={artifact}
           thread={openThread}
-          title={`Comment ${openThread.n}`}
+          subtitle={page.title ?? page.key}
           base={`/${artifact.project}/${artifact.slug}`}
           threads={threads}
           onClose={() => {
@@ -453,6 +454,6 @@ export function ArticleView({
           </div>
         </Sheet>
       )}
-    </>
+    </div>
   );
 }

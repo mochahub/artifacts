@@ -3,10 +3,12 @@ import { useSignal } from "@preact/signals";
 import { ChevronLeft, ChevronsUpDown, Search, Share } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { ArtifactTile } from "../components/cards.tsx";
+import { LoadFailed, PlaceholderTiles } from "../components/placeholder.tsx";
 import { ProjectShareSheet } from "../components/share.tsx";
 import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
 import { meta } from "../session.ts";
+import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 import { NotFound } from "./not-found.tsx";
 
@@ -24,12 +26,15 @@ function Project() {
   const sort = useSignal("recent");
   const query = new URLSearchParams({ q: q.value, status: status.value, sort: sort.value });
   const sharing = useSignal(false);
-  const { data, error, refresh } = usePoll<ProjectArtifacts>(
+  const { data, error, loading, refresh } = usePoll<ProjectArtifacts>(
     `/api/projects/${encodeURIComponent(params.project ?? "")}/artifacts?${query}`,
     60_000,
   );
-  if (error.value?.status === 404) return <NotFound />;
   const project = data.value?.project;
+  useTitle(project?.name);
+  if (error.value?.status === 404) return <NotFound />;
+  // The last list stays while the next filter loads; only a settled, empty answer says so.
+  const artifacts = data.value?.artifacts;
   return (
     <Shell wide>
       <a class="back" href="/projects">
@@ -38,7 +43,7 @@ function Project() {
       </a>
       <div>
         <div class="row">
-          <h1 class="h1 grow">{project?.name}</h1>
+          <h1 class="h1 grow">{project?.name ?? <span class="ph-line" style="width:50%;height:30px" />}</h1>
           {project?.canShare && (
             <button
               type="button"
@@ -57,32 +62,18 @@ function Project() {
         )}
         {project?.repo && <div class="ss">{project.repo}</div>}
       </div>
-      <label class="search">
-        <Search />
-        <input
-          placeholder={`Find in ${project?.name ?? "this project"}`}
-          aria-label="Find in this project"
-          value={q.value}
-          onInput={(e) => {
-            q.value = e.currentTarget.value;
-          }}
-        />
-      </label>
       <div class="row">
-        <div class="seg">
-          {FILTERS.map(([value, label]) => (
-            <button
-              type="button"
-              key={value}
-              aria-pressed={status.value === value}
-              onClick={() => {
-                status.value = value;
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <label class="search grow">
+          <Search />
+          <input
+            placeholder={`Find in ${project?.name ?? "this project"}`}
+            aria-label="Find in this project"
+            value={q.value}
+            onInput={(e) => {
+              q.value = e.currentTarget.value;
+            }}
+          />
+        </label>
         <label class="sort">
           <select
             aria-label="Sort"
@@ -97,12 +88,32 @@ function Project() {
           <ChevronsUpDown />
         </label>
       </div>
-      <div class="grid">
-        {data.value?.artifacts.map((card) => (
-          <ArtifactTile card={card} key={card.id} />
+      <div class="seg">
+        {FILTERS.map(([value, label]) => (
+          <button
+            type="button"
+            key={value}
+            aria-pressed={status.value === value}
+            onClick={() => {
+              status.value = value;
+            }}
+          >
+            {label}
+          </button>
         ))}
       </div>
-      {data.value?.artifacts.length === 0 && <div class="empty">Nothing here.</div>}
+      {artifacts ? (
+        <div class="grid" aria-busy={loading}>
+          {artifacts.map((card) => (
+            <ArtifactTile card={card} key={card.id} />
+          ))}
+        </div>
+      ) : error.value && !loading ? (
+        <LoadFailed retry={() => refresh().catch(() => {})} />
+      ) : (
+        <PlaceholderTiles />
+      )}
+      {artifacts?.length === 0 && !loading && <div class="empty">Nothing here.</div>}
       {sharing.value && params.project && (
         <ProjectShareSheet
           slug={params.project}

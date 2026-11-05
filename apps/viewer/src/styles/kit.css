@@ -299,8 +299,13 @@ button.li:active::after,
 }
 .shead .t {
   flex: 1;
+  min-width: 0;
   font-size: 20px;
   font-weight: 700;
+}
+.shead .fn {
+  display: block;
+  font-weight: 500;
 }
 .x {
   width: 44px;
@@ -507,16 +512,14 @@ button.li:active::after,
   object-fit: cover;
   object-position: top;
 }
-/* Pinned from the top, and tall enough that a phone frame shows its first screen, not a slice of it. */
+/* The whole first page, never a slice through a line: the box takes the render's shape, within reason. */
 .cover {
-  aspect-ratio: 8 / 9;
-  max-height: 200px;
+  aspect-ratio: var(--cover-ar, 1.6);
   width: 100%;
 }
-.card.pad .cover {
-  aspect-ratio: auto;
-  height: 256px;
-  max-height: none;
+.cover img {
+  object-fit: contain;
+  object-position: center;
 }
 .kind {
   width: 40px;
@@ -575,10 +578,17 @@ button.li:active::after,
 }
 .seg {
   display: flex;
+  /* Never grows down a column; on a screen too narrow for its labels it scrolls, the page doesn't. */
   flex: none;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   background: var(--soft);
   border-radius: 99px;
   padding: 3px;
+}
+.seg::-webkit-scrollbar {
+  display: none;
 }
 .row > .seg {
   flex: 0 1 auto;
@@ -607,29 +617,39 @@ button.li:active::after,
   color: var(--tx);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
+/* A select in the kit's clothes: a pill like the search field, with the system menu behind it. */
 .sort {
   position: relative;
-  flex: none;
-  margin-left: auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  color: var(--tx2);
+  flex: none;
+  min-height: 46px;
+  padding: 0 10px 0 14px;
+  border-radius: 99px;
+  background: var(--card);
+  box-shadow: 0 0 0 0.5px var(--sep);
+  color: var(--tx);
+  font: 600 15px var(--ui);
+  cursor: pointer;
 }
 .sort select {
   appearance: none;
+  -webkit-appearance: none;
   border: 0;
   background: none;
   color: inherit;
-  font: 14px var(--ui);
-  min-height: 44px;
-  padding: 0 16px 0 0;
+  font: inherit;
+  padding: 0 22px 0 0;
+  cursor: pointer;
+  outline: none;
 }
 .sort svg {
   position: absolute;
-  right: 0;
-  width: 14px;
-  height: 14px;
+  right: 11px;
+  width: 16px;
+  height: 16px;
   pointer-events: none;
+  color: var(--tx2);
 }
 .grid {
   display: grid;
@@ -657,7 +677,7 @@ button.li:active::after,
   font-weight: 600;
 }
 .paper {
-  height: 106px;
+  aspect-ratio: var(--cover-ar, 1.6);
   background: var(--card);
   padding: 12px 14px;
   border-bottom: 0.5px solid var(--sep);
@@ -1374,16 +1394,23 @@ select.field {
 
 /* Article */
 .article {
-  max-width: 42rem;
+  /* The gutter holds the margin tabs, so they're never past the edge of a phone. */
+  --gutter: 32px;
+  max-width: calc(42rem - 48px + 2 * var(--gutter));
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top) + 82px) calc(env(safe-area-inset-right) + 24px)
-    calc(env(safe-area-inset-bottom) + 108px) calc(env(safe-area-inset-left) + 24px);
+  padding: calc(env(safe-area-inset-top) + 82px) calc(env(safe-area-inset-right) + var(--gutter))
+    calc(env(safe-area-inset-bottom) + 108px) calc(env(safe-area-inset-left) + var(--gutter));
   color: var(--tx);
   font: var(--read-size, 19px) / 1.55 var(--read-font, var(--theme-font, var(--serif)));
 }
 .article {
   /* Margin tabs sit in the gutter; on a phone they must never make the page scroll sideways. */
   overflow-x: clip;
+}
+@media (min-width: 900px) {
+  .article {
+    --gutter: 56px;
+  }
 }
 .article h1 {
   font: 700 34px / 1.14 var(--theme-display, var(--serif));
@@ -1624,10 +1651,6 @@ select.field {
   font-size: 17px;
   font-weight: 700;
 }
-.compose .fn {
-  display: block;
-  font-weight: 500;
-}
 .compose textarea,
 .replybox textarea {
   display: block;
@@ -1747,7 +1770,7 @@ select.field {
 }
 .mm {
   position: absolute;
-  right: -22px;
+  right: calc(6px - var(--gutter));
   top: 2px;
   width: 24px;
   height: 24px;
@@ -1777,6 +1800,15 @@ select.field {
 .status-note {
   font-size: 15px;
   color: var(--tx2);
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* The toolbar steps aside for a sheet without a dim, or its labels show through the glass. */
+.vbar.hidden {
+  display: none;
 }
 .copy-prompt-note {
   margin: 0;
@@ -1823,6 +1855,29 @@ select.field {
   }
   .panel .seg {
     margin: 0 12px 10px;
+  }
+  /* The panel's column is spoken for: the page, the canvas and what floats over them keep to the rest. */
+  .has-panel {
+    --panel-w: 330px;
+    padding-right: var(--panel-w);
+  }
+  .has-panel .cv {
+    right: var(--panel-w);
+  }
+  .has-panel .capsule {
+    right: calc(env(safe-area-inset-right) + 12px + var(--panel-w));
+  }
+  .has-panel .popover {
+    right: calc(14px + var(--panel-w));
+  }
+  .has-panel .vbar,
+  .has-panel .hint,
+  .has-panel .notice {
+    left: calc((100% - var(--panel-w)) / 2);
+  }
+  .has-panel .sheet,
+  .has-panel .compose {
+    right: calc(10px + var(--panel-w));
   }
 }
 .hint {
@@ -2189,4 +2244,181 @@ select.field {
   from {
     opacity: 0;
   }
+}
+
+/* Placeholders: the page's shape in the page's grey while the first answer is on its way. */
+.ph-line {
+  display: block;
+  height: 14px;
+  width: 60%;
+  border-radius: 7px;
+  background: var(--soft);
+  margin: 4px 0;
+}
+.ph-line.short {
+  width: 34%;
+  height: 11px;
+}
+.ph-box {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--soft);
+  flex: none;
+}
+.ph-cover {
+  background: var(--soft);
+}
+.ph-page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 96px) 32px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ph-page .ph-line {
+  height: 18px;
+  margin: 0;
+}
+
+/* Interactive states: hover where a pointer can, a press that shows on touch, and one ring for the keyboard. */
+:where(
+  .tab,
+  .rail a,
+  .icon-btn,
+  .x,
+  .vb,
+  .vchip,
+  .seg button,
+  .pin,
+  .card.pad,
+  .tile,
+  .back,
+  .sort,
+  a.word,
+  a.av
+) {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    scale 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .icon-btn:hover,
+  .x:hover,
+  .vb:not([aria-pressed="true"]):hover,
+  .vchip:hover,
+  .seg button:not([aria-pressed="true"]):hover,
+  .tab:not([aria-current="page"]):hover,
+  .rail a:not([aria-current="page"]):hover,
+  .btn:not(.ink, .mark, .soft, :disabled):hover {
+    background: var(--hover);
+  }
+  .btn.soft:not(:disabled):hover,
+  .round:hover,
+  .sort:hover {
+    background: var(--press);
+  }
+  .btn.ink:not(:disabled):hover {
+    background: color-mix(in srgb, var(--tx) 86%, var(--bg));
+  }
+  .btn.mark:not(:disabled):hover {
+    background: color-mix(in srgb, var(--mark) 90%, var(--mark-ink));
+  }
+  .card.pad:hover,
+  .tile:hover {
+    box-shadow:
+      0 0 0 0.5px var(--sep),
+      0 6px 18px rgba(0, 0, 0, 0.08);
+  }
+  .pin:hover {
+    scale: 1.08;
+  }
+  .back:hover,
+  a.word:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+.icon-btn:active,
+.x:active,
+.vb:active,
+.vchip:active,
+.seg button:active,
+.sort:active,
+a.av:active {
+  transform: scale(0.96);
+}
+.pin:active {
+  scale: 0.94;
+}
+.tab:active,
+.rail a:active {
+  background: var(--press);
+}
+.card.pad:active,
+.tile:active {
+  transform: scale(0.99);
+}
+:where(
+  .btn,
+  .li,
+  .btn-li,
+  .tab,
+  .rail a,
+  .round,
+  .icon-btn,
+  .x,
+  .vb,
+  .vchip,
+  .seg button,
+  .thread-row,
+  .vrow,
+  .pin,
+  .card.pad,
+  .tile,
+  .back,
+  a.word,
+  a.av,
+  .capsule .where,
+  .cell-g
+):focus {
+  outline: none;
+}
+:where(
+  .btn,
+  .tab,
+  .rail a,
+  .round,
+  .icon-btn,
+  .x,
+  .vb,
+  .vchip,
+  .pin,
+  .card.pad,
+  .tile,
+  .back,
+  a.word,
+  a.av,
+  .capsule .where
+):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}
+/* Inside a clipped group or the segmented pill, the ring sits just inside the edge so nothing cuts it. */
+:where(.li, .btn-li, .thread-row, .vrow, .seg button):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: -2px;
+}
+.search:focus-within {
+  box-shadow:
+    0 0 0 0.5px var(--mark),
+    0 0 0 3px rgba(255, 216, 77, 0.25);
+}
+.sort:focus-within {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
 }

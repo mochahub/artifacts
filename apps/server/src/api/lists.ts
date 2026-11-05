@@ -114,6 +114,8 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
           renders: frames.renders,
           y: frames.y,
           x: frames.x,
+          w: frames.w,
+          h: frames.h,
         })
         .from(frames)
         .where(
@@ -188,7 +190,9 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
         project: projectSlug,
         slug: row.slug,
         title: row.title,
-        cover: first ? { renderHash: (first.renders as { thumb: string }).thumb } : { title: row.title },
+        cover: first
+          ? { renderHash: (first.renders as { thumb: string }).thumb, w: first.w, h: first.h }
+          : { title: row.title },
         pageCount: pageCounts.find((entry) => entry.versionId === latest.id)?.count ?? 0,
         latestVersion: latest.n,
         status,
@@ -460,6 +464,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
 
     const body: Artifact = {
       ...card,
+      projectName: project?.name,
       visibility: row.visibility,
       publisherId: row.publisherId,
       hasBackend: row.hasBackend,

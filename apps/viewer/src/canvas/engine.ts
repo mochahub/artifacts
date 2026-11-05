@@ -29,6 +29,7 @@ type Options = {
 };
 
 const MAX_FULL = 40; // Decoded full-size images at once: this is what bounds memory on an iPhone (06).
+const LABEL_ABOVE = 72; // A board's title sits this far above its first row of frames.
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 8;
 const DOUBLE_TAP_MS = 300;
@@ -94,6 +95,7 @@ export class CanvasEngine {
   y = 0;
   s = 1;
   private readonly frames: CanvasFrame[];
+  private readonly boards: Board[];
   private readonly imgs = new Map<string, { el: HTMLImageElement; level: string; box: HTMLElement }>();
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pins: Pin[] = [];
@@ -119,11 +121,12 @@ export class CanvasEngine {
     const tall = root.clientHeight > root.clientWidth;
     const { boards, frames } = arrange(allBoards, allFrames, tall ? 2 : Math.max(1, allBoards.length));
     this.frames = frames;
+    this.boards = boards;
     for (const board of boards) {
       const label = document.createElement("div");
       label.className = "brd";
       label.style.left = `${board.x}px`;
-      label.style.top = `${board.y - 72}px`;
+      label.style.top = `${board.y - LABEL_ABOVE}px`;
       label.textContent = board.title;
       if (board.subtitle) {
         const small = document.createElement("small");
@@ -183,7 +186,7 @@ export class CanvasEngine {
     const top = Math.min(...this.frames.map((f) => f.y));
     const right = Math.max(...this.frames.map((f) => f.x + f.w));
     const bottom = Math.max(...this.frames.map((f) => f.y + f.h));
-    return { x: left, y: top - 72, w: right - left, h: bottom - top + 72 };
+    return { x: left, y: top - LABEL_ABOVE, w: right - left, h: bottom - top + LABEL_ABOVE };
   }
 
   /** Room for the capsule and toolbar, so a fitted frame isn't underneath them. */
@@ -191,9 +194,14 @@ export class CanvasEngine {
     return { top: 84, bottom: 96, side: 16 };
   }
 
+  /** The root's own box: with the comments panel open it is narrower than the window, and the fit is to it. */
+  private box() {
+    return { width: this.root.clientWidth, height: this.root.clientHeight };
+  }
+
   private target(rect: Rect) {
     const { top, bottom } = this.insets();
-    const box = this.root.getBoundingClientRect();
+    const box = this.box();
     const s = fitScale(box, rect, this.insets());
     return {
       s,
@@ -211,7 +219,10 @@ export class CanvasEngine {
     if (!frame) return;
     this.focused = key;
     this.options.onFocus(frame);
-    this.go(this.target(frame), animate);
+    // A frame on its board's first row brings the board's title with it, so the title isn't under the capsule.
+    const board = this.boards.find((b) => b.key === frame.board);
+    const above = board && frame.y - board.y < 1 ? LABEL_ABOVE : 0;
+    this.go(this.target({ x: frame.x, y: frame.y - above, w: frame.w, h: frame.h + above }), animate);
   }
 
   step(by: number) {
@@ -222,13 +233,14 @@ export class CanvasEngine {
 
   zoomTo(s: number) {
     cancelAnimationFrame(this.raf);
-    const box = this.root.getBoundingClientRect();
-    this.zoomAround(s, box.left + box.width / 2, box.top + box.height / 2);
+    const at = this.root.getBoundingClientRect();
+    const box = this.box();
+    this.zoomAround(s, at.left + box.width / 2, at.top + box.height / 2);
   }
 
   /** Keeps a world point at a screen point, for the comment sheet (06). */
   showPoint(wx: number, wy: number, screenY: number) {
-    const box = this.root.getBoundingClientRect();
+    const box = this.box();
     this.go({ s: this.s, x: box.width / 2 - wx * this.s, y: screenY - wy * this.s }, true);
   }
 
@@ -324,7 +336,7 @@ export class CanvasEngine {
 
   /** Level of detail (06): swaps only after decode, so frames never flash blank mid-pan. */
   private updateDetail() {
-    const box = this.root.getBoundingClientRect();
+    const box = this.box();
     const dpr = window.devicePixelRatio || 1;
     let full = 0;
     for (const frame of this.frames) {

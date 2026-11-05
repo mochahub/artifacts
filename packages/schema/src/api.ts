@@ -285,7 +285,11 @@ export const ArtifactCard = z.object({
   project: z.string(),
   slug: z.string(),
   title: z.string(),
-  cover: z.union([z.object({ renderHash: Sha256 }), z.object({ title: z.string() })]),
+  /** The first frame's thumb, with its size so a tile can keep the whole page in view. */
+  cover: z.union([
+    z.object({ renderHash: Sha256, w: z.number().optional(), h: z.number().optional() }),
+    z.object({ title: z.string() }),
+  ]),
   pageCount: z.number().int(),
   latestVersion: z.number().int(),
   status: ArtifactStatus,
@@ -310,6 +314,8 @@ export const Decision = z.object({
 });
 
 export const Artifact = ArtifactCard.extend({
+  /** The project's display name, for the back link. Absent from older servers. */
+  projectName: z.string().optional(),
   visibility: Visibility,
   publisherId: Id,
   hasBackend: z.boolean(),
