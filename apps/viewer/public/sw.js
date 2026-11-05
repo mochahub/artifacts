@@ -5,16 +5,19 @@ const API = "api-v1";
 const MAX_CONTENT = 1500;
 const MAX_API = 300;
 
-// These change with the session, are a stream, or aren't worth keeping. The lists of people, tokens,
-// invites and who an artifact is shared with are never kept: they name other people, and a worker's
-// answer isn't tied to whoever asked.
+// These change with the session, are a stream, or aren't worth keeping. The lists of people, teams,
+// tokens, invites and who an artifact is shared with are never kept: they name other people, and a
+// worker's answer isn't tied to whoever asked.
 const NEVER =
-  /^\/api\/(?:events|auth|me\/|push|health|search|tokens|people|shares|org|invites|reset|device|recover|setup|publish|deleted|artifacts\/[^/]+\/(?:access|data|data-export|files|logs|content-token)(?:\/|$))/;
+  /^\/api\/(?:events|auth|me\/|push|health|search|tokens|people|teams|shares|org|invites|reset|device|recover|setup|publish|deleted|projects\/[^/]+\/access|artifacts\/[^/]+\/(?:access|teams|data|data-export|files|logs|content-token)(?:\/|$))/;
 const ASSETS = /^\/assets\//;
 const RENDER = /^\/api\/artifacts\/[^/]+\/r\/[0-9a-f]{64}$/;
 const ARTICLE = /^\/api\/artifacts\/[^/]+\/v\/\d+\//;
 // A refusal on these means this device has lost the artifact, so what it kept goes too.
 const ACCESS = /^\/api\/(artifacts\/(by-slug\/[^/]+\/[^/]+|[0-9a-f-]{36})|s\/[^/]+|me)$/;
+
+// Where the last tapped notification leads, kept for the app to collect (notify.ts).
+const TAPPED = "/tapped-notification";
 
 const forget = () => Promise.all([API, CONTENT].map((name) => caches.delete(name)));
 
@@ -116,10 +119,18 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = ownPath(event.notification.data?.url);
+  // iOS brings a Home Screen app back with its old page, and its window can ignore navigate() and
+  // openWindow() can land on the start page, so the app is told where to go and goes there itself.
+  const left = keep(SHELL, TAPPED, new Response(JSON.stringify({ url, at: Date.now() })));
   event.waitUntil(
-    self.clients.matchAll({ type: "window" }).then((windows) => {
-      const open = windows.find((client) => "navigate" in client);
-      return open ? open.focus().then(() => open.navigate(url)) : self.clients.openWindow(url);
-    }),
+    Promise.all([
+      left,
+      self.clients.matchAll({ type: "window" }).then(async ([open]) => {
+        if (!open) return self.clients.openWindow(url);
+        await left;
+        open.postMessage("tapped");
+        return open.focus();
+      }),
+    ]),
   );
 });

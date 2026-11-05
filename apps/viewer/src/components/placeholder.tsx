@@ -55,3 +55,15 @@ export function PlaceholderPage() {
     </div>
   );
 }
+
+/** The first answer didn't come: say so, with a way to ask again, instead of a shape that never fills. */
+export function LoadFailed({ retry }: { retry(): void }) {
+  return (
+    <div class="empty">
+      Couldn't load this.{" "}
+      <button type="button" class="vchip" onClick={retry}>
+        Try again
+      </button>
+    </div>
+  );
+}

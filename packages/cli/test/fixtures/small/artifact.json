@@ -2,6 +2,7 @@
   "project": "demo",
   "slug": "small",
   "title": "Small",
+  "summary": "Fixture: Small.",
   "pages": [
     { "id": "plan", "kind": "article", "src": "README.md" },
     {

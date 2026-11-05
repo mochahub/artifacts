@@ -1,7 +1,7 @@
 import type { Home as HomeData } from "@artifacts/schema";
 import { FileText } from "lucide-preact";
 import { ReviewCard } from "../components/cards.tsx";
-import { PlaceholderCard, PlaceholderRows } from "../components/placeholder.tsx";
+import { LoadFailed, PlaceholderCard, PlaceholderRows } from "../components/placeholder.tsx";
 import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
 import { me } from "../session.ts";
@@ -9,7 +9,7 @@ import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
 function Review() {
-  const { data } = usePoll<HomeData>("/api/home", 60_000);
+  const { data, error, loading, refresh } = usePoll<HomeData>("/api/home", 60_000);
   const home = data.value;
   useTitle("Review");
   return (
@@ -20,7 +20,8 @@ function Review() {
           {me.value?.name[0]}
         </a>
       </div>
-      {!home && (
+      {!home && error.value && !loading && <LoadFailed retry={() => refresh().catch(() => {})} />}
+      {!home && !(error.value && !loading) && (
         <>
           <span class="gh" aria-hidden="true">
             Waiting on you

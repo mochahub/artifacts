@@ -113,6 +113,7 @@ function boardPage(board) {
   return `<!doctype html><html><head><meta charset="utf-8">
 ${board.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}
 ${board.scripts.map((path) => `<script src="${up}${path}"></script>`).join("\n")}
+${job.theme ? `<style>${job.theme.replaceAll("{{up}}", up)}</style>` : ""}
 <style>html,body{margin:0}body{padding:40px;display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start}
 *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important;transition-delay:0s!important}</style>
 </head><body>${body}</body></html>`;
@@ -151,8 +152,12 @@ async function openBoard(browser, board, scale, failures, fixtures = job.fixture
   return { context, page };
 }
 
+// Only outermost: a page's own components can carry this attribute too, as Stageshow's Phone does.
+const TOP_FRAMES = "[data-frame]:not([data-frame] *)";
+const frameAt = (id) => `[data-frame="${id}"]:not([data-frame] *)`;
+
 /** Frame metadata and render lint, run inside the page (07). */
-function inspect() {
+function inspect(TOP_FRAMES) {
   const frames = [];
   const problems = [];
   const INTERACTIVE = "a,button,input,select,textarea,[role=button],[role=link]";
@@ -191,7 +196,7 @@ function inspect() {
     return [255, 255, 255, 1];
   };
 
-  for (const frame of document.querySelectorAll("[data-frame]")) {
+  for (const frame of document.querySelectorAll(TOP_FRAMES)) {
     const id = frame.dataset.frame;
     const box = frame.getBoundingClientRect();
     const heading = frame.querySelector("h1,h2,h3");
@@ -297,11 +302,11 @@ async function renderBoard(browser, board, problems) {
   for (const scale of SCALES) {
     const { context, page } = await openBoard(browser, board, scale, failures);
     if (scale === 1) {
-      info = await page.evaluate(inspect);
+      info = await page.evaluate(inspect, TOP_FRAMES);
       problems.push(...info.problems);
     }
     for (const frame of info.frames) {
-      const png = await page.locator(`[data-frame="${frame.id}"]`).screenshot({ animations: "disabled" });
+      const png = await page.locator(frameAt(frame.id)).screenshot({ animations: "disabled" });
       shots[frame.id] = { ...shots[frame.id], [scale]: png };
     }
     await context.close();
@@ -337,7 +342,7 @@ async function renderBoard(browser, board, problems) {
     // Twice in fresh contexts: differing pixels are an error (05).
     const { context, page } = await openBoard(browser, board, 1, new Set());
     for (const frame of frames) {
-      const again = await page.locator(`[data-frame="${frame.id}"]`).screenshot({ animations: "disabled" });
+      const again = await page.locator(frameAt(frame.id)).screenshot({ animations: "disabled" });
       if ((await rawHash(again)) !== frame.contentHash) {
         problems.push({
           rule: "frames/deterministic",

@@ -2,6 +2,7 @@
   "project": "demo",
   "slug": "contrast",
   "title": "contrast",
+  "summary": "Fixture: contrast.",
   "pages": [
     {
       "id": "mocks",

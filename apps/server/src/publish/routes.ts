@@ -1,19 +1,24 @@
 import {
   type Anchor,
+  agentLabel,
   type BlockRecord,
   type FrameRecord,
+  isBundlePath,
+  normalizeRepo,
   type PageRecord,
   PublishCommit,
   PublishPrepare,
   type PublishResult,
+  UNNAMED_AGENT,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
-import { type ArtifactRow, toResource } from "../api/artifacts-db.ts";
+import type { z } from "zod";
+import { type ArtifactRow, findArtifact, toProject, toResource } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
 import type { Caller } from "../auth/caller.ts";
-import { seesArtifact } from "../auth/can.ts";
+import { can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
 import {
   activity,
@@ -23,11 +28,13 @@ import {
   frames,
   pages,
   people,
+  projectAccess,
   projects,
   threads,
   versions,
 } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { audienceOf } from "../library/audience.ts";
 import { notifyPublished } from "../push/notify.ts";
 import { reanchor } from "../review/reanchor.ts";
 import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
@@ -56,8 +63,13 @@ type UploadTicket = {
   visibility: "me" | "org";
   uploaded: { files: number; bytes: number };
   reused: number;
+  /** Set when a payload blob carries the commit, so it can only commit that payload (MCP). */
+  payload: string | null;
   exp: number;
 };
+
+/** The whole answer for someone outside a restricted project: no more than any taken name tells them. */
+const nameTaken = () => new ApiError("conflict", "That project name is taken.");
 
 export const publisherOf = (caller: Caller): string => {
   if (caller.kind === "person" || caller.kind === "cliToken") return caller.person.id;
@@ -82,7 +94,10 @@ async function insertChunks<T>(rows: T[], insert: (chunk: T[]) => Promise<unknow
   for (let i = 0; i < rows.length; i += 500) await insert(rows.slice(i, i + 500));
 }
 
-export function publishRoutes(routes: Routes, deps: Deps) {
+export type Publisher = ReturnType<typeof createPublisher>;
+
+/** Publishing, for the API and the hosted MCP alike. `c` only supplies the org and the caller. */
+export function createPublisher(deps: Deps) {
   const { db, env, clock, bucket } = deps;
 
   /** Who may publish to this project/slug, and the row if it exists. Prepare and commit both run this. */
@@ -102,19 +117,23 @@ export function publishRoutes(routes: Routes, deps: Deps) {
           .limit(1)
       : [];
 
-    if (!row) {
+    const place = project ? await toProject(deps, project) : null;
+    const resource = row ? await toResource(deps, row) : null;
+    // Before anything about the slug, or the two answers would say which artifacts are in there.
+    const allowed = place && (seesProject(caller, place) || can(caller, "project.publish", place));
+    if (place?.restricted && !allowed && !(resource && seesArtifact(caller, resource))) throw nameTaken();
+    if (!row || !resource) {
       requireCan(c, "project.create", { type: "org" });
-      if (
-        project &&
-        caller.kind === "orgToken" &&
-        caller.projectIds &&
-        !caller.projectIds.includes(project.id)
-      ) {
-        throw new ApiError("forbidden", "This token can't publish to that project.");
+      if (place && !can(caller, "project.publish", place)) {
+        throw new ApiError(
+          "forbidden",
+          caller.kind === "orgToken"
+            ? "This token can't publish to that project."
+            : "You can't add to that project.",
+        );
       }
       return null;
     }
-    const resource = await toResource(deps, row);
     if (!seesArtifact(caller, resource)) throw new ApiError("conflict", "That slug is taken.");
     if (row.deletedAt) {
       const [by] = await db
@@ -132,11 +151,9 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     return row;
   }
 
-  routes.post("/api/publish/prepare", { action: "artifact.publish", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const body = await parseBody(c, PublishPrepare);
+  async function prepare(c: ApiContext, body: z.infer<typeof PublishPrepare>, payload: string | null = null) {
     const org = c.get("org");
-    const existing = await target(c as ApiContext, body.project, body.slug);
+    const existing = await target(c, body.project, body.slug);
 
     const declared = new Map<string, { size: number; type: string }>();
     for (const file of body.files) {
@@ -163,37 +180,44 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       isNew: !existing,
       project: body.project,
       projectName: body.projectName ?? body.project,
-      repo: body.repo ?? null,
+      // Whatever a client sends: a remote can hold a password, and lookups need one form for one repo.
+      repo: normalizeRepo(body.repo),
       slug: body.slug,
       title: body.title,
       // An org token has no person to be private to, so what it makes stays reachable by it.
       visibility: caller.kind === "orgToken" ? "org" : (body.visibility ?? org.settings.defaultVisibility),
       uploaded: { files: missing.length, bytes: missing.reduce((sum, [, file]) => sum + file.size, 0) },
       reused: known.size,
+      payload,
       exp: clock.now().getTime() + UPLOAD_HOURS * 3600_000,
     };
-    return c.json({
+    return {
       uploadId: signPayload(ticket, env.sessionSecret, UPLOAD_INFO),
       artifactId: ticket.artifactId,
       missing: signed,
-    });
-  });
+    };
+  }
 
-  routes.post("/api/publish/commit", { action: "artifact.publish", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const body = await parseBody(c, PublishCommit);
+  async function commit(c: ApiContext, body: z.infer<typeof PublishCommit>, payload: string | null = null) {
     const org = c.get("org");
     const ticket = verifyPayload<UploadTicket>(body.uploadId, env.sessionSecret, UPLOAD_INFO);
     if (!ticket || ticket.exp <= clock.now().getTime()) {
       throw new ApiError("invalid", "This upload expired. Publish again.");
     }
+    // A ticket made for one payload commits only that one, and a ticket for the API none.
+    if ((ticket.payload ?? null) !== payload) {
+      throw new ApiError("invalid", "This upload was made for another payload.");
+    }
     const caller = c.get("caller");
-    const existing = await target(c as ApiContext, ticket.project, ticket.slug);
+    const existing = await target(c, ticket.project, ticket.slug);
     if (existing && existing.id !== ticket.artifactId) throw new ApiError("conflict", "That slug is taken.");
 
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();
     for (const [path, file] of Object.entries(body.files)) {
+      // `artifacts pull` writes these paths to someone's disk.
+      if (!isBundlePath(path))
+        throw new ApiError("invalid", `${path.slice(0, 200)} isn't a path in a bundle.`);
       checkType(path, file.type);
       wanted.set(file.hash, file.size);
     }
@@ -241,6 +265,8 @@ export function publishRoutes(routes: Routes, deps: Deps) {
     });
 
     const publisher = publisherOf(caller);
+    // Anything but a signed-in person is an agent, whether or not it said which.
+    const agent = body.agent?.trim() || (caller.kind === "person" ? null : UNNAMED_AGENT);
     const now = clock.now();
     const result = await db.transaction(async (tx) => {
       // One commit at a time per artifact (03).
@@ -251,7 +277,9 @@ export function publishRoutes(routes: Routes, deps: Deps) {
         .from(projects)
         .where(and(eq(projects.orgId, org.id), eq(projects.slug, ticket.project)))
         .limit(1);
+      let made = false;
       if (!project) {
+        const byToken = caller.kind === "orgToken";
         [project] = await tx
           .insert(projects)
           .values({
@@ -260,11 +288,48 @@ export function publishRoutes(routes: Routes, deps: Deps) {
             slug: ticket.project,
             name: ticket.projectName,
             repo: ticket.repo,
+            restricted: org.settings.defaultProjectAccess === "restricted",
+            createdBy: byToken ? null : publisher,
+            createdByToken: byToken ? caller.tokenId : null,
           })
-          .onConflictDoUpdate({ target: [projects.orgId, projects.slug], set: { updatedAt: now } })
+          .onConflictDoNothing({ target: [projects.orgId, projects.slug] })
           .returning();
+        // Admins manage what a token made: no person created it (04).
+        if (project && !byToken) {
+          await tx.insert(projectAccess).values({
+            id: Bun.randomUUIDv7(),
+            orgId: org.id,
+            projectId: project.id,
+            personId: publisher,
+            permission: "manage",
+            grantedBy: publisher,
+            createdAt: now,
+          });
+        }
+        made = project !== undefined;
+        if (!project) {
+          // Someone else's publish made it first.
+          [project] = await tx
+            .select()
+            .from(projects)
+            .where(and(eq(projects.orgId, org.id), eq(projects.slug, ticket.project)))
+            .limit(1);
+        }
+      }
+      // Under the transaction: it may have appeared, or been restricted, since target() looked.
+      if (
+        project &&
+        !made &&
+        ticket.isNew &&
+        !can(caller, "project.publish", await toProject(deps, project))
+      ) {
+        throw nameTaken();
       }
       if (!project) throw new Error("no project row");
+      // Projects made before the CLI sent a remote learn it from their next publish.
+      if (!project.repo && ticket.repo) {
+        await tx.update(projects).set({ repo: ticket.repo }).where(eq(projects.id, project.id));
+      }
 
       const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, ticket.artifactId)).limit(1);
       if (ticket.isNew) {
@@ -319,8 +384,10 @@ export function publishRoutes(routes: Routes, deps: Deps) {
         message: body.message ?? null,
         name: body.name ?? null,
         notes: body.notes,
+        summary: body.summary ?? null,
+        tags: body.tags ?? null,
         publishedBy: publisher,
-        agent: body.agent ?? null,
+        agent,
         publishedAt: now,
       });
       await writeContent(tx, org.id, versionId, safePages, body.frames, body.blocks);
@@ -346,7 +413,7 @@ export function publishRoutes(routes: Routes, deps: Deps) {
         artifactId: ticket.artifactId,
         projectId: project.id,
         actorPersonId: publisher,
-        agent: body.agent ?? null,
+        agent,
         kind: "published",
         payload: { version: n, message: body.message ?? null },
         createdAt: now,
@@ -359,13 +426,16 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       };
     });
 
+    const published = await findArtifact(deps, org.id, ticket.artifactId);
     void deps.events.emit(ticket.artifactId, "version", { version: result.version });
     void notifyPublished(deps, org.id, ticket.artifactId, {
       project: ticket.project,
       slug: ticket.slug,
       title: ticket.title,
       version: result.version,
-      agent: body.agent ?? null,
+      // Only a named agent: someone running the CLI at their own terminal knows what they published.
+      agent:
+        body.agent && "person" in caller ? agentLabel(caller.person.name, body.agent) : (body.agent ?? null),
     }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
     const response: PublishResult = {
       version: result.version,
@@ -375,8 +445,23 @@ export function publishRoutes(routes: Routes, deps: Deps) {
       orphaned: result.orphaned,
       uploaded: ticket.uploaded,
       reused: ticket.reused,
+      ...(published ? { audience: await audienceOf(deps, org.name, published, ticket.projectName) } : {}),
     };
-    return c.json(response);
+    return response;
+  }
+
+  return { prepare, commit, target };
+}
+
+export function publishRoutes(routes: Routes, publisher: Publisher) {
+  routes.post("/api/publish/prepare", { action: "artifact.publish", inHandler: true }, async (c) => {
+    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
+    return c.json(await publisher.prepare(c as ApiContext, await parseBody(c, PublishPrepare)));
+  });
+
+  routes.post("/api/publish/commit", { action: "artifact.publish", inHandler: true }, async (c) => {
+    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
+    return c.json(await publisher.commit(c as ApiContext, await parseBody(c, PublishCommit)));
   });
 }
 

@@ -12,6 +12,17 @@ An agent runs `artifacts publish`. The CLI checks the work, renders each screen 
 
 ![Four phone screens from one review: a new version waiting in the inbox, a comment pinned to a screen, a quoted passage in a research page, and a compare view outlining the two regions that changed.](docs/images/review-loop.jpg)
 
+## Connect an agent from anywhere
+
+The skill and the CLI cover agents on a machine with them installed. For remote boxes, Artifacts is also a hosted MCP server at `<your server>/api/mcp`, which signs in with your Artifacts account:
+
+```sh
+artifacts mcp install                       # Claude Code and Codex, opt-in
+claude mcp add --transport http --scope user artifacts https://art.example.com/api/mcp
+```
+
+It can search, read and view hosted work, read comments, reply, publish text articles with no CLI at all, and publish anything else with one. On a box with no sign-in, a CLI token in an environment variable works too: `artifacts mcp install --token-env ARTIFACTS_MCP_TOKEN`. Publishing a canvas still needs the CLI and WebKit on that box, because rendering happens on the client: `artifacts pack` does it, and needs no sign-in.
+
 ## Requirements
 
 - A machine for the server that runs Docker containers, or a Railway account.
@@ -36,7 +47,7 @@ Or `bun add -g @artifacts/cli`, once a release has been published to npm. Nobody
 artifacts setup
 ```
 
-This deploys to Railway (app, Postgres and a bucket), claims the server, makes you the owner, signs this machine in and installs the skill for Claude Code and Codex.
+This deploys to Railway (app, Postgres and a bucket), claims the server, makes you the owner, signs this machine in and installs the skill for Claude Code and Codex. It also offers [Stageshow](https://github.com/benjitaylor/skills), a third-party skill for product demos, which stays off unless you say yes.
 
 **Docker, on a machine you run:**
 
@@ -69,7 +80,7 @@ Then in `.env`, set `PUBLIC_URL`, `CONTENT_URL` and `S3_PUBLIC_ENDPOINT` to thos
 ## Use it
 
 ```sh
-artifacts init            # artifact.json, a starter page and the kit
+artifacts init            # a working folder in .artifacts/work/, with the kit
 artifacts lint            # overlap, clipping, safe areas, contrast, determinism
 artifacts render          # look at .artifacts/contact-sheet.png
 artifacts publish -m "First draft"
@@ -79,7 +90,10 @@ artifacts comments --open --json
 artifacts reply 3 "Moved it above the strip" --fixed
 ```
 
-Invite people with `artifacts org invite sam@example.com`, which prints a link to send yourself. The server never sends email.
+Invite people with `artifacts org invite sam@example.com`, which prints a link to send yourself. The server never sends email. Group them into teams in Settings, and share an artifact with a team from its Share sheet or with `artifacts share --team design`. A project is open to the organization until you restrict it from its own Share sheet, to chosen people and teams. Reviewers and outside people never go above commenting, and admins see everything.
+
+Google sign-in is optional. `artifacts setup` asks for a client, or an admin adds one under Settings, Sign-in, which lists the redirect URIs to paste. Google turns on after one test by that admin. People still need an invite, unless an admin opts in to letting a Google Workspace domain join.
+
 
 ## Upgrading
 

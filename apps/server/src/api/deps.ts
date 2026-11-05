@@ -1,9 +1,11 @@
 import type { Context } from "hono";
+import type { GoogleProvider } from "../auth/google.ts";
 import type { RateLimits } from "../auth/rate-limit.ts";
 import type { Clock } from "../clock.ts";
 import type { Db } from "../db/index.ts";
 import type { Env } from "../env.ts";
 import type { Logger } from "../log.ts";
+import type { MetadataFetch } from "../oauth/clients.ts";
 import type { Events } from "../realtime/events.ts";
 import type { Bucket } from "../s3.ts";
 import type { SandboxPool } from "../sandbox/pool.ts";
@@ -24,4 +26,8 @@ export type Deps = {
   events: Events;
   /** Tests point this at a local push service. */
   pushAllow?: (endpoint: string) => boolean;
+  /** Tests stand in for the internet here: the real fetch refuses every address a test could use. */
+  clientMetadata?: MetadataFetch;
+  /** Tests stand in for Google here. They never call it. */
+  google?: GoogleProvider;
 };

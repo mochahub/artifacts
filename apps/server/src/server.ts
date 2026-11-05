@@ -7,6 +7,7 @@ import type { Deps } from "./api/deps.ts";
 import { mountApi } from "./api/index.ts";
 import { metaRoutes, viewerOrigins } from "./api/meta.ts";
 import { type ApiVars, Routes } from "./api/routes.ts";
+import type { GoogleProvider } from "./auth/google.ts";
 import { RateLimits } from "./auth/rate-limit.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { createContentApp } from "./content/app.ts";
@@ -20,6 +21,9 @@ import { wellKnownWebauthn } from "./http/well-known.ts";
 import { createInternalApp } from "./internal/app.ts";
 import { jobsFor, startJobs } from "./jobs/index.ts";
 import type { Logger } from "./log.ts";
+import { mcpChallenge } from "./mcp/routes.ts";
+import type { MetadataFetch } from "./oauth/clients.ts";
+import { MCP_PATH } from "./oauth/origin.ts";
 import { Events } from "./realtime/events.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
 import { SandboxPool } from "./sandbox/pool.ts";
@@ -34,6 +38,10 @@ export type StartOptions = {
   /** Tests move the clock, so they run jobs by hand. */
   jobs?: boolean;
   pushAllow?: (endpoint: string) => boolean;
+  clientMetadata?: MetadataFetch;
+  google?: GoogleProvider;
+  /** Tests shorten this, so a stream's recheck doesn't take 25 seconds. */
+  heartbeatMs?: number;
 };
 
 const PRIVATE_PEER = /^(::ffff:)?(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|^::1$|^f[cd]/;
@@ -87,7 +95,7 @@ export async function startServer(env: Env, options: StartOptions) {
     return homeDomain;
   };
 
-  const events = new Events(env.databaseUrl);
+  const events = new Events(env.databaseUrl, undefined, options.heartbeatMs);
   await events.start();
 
   const deps: Deps = {
@@ -102,6 +110,8 @@ export async function startServer(env: Env, options: StartOptions) {
     sandbox: null,
     events,
     pushAllow: options.pushAllow,
+    clientMetadata: options.clientMetadata,
+    google: options.google,
   };
   deps.sandbox = new SandboxPool(
     org?.settings.sandboxProcesses ?? DEFAULT_ORG_SETTINGS.sandboxProcesses,
@@ -113,18 +123,23 @@ export async function startServer(env: Env, options: StartOptions) {
   // Exempt from the host check: Railway's and Docker's health checks send their own Host.
   const viewerHost = requireViewerHost(env, currentHomeDomain);
   viewer.use((c, next) => (c.req.path === "/api/health" ? next() : viewerHost(c, next)));
+  viewer.use(MCP_PATH, mcpChallenge(deps));
   viewer.use(apiGuards(deps));
   if (options.onRoute) {
     const record = options.onRoute;
-    viewer.use("/api/*", async (c, next) => {
+    const hit: Parameters<typeof viewer.use>[1] = async (c, next) => {
       await next();
       record(c.req.method, routePath(c));
-    });
+    };
+    viewer.use("/api/*", hit);
+    viewer.use("/.well-known/*", hit);
   }
   metaRoutes(viewer, env, db);
   viewer.get("/.well-known/webauthn", wellKnownWebauthn(deps));
   const routes = new Routes(viewer);
   mountApi(routes, deps);
+  // This transport has no stream to open and no session to end (MCP, Streamable HTTP).
+  viewer.on(["GET", "DELETE"], MCP_PATH, (c) => c.body(null, 405, { Allow: "POST" }));
   viewer.all("/api/*", (c) => c.notFound());
   viewer.get("*", serveViewer(options.viewerDir === undefined ? findViewerDir() : options.viewerDir, deps));
 

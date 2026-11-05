@@ -1,0 +1,38 @@
+{
+  "project": "{{project}}",
+  "slug": "{{slug}}",
+  "title": "{{title}}",
+  "summary": "Replace this: say what this holds and why it mattered, in up to 280 characters.",
+  "tags": ["presentation"],
+  "templateTheme": {
+    "mode": "dark",
+    "accent": "#d7e24b",
+    "display": "grotesque",
+    "font": "grotesque",
+    "radius": 0,
+    "neutralsDark": {
+      "bg": "#10211c",
+      "card": "#183029",
+      "text": "#f3f5ec",
+      "muted": "#a9b8ae",
+      "line": "#2f4a41"
+    }
+  },
+  "pages": [
+    {
+      "id": "slides",
+      "kind": "canvas",
+      "title": "Slides",
+      "boards": [
+        {
+          "id": "deck",
+          "title": "Slides",
+          "subtitle": "16:9, in order",
+          "src": "boards/deck.html"
+        }
+      ],
+      "styles": ["vendor/artifacts-kit/tokens.css", "vendor/artifacts-kit/components.css", "style.css"],
+      "scripts": []
+    }
+  ]
+}

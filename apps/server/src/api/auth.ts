@@ -1,10 +1,20 @@
 import { ChangePassword, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
-import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { sha256 } from "../auth/secrets.ts";
 import { clearCookie, personView, SESSION_COOKIE, startSession } from "../auth/sessions.ts";
-import { passkeys as passkeyRows, passwords, people, resetLinks, sessions, tokens } from "../db/schema.ts";
+import {
+  identities,
+  oauthGrants,
+  passkeys as passkeyRows,
+  passwords,
+  people,
+  resetLinks,
+  sessions,
+  tokens,
+} from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
+import { revokeGrants } from "../oauth/revoke.ts";
 import type { Deps } from "./deps.ts";
 import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
@@ -95,6 +105,11 @@ export function authRoutes(
     return c.json({ ok: true });
   });
 
+  // Answers recent_auth_required, so the viewer can confirm someone before a redirect it can't retry.
+  routes.post("/api/auth/reauth/check", { action: "account.manage", recentAuth: true }, (c) =>
+    c.json({ ok: true }),
+  );
+
   routes.get("/api/me", { action: "account.read" }, (c) => {
     const caller = c.get("caller");
     return c.json({
@@ -107,7 +122,7 @@ export function authRoutes(
   routes.get("/api/me/sessions", { action: "account.manage" }, async (c) => {
     const caller = sessionOf(c.get("caller"));
     const now = clock.now();
-    const [open, cli] = await Promise.all([
+    const [open, cli, connectors] = await Promise.all([
       db
         .select()
         .from(sessions)
@@ -118,6 +133,11 @@ export function authRoutes(
         .from(tokens)
         .where(and(eq(tokens.personId, caller.person.id), eq(tokens.kind, "cli"), isNull(tokens.revokedAt)))
         .orderBy(desc(tokens.createdAt)),
+      db
+        .select()
+        .from(oauthGrants)
+        .where(and(eq(oauthGrants.personId, caller.person.id), isNull(oauthGrants.revokedAt)))
+        .orderBy(desc(oauthGrants.createdAt)),
     ]);
     return c.json([
       ...open.map((row) => ({
@@ -136,6 +156,14 @@ export function authRoutes(
         lastSeenAt: row.lastUsedAt?.toISOString() ?? null,
         current: false,
       })),
+      ...connectors.map((row) => ({
+        id: row.id,
+        kind: "connector" as const,
+        name: row.clientName,
+        userAgent: null,
+        lastSeenAt: row.lastUsedAt?.toISOString() ?? null,
+        current: false,
+      })),
     ]);
   });
 
@@ -148,6 +176,18 @@ export function authRoutes(
       .where(and(eq(sessions.id, id), eq(sessions.personId, caller.person.id)))
       .returning({ id: sessions.id });
     if (ended.length > 0) return c.json({ ok: true });
+    const [grant] = await db
+      .update(oauthGrants)
+      .set({ revokedAt: clock.now() })
+      .where(
+        and(
+          eq(oauthGrants.id, id),
+          eq(oauthGrants.personId, caller.person.id),
+          isNull(oauthGrants.revokedAt),
+        ),
+      )
+      .returning({ id: oauthGrants.id });
+    if (grant) return c.json({ ok: true });
     const revoked = await db
       .update(tokens)
       .set({ revokedAt: clock.now() })
@@ -225,7 +265,7 @@ export function authRoutes(
     if (!person) throw new ApiError("gone", "This reset link no longer works.");
     await setPassword(link.orgId, person.id, password);
     // A reset is the way back from a suspected takeover, so nothing the attacker holds may outlive it:
-    // sessions, CLI tokens and passkeys all end. (A routine password change leaves the last two alone.)
+    // sessions, CLI tokens, passkeys and linked Google accounts all end. (A routine password change leaves the last two alone.)
     // Org tokens aren't personal, so they stay.
     const now = clock.now();
     await db.transaction(async (tx) => {
@@ -233,8 +273,16 @@ export function authRoutes(
       await tx
         .update(tokens)
         .set({ revokedAt: now })
-        .where(and(eq(tokens.personId, person.id), eq(tokens.kind, "cli"), isNull(tokens.revokedAt)));
+        .where(
+          and(
+            eq(tokens.personId, person.id),
+            inArray(tokens.kind, ["cli", "oauth"]),
+            isNull(tokens.revokedAt),
+          ),
+        );
+      await revokeGrants(tx, person.id, now);
       await tx.delete(passkeyRows).where(eq(passkeyRows.personId, person.id));
+      await tx.delete(identities).where(eq(identities.personId, person.id));
     });
     await startSession(c, deps, link.orgId, person.id);
     return c.json({ person: personView(person) });

@@ -181,8 +181,15 @@ export async function domainCommand(
     railway(["variable", "set", `PUBLIC_URL=${origin}`, "--service", SERVICE], dir);
     primary = true;
   }
-  out.result({ domain, primary, dns: printed.trim() }, () => {
+  // Google matches redirects exactly, so a new domain needs its own, and fails until it has one.
+  const meta = await new Client(url)
+    .get("/api/meta")
+    .then((body) => Meta.parse(body))
+    .catch(() => null);
+  const redirect = meta?.google ? `${origin}/api/auth/google/callback` : null;
+  out.result({ domain, primary, dns: printed.trim(), googleRedirectUri: redirect }, () => {
     out.say(printed.trim());
     out.say(`✓ ${domain} added. Add the DNS records above; passkeys keep working.`);
+    if (redirect) out.say(`  Google sign-in: add ${redirect} to your client's redirect URIs.`);
   });
 }

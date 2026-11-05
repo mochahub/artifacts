@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Manifest } from "@artifacts/schema";
 import { Parser } from "htmlparser2";
-import { crawl, typeOf } from "../bundle/crawl.ts";
+import { backendSources, crawl, typeOf } from "../bundle/crawl.ts";
 
 const MB = 1024 * 1024;
 
@@ -62,9 +62,10 @@ export async function staticLint(root: string, manifest: Manifest) {
   }
 
   // data/api: state belongs in the kit's store, where reviewers' copies stay apart (07).
+  const backend = new Set(manifest.backend ? backendSources(root, manifest.backend.src) : []);
   const usesKitData = [...files.keys()].some((path) => path.endsWith("artifacts-kit/data.js"));
   for (const [path, absolute] of files) {
-    if (!/\.(html?|m?js)$/i.test(path) || path.includes("artifacts-kit/")) continue;
+    if (!/\.(html?|m?js)$/i.test(path) || path.includes("artifacts-kit/") || backend.has(path)) continue;
     const source = readFileSync(absolute, "utf8");
     const banned = /\b(localStorage|sessionStorage|indexedDB|document\.cookie)\b/.exec(source)?.[1];
     if (banned) {

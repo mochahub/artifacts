@@ -1,7 +1,8 @@
 import { useSignal } from "@preact/signals";
-import { PlaceholderRows } from "../components/placeholder.tsx";
+import { AgentMark } from "../components/cards.tsx";
+import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
 import { Shell } from "../components/shell.tsx";
-import { agentInitials, agentShort, ago } from "../format.ts";
+import { agentShort, ago } from "../format.ts";
 import { usePoll } from "../poll.ts";
 import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
@@ -12,7 +13,15 @@ type Item = {
   actor: string;
   agent: string | null;
   artifact: { title: string; slug: string; project: string } | null;
-  payload: { version?: number; title?: string; thread?: number; from?: number };
+  payload: {
+    version?: number;
+    title?: string;
+    thread?: number;
+    from?: number;
+    team?: string;
+    person?: string;
+    project?: string;
+  };
   createdAt: string;
 };
 
@@ -37,6 +46,12 @@ const VERBS: Record<string, string> = {
   shared: "shared",
   joined: "joined",
   recovered: "recovered an owner account",
+  team_created: "created the team",
+  team_deleted: "deleted the team",
+  team_member_added: "added someone to",
+  team_member_removed: "removed someone from",
+  project_access_changed: "changed who has access to",
+  identity_linked: "connected Google",
 };
 
 const day = (iso: string) =>
@@ -44,7 +59,10 @@ const day = (iso: string) =>
 
 function Feed() {
   const filter = useSignal("all");
-  const { data, loading } = usePoll<{ items: Item[] }>(`/api/activity?filter=${filter.value}`, 60_000);
+  const { data, error, loading, refresh } = usePoll<{ items: Item[] }>(
+    `/api/activity?filter=${filter.value}`,
+    60_000,
+  );
   useTitle("Activity");
   const items = data.value?.items ?? [];
   const days = [...new Set(items.map((item) => day(item.createdAt)))];
@@ -69,8 +87,13 @@ function Feed() {
           </button>
         ))}
       </div>
-      {!data.value && <PlaceholderRows rows={4} />}
-      {data.value && !loading.value && items.length === 0 && <div class="empty">Nothing yet.</div>}
+      {!data.value &&
+        (error.value && !loading ? (
+          <LoadFailed retry={() => refresh().catch(() => {})} />
+        ) : (
+          <PlaceholderRows rows={4} />
+        ))}
+      {data.value && !loading && items.length === 0 && <div class="empty">Nothing yet.</div>}
       {days.map((label) => (
         <>
           <span class="gh" key={label}>
@@ -80,7 +103,12 @@ function Feed() {
             {items
               .filter((item) => day(item.createdAt) === label)
               .map((item) => {
-                const title = item.artifact?.title ?? item.payload.title ?? "";
+                const title =
+                  item.artifact?.title ??
+                  item.payload.title ??
+                  item.payload.project ??
+                  item.payload.team ??
+                  "";
                 const version = item.payload.version ? ` v${item.payload.version}` : "";
                 return (
                   <a
@@ -88,11 +116,7 @@ function Feed() {
                     key={item.id}
                     href={item.artifact ? `/${item.artifact.project}/${item.artifact.slug}` : undefined}
                   >
-                    {item.agent ? (
-                      <span class="av agent">{agentInitials(item.agent)}</span>
-                    ) : (
-                      <span class="av">{item.actor[0]}</span>
-                    )}
+                    {item.agent ? <AgentMark /> : <span class="av">{item.actor[0]}</span>}
                     <div class="grow">
                       <div class="tt" style="font-weight:400">
                         <b>{item.agent ? agentShort(item.agent) : item.actor}</b> {VERBS[item.kind]} {title}

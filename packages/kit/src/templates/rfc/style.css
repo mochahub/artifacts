@@ -1,0 +1,49 @@
+.cover {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+/* A title page, set like a standards document. */
+.cover {
+  padding: 64px 76px;
+  display: flex;
+  flex-direction: column;
+}
+.cover .head {
+  display: flex;
+  justify-content: space-between;
+  font: 17px var(--art-ui);
+  color: var(--art-tx2);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--art-tx);
+}
+.cover .no {
+  color: var(--art-accent);
+  font-weight: 700;
+}
+.cover h1 {
+  margin: auto 0;
+  max-width: 980px;
+  font: 400 76px / 1.06 var(--art-display);
+  letter-spacing: -0.015em;
+}
+.cover .foot {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-content: space-between;
+  font: 17px var(--art-ui);
+  color: var(--art-tx2);
+}
+.cover .seal {
+  position: absolute;
+  right: 76px;
+  top: 118px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: var(--art-accent);
+}

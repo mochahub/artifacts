@@ -1,0 +1,42 @@
+{
+  "project": "{{project}}",
+  "slug": "{{slug}}",
+  "title": "{{title}}",
+  "summary": "Replace this: say what this holds and why it mattered, in up to 280 characters.",
+  "tags": ["case study"],
+  "templateTheme": {
+    "mode": "light",
+    "accent": "#1f3fbf",
+    "display": "didone",
+    "font": "humanist",
+    "radius": 4,
+    "neutrals": {
+      "bg": "#f6f3ee",
+      "card": "#ffffff",
+      "text": "#14151a",
+      "muted": "#5d5c60",
+      "line": "#dcd7cd"
+    }
+  },
+  "pages": [
+    {
+      "id": "doc",
+      "kind": "article",
+      "src": "doc.md",
+      "title": "Document"
+    },
+    {
+      "id": "cover",
+      "kind": "canvas",
+      "title": "Cover",
+      "boards": [
+        {
+          "id": "main",
+          "title": "Cover",
+          "src": "boards/cover.html"
+        }
+      ],
+      "styles": ["vendor/artifacts-kit/tokens.css", "vendor/artifacts-kit/components.css", "style.css"]
+    }
+  ]
+}

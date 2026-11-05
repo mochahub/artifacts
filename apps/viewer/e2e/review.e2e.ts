@@ -2,8 +2,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { box, watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop") await page.screenshot({ path: `../../docs/mocks/shots/desktop-${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "desktop")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
 };
 
 /** Taps the canvas at the middle of a frame, as a pointer would. */
@@ -22,6 +24,20 @@ async function tapFrame(page: Page) {
   }
 }
 
+/** Tests run in parallel, so each one that needs an open thread pins its own. */
+async function pinComment(page: Page, text: string) {
+  await page.goto("/camerabuddy/roadmap/mocks#frame=welcome");
+  await expect(page.locator(".capsule b")).toHaveText("Welcome");
+  await page.waitForTimeout(350);
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await tapFrame(page);
+  const sheet = page.getByRole("dialog", { name: "New comment" });
+  await sheet.getByLabel("Comment").fill(text);
+  await sheet.getByRole("button", { name: "Post" }).click();
+  await expect(page.getByRole("dialog").filter({ hasText: text })).toBeVisible();
+  await page.keyboard.press("Escape");
+}
+
 test("pin a comment, read it, reply and resolve", async ({ page }, info) => {
   const errors = watchErrors(page);
   const text = `Move this up ${info.project.name}`;
@@ -37,14 +53,14 @@ test("pin a comment, read it, reply and resolve", async ({ page }, info) => {
   await expect(sheet.getByLabel("Comment")).toBeFocused();
   await expect(page.locator(".pin.draft")).toBeVisible();
   // The toolbar steps aside, so its labels don't show through the sheet under Cancel and Post.
-  await expect(page.locator(".vbar")).toHaveCount(0);
+  await expect(page.locator(".vbar")).toBeHidden();
   await sheet.getByLabel("Comment").fill(text);
   await shot(page, info.project.name, "02-3-comment");
   await sheet.getByRole("button", { name: "Post" }).click();
 
   const dialog = page.getByRole("dialog").filter({ hasText: text });
   await expect(dialog).toBeVisible();
-  await expect(page.locator(".vbar")).toHaveCount(1);
+  await expect(page.locator(".vbar")).toBeVisible();
   // The same title as an article thread, with the frame underneath it.
   await expect(dialog.locator(".shead .t")).toContainText(/^Comment \d+/);
   await expect(dialog.locator(".shead .fn")).toHaveText("Welcome");
@@ -66,6 +82,60 @@ test("pin a comment, read it, reply and resolve", async ({ page }, info) => {
   await page.getByRole("button", { name: "Comments" }).click();
   await expect(page.getByRole("dialog", { name: "Comments" }).getByText(text)).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("everything in the comments sheet can be tapped", async ({ page }, info) => {
+  test.skip(info.project.name !== "iphone", "the sheet is phone only");
+  await pinComment(page, "Tap around this");
+  await page.getByRole("button", { name: "Comments" }).click();
+  const sheet = page.getByRole("dialog", { name: "Comments" });
+  await sheet.getByRole("button", { name: /^Fixed/ }).click({ timeout: 3000 });
+  await expect(sheet.getByRole("button", { name: "Copy prompt for your agent" })).toHaveCount(0);
+  await sheet.getByRole("button", { name: /^Open/ }).click({ timeout: 3000 });
+  await sheet.getByRole("button", { name: "Close" }).click({ timeout: 3000 });
+  await expect(sheet).toHaveCount(0);
+});
+
+test("copy the prompt for an agent from the comments", async ({ page }, info) => {
+  await page.addInitScript(() => {
+    const clip = { text: "" };
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (text: string) => {
+          clip.text = text;
+        },
+      },
+    });
+    Object.assign(window, { clip });
+  });
+  const text = `Leave this out ${info.project.name}`;
+  await pinComment(page, text);
+  const phone = info.project.name === "iphone";
+  if (phone) await page.getByRole("button", { name: "Comments" }).click();
+  const where = phone
+    ? page.getByRole("dialog", { name: "Comments" })
+    : page.getByRole("complementary", { name: "Comments" });
+  await where.getByRole("button", { name: "Copy prompt for your agent" }).click();
+  await expect(where.getByRole("button", { name: "Copied. Paste it to your agent" })).toBeVisible();
+  const copied = await page.evaluate(() => (window as unknown as { clip: { text: string } }).clip.text);
+  expect(copied).toContain("Address the open comments on camerabuddy/roadmap");
+  expect(copied).toContain(`${new URL(page.url()).origin}/camerabuddy/roadmap`);
+  expect(copied).not.toContain(text);
+});
+
+test("if the copy fails, the prompt is there to select", async ({ page }, info) => {
+  test.skip(info.project.name !== "iphone", "phone only");
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: () => Promise.reject(new Error("refused")) },
+    });
+  });
+  await pinComment(page, "Copy this by hand");
+  await page.getByRole("button", { name: "Comments" }).click();
+  const sheet = page.getByRole("dialog", { name: "Comments" });
+  await sheet.getByRole("button", { name: "Copy prompt for your agent" }).click();
+  await expect(sheet.getByText("Couldn't copy.")).toBeVisible();
+  await expect(sheet.locator(".copy-prompt-text")).toContainText("artifacts pull camerabuddy/roadmap");
 });
 
 test("the comment sheet sits on the keyboard, and a thread opens from ?c=", async ({ page }, info) => {
@@ -123,6 +193,25 @@ test("comment on a passage: select text, then the quote travels and highlights",
   expect(errors).toEqual([]);
 });
 
+test("comment on a whole paragraph: the selection ends in the next block", async ({ page }, info) => {
+  await page.goto(`/camerabuddy/roadmap/research-0${info.project.name === "iphone" ? 3 : 4}`);
+  const paragraph = page.locator('[data-block="findings/p1"]');
+  await expect(paragraph).toBeVisible();
+  // What a triple-click leaves: from the paragraph's first word to offset 0 of the block after it.
+  await paragraph.evaluate((el) => {
+    const range = document.createRange();
+    range.setStart(el.firstChild as Text, 0);
+    range.setEnd(el.nextElementSibling as Element, 0);
+    const selection = document.getSelection() as Selection;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.locator(".selbtn").click();
+  await expect(page.getByRole("dialog", { name: "New comment" }).locator(".quote")).toHaveText(
+    "The first finding is plain and short.",
+  );
+});
+
 test("comment on a block: tap Comment, then a paragraph", async ({ page }, info) => {
   await page.goto("/camerabuddy/roadmap/research-02");
   await expect(page.locator('[data-block="findings/p2"]')).toBeVisible();
@@ -143,6 +232,9 @@ test("request changes, and the artifact says so", async ({ page }, info) => {
   await expect(sheet.getByText("artifacts status")).toBeVisible();
   await shot(page, info.project.name, "05-3-decide");
   await sheet.getByRole("button", { name: "Request changes" }).last().click();
+  const next = page.getByRole("dialog", { name: "Changes requested" });
+  await expect(next.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
+  await next.getByRole("button", { name: "Close" }).click();
   await expect(page.getByText(`Tighten it ${info.project.name}`)).toBeVisible();
-  await expect(page.getByText("With Claude")).toBeVisible();
+  await expect(page.getByText(/^With .*'s Claude$/)).toBeVisible();
 });

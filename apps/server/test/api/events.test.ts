@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { sha256 } from "../../src/auth/secrets.ts";
-import { artifacts, tokens } from "../../src/db/schema.ts";
+import { artifacts, sessions, tokens } from "../../src/db/schema.ts";
 import { isPushEndpoint } from "../../src/push/notify.ts";
 import { Events } from "../../src/realtime/events.ts";
 import { claim, createDatabase, OWNER, signIn, startTestServer } from "../helpers.ts";
-import { publish } from "../publish-helper.ts";
+import { makeAccount, publish } from "../publish-helper.ts";
 
 /** A TCP proxy to Postgres that can be cut, for an outage long enough that the driver gives up. */
 function proxy(target: URL) {
@@ -130,6 +131,84 @@ describe("push endpoints", () => {
       "nonsense",
     ]) {
       expect(isPushEndpoint(bad)).toBe(false);
+    }
+  });
+});
+
+describe("streams end when access does", () => {
+  const closes = async (response: Response) => {
+    const reader = response.body?.getReader();
+    for (let i = 0; i < 100; i++) {
+      const { done } = (await Promise.race([
+        reader?.read(),
+        Bun.sleep(100).then(() => ({ done: false })),
+      ])) as { done: boolean };
+      if (done) return true;
+    }
+    await reader?.cancel();
+    return false;
+  };
+
+  test("losing a team closes it within a heartbeat, for a session and a token", async () => {
+    const t = await startTestServer({}, { heartbeatMs: 40 });
+    try {
+      const { token } = await claim(t);
+      const owner = await signIn(t, OWNER.email, OWNER.password);
+      await publish(t, token, { slug: "live", visibility: "me" });
+      const [row] = await t.server.db.select().from(artifacts);
+      const member = await makeAccount(t, row?.orgId as string, "member");
+      const made = await t.api("/api/teams", { method: "POST", cookie: owner, json: { name: "Live" } });
+      const { team } = (await made.json()) as { team: { id: string; slug: string } };
+      const member_ = `/api/teams/${team.slug}/members/${member.id}`;
+      await t.api(member_, { method: "PUT", cookie: owner, json: { role: "member" } });
+      await t.api(`/api/artifacts/${row?.id}/teams/${team.id}`, {
+        method: "PUT",
+        cookie: owner,
+        json: { permission: "view" },
+      });
+
+      const streams = await Promise.all([
+        t.api(`/api/events?artifact=${row?.id}`, { cookie: member.cookie }),
+        t.api(`/api/events?artifact=${row?.id}`, { bearer: member.token }),
+      ]);
+      expect(streams.map((response) => response.status)).toEqual([200, 200]);
+      await t.api(member_, { method: "DELETE", cookie: owner });
+      expect(await Promise.all(streams.map(closes))).toEqual([true, true]);
+    } finally {
+      await t.stop();
+    }
+  });
+
+  test("a revoked token's stream ends, and an ended session's", async () => {
+    const t = await startTestServer({}, { heartbeatMs: 40 });
+    try {
+      const { token } = await claim(t);
+      await publish(t, token, { slug: "live" });
+      const [row] = await t.server.db.select().from(artifacts);
+      const member = await makeAccount(t, row?.orgId as string, "member");
+      const open = (auth: object) => t.api(`/api/events?artifact=${row?.id}`, auth);
+      const streams = await Promise.all([open({ cookie: member.cookie }), open({ bearer: member.token })]);
+      await t.server.db.update(tokens).set({ revokedAt: new Date() }).where(eq(tokens.personId, member.id));
+      await t.server.db.delete(sessions).where(eq(sessions.personId, member.id));
+      expect(await Promise.all(streams.map(closes))).toEqual([true, true]);
+    } finally {
+      await t.stop();
+    }
+  });
+
+  test("a stream stays open while access lasts", async () => {
+    const t = await startTestServer({}, { heartbeatMs: 40 });
+    try {
+      const { token } = await claim(t);
+      await publish(t, token, { slug: "live" });
+      const [row] = await t.server.db.select().from(artifacts);
+      const response = await t.api(`/api/events?artifact=${row?.id}`, { bearer: token });
+      const reader = response.body?.getReader();
+      const beats = [await reader?.read(), await reader?.read(), await reader?.read()];
+      expect(beats.every((beat) => beat?.done === false)).toBe(true);
+      await reader?.cancel();
+    } finally {
+      await t.stop();
     }
   });
 });

@@ -1,5 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { KeychainBlocked, waitForKeychain } from "../src/credentials/index.ts";
+import {
+  getToken,
+  KeychainBlocked,
+  removeToken,
+  setToken,
+  waitForKeychain,
+} from "../src/credentials/index.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
 /** A server that only writes down who called it, and with what. */
@@ -73,5 +79,29 @@ describe("a keychain nobody answers", () => {
 
   test("an answer in time comes straight back", async () => {
     expect(await waitForKeychain(Promise.resolve("art_token"), 1000)).toBe("art_token");
+  });
+});
+
+// The real login keychain, so only on a Mac, with a host nobody uses.
+describe.skipIf(process.platform !== "darwin")("the macOS keychain", () => {
+  const url = `https://keychain-test-${process.pid}.invalid`;
+  const read = (service: string) =>
+    Bun.spawnSync(["/usr/bin/security", "find-generic-password", "-s", service, "-a", url, "-w"]);
+  afterAll(() => removeToken(url));
+
+  test("keeps the token in an item Apple's security tool owns, so a new build reads it without asking", async () => {
+    await setToken(url, "art_first");
+    await setToken(url, "art_second");
+    expect(await getToken(url)).toBe("art_second");
+    expect(read("artifacts-cli").stdout.toString().trim()).toBe("art_second");
+    await removeToken(url);
+    expect(await getToken(url)).toBeNull();
+  });
+
+  test("moves a token an older CLI saved, and deletes the old item", async () => {
+    await Bun.secrets.set({ service: "artifacts", name: url, value: "art_legacy" });
+    expect(await getToken(url)).toBe("art_legacy");
+    expect(read("artifacts-cli").stdout.toString().trim()).toBe("art_legacy");
+    expect(read("artifacts").exitCode).toBe(44);
   });
 });

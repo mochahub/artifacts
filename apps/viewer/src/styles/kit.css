@@ -27,6 +27,7 @@
   margin: 0;
   font: 700 34px / 1.12 var(--serif);
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 .h1.m {
   font-size: 30px;
@@ -46,7 +47,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--tx2);
-  margin: 2px 0 -8px 4px;
+  margin: 2px 0 -8px;
   display: block;
 }
 .mono {
@@ -90,13 +91,19 @@
 .card {
   background: var(--card);
   border-radius: 20px;
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
+}
+a.card {
+  transition: transform 140ms ease-out;
+}
+a.card:active {
+  transform: scale(0.985);
 }
 .group {
   background: var(--card);
   border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
 }
 .li {
   position: relative;
@@ -115,6 +122,37 @@
   left: 16px;
   right: 0;
   border-top: 0.5px solid var(--sep);
+}
+/* Pressing fills the row inside its card, so a fill never runs under the card's corners or a rule. */
+a.li[href]::after,
+button.li::after,
+.vrow::after,
+.thread-row::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 14px;
+  background: var(--soft);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease-out;
+}
+a.li[href]:active::after,
+button.li:active::after,
+.vrow:active::after,
+.thread-row:active::after {
+  opacity: 1;
+}
+@media (hover: hover) {
+  a.li[href]:hover::after,
+  button.li:hover::after,
+  .vrow:hover::after,
+  .thread-row:hover::after {
+    opacity: 1;
+  }
+  .rail a:not([aria-current]):hover {
+    color: var(--tx);
+  }
 }
 .li > svg {
   flex: none;
@@ -151,6 +189,11 @@
   background: none;
   cursor: pointer;
   text-decoration: none;
+  transition: transform 140ms ease-out;
+}
+.btn:active:not(:disabled),
+.round:active {
+  transform: scale(0.97);
 }
 .btn svg {
   width: 20px;
@@ -324,6 +367,9 @@
   width: 20px;
   height: 20px;
 }
+.top .back {
+  margin-right: auto;
+}
 .round {
   width: 38px;
   height: 38px;
@@ -336,6 +382,7 @@
   color: var(--tx);
   cursor: pointer;
   text-decoration: none;
+  transition: transform 140ms ease-out;
 }
 .round svg {
   width: 19px;
@@ -351,12 +398,18 @@
   line-height: 1.25;
 }
 .who {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   font-size: 15px;
   color: var(--tx2);
   margin-top: 3px;
+}
+.byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  font-size: 15px;
+  color: var(--tx2);
 }
 .words {
   display: flex;
@@ -397,6 +450,7 @@
   font-weight: 700;
   background: var(--mark);
   color: var(--mark-ink);
+  font-variant-numeric: tabular-nums;
 }
 .dot {
   width: 10px;
@@ -415,31 +469,22 @@
   flex: none;
   font-size: 15px;
   font-weight: 700;
+  text-transform: uppercase;
   background: #3b4250;
   color: #fff;
 }
 .av.you {
-  background: #e9e2c9;
-  color: #3a3220;
+  background: var(--mark);
+  color: var(--mark-ink);
 }
 .av.agent {
-  border-radius: 10px;
-  background: var(--agent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  background: var(--soft);
+  color: var(--agent-word);
 }
-.av.sm {
-  width: 24px;
-  height: 24px;
-  font-size: 11px;
+.av svg {
+  width: 18px;
+  height: 18px;
 }
-.av.agent.sm {
-  border-radius: 7px;
-  font-size: 10.5px;
-}
-
 .card.pad {
   display: flex;
   flex-direction: column;
@@ -490,8 +535,14 @@
   font-weight: 800;
 }
 .kind svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
+}
+/* The icon says what a page is. A tile around it would only be one more box. */
+.kind:has(> svg) {
+  width: 24px;
+  background: none;
+  box-shadow: none;
 }
 .chev {
   flex: none;
@@ -508,7 +559,7 @@
   padding: 0 16px;
   border-radius: 99px;
   background: var(--card);
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
   color: var(--tx3);
 }
 .search svg {
@@ -527,7 +578,7 @@
 }
 .seg {
   display: flex;
-  /* Never grows down a column; across a row it takes the width it's given and scrolls past it. */
+  /* Never grows down a column; on a screen too narrow for its labels it scrolls, the page doesn't. */
   flex: none;
   min-width: 0;
   overflow-x: auto;
@@ -540,7 +591,14 @@
   display: none;
 }
 .row > .seg {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.row > .seg button {
+  flex: none;
+  padding: 0 6px;
 }
 .seg button {
   flex: 1;
@@ -559,6 +617,7 @@
   color: var(--tx);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
+/* A select in the kit's clothes: a pill like the search field, with the system menu behind it. */
 .sort {
   position: relative;
   display: inline-flex;
@@ -633,7 +692,7 @@
   padding: 12px 16px;
   border-radius: 16px;
   background: var(--card);
-  box-shadow: 0 0 0 0.5px var(--sep);
+  box-shadow: var(--lift);
   font-size: 15px;
 }
 .changed-h {
@@ -656,6 +715,231 @@
   -webkit-backdrop-filter: blur(18px) saturate(170%);
   border: 0.5px solid var(--glass-line);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+/* Liquid Glass, for the reader's chrome. iOS Safari can't bend what's behind a page element: it accepts
+   backdrop-filter: url() and draws nothing, and drops the blur beside it. So this is clarity, a lit rim and
+   movement. The layers are pseudo-elements, siblings under the content: a backdrop-filter on a child of
+   another one sees only its parent. */
+@property --liquid-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+:root {
+  --liquid-spring: linear(0, 0.18 6%, 0.55 13%, 0.9 22%, 1.08 31%, 1.12 38%, 1.07 48%, 1 62%, 0.985 75%, 1);
+  --liquid-time: 0.5s;
+}
+.liquid {
+  --liquid-alpha: 0.2;
+  --liquid-blur: 6px;
+  --liquid-sat: 1.9;
+  --tx2: var(--liquid-ink-2);
+  --agent-word: var(--liquid-agent);
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  box-shadow: none;
+  isolation: isolate;
+}
+/* Words that must stay readable over anything: the settings and the hint. */
+.liquid.thick {
+  --liquid-alpha: 0.82;
+  --liquid-blur: 14px;
+  --liquid-sat: 1.7;
+}
+.liquid::before,
+.liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.liquid::before {
+  background: rgb(var(--liquid-tint) / var(--liquid-alpha));
+  backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-sat)) brightness(var(--liquid-bright));
+  -webkit-backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-sat))
+    brightness(var(--liquid-bright));
+  box-shadow: var(--liquid-inner), var(--liquid-drop);
+  transition: background-color 0.25s ease;
+}
+/* The light turns a little as the page moves. On the rim alone, so a frame restyles only the rim. */
+.liquid::after {
+  padding: 1.25px;
+  background: conic-gradient(
+    from calc(295deg + var(--liquid-angle)),
+    var(--liquid-rim-hi),
+    var(--liquid-rim-lo) 22%,
+    var(--liquid-rim-lo) 42%,
+    var(--liquid-rim-hi) 52%,
+    var(--liquid-rim-lo) 66%,
+    var(--liquid-rim-lo) 88%,
+    var(--liquid-rim-hi)
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: liquid-light linear both;
+  animation-timeline: scroll(root);
+}
+@keyframes liquid-light {
+  to {
+    --liquid-angle: 70deg;
+  }
+}
+/* The ink follows the picture behind the glass (article/liquid.ts). */
+.liquid[data-tone="dark"] {
+  --liquid-tint: 16 18 24;
+  --liquid-bright: 0.8;
+  --liquid-ink-2: #e1e4ea;
+  --liquid-agent: #d6ceff;
+  --liquid-rim-hi: rgba(255, 255, 255, 0.7);
+  --tx: #f5f6f8;
+  color: var(--tx);
+}
+.liquid[data-tone="light"] {
+  --liquid-tint: 255 255 255;
+  --liquid-bright: 1.15;
+  --liquid-ink-2: #2c3037;
+  --liquid-agent: #2a1e96;
+  --liquid-rim-hi: rgba(255, 255, 255, 0.95);
+  --tx: #121418;
+  color: var(--tx);
+}
+.liquid.capsule,
+.liquid.vbar {
+  transition:
+    color 0.2s ease,
+    min-height var(--liquid-time) var(--liquid-spring),
+    height var(--liquid-time) var(--liquid-spring);
+}
+.liquid .where span {
+  max-height: 18px;
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease;
+}
+.liquid .round {
+  background: none;
+  transition: transform var(--liquid-time) var(--liquid-spring);
+}
+.liquid .round:active {
+  transform: scale(1.12);
+}
+.liquid .vb {
+  transition: width var(--liquid-time) var(--liquid-spring);
+  -webkit-tap-highlight-color: transparent;
+}
+.liquid .vb[aria-pressed="true"] {
+  background: none;
+  color: inherit;
+}
+.liquid .vb svg {
+  transition: transform var(--liquid-time) var(--liquid-spring);
+}
+.liquid .vb:active svg,
+.liquid .icon-btn:active svg {
+  transform: scale(1.14);
+}
+.liquid .vb .l {
+  display: block;
+  max-height: 16px;
+  line-height: 16px;
+  overflow: hidden;
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease;
+}
+/* The bead under the pressed control. */
+.pool {
+  position: absolute;
+  z-index: -1;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: var(--w, 74px);
+  border-radius: 99px;
+  background: var(--liquid-pool);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--x, 0)) scale(0.82);
+  transition:
+    transform var(--liquid-time) var(--liquid-spring),
+    width var(--liquid-time) var(--liquid-spring),
+    opacity 0.18s ease,
+    background-color 0.18s ease;
+}
+.pool.on {
+  opacity: 1;
+  transform: translateX(var(--x, 0)) scale(1);
+}
+.pool.down {
+  transform: translateX(var(--x, 0)) scale(1.06, 1.1);
+}
+.pool.mark {
+  background: rgba(255, 216, 77, 0.5);
+}
+/* Scrolling down draws the chrome back to its essentials. Without labels, the bar can go thinner still. */
+:root.reading .liquid.capsule {
+  min-height: 44px;
+}
+:root.reading .liquid .where span {
+  max-height: 0;
+  opacity: 0;
+}
+:root.reading .liquid .where b {
+  font-size: 15px;
+}
+:root.reading .liquid.vbar {
+  --liquid-alpha: 0.42;
+  --liquid-blur: 4px;
+  height: 52px;
+}
+:root.reading .liquid .vb {
+  width: 52px;
+  gap: 0;
+}
+:root.reading .liquid .vb .l {
+  max-height: 0;
+  opacity: 0;
+}
+:root.reading .liquid .vsep {
+  margin: 12px 2px;
+}
+.popover.liquid {
+  transform-origin: calc(100% - 32px) -18px;
+  animation: liquid-grow var(--liquid-time) var(--liquid-spring);
+}
+.popover.liquid .seg {
+  background: rgb(var(--liquid-tint) / 0.5);
+}
+@keyframes liquid-grow {
+  from {
+    transform: scale(0.28);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --liquid-spring: ease;
+    --liquid-time: 0.01s;
+  }
+  .liquid::after {
+    animation: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .liquid::before {
+    background: var(--card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--tx2);
+  }
+  .liquid::after {
+    display: none;
+  }
 }
 .tabbar {
   position: fixed;
@@ -755,6 +1039,9 @@
   padding: 14px 10px 4px;
 }
 @media (min-width: 900px) {
+  .row > .seg button {
+    padding: 0 14px;
+  }
   .rail {
     display: flex;
   }
@@ -900,6 +1187,7 @@
   flex: none;
 }
 .vrow {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -932,10 +1220,58 @@
 .num {
   font-variant-numeric: tabular-nums;
 }
+.li:has(> .level) {
+  gap: 8px;
+}
+.addrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.addrow .field {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.addrow .group {
+  order: 3;
+  flex: 1 0 100%;
+}
+.sheet .field,
+.sheet .addrow {
+  flex: none;
+}
+select.field {
+  min-height: 48px;
+}
+.level {
+  flex: none;
+  width: 132px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tx2);
+  font: 16px var(--ui);
+}
+.linkish {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tx);
+  font: 600 15px var(--ui);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.tt a,
+.ss a {
+  color: inherit;
+}
 .gh.split {
   display: flex;
   justify-content: space-between;
-  margin-right: 4px;
+  gap: 12px;
 }
 
 /* Canvas */
@@ -1047,6 +1383,10 @@
   margin: 0;
   flex: none;
 }
+/* Not positioned, so this would stretch across the sheet. The row is the tap target here. */
+.pin.static::before {
+  display: none;
+}
 .th.frame {
   width: 44px;
   height: 56px;
@@ -1054,30 +1394,35 @@
 
 /* Article */
 .article {
-  /* The gutter holds the margin tabs and change dots, so they're never past the edge of a phone. */
+  /* The gutter holds the margin tabs, so they're never past the edge of a phone. */
   --gutter: 32px;
   max-width: calc(42rem - 48px + 2 * var(--gutter));
   margin: 0 auto;
   padding: calc(env(safe-area-inset-top) + 82px) calc(env(safe-area-inset-right) + var(--gutter))
     calc(env(safe-area-inset-bottom) + 108px) calc(env(safe-area-inset-left) + var(--gutter));
   color: var(--tx);
-  font: var(--read-size, 19px) / 1.55 var(--read-font, var(--serif));
+  font: var(--read-size, 19px) / 1.55 var(--read-font, var(--theme-font, var(--serif)));
 }
 .article {
   /* Margin tabs sit in the gutter; on a phone they must never make the page scroll sideways. */
   overflow-x: clip;
 }
+@media (min-width: 900px) {
+  .article {
+    --gutter: 56px;
+  }
+}
 .article h1 {
-  font: 700 34px / 1.14 var(--serif);
+  font: 700 34px / 1.14 var(--theme-display, var(--serif));
   letter-spacing: -0.01em;
   margin: 0 0 12px;
 }
 .article h2 {
-  font: 700 24px / 1.25 var(--serif);
+  font: 700 24px / 1.25 var(--theme-display, var(--serif));
   margin: 28px 0 10px;
 }
 .article h3 {
-  font: 700 20px / 1.3 var(--serif);
+  font: 700 20px / 1.3 var(--theme-display, var(--serif));
   margin: 22px 0 8px;
 }
 .article p,
@@ -1096,6 +1441,10 @@
 }
 .article a {
   color: inherit;
+  /* A brand's accent has to read on both page colours, so it's the underline that carries it. */
+  text-decoration-color: var(--theme-accent, currentColor);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 .article img,
 .article svg {
@@ -1114,7 +1463,7 @@
   overflow-x: auto;
   background: var(--card);
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--theme-radius, 12px);
   font: 14px / 1.5 var(--mono);
 }
 .article code {
@@ -1150,6 +1499,54 @@
   font-style: normal;
   color: var(--tx);
 }
+.article [data-component="stats"] > ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 18px 24px;
+  margin: 22px 0;
+  padding: 0;
+  list-style: none;
+  font: 15px / 1.35 var(--ui);
+  color: var(--tx2);
+}
+.article [data-component="stats"] strong {
+  display: block;
+  font: 700 2.1rem / 1.1 var(--theme-display, var(--serif));
+  color: var(--tx);
+  border-top: 2px solid var(--theme-accent, var(--tx));
+  padding-top: 8px;
+  margin-bottom: 4px;
+}
+.article [data-component="compare"] table {
+  display: table;
+  width: 100%;
+  white-space: normal;
+  table-layout: fixed;
+}
+.article [data-component="compare"] th {
+  color: var(--tx);
+  border-bottom: 2px solid var(--theme-accent, var(--tx));
+}
+.article [data-component="compare"] td {
+  vertical-align: top;
+}
+.article [data-component="steps"] > ol {
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+}
+.article [data-component="steps"] > ol > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 2.2rem;
+  margin-bottom: 12px;
+}
+.article [data-component="steps"] > ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  font: 700 1.3em / 1.2 var(--theme-display, var(--serif));
+}
 .article [data-verdict] {
   font: 600 0.8em var(--ui);
 }
@@ -1163,15 +1560,59 @@
   position: relative;
   scroll-margin-top: 90px;
 }
-.article.show-changes [data-changed]::before {
-  content: "";
-  position: absolute;
-  left: calc(12px - var(--gutter));
-  top: 0.62em;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--agent);
+/* Changes since the version before (diff.ts): in the page all along, shown only while Changes is on. */
+.article ins.chg {
+  text-decoration: none;
+  color: inherit;
+}
+.article:not(.show-changes) :is(del.chg, .chg-gone) {
+  display: none;
+}
+.article.show-changes ins.chg {
+  background: var(--add-hl);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px var(--add-hl);
+}
+.article del.chg {
+  color: var(--warn-word);
+  background: var(--del-hl);
+  text-decoration: line-through 1.5px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px var(--del-hl);
+}
+.article del.chg.gap-l {
+  margin-inline-start: 0.3em;
+}
+.article del.chg.gap-r {
+  margin-inline-end: 0.3em;
+}
+.article.show-changes .chg-new {
+  background: var(--add-hl);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--add-hl);
+}
+.article.show-changes .chg-gone {
+  background: var(--del-hl);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--del-hl);
+}
+/* A row or an item is tinted edge to edge: a ring would overlap its neighbours. */
+.article.show-changes :is(tr, li):is(.chg-new, .chg-gone) {
+  box-shadow: none;
+  border-radius: 0;
+}
+.article.show-changes .chg-gone,
+.article.show-changes .chg-gone * {
+  color: var(--warn-word);
+  text-decoration: line-through 1.5px;
+}
+.article.show-changes .chg-gone img {
+  opacity: 0.45;
+}
+.article .chg-key {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: 8px;
 }
 .popover {
   position: fixed;
@@ -1286,6 +1727,7 @@
   flex: 1;
 }
 .thread-row {
+  position: relative;
   width: 100%;
   display: flex;
   gap: 12px;
@@ -1355,22 +1797,45 @@
   display: flex;
   gap: 10px;
 }
+.status-note {
+  font-size: 15px;
+  color: var(--tx2);
+}
 .stack {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.top .actions {
-  gap: 8px;
+/* The toolbar steps aside for a sheet without a dim, or its labels show through the glass. */
+.vbar.hidden {
+  display: none;
 }
-.status-note {
+.copy-prompt-note {
+  margin: 0;
   font-size: 15px;
   color: var(--tx2);
 }
-@media (min-width: 900px) {
-  .article {
-    --gutter: 56px;
-  }
+.copy-prompt {
+  flex: none;
+}
+.panel .copy-prompt {
+  width: auto;
+  margin: 12px;
+}
+.panel .fn,
+.panel .copy-prompt-text {
+  margin: 0 12px 12px;
+}
+.copy-prompt.done svg {
+  color: var(--ok);
+}
+.copy-prompt-text {
+  flex: none;
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  -webkit-user-select: all;
+  user-select: all;
 }
 @media (min-width: 1100px) {
   .panel {
@@ -1390,7 +1855,6 @@
   }
   .panel .seg {
     margin: 0 12px 10px;
-    flex: none;
   }
   /* The panel's column is spoken for: the page, the canvas and what floats over them keep to the rest. */
   .has-panel {
@@ -1616,6 +2080,172 @@
   gap: 8px;
 }
 
+/* Settings, Brand: a small page drawn with the brand's own tokens, and nothing around it. */
+.specimen {
+  --art-accent: #0a84ff;
+  --art-on-accent: #fff;
+  --art-bg: #f5f6f8;
+  --art-card: #fff;
+  --art-tx: #121418;
+  --art-tx2: #5e6470;
+  --art-sep: #e4e6ea;
+  --art-radius: 14px;
+  --art-ui: var(--ui);
+  margin: 0;
+  padding: 28px 20px;
+  border-radius: 18px;
+  background: var(--art-bg);
+  box-shadow: 0 0 0 0.5px var(--sep);
+}
+.specimen-card {
+  padding: 22px 20px;
+  border-radius: var(--art-radius);
+  background: var(--art-card);
+  box-shadow: 0 0 0 0.5px var(--art-sep);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+.specimen h2 {
+  margin: 0 0 10px;
+  font: 700 30px / 1.1 var(--art-display, var(--art-ui));
+  overflow-wrap: anywhere;
+}
+.specimen p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+}
+.specimen small {
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--art-tx2);
+}
+.specimen hr {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--art-sep);
+}
+.specimen-action {
+  display: block;
+  padding: 11px 16px;
+  border-radius: var(--art-radius);
+  background: var(--art-accent);
+  color: var(--art-on-accent);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+.select {
+  position: relative;
+}
+.select select {
+  appearance: none;
+  padding-right: 44px;
+}
+.select svg {
+  position: absolute;
+  top: 15px;
+  right: 16px;
+  width: 20px;
+  height: 20px;
+  color: var(--tx3);
+  pointer-events: none;
+}
+.hex {
+  width: 92px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--tx);
+  font: 16px var(--ui);
+  text-align: right;
+  outline: none;
+}
+.swatch {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  appearance: none;
+}
+.swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.5px var(--sep);
+}
+.more summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tx2);
+}
+.more summary::-webkit-details-marker {
+  display: none;
+}
+.more summary svg {
+  width: 18px;
+  height: 18px;
+}
+.more[open] summary svg {
+  transform: rotate(90deg);
+}
+
+/* A capital or digit centres on its own ink: a plain line box leaves it a pixel or two low. */
+@supports (text-box: trim-both cap alphabetic) {
+  .count,
+  .av:not(.agent) {
+    display: inline-block;
+    text-align: center;
+    text-box: trim-both cap alphabetic;
+  }
+  .count {
+    padding-block: calc((24px - 1cap) / 2);
+  }
+  .tab .count,
+  .vb .count {
+    padding-block: calc((20px - 1cap) / 2);
+  }
+  .av:not(.agent) {
+    padding-block: calc((34px - 1cap) / 2);
+  }
+}
+
+/* A sheet rises because something asked for it. Nothing moves on its own. */
+@media (prefers-reduced-motion: no-preference) {
+  .sheet,
+  .compose {
+    animation: rise 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .dim {
+    animation: fade 200ms ease-out;
+  }
+  .selbtn {
+    animation: fade 140ms ease-out;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
 /* Placeholders: the page's shape in the page's grey while the first answer is on its way. */
 .ph-line {
   display: block;
@@ -1654,19 +2284,13 @@
 
 /* Interactive states: hover where a pointer can, a press that shows on touch, and one ring for the keyboard. */
 :where(
-  .btn,
-  .li[href],
-  .btn-li,
   .tab,
   .rail a,
-  .round,
   .icon-btn,
   .x,
   .vb,
   .vchip,
   .seg button,
-  .thread-row,
-  .vrow,
   .pin,
   .card.pad,
   .tile,
@@ -1679,15 +2303,10 @@
     background-color 120ms ease,
     box-shadow 120ms ease,
     transform 120ms ease,
-    scale 120ms ease,
-    opacity 120ms ease;
+    scale 120ms ease;
   -webkit-tap-highlight-color: transparent;
 }
 @media (hover: hover) {
-  .li[href]:hover,
-  .btn-li:hover,
-  .thread-row:hover,
-  .vrow:hover,
   .icon-btn:hover,
   .x:hover,
   .vb:not([aria-pressed="true"]):hover,
@@ -1724,8 +2343,6 @@
     text-underline-offset: 3px;
   }
 }
-.btn:not(:disabled):active,
-.round:active,
 .icon-btn:active,
 .x:active,
 .vb:active,
@@ -1738,10 +2355,6 @@ a.av:active {
 .pin:active {
   scale: 0.94;
 }
-.li[href]:active,
-.btn-li:active,
-.thread-row:active,
-.vrow:active,
 .tab:active,
 .rail a:active {
   background: var(--press);

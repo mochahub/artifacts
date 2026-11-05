@@ -2,6 +2,7 @@
   "project": "demo",
   "slug": "refs",
   "title": "refs",
+  "summary": "Fixture: refs.",
   "pages": [
     {
       "id": "mocks",

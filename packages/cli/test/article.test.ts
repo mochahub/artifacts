@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildArticle } from "../src/article/build.ts";
+import { buildArticle } from "@artifacts/schema/article";
+import { TEMPLATES } from "@artifacts/schema/templates";
 
 function build(source: string, root: string, bundle: Record<string, string>) {
   return buildArticle({
     path: "README.md",
     source,
-    root,
+    readFile: (path: string) => readFileSync(join(root, path), "utf8"),
     blobHash: (path) => bundle[path],
     frameHash: () => undefined,
     mermaid: new Map(),
@@ -55,5 +56,17 @@ describe("articles", () => {
     writeFileSync(join(root, "c.json"), '{"labels": 5}');
     const built = build("::chart{src=c.json}\n", root, { "c.json": "h" });
     expect(built.problems.map((problem) => problem.rule)).toEqual(["files/missing"]);
+  });
+  test("stats, compare and steps survive the allowlist", () => {
+    const built = build(":::stats\n- **41%** fewer\n:::\n", "/nowhere", {});
+    expect(built.html).toContain('data-component="stats"');
+  });
+  test("every template's article closes its components, so no fence shows on the page", () => {
+    for (const [name, files] of Object.entries(TEMPLATES)) {
+      const source = files["doc.md"];
+      if (!source) continue;
+      const built = build(source.replace(/^::frame.*$/m, ""), "/nowhere", {});
+      expect(`${name}: ${built.html.includes(":::")}`).toBe(`${name}: false`);
+    }
   });
 });

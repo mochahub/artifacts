@@ -2,7 +2,8 @@ import { type Browser, expect, type Page, test } from "@playwright/test";
 import { OWNER } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
 };
 const stranger = (browser: Browser, project: string) =>
   browser.newContext({
@@ -17,7 +18,7 @@ test("invite someone, they join, and see organization work", async ({ page, brow
   await page.goto("/settings/people");
   await expect(page.getByText(OWNER.email)).toBeVisible();
   await shot(page, info.project.name, "06-4-people");
-  await page.getByRole("button", { name: "Invite" }).click();
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Reviewer", exact: true }).click();
   await page.getByRole("button", { name: "Copy invite link" }).click();
@@ -45,6 +46,7 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
   browser,
 }, info) => {
   await page.goto("/camerabuddy/roadmap");
+  await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("button", { name: "Share" }).click();
   await shot(page, info.project.name, "05-1-share");
   await page.getByRole("button", { name: "Copy link" }).click();
@@ -66,6 +68,9 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
   await sheet.getByLabel("Comment").fill(`From a guest ${info.project.name}`);
   await sheet.getByRole("button", { name: "Post" }).click();
   await expect(guest.locator(".mm").first()).toBeVisible();
+  if (info.project.name === "iphone") await guest.getByRole("button", { name: "Comments" }).click();
+  await expect(guest.getByText(`From a guest ${info.project.name}`).last()).toBeVisible();
+  await expect(guest.getByRole("button", { name: "Copy prompt for your agent" })).toHaveCount(0);
 
   const revoke = page.getByRole("button", { name: "Revoke this link" });
   while ((await revoke.count()) > 0) {

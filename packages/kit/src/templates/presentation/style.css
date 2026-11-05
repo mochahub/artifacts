@@ -1,0 +1,103 @@
+/* 16:9 slides. One idea on each, set big. */
+.slide {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  padding: 72px 84px;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.slide h1 {
+  font: 700 calc(104px * var(--art-scale)) / 0.98 var(--art-display);
+  letter-spacing: -0.035em;
+  margin: 0;
+  max-width: 1040px;
+}
+.slide h2 {
+  font: 700 calc(64px * var(--art-scale)) / 1.04 var(--art-display);
+  letter-spacing: -0.025em;
+  margin: 0 0 40px;
+  max-width: 1040px;
+}
+.slide p {
+  font: calc(27px * var(--art-scale)) / 1.4 var(--art-ui);
+  color: var(--art-tx2);
+  margin: 0;
+}
+.slide .foot {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  font: 500 19px var(--art-ui);
+  color: var(--art-tx2);
+}
+.slide.accent {
+  background: var(--art-accent);
+  color: var(--art-on-accent);
+}
+.slide.accent .foot {
+  color: var(--art-on-accent);
+}
+.slide .disc {
+  position: absolute;
+  right: -180px;
+  bottom: -220px;
+  width: 620px;
+  height: 620px;
+  border-radius: 50%;
+  background: var(--art-accent);
+}
+.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+}
+.two h3 {
+  font: 700 calc(30px * var(--art-scale)) / 1.15 var(--art-display);
+  margin: 0 0 14px;
+  padding-top: 14px;
+  border-top: 2px solid var(--art-accent);
+}
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  height: 330px;
+}
+.bars div {
+  flex: 1;
+  background: var(--art-card);
+  color: var(--art-tx);
+  padding: 12px 14px;
+  font: 600 20px var(--art-ui);
+}
+.bars div.now {
+  background: var(--art-accent);
+  color: var(--art-on-accent);
+}
+.slide.big h2 {
+  font-size: calc(88px * var(--art-scale));
+  line-height: 1.02;
+  margin-bottom: 32px;
+}
+.slide .art-stats {
+  margin-top: auto;
+  margin-bottom: 56px;
+}
+.slide .art-stats > * {
+  font-size: calc(23px * var(--art-scale));
+}
+.slide .art-stats b {
+  font-size: calc(112px * var(--art-scale));
+  margin-bottom: 10px;
+}
+.two p {
+  font-size: calc(30px * var(--art-scale));
+}
+.two {
+  margin-top: 40px;
+}

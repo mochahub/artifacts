@@ -1,4 +1,5 @@
 import type { Thread } from "@artifacts/schema";
+import { GONE } from "./diff.ts";
 import { findQuote, type Quote } from "./quote.ts";
 
 const CONTEXT = 32;
@@ -10,7 +11,8 @@ function wrap(block: HTMLElement, quote: Quote, id: string) {
   const nodes: Text[] = [];
   let text = "";
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if ((node as Text).parentElement?.closest(".mm")) continue; // The margin tabs aren't the author's words.
+    // The margin tabs and the removed words aren't the author's words.
+    if ((node as Text).parentElement?.closest(`.mm, ${GONE}`)) continue;
     nodes.push(node as Text);
     text += (node as Text).data;
   }
@@ -64,31 +66,47 @@ export function decorate(root: HTMLElement, threads: Thread[], open: (id: string
   }
 }
 
-/** The selection as a text-quote anchor: exact words plus 32 characters each side (06). */
+/** The range's words, minus the margin tabs and removed words: a paragraph's selection runs over its tab. */
+function words(range: Range) {
+  const part = range.cloneContents();
+  for (const tab of part.querySelectorAll(`.mm, ${GONE}`)) tab.remove();
+  return collapse(part.textContent ?? "");
+}
+
+/**
+ * The selection as a text-quote anchor: exact words plus 32 characters each side (06).
+ *
+ * An anchor sits in one block, so this quotes the first block with words selected. A triple-click or a
+ * drag past a paragraph's end finishes at the start of the next block, and a drag can start at the end
+ * of the block before.
+ */
 export function quoteFromSelection(root: HTMLElement) {
   const selection = document.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
-  const start = range.startContainer;
-  const element = start instanceof Element ? start : start.parentElement;
-  const block = element?.closest<HTMLElement>("[data-block]");
-  if (!block || !root.contains(block) || !block.contains(range.endContainer)) return null;
-  const exact = collapse(selection.toString()).trim();
-  if (!exact) return null;
+  for (const block of root.querySelectorAll<HTMLElement>("[data-block]")) {
+    if (!range.intersectsNode(block)) continue;
+    const part = range.cloneRange();
+    if (!block.contains(part.startContainer)) part.setStart(block, 0);
+    if (!block.contains(part.endContainer)) part.setEnd(block, block.childNodes.length);
+    const exact = words(part).trim();
+    if (!exact) continue;
 
-  const before = document.createRange();
-  before.selectNodeContents(block);
-  before.setEnd(range.startContainer, range.startOffset);
-  const after = document.createRange();
-  after.selectNodeContents(block);
-  after.setStart(range.endContainer, range.endOffset);
-  return {
-    blockKey: block.dataset.block as string,
-    quote: {
-      exact,
-      prefix: collapse(before.toString()).slice(-CONTEXT),
-      suffix: collapse(after.toString()).slice(0, CONTEXT),
-    },
-    rect: range.getBoundingClientRect(),
-  };
+    const before = document.createRange();
+    before.selectNodeContents(block);
+    before.setEnd(part.startContainer, part.startOffset);
+    const after = document.createRange();
+    after.selectNodeContents(block);
+    after.setStart(part.endContainer, part.endOffset);
+    return {
+      blockKey: block.dataset.block as string,
+      quote: {
+        exact,
+        prefix: words(before).slice(-CONTEXT),
+        suffix: words(after).slice(0, CONTEXT),
+      },
+      rect: part.getBoundingClientRect(),
+    };
+  }
+  return null;
 }

@@ -1,0 +1,42 @@
+{
+  "project": "{{project}}",
+  "slug": "{{slug}}",
+  "title": "{{title}}",
+  "summary": "Replace this: say what this holds and why it mattered, in up to 280 characters.",
+  "tags": ["prd"],
+  "templateTheme": {
+    "mode": "light",
+    "accent": "#d2452d",
+    "display": "grotesque",
+    "font": "grotesque",
+    "radius": 8,
+    "neutrals": {
+      "bg": "#eef1f3",
+      "card": "#ffffff",
+      "text": "#111920",
+      "muted": "#526070",
+      "line": "#cbd3da"
+    }
+  },
+  "pages": [
+    {
+      "id": "doc",
+      "kind": "article",
+      "src": "doc.md",
+      "title": "Document"
+    },
+    {
+      "id": "cover",
+      "kind": "canvas",
+      "title": "Cover",
+      "boards": [
+        {
+          "id": "main",
+          "title": "Cover",
+          "src": "boards/cover.html"
+        }
+      ],
+      "styles": ["vendor/artifacts-kit/tokens.css", "vendor/artifacts-kit/components.css", "style.css"]
+    }
+  ]
+}

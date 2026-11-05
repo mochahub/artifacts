@@ -7,5 +7,9 @@ export function useTitle(...parts: (string | null | undefined)[]) {
   useEffect(() => {
     const org = meta.value?.orgName ?? "Artifacts";
     document.title = title ? `${title} – ${org}` : org;
+    // A route that sets no title of its own must not keep this one.
+    return () => {
+      document.title = org;
+    };
   }, [title]);
 }

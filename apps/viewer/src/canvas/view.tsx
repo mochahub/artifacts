@@ -13,6 +13,7 @@ import {
 import { Sheet } from "../components/sheets.tsx";
 import { renderUrl } from "../format.ts";
 import { LiveFrame, savedNotice } from "../live/frame.tsx";
+import { tapped } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { type Board, CanvasEngine, type Pin } from "./engine.ts";
 import { frameFromHash, frameHash } from "./hash.ts";
@@ -174,14 +175,15 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
     engine.current?.setPins(draft.value ? [...pins, draft.value.pin] : pins);
   });
 
-  // ?c=<n> opens a thread, once.
-  const deepLinked = useRef(false);
+  // ?c=<n> opens a thread, once for each link or tapped notification.
+  const deepLinked = useRef("");
+  const link = `${location.search}/${tapped.value}`;
   useEffect(() => {
     const n = Number(new URLSearchParams(location.search).get("c"));
-    if (deepLinked.current || !n || all.length === 0) return;
+    if (deepLinked.current === link || !n || all.length === 0) return;
     const thread = all.find((entry) => entry.n === n);
     if (!thread) return;
-    deepLinked.current = true;
+    deepLinked.current = link;
     openId.value = thread.id;
     if (thread.anchor?.type === "frame") engine.current?.focusFrame(thread.anchor.frameKey, false);
   });
@@ -241,58 +243,56 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         <TryIt artifact={artifact} frame={trying.value} version={version} engine={engine.current} />
       )}
       {/* The toolbar steps aside for the comment sheet, or its labels show through the glass. */}
-      {!draft.value && (
-        <div class="vbar glass">
+      <div class={`vbar glass${draft.value ? " hidden" : ""}`}>
+        <button
+          type="button"
+          class="vb"
+          aria-pressed={!commenting.value}
+          onClick={() => {
+            commenting.value = false;
+          }}
+        >
+          <Move />
+          Move
+        </button>
+        {canComment && (
           <button
             type="button"
             class="vb"
-            aria-pressed={!commenting.value}
+            aria-pressed={commenting.value}
             onClick={() => {
-              commenting.value = false;
+              commenting.value = !commenting.value;
             }}
           >
-            <Move />
-            Move
+            <MessageCircle />
+            Comment
           </button>
-          {canComment && (
-            <button
-              type="button"
-              class="vb"
-              aria-pressed={commenting.value}
-              onClick={() => {
-                commenting.value = !commenting.value;
-              }}
-            >
-              <MessageCircle />
-              Comment
-            </button>
-          )}
-          <i class="vsep" />
-          <button
-            type="button"
-            class="vb"
-            onClick={() => {
-              framesOpen.value = true;
-            }}
-          >
-            <Images />
-            Frames
-          </button>
-          <button
-            type="button"
-            class="vb"
-            onClick={() => {
-              listOpen.value = true;
-            }}
-          >
-            <List />
-            Comments
-            {openCount > 0 && <b class="count">{openCount}</b>}
-          </button>
-        </div>
-      )}
+        )}
+        <i class="vsep" />
+        <button
+          type="button"
+          class="vb"
+          onClick={() => {
+            framesOpen.value = true;
+          }}
+        >
+          <Images />
+          Frames
+        </button>
+        <button
+          type="button"
+          class="vb"
+          onClick={() => {
+            listOpen.value = true;
+          }}
+        >
+          <List />
+          Comments
+          {openCount > 0 && <b class="count">{openCount}</b>}
+        </button>
+      </div>
       {commenting.value && <div class="hint glass">Tap a spot to comment</div>}
-      <CommentsPanel threads={all} onOpen={select} />
+      <CommentsPanel artifact={artifact} threads={all} onOpen={select} />
       {draft.value && (
         <CommentSheet
           artifact={artifact}
@@ -329,6 +329,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
       )}
       {listOpen.value && (
         <CommentsSheet
+          artifact={artifact}
           threads={all}
           onOpen={select}
           onClose={() => {

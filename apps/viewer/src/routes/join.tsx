@@ -13,6 +13,8 @@ type Preview = {
   role: string;
   email: string;
   artifact?: { title: string };
+  project?: { name: string };
+  teams?: string[];
 };
 
 /** One screen: a passkey is the default, because it's one tap on a phone (06·6). */
@@ -74,7 +76,12 @@ export function Join() {
       </div>
       <p class="sub">
         {invite.invitedBy} invited you{" "}
-        {invite.artifact ? `to ${invite.artifact.title}` : `as a ${invite.role}`}
+        {invite.artifact
+          ? `to ${invite.artifact.title}`
+          : invite.project
+            ? `to ${invite.project.name}`
+            : `as a ${invite.role}`}
+        {invite.teams?.length ? `, in ${invite.teams.join(" and ")}` : ""}
       </p>
       <h1 class="h1">Join {invite.orgName}</h1>
       <label class="gh" for="join-name">
@@ -128,6 +135,11 @@ export function Join() {
             <ScanFace />
             Create a passkey
           </button>
+          {meta.value?.google && (
+            <a class="btn soft" href={`/api/auth/google/start?intent=invite&invite=${token}`}>
+              Continue with Google
+            </a>
+          )}
           <button
             type="button"
             class="btn"

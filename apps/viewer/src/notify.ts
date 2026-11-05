@@ -1,11 +1,17 @@
 import { signal } from "@preact/signals";
 import { api, del, post } from "./api.ts";
+import { safeNext } from "./next.ts";
 import { readStored, writeStored } from "./storage.ts";
 
 /** Set after a first comment; the app shows the sheet. */
 export const askInstall = signal(false);
 
+/** Counts tapped notifications, so a page already at the link still opens its thread again. */
+export const tapped = signal(0);
+
 const ASKED = "artifacts.install-asked";
+const TAPPED = "/tapped-notification";
+const TAP_LASTS_MS = 60_000;
 
 export const standalone = () =>
   matchMedia("(display-mode: standalone)").matches ||
@@ -51,6 +57,22 @@ export async function turnOffNotifications() {
   if (!subscription) return;
   await del("/api/push/subscribe", { endpoint: subscription.endpoint });
   await subscription.unsubscribe();
+}
+
+/**
+ * Goes where the worker left a tapped notification (sw.js). Called whenever the app might have just
+ * been brought back, so taking the note is what decides who follows it.
+ */
+export async function followTapped(go: (url: string) => void) {
+  try {
+    const cache = await caches.open("shell-v1");
+    const note = await cache.match(TAPPED);
+    if (!note || !(await cache.delete(TAPPED))) return;
+    const { url, at } = (await note.json()) as { url: string; at: number };
+    if (Date.now() - at > TAP_LASTS_MS) return;
+    go(safeNext(url));
+    tapped.value++;
+  } catch {}
 }
 
 /** Kept pages and answers belong to whoever was signed in. From here too: this page may not be controlled. */

@@ -1,0 +1,43 @@
+.cover {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+/* A magazine opener: the result is the headline. */
+.cover .num {
+  position: absolute;
+  left: 56px;
+  bottom: 44px;
+  font: 400 280px / 0.82 var(--art-display);
+  letter-spacing: -0.04em;
+  color: var(--art-accent);
+}
+.cover h1 {
+  position: absolute;
+  top: 56px;
+  right: 60px;
+  width: 500px;
+  margin: 0;
+  font: 400 50px / 1.08 var(--art-display);
+}
+.cover p {
+  position: absolute;
+  right: 60px;
+  bottom: 56px;
+  width: 500px;
+  margin: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--art-tx);
+  font: 19px / 1.4 var(--art-ui);
+  color: var(--art-tx2);
+}
+.cover small {
+  position: absolute;
+  top: 60px;
+  left: 60px;
+  font: 600 16px var(--art-ui);
+}

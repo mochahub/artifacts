@@ -1,17 +1,27 @@
 import type { ProjectRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { Search } from "lucide-preact";
-import { PlaceholderRows } from "../components/placeholder.tsx";
+import { ChevronsUpDown, Search } from "lucide-preact";
+import { useLocation } from "preact-iso";
+import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
 import { ProjectTile, Shell } from "../components/shell.tsx";
 import { ago, plural } from "../format.ts";
 import { usePoll } from "../poll.ts";
 import { useTitle } from "../title.ts";
 import { SignedIn } from "./guard.tsx";
 
+type Teams = { teams: { slug: string; name: string }[] };
+
 function List() {
   const q = useSignal("");
-  const { data } = usePoll<ProjectRow[]>(`/api/projects?q=${encodeURIComponent(q.value)}`, 60_000);
+  const { query, route } = useLocation();
+  const team = query.team ?? "";
+  const { data, error, loading, refresh } = usePoll<ProjectRow[]>(
+    `/api/projects?${new URLSearchParams({ q: q.value, ...(team ? { team } : {}) })}`,
+    60_000,
+  );
   useTitle("Projects");
+  const teams = usePoll<Teams>("/api/teams", 300_000);
+  const choices = teams.data.value?.teams ?? [];
   return (
     <Shell>
       <h1 class="h1 l">Projects</h1>
@@ -26,7 +36,31 @@ function List() {
           }}
         />
       </label>
-      {!data.value && <PlaceholderRows rows={3} />}
+      {choices.length > 0 && (
+        <label class="sort" style="align-self:flex-start">
+          <select
+            aria-label="Filter by team"
+            value={team}
+            onChange={(e) =>
+              route(e.currentTarget.value ? `/projects?team=${e.currentTarget.value}` : "/projects")
+            }
+          >
+            <option value="">Every team</option>
+            {choices.map((choice) => (
+              <option value={choice.slug} key={choice.slug}>
+                {choice.name}
+              </option>
+            ))}
+          </select>
+          <ChevronsUpDown />
+        </label>
+      )}
+      {!data.value &&
+        (error.value && !loading ? (
+          <LoadFailed retry={() => refresh().catch(() => {})} />
+        ) : (
+          <PlaceholderRows rows={3} />
+        ))}
       {data.value && data.value.length > 0 && (
         <div class="group">
           {data.value.map((project) => (
@@ -36,6 +70,7 @@ function List() {
                 <div class="tt">{project.name}</div>
                 <div class="ss">
                   {plural(project.artifactCount, "artifact")}, {ago(project.updatedAt)}
+                  {project.restricted && ", restricted"}
                 </div>
               </div>
               {project.openCount > 0 && <b class="count">{project.openCount}</b>}
@@ -43,7 +78,9 @@ function List() {
           ))}
         </div>
       )}
-      <p class="fn center">A project appears the first time an agent publishes from its repo.</p>
+      {data.value?.length === 0 && !q.value && (
+        <p class="fn center">A project appears the first time an agent publishes from its repo.</p>
+      )}
     </Shell>
   );
 }

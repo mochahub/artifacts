@@ -37,14 +37,14 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 5. **Review is the core feature.** Anchored comments, threads, resolve, version-aware pins, and an agent API to read comments and reply to them.
 6. **Looks stunning by default.** A shared design kit (device frames, article typography, components) means an agent's first draft already looks polished. Each project can theme it.
 7. **Quality gates.** Lint, render and size budgets run before anything is published.
-8. **People and teams.** Each deployment is one organization. A publisher is a person or the organization: artifacts are private to their publisher or visible to the whole organization, depending on an organization setting, and any single artifact can be shared with people outside.
+8. **People and teams.** Each deployment is one organization, and people can belong to any number of teams inside it. A publisher is a person or the organization: artifacts are private to their publisher or visible to the whole organization, depending on an organization setting, and any single artifact can be shared with a team or with people outside. A project is open to the organization, or restricted to chosen people and teams.
 9. **Micro apps when needed.** An artifact can be just pages, or a small app: a frontend, an optional backend that ships in the same bundle, and an optional data folder (§7.9). Most artifacts use none of the extras.
 
 ### Non-goals (for now)
 - Editing in the browser. Agents and repos are where content is written; the viewer is for reading and reviewing.
 - Real-time co-editing, or a Figma replacement.
 - A hosted, multi-tenant service, for now. Artifacts is open source that each team deploys for itself: one click from the Railway template, or Docker Compose anywhere (§14, [hosting evaluation](hosting-evaluation.md)).
-- Sign-in through outside providers (Google, GitHub, SSO). Accounts use email with a password or a passkey, so a deploy needs no OAuth app.
+
 - Sending email. Invite, reset and share links are copied and sent by hand, so a deploy needs no email provider.
 - Long-running servers, background jobs and SQL databases for artifacts. An artifact's backend answers requests and stops (§7.9).
 
@@ -80,13 +80,18 @@ Organization          mochahub                 one per deployment; created by `a
 
 ## 4. Authoring contract
 
-### 4.1 Manifest (`artifact.json`, kept next to the source in the project repo)
+### 4.1 Manifest (`artifact.json`, kept next to the source)
+
+The server holds what's published, so source doesn't have to be in git. `artifacts init` writes to `.artifacts/work/<slug>/`, which git ignores; `--in-repo` writes to the current folder, to commit it. `artifacts pull` restores a working folder from any version, and `artifacts export` writes out a whole project.
+
 ```jsonc
 {
   "project": "camerabuddy",
   "slug": "roadmap",
   "visibility": "org",           // "me" or "org"; optional, otherwise the organization default (§7.3)
   "title": "Camera Buddy roadmap",
+  "summary": "The plan, research and mocks. Wi-Fi pairing won over Bluetooth.",   // required by lint, up to 280 characters
+  "tags": ["roadmap", "camera"],  // optional: up to 8, up to 32 characters each
   "theme": { "accent": "#ff9f0a", "font": "inter", "mode": "auto" },
   "backend": { "src": "api/index.ts" },   // optional: request handlers shipped with the bundle (§7.9)
   "pages": [
@@ -98,6 +103,8 @@ Organization          mochahub                 one per deployment; created by `a
   ]
 }
 ```
+
+`summary` and `tags` are an artifact's frontmatter: what a later agent reads instead of the whole document (§10.3). Versions from before they existed stay valid, and show their first text instead.
 
 ### 4.2 Canvas rules
 - Every screen is an element with a **stable** `data-frame="live-view"` id and `data-device="iphone|ipad|watch|mac|browser|none"`. Comments attach to these ids, so renaming one orphans its comments, and lint warns about it.
@@ -123,7 +130,7 @@ Organization          mochahub                 one per deployment; created by `a
 - **Status nobody has to set.** Each artifact shows whose turn it is, worked out from the review: **Waiting on you** (a new version, or a reply, since your last decision), **With Claude** (you asked for changes and the agent hasn't published since), **Approved vN**, or **Not reviewed yet**.
 - **Projects:** search, sort (recent activity or name) and filter by status.
 - **Light and dark mode:** follows the system, with an override switch.
-- **Marks:** yellow is a person's (pins, highlights, open counts); violet is an agent's (new versions, replies, changed frames and paragraphs). Labels are coloured words, not tinted pills; only counts get a filled badge. Agents sign with initials in a violet square, never a sparkle icon, and nothing uses a coloured bar down a card's edge.
+- **Marks:** yellow is a person's (pins, highlights, open counts); blue is an agent's (new versions, replies, changed frames and paragraphs). Labels are coloured words, not tinted pills; only counts get a filled badge. Agents sign with a blue pencil, never a sparkle icon or initials in a coloured square, and nothing uses a coloured bar down a card's edge.
 - **Home and Activity:** Home lists the artifacts waiting on you (a new version since you last looked, or replies to you). Activity is a feed of publishes, comments and decisions across projects, which you can filter to agents or people.
 - **Installable:** a PWA you can add to the Home Screen. A service worker caches the versions you've viewed, so they open offline.
 - **Links:**
@@ -147,7 +154,7 @@ Organization          mochahub                 one per deployment; created by `a
   - The images stay pixel-identical while you pan, and memory stays bounded.
 - **Comment mode:** tap a spot to drop a pin, which stores the frame id plus x and y as 0–1 fractions. A bottom sheet opens above the keyboard (positioned with `visualViewport`) and never covers the toolbar.
 - **Frames list:** jump to any frame, with a dot on frames that have open comments or changed in this version.
-- **Compare (Phase 2):** side by side, swipe, or **Changes**: the regions whose pixels differ between the two renders, each outlined in violet and numbered. An agent can label a frame's change when it publishes (`--note "live-view=Moved MF above the strip"`), and the label appears next to that region.
+- **Compare (Phase 2):** side by side, swipe, or **Changes**: the regions whose pixels differ between the two renders, each outlined in blue and numbered. An agent can label a frame's change when it publishes (`--note "live-view=Moved MF above the strip"`), and the label appears next to that region.
 
 ### 5.3 Article
 - **Readable at any width:**
@@ -171,7 +178,7 @@ Two ways to clear an artifact away: **archive** when it's done and worth keeping
 | | Archive | Delete |
 |---|---|---|
 | What it's for | Finished work you may want to look back at | Mistakes, duplicates, things published by accident |
-| Lists | Hidden from Home, Projects and search; shown under a project's **Archived** filter | Gone from every list; shown in **Recently deleted** for 30 days |
+| Lists | Hidden from Home, Projects and people's search; shown under a project's **Archived** filter. Agents still find it in `artifacts search`, marked archived, because a dropped experiment is worth knowing about (§10.3) | Gone from every list; shown in **Recently deleted** for 30 days |
 | Its links | Keep working, with an "Archived" banner | Stop working at once: people who could see it are told "This artifact was deleted", anyone else gets the ordinary not-found page, and share links stop |
 | Reviewing | Read-only: no new comments, versions or approvals | Nothing |
 | Micro app | Try it still runs; its data folder becomes read-only, so backend writes are refused | Its backend stops |
@@ -214,6 +221,7 @@ Two ways to clear an artifact away: **archive** when it's done and worth keeping
   - `artifacts publish` prints which open threads point at frames that changed, so the agent can reply to each of them.
 - **Approval:** you can mark a version "Approved" or "Request changes" with a note.
   - Nothing is pushed to the agent. Agents run on people's machines, not on the server, so "Request changes" only records the decision. The skill starts every agent run with `artifacts status`, which returns the decision, the note and the open comments.
+  - "Copy prompt for your agent" gives people who can decide a prompt to paste into their agent, so a review can start the next run by hand. It appears with open comments and after "Request changes". It names the artifact and never carries comment text.
   - **Later, optional:** a webhook per project that fires on "Request changes", so a team can start an agent run from it (a CI job, or a remote Claude Code session).
 - **Version history:** every publish is kept. Like a docs app, a person can name a version ("Real photos"), preview any version, compare it with the current one, and **restore** it. Restoring publishes a copy of the old version as the next one, so nothing is lost and open threads re-anchor as usual. CLI: `artifacts versions`, `artifacts versions name 4 "Real photos"`, `artifacts restore 4`. Agents can name the version they publish with `artifacts publish --name`.
 - **Notifications (Phase 2):** your own server sends Web Push to devices that allowed it, when an agent publishes or someone replies, plus a daily digest.
@@ -295,7 +303,8 @@ On Railway, those are three things in one project from the template: the app ser
 | Member | Publish, see every organization-visible artifact, comment, share, archive and delete their own artifacts |
 | Reviewer | See and comment on organization-visible artifacts; can't publish |
 
-**Sign-in is email with a password, a passkey, or both.** No OAuth provider is involved.
+**Sign-in is email with a password, a passkey, or both, or optionally Google.** A deploy needs no OAuth app: Google is off until an admin sets up a client, tests it and turns it on. GitHub, SAML and SCIM aren't supported.
+
 - **Passwords:**
   - argon2id hashes (`Bun.password`) and a 12-character minimum.
   - Rate limits with backoff, per account and per IP.
@@ -309,10 +318,12 @@ On Railway, those are three things in one project from the template: the app ser
   - People can see and end their sessions.
   - Adding a passkey, changing a password or creating a token needs a sign-in within the last 10 minutes.
 
-**No open sign-up.** Accounts only come from invites:
+**No open sign-up, unless an admin opts in.** Accounts come from invites. The one exception is **Workspace auto-join**, an opt-in setting that's off by default: an admin names a Google Workspace domain, a role and teams, and someone whose Google `hd` claim is that domain can join without an invite. It reads the claim, never a request parameter, and never allows `gmail.com`.
+
 - **Organization invites,** from an admin with a role. The link is single-use and expires in 7 days. The admin copies it and sends it themselves. The invitee picks a password, a passkey or both.
 - **Artifact invites,** from whoever shared the artifact, also as a copied link. They create an outside account that can only reach the artifacts shared with it.
-- **Email addresses are sign-in names.** Nothing checks that a person owns their address; the admin who sent the link vouches for it.
+- **Email addresses are sign-in names.** Nothing checks that a person owns their address; the admin who sent the link vouches for it. So a Google account with the same address never takes over an existing account: a link happens while accepting an invite for that address, or for someone who has just signed in the usual way.
+
 
 **Password reset.** An admin issues a one-time reset link that lasts an hour (`artifacts org reset-link <email>` or the person's page) and sends it. A person with a passkey can also sign in with it and change their password. Owner recovery is in §7.4.
 
@@ -328,7 +339,11 @@ On Railway, those are three things in one project from the template: the app ser
 - **The content domain is never listed.** Bundle scripts run there and must not be able to ask for passkeys. The server refuses to start if it's listed.
 - Sign-in sessions are per domain: opening the other domain means signing in again, with the same passkey.
 
-**Visibility inside the organization.** Each artifact is **Only me** (the publisher, plus anyone they add) or **Organization** (every member and reviewer). An organization setting picks the default for new artifacts, and the manifest's `visibility` or the viewer can override it per artifact.
+**Visibility inside the organization.** A project is open to the organization or restricted. Add people or teams to give them a level. Reviewers and outside people never go above commenting. Admins see everything. Each artifact is **Only me** (the publisher, plus anyone they add) or **Organization** (everyone who can see its project: in an open project, every member and reviewer). An organization setting picks the default for new artifacts, and the manifest's `visibility` or the viewer can override it per artifact.
+
+**Teams.** A team is a named group of people inside the organization, and an artifact can be shared with it at a level, as with a person. Anyone added to a team later gets the same access. A person added directly keeps exactly that level, so a direct "view" still narrows one person. Reviewers and outside people stop at commenting however they got there. Admins make teams, and a team's leads choose who's in it, in a browser: agents can read teams and share their own work with one, up to commenting, but can't change a team. People who can publish can search the people directory, by name or email, in a browser.
+
+**Project access.** People and teams can be given a level on a whole project: **view**, **comment**, **publish** adds new artifacts, and **manage** also publishes to any artifact, archives, deletes and changes who has access. Whoever creates a project manages it. Project grants never reach an **Only me** artifact. Making a project restricted hides it from everyone else, including search, and takes it away from organization tokens that don't name it. Links and outside invites in a restricted project need `manage`. An organization setting picks what new projects start as. Managing a project is for people in a browser: an agent's token still only manages what its person published.
 
 **Sharing outside, per artifact:**
 - **People:** invite someone by email address as a viewer or commenter, and send them the printed link. A member of the organization can also be added as a **publisher** of that one artifact, so their agent can publish new versions; only the artifact's publisher or an admin can do that, because publishing a backend can read everyone's saved data. They sign in to an outside account that sees only what's shared with it.
@@ -338,7 +353,7 @@ On Railway, those are three things in one project from the template: the app ser
 **The CLI and agents.**
 - `artifacts login <url>` uses the device flow. The CLI shows a code and opens `<url>/device`; you sign in with your password or passkey and approve. The token goes in the OS keychain, acts as you, and is scoped to publishing and commenting.
 - Admins create organization tokens for CI and headless agents, scoped to projects and revocable.
-- Each publish records the person and the agent the CLI detected ("Claude for Zahin").
+- Anything a token does is marked as an agent's, shown with its person ("Zahin's Claude Code", or "Zahin's agent" when it didn't name itself). It never reads as the person's own comment or publish.
 
 **One permission check.** Every request resolves to who is asking (a session, a CLI or organization token, or a share token). One function decides what that caller may do. Every API route uses it, and so does minting content-host tokens. A test matrix covers role × visibility × share type.
 
@@ -651,8 +666,9 @@ The kit is why artifacts look stunning by default instead of only when an agent 
   - Android in a later phase
   - Each is a web component (`<a-phone time="9:41">`), generalized from CameraBuddy's `mock.js`.
 - **iOS-style primitives:**
-  - glass material, tab bar, nav bar, sheet, list rows, toggles, segmented control
+  - tab bar, nav bar, sheet, list rows, toggles, segmented control
   - the "safe text" utilities the audit kept needing (no text under the home indicator, no clipped labels)
+- **Templates:** editable starters for daily work, copied by `artifacts init --template <name>`: design review, presentation, case study, PRD, RFC, research report and weekly status. Each has a guide to its structure in the skill. They never prescribe content, and agents can skip them. Presentations are canvas boards of 16:9 frames.
 - **Icons:** an open-licence icon set such as Lucide, with a name map. No emoji as icons, as the CameraBuddy audit found.
 - **Article typography:** a display and body font pair, plus these components:
   - callouts
@@ -661,7 +677,8 @@ The kit is why artifacts look stunning by default instead of only when an agent 
   - verdict badges
   - stat tiles
   - figures and charts (the `dataviz` skill's palette and rules)
-- **Theme tokens:** accent, neutrals, radius, font and density. Each project sets them in its manifest, so CameraBuddy looks like CameraBuddy.
+- **Theme tokens:** accent, neutrals, radius, fonts and type scale. Each project sets them in its manifest, so CameraBuddy looks like CameraBuddy. The CLI turns them into tokens at render, and articles carry the allowed values to the viewer, which applies them only inside the article body. The review UI keeps its own look.
+- **Brand:** a good default ships for everyone. `artifacts setup` ends with a prompt to hand an agent, which reads your brand guide, previews it across the templates and proposes it with a sample artifact. A person reviews the sample and applies it in Settings; a token can't. A person can also set a name, colours, built-in fonts and corners by hand in Settings, with a live preview; only an agent can add font files. Precedence, lowest first: a template's look, the org's brand, a project's `theme`. The CLI caches the brand, so it renders offline. Brand fonts ship in each bundle, so they must be licensed for embedding.
 - **Photo helpers:** stand-in images, `data-p` photo frames with real aspect-fit, and computed overlays. CameraBuddy's overlay code stays in that project; the kit only provides the hook.
 
 Phase 0 sets the visual direction: we mock the viewer itself and review it in the existing local canvas. The system is also its own first artifact.
@@ -694,10 +711,16 @@ artifacts doctor                  # checks WebKit, the skill, the sign-in and th
 artifacts skill install           # reinstalls the skill for Claude Code and Codex
 artifacts login <url> | logout | whoami   # browser approval (device flow); token in the OS keychain
 artifacts recover <url>           # with SETUP_TOKEN: a one-hour reset link for an owner
-artifacts init                    # adds artifact.json + kit to the current repo
+artifacts init [--in-repo]        # a working folder in .artifacts/work/, or artifact.json + kit here
 artifacts dev                     # local viewer with hot reload (replaces review/server.py)
 artifacts lint | render           # quality gates; contact sheet in .artifacts/
 artifacts publish [-m <message>] [--note <frame>=<text>]   # → URL, change summary, threads on changed anchors
+artifacts search <words>          # the hosted library: short cards, from any folder
+artifacts list [<project>[/<slug>[/<page>]]]   # browse, only as deep as asked
+artifacts read <project>/<slug>   # full text, in pieces
+artifacts view <project>/<slug>   # a frame as a picture: a thumbnail, or larger on request
+artifacts pull <project>/<slug>   # restore a working folder from a published version
+artifacts export <project>        # every artifact in a project, with versions, comments and decisions
 artifacts open [--version N]
 artifacts comments [--open] [--json] [--page mocks]
 artifacts status                  # latest decision, note and open comment count
@@ -716,7 +739,7 @@ artifacts restore <n>             # publishes a copy of version n as the next ve
 artifacts data ls | get <key> | export | clear [--scope shared|me]   # an artifact's data (§7.9)
 artifacts logs [--follow]         # the artifact backend's console output and errors
 ```
-- **Which artifact a command acts on:** commands about one artifact (`publish`, `open`, `comments`, `status`, `reply`, `visibility`, `share`, `versions`, `restore`, `archive`, `delete`, `undelete`, `data`, `logs`) act on the artifact named by the `artifact.json` in the current folder or its nearest parent. An optional `<project>/<slug>` argument overrides that, for example `artifacts archive camerabuddy/onboarding-v1`. Every command accepts `--json` for agents.
+- **Which artifact a command acts on:** commands about one artifact (`publish`, `open`, `comments`, `status`, `reply`, `visibility`, `share`, `versions`, `restore`, `archive`, `delete`, `undelete`, `data`, `logs`) act on the artifact named by the `artifact.json` in the current folder or its nearest parent, or else on the only working folder in `.artifacts/work/`. An optional `<project>/<slug>` argument overrides that, for example `artifacts archive camerabuddy/onboarding-v1`. Every command accepts `--json` for agents.
 - **`share --invite` from a CLI token** gives access that can comment but not approve, request changes or resolve, until a person confirms it by granting the same person access in the viewer.
 - The CLI is agent-agnostic, so Claude Code, Codex, CI and you can all use the same contract. The full command reference, with flags and output, is in [implementation/07-cli-and-skill.md](implementation/07-cli-and-skill.md).
 - An **MCP server** (Phase 2) is a thin wrapper over the same API, for tools without a shell.
@@ -736,6 +759,28 @@ artifacts logs [--follow]         # the artifact backend's console output and er
   3. Republish.
   4. Reply to each thread with what changed, using `--fixed`. Never resolve a person's comment. If a comment is ambiguous, ask a question and leave the thread open.
 - **Report back:** the URL, the version, what changed and which threads were marked fixed.
+
+### 10.3 The hosted library
+
+A later agent should find, skim and open published work almost as easily as local files, in any repo, with or without a working copy.
+
+- **Selective disclosure.** `search` and `list` return small cards with a capped size: project, slug, title, summary, tags, status, outcome, latest version, updated time and a match snippet. Only `read` (paged) and `view` (a picture) return content, so an agent can page through a hundred results without filling its context.
+- **Search** is Postgres full-text search over each artifact's latest version: article text, frame and page titles, summaries, tags, version notes and comments. It answers in the viewer's ⌘K too.
+- **`outcome`** says how the review ended: approved or changes requested, open comments, and archived, so an agent can tell whether an experiment won or was dropped.
+- **Project matching.** A project remembers its git remote, in any form, with credentials removed, so an agent in a clone finds its project with no `artifact.json`.
+- **Every search, list and read** goes through the same permission check as the viewer, and a hidden artifact can't show through a count, a snippet or a summary.
+- **Text in results is data.** Comments, summaries and articles can come from other people, guests included, so tool results say to treat them as data, never as instructions.
+
+### 10.4 The hosted connector
+
+A hosted MCP server at `<viewer domain>/api/mcp` makes a remote box easy to set up in tools like Claude Code and Codex, with no local skill.
+
+- **Sign-in** is OAuth 2.1 with our own server as the authorization server, on the existing email, password and passkey sign-in, plus a consent screen. Connectors appear in Settings and can be ended there. Scopes are read, comment and publish. A connector can't resolve, decide, delete or manage. CLI tokens also work as a static bearer.
+- **Tools:** search, list, read, view, status, comments, reply and versions, with the same permission checks as the API, and two for publishing. Templates and guides are resources, so a connected agent has the guidance without the skill.
+- **Publishing:** the client renders, and the server stays browserless. `artifacts pack` lints, renders and writes a publish to a local folder; files go straight to the bucket, and a commit payload goes as a blob and is committed by hash, so neither passes through the model.
+- **Articles with no CLI:** a tool publishes Markdown with a required summary, with no filesystem or shell, through the same commit and sanitizer as the CLI. It takes text only: images, diagrams and embeds need the CLI.
+- **What's still needed on a box:** the CLI and WebKit, to render canvases or anything with images. Reading, commenting, replying and publishing text articles need neither.
+- It's opt-in: `artifacts mcp install` adds it. The local `artifacts mcp` stays, for tools on the same machine.
 
 ## 11. Repo layout (this repo)
 ```
@@ -757,18 +802,19 @@ docs/            this spec, evaluations, implementation guides, mocks and the re
 | **0: Direction** (days) | Pick the name. Mock the viewer (canvas, article, comments) on phone and desktop. Review the mocks with the current local canvas. Lock the kit's visual direction. | You've approved the viewer mocks |
 | **1: MVP** | One container (Bun + Hono) with Postgres and S3-compatible storage, MIT licensed. The Railway template and Docker Compose. Email + password and passkey sign-in, `artifacts setup` for the first owner, invites, the four roles, the organization visibility setting, and per-artifact external sharing (people and links). CLI `setup, upgrade, domain, login, init, dev, lint, render, publish, comments, reply, share, org invite, archive, delete, undelete`. Archive, delete with Recently deleted, and file clean-up (§5.5). Version history: name, preview, compare and restore (§6). Status that follows the review, and project search, sort and filter (§5.1). Canvas viewer (image level of detail, pins, frames list). Article viewer (outline, block and quote comments). Version picker and "changed" badges. Approve or request changes, and `artifacts status`. Kit v1. Skill v1. | **Acceptance:** the CameraBuddy roadmap (plan, seven research reports, four boards) is published, reviewed on your iPhone over 5G, and an agent completes a full comment → fix → republish → reply round trip from a fresh session. On a machine with only the CLI installed, `artifacts setup` deploys to Railway, claims the server and installs the skill in under 10 minutes. A teammate joins through an invite and sees organization artifacts but not your private ones, and someone outside comments through a link |
 | **2: Live review and micro apps** | Realtime comments over server-sent events, Web Push and the install prompt, version compare (side by side, swipe, changes), Micro apps (§7.9): Try it, artifact data and files, and backends in the app's sandbox with `artifacts logs`; the prototype and gallery kinds, ⌘K search, MCP server, OG unfurls | Comments show up live on the second device; you get a push notification when the agent replies. Outside teams deploy the template and publish within 15 minutes |
-| **3: Breadth** | Decks, PDF and zip export, Android frames, groups inside an organization, audit log export. If hosting is ever approved (§14): multi-tenancy, abuse tooling, billing, SSO | — |
+| **3: Breadth** | Decks, PDF and zip export, Android frames, audit log export. If hosting is ever approved (§14): multi-tenancy, abuse tooling, billing, SSO | — |
 
 ## 13. Mocks
 
-The viewer is mocked in [`mocks/boards/`](mocks/boards/) on seven boards: find and open, canvas review, read and annotate, desktop, share/decide/notify, accounts (setup, sign-in, passkeys, invites, domains), and archive and delete. The viewer is a website, so phone screens are drawn in Safari: the full bottom bar on pages seen from the top, and the collapsed bar on canvases, articles and sheets. To review them on a phone, run `python3 -I review/server.py` from `docs/` and share it with `tailscale serve --bg --https=8788 http://127.0.0.1:8788`. Comments go to `review/comments.json`, which git ignores. The phone screens shown inside the mocks are Camera Buddy's mocks, captured with `mocks/tools/capture-cb.mjs`.
+The viewer is mocked in [`mocks/boards/`](mocks/boards/) on seven boards: find and open, canvas review, read and annotate, desktop, share/decide/notify, accounts (setup, sign-in, passkeys, invites, domains), and archive and delete. The viewer is a website, so phone screens are drawn in Safari: the full bottom bar on pages seen from the top, and the collapsed bar on canvases, articles and sheets. To view them here, run `python3 -I review/server.py` from `docs/`. Comments left there go to `review/comments.json`, which git ignores. That server is for this machine. The phone screens shown inside the mocks are Camera Buddy's mocks, captured with `mocks/tools/capture-cb.mjs`.
 
 ## 14. Self-hosted, on Railway
 
 Decided 2026-10-29. Artifacts is open source (MIT), and each team deploys its own copy:
 - **Recommended path:** `artifacts setup`, which deploys the Railway template for you.
 - **Anywhere else:** Docker Compose.
-- **Sign-in:** email with a password or a passkey, so there's no OAuth app to register.
+- **Sign-in:** email with a password or a passkey, so there's no OAuth app to register unless you want Google.
+
 - **First owner:** created by `artifacts setup` (§7.4).
 
 Why self-hosted rather than a hosted service is in [hosting-evaluation.md](hosting-evaluation.md). In short:

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Manifest } from "@artifacts/schema";
 import { CliError } from "../output.ts";
@@ -7,15 +7,60 @@ export type Problem = { rule: string; severity: "error" | "warning"; message: st
 
 export const manifestPath = (root: string) => join(root, "artifact.json");
 
-/** The nearest artifact.json from `from` upward (07). */
-export function findRoot(from = process.cwd()): string {
+export const WORK = ".artifacts/work";
+
+/** The repo this folder is in, or the folder itself: where `.artifacts/` lives. */
+export function repoRoot(from = process.cwd()): string {
+  const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+    cwd: from,
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  return result.success ? result.stdout.toString().trim() : resolve(from);
+}
+
+/** Every working folder in the nearest `.artifacts/work/`, from `from` upward. */
+export function workFolders(from = process.cwd()): string[] {
   let dir = resolve(from);
   for (;;) {
-    if (existsSync(manifestPath(dir))) return dir;
+    const work = join(dir, WORK);
+    if (existsSync(work)) {
+      return readdirSync(work)
+        .map((name) => join(work, name))
+        .filter((path) => existsSync(manifestPath(path)))
+        .sort();
+    }
     const parent = dirname(dir);
-    if (parent === dir) throw new CliError("No artifact.json here or above. Run artifacts init.");
+    if (parent === dir) return [];
     dir = parent;
   }
+}
+
+/**
+ * The nearest artifact.json from `from` upward (07). New artifacts live in the gitignored working
+ * folder, so with none on the way up, a single working folder is the answer. `want` picks one of
+ * several by slug, or by project/slug.
+ */
+export function findRoot(from = process.cwd(), want?: string): string {
+  if (!want) {
+    let dir = resolve(from);
+    for (;;) {
+      if (existsSync(manifestPath(dir))) return dir;
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  const folders = workFolders(from);
+  const slug = want?.split("/").pop();
+  const matching = want ? folders.filter((path) => path.split("/").pop() === slug) : folders;
+  if (matching.length === 1) return matching[0] as string;
+  if (want) throw new CliError(`There's no working folder for ${want} in ${WORK}.`);
+  if (matching.length > 1) {
+    const names = matching.map((path) => path.split("/").pop()).join(", ");
+    throw new CliError(`There are several artifacts here: ${names}. Name one, or cd into its folder.`);
+  }
+  throw new CliError("No artifact.json here or above. Run artifacts init.");
 }
 
 export function loadManifest(root: string): { manifest: Manifest | null; problems: Problem[] } {

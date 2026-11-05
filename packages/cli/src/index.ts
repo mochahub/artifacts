@@ -2,12 +2,29 @@
 import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
 import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
+import { brandCommand } from "./commands/brand.ts";
+import { mcpInstall } from "./commands/connect.ts";
 import { dataCommand, logsCommand } from "./commands/data.ts";
 import { devCommand } from "./commands/dev.ts";
 import { doctor } from "./commands/doctor.ts";
+import {
+  exportCommand,
+  listCommand,
+  pullCommand,
+  readCommand,
+  searchCommand,
+  viewCommand,
+} from "./commands/library.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { domainCommand, upgradeCommand } from "./commands/operate.ts";
-import { orgCommand, shareCommand, visibilityCommand } from "./commands/people.ts";
+import { packCommand, packUpload } from "./commands/pack.ts";
+import {
+  orgCommand,
+  projectCommand,
+  shareCommand,
+  teamsCommand,
+  visibilityCommand,
+} from "./commands/people.ts";
 import {
   archiveCommand,
   commentsCommand,
@@ -26,28 +43,38 @@ import { KeychainBlocked } from "./credentials/index.ts";
 import { CliError, createOutput, UsageError } from "./output.ts";
 import { closePrompts } from "./prompt.ts";
 import { installSkill } from "./skill/install.ts";
+import { installStageshow } from "./skill/stageshow.ts";
 import { VERSION } from "./version.ts";
 
 const USAGE = `artifacts ${VERSION}
 
   artifacts setup [<url>] [--docker [--dir <path>] [--image <ref>] [--port <n>]]
-                  [--org <name>] [--name <you>] [--email <you>] [--no-skill]
+                  [--org <name>] [--name <you>] [--email <you>] [--no-skill] [--stageshow]
   artifacts login [<url>] | logout | whoami
   artifacts recover <url>
   artifacts doctor
   artifacts upgrade [--server] [--to <version>]
   artifacts domain add <domain> | list
   artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype]
-  artifacts lint | render
-  artifacts publish [-m <message>] [--name <label>] [--note <frame>=<text>]
+                 [--template <name>] [--in-repo]
+  artifacts lint | render [<slug>]
+  artifacts publish [<slug>] [-m <message>] [--name <label>] [--note <frame>=<text>]
+  artifacts search <words> [--project <slug>] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]
+  artifacts list [<project>[/<slug>[/<page>]]] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]
+  artifacts read <project>/<slug> [--page <key>] [--version <n>] [--cursor <c>] [--chars <n>]
+  artifacts view <project>/<slug> [--page <key>] [--frame <key>] [--size thumb|1x|2x] [--out <file>]
+  artifacts pull <project>/<slug> [--version <n>] [--dir <path>] [--force]
+  artifacts export <project> [--dir <path>]
+  artifacts brand [show] | prompt | preview <file> | propose <file>
   artifacts open [<project>/<slug>] [--version <n>] [--page <key>]
   artifacts status [<project>/<slug>]
   artifacts comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]
   artifacts reply <n> "<text>" [--fixed]
-  artifacts skill install [--claude] [--codex]
+  artifacts skill install [--claude] [--codex] [--stageshow]
   artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>
   artifacts dev [--port 4321]
-  artifacts mcp
+  artifacts mcp | mcp install [--claude] [--codex] [--token-env <name>]
+  artifacts pack [<slug>] [-m <message>] [--name <label>] | pack [<slug>] --upload <plan>
   artifacts data ls | get <key> | export | clear [--scope shared|me]
   artifacts logs [--follow] [--version <n>]
   artifacts visibility org|me
@@ -56,6 +83,9 @@ const USAGE = `artifacts ${VERSION}
   artifacts delete | undelete [<project>/<slug>] [--version <n>]
   artifacts share --link [--comment] [--expires 1d|7d|30d]
   artifacts share --invite <email> [--comment|--publish]
+  artifacts share --team <slug> [--comment]
+  artifacts teams
+  artifacts project access [<project>]
 
 Every command takes --json. Commands that talk to a server take --server <url|name>
 (on upgrade, --server means "the server too", and it can't name one).`;
@@ -88,12 +118,27 @@ const OPTIONS = {
   undo: { type: "boolean" },
   link: { type: "boolean" },
   invite: { type: "string" },
+  team: { type: "string" },
   comment: { type: "boolean" },
   publish: { type: "boolean" },
   expires: { type: "string" },
   claude: { type: "boolean" },
   codex: { type: "boolean" },
   "no-skill": { type: "boolean" },
+  stageshow: { type: "boolean" },
+  "in-repo": { type: "boolean" },
+  template: { type: "string" },
+  "token-env": { type: "string" },
+  upload: { type: "string" },
+  repo: { type: "string" },
+  here: { type: "boolean" },
+  limit: { type: "string" },
+  cursor: { type: "string" },
+  chars: { type: "string" },
+  frame: { type: "string" },
+  size: { type: "string" },
+  out: { type: "string" },
+  force: { type: "boolean" },
 } as const;
 
 /** `--version` is a boolean everywhere except `open --version <n>`, where it takes a number. */
@@ -123,7 +168,9 @@ async function main(argv: string[]) {
   try {
     // Its number would otherwise be read as a positional.
     const isUpgrade = argv[0] === "upgrade";
-    const takesVersion = ["open", "delete", "undelete", "logs"].includes(argv[0] ?? "");
+    const takesVersion = ["open", "delete", "undelete", "logs", "read", "view", "pull"].includes(
+      argv[0] ?? "",
+    );
     const args = takesVersion
       ? argv.filter((_, i) => argv[i - 1] !== "--version" && argv[i] !== "--version")
       : argv;
@@ -155,6 +202,7 @@ async function main(argv: string[]) {
           name: values.name,
           email: values.email,
           skill: !values["no-skill"],
+          stageshow: values.stageshow,
         },
         out,
       );
@@ -185,8 +233,10 @@ async function main(argv: string[]) {
     case "reply":
       return replyCommand(first, positionals[2], { fixed: values.fixed, server: values.server }, out);
     case "skill": {
-      if (first !== "install") throw new UsageError("Usage: artifacts skill install [--claude] [--codex]");
+      if (first !== "install")
+        throw new UsageError("Usage: artifacts skill install [--claude] [--codex] [--stageshow]");
       const dirs = installSkill({ claude: values.claude, codex: values.codex }, out);
+      if (values.stageshow) await installStageshow(out);
       return out.result({ installed: dirs }, () => {});
     }
     case "data":
@@ -197,7 +247,22 @@ async function main(argv: string[]) {
         out,
       );
     case "mcp":
+      if (first === "install") {
+        return mcpInstall(
+          {
+            claude: values.claude,
+            codex: values.codex,
+            tokenEnv: values["token-env"],
+            server: values.server,
+          },
+          out,
+        );
+      }
+      if (first) throw new UsageError("Usage: artifacts mcp | mcp install");
       return mcpCommand();
+    case "pack":
+      if (values.upload) return packUpload(first, values.upload, out);
+      return packCommand(first, { message: values.message, name: values.name }, out);
     case "dev":
       return devCommand({ port: portOption(values.port) ?? 4321 }, out);
     case "versions":
@@ -220,12 +285,17 @@ async function main(argv: string[]) {
       return orgCommand(first, positionals[2], { role: values.role, server: values.server }, out);
     case "visibility":
       return visibilityCommand(first, positionals[2], values.server, out);
+    case "teams":
+      return teamsCommand(values.server, out);
+    case "project":
+      return projectCommand(first, positionals[2], values.server, out);
     case "share":
       return shareCommand(
         first,
         {
           link: values.link,
           invite: values.invite,
+          team: values.team,
           comment: values.comment,
           publish: values.publish,
           expires: values.expires,
@@ -234,16 +304,86 @@ async function main(argv: string[]) {
         out,
       );
     case "init":
-      return initCommand({ project: values.project, slug: values.slug, kind: values.kind }, out);
+      return initCommand(
+        {
+          project: values.project,
+          slug: values.slug,
+          kind: values.kind,
+          template: values.template,
+          inRepo: values["in-repo"],
+        },
+        out,
+      );
     case "lint":
-      return lintCommand(out);
+      return lintCommand(first, out);
     case "render":
-      return renderCommand(out);
+      return renderCommand(first, out);
     case "publish":
       return publishCommand(
+        first,
         { message: values.message, name: values.name, notes: values.note ?? [], server: values.server },
         out,
       );
+    case "search":
+      return searchCommand(
+        positionals.slice(1).join(" "),
+        {
+          project: values.project,
+          repo: values.repo,
+          here: values.here,
+          limit: values.limit,
+          cursor: values.cursor,
+          server: values.server,
+        },
+        out,
+      );
+    case "list":
+      return listCommand(
+        first,
+        {
+          repo: values.repo,
+          here: values.here,
+          limit: values.limit,
+          cursor: values.cursor,
+          server: values.server,
+        },
+        out,
+      );
+    case "read":
+      return readCommand(
+        first,
+        {
+          page: values.page,
+          version: optionAfter("--version"),
+          cursor: values.cursor,
+          chars: values.chars,
+          server: values.server,
+        },
+        out,
+      );
+    case "view":
+      return viewCommand(
+        first,
+        {
+          page: values.page,
+          frame: values.frame,
+          size: values.size,
+          version: optionAfter("--version"),
+          out: values.out,
+          server: values.server,
+        },
+        out,
+      );
+    case "pull":
+      return pullCommand(
+        first,
+        { version: optionAfter("--version"), dir: values.dir, force: values.force, server: values.server },
+        out,
+      );
+    case "brand":
+      return brandCommand(first, positionals[2], { server: values.server }, out);
+    case "export":
+      return exportCommand(first, { dir: values.dir, server: values.server }, out);
     case "open":
       return openCommand(
         first,

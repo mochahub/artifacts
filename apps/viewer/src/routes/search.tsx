@@ -1,7 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { Search as SearchIcon } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
-import { PlaceholderRows } from "../components/placeholder.tsx";
+import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
 import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
 import { useTitle } from "../title.ts";
@@ -12,6 +12,15 @@ type Results = {
   artifacts: Hit[];
   pages: (Hit & { pageKey: string; pageTitle: string | null })[];
   comments: (Hit & { thread: number; pageKey: string; body: string; author: string })[];
+  content?: (Hit & { source: string; pageKey: string | null; ref: string | null; snippet: string })[];
+};
+
+type ContentHit = NonNullable<Results["content"]>[number];
+
+/** A frame opens at that frame; anything else opens its page, or the artifact. */
+const contentLink = (hit: ContentHit) => {
+  const base = `/${hit.project}/${hit.slug}${hit.pageKey ? `/${hit.pageKey}` : ""}`;
+  return hit.source === "frame" && hit.ref ? `${base}#frame=${encodeURIComponent(hit.ref)}` : base;
 };
 
 /** The results list, shared by the Search tab and ⌘K. */
@@ -28,13 +37,14 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
   const query = settled.value.trim();
-  const { data, loading } = usePoll<Results>(
+  const { data, error, loading, refresh } = usePoll<Results>(
     query.length >= 2 ? `/api/search?q=${encodeURIComponent(query)}` : null,
     3_600_000,
   );
   const results = query.length >= 2 ? data.value : null;
   // A first search shows its shape; a retyped one keeps the last results until the next arrive.
-  const waiting = query.length >= 2 && !results && loading.value;
+  const waiting = query.length >= 2 && !results && loading;
+  const failed = query.length >= 2 && !results && !loading && error.value;
   const row = (href: string, title: string, sub: string, key: string) => (
     <a class="li" href={href} key={key} onClick={onPick}>
       <div class="grow">
@@ -43,17 +53,18 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
       </div>
     </a>
   );
+  const content = results?.content ?? [];
   const none =
     results &&
-    !loading.value &&
-    results.artifacts.length + results.pages.length + results.comments.length === 0;
+    !loading &&
+    results.artifacts.length + results.pages.length + results.comments.length + content.length === 0;
   return (
     <>
       <label class="search">
         <SearchIcon />
         <input
           ref={field}
-          placeholder="Search artifacts, pages and comments"
+          placeholder="Search artifacts, their text and comments"
           aria-label="Search"
           value={q.value}
           onInput={(event) => {
@@ -62,6 +73,7 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
         />
       </label>
       {waiting && <PlaceholderRows rows={3} />}
+      {failed && <LoadFailed retry={() => refresh().catch(() => {})} />}
       {none && <div class="empty">Nothing found.</div>}
       {results && results.artifacts.length > 0 && (
         <>
@@ -83,6 +95,21 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
                 hit.pageTitle ?? hit.pageKey,
                 hit.title,
                 `${hit.id}/${hit.pageKey}`,
+              ),
+            )}
+          </div>
+        </>
+      )}
+      {content.length > 0 && (
+        <>
+          <span class="gh">In the text</span>
+          <div class="group">
+            {content.map((hit) =>
+              row(
+                contentLink(hit),
+                hit.snippet,
+                hit.title,
+                `${hit.id}/${hit.pageKey}/${hit.ref}/${hit.source}`,
               ),
             )}
           </div>

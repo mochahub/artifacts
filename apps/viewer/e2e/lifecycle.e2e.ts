@@ -4,7 +4,8 @@ import { box } from "./helpers.ts";
 import { publishCopy } from "./seed.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
 };
 test.describe.configure({ timeout: 120_000 });
 
@@ -64,7 +65,8 @@ test("version history: preview, name, restore and compare", async ({ page }, inf
   const slug = `ver-${info.project.name}`;
   publishCopy(slug, token(), true);
   await page.goto(`/camerabuddy/${slug}`);
-  await page.getByRole("button", { name: "Version history" }).click();
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Version history" }).click();
   const sheet = page.getByRole("dialog", { name: "Version history" });
   await sheet.getByRole("button", { name: /^v1/ }).click();
   await shot(page, info.project.name, "01-6-version-open");
@@ -77,7 +79,8 @@ test("version history: preview, name, restore and compare", async ({ page }, inf
   await expect(page.locator(".tt", { hasText: "mocks/live-view" })).toBeVisible();
 
   await page.goto(`/camerabuddy/${slug}`);
-  await page.getByRole("button", { name: "Version history" }).click();
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Version history" }).click();
   await sheet.getByRole("button", { name: /^v1/ }).click();
   await sheet.getByRole("button", { name: "Restore" }).click();
   await expect(sheet).toHaveCount(0);
@@ -89,7 +92,8 @@ test("activity lists what happened, and filters", async ({ page }, info) => {
   await page.goto("/activity");
   await expect(page.getByText(/published Camera Buddy roadmap/).first()).toBeVisible();
   await shot(page, info.project.name, "05-5-activity");
-  // One pill row, not a column-filling slab: the segmented control never grows down the page.
+  // In the page's column, a filter that takes spare height swells whenever the list is short.
+  await expect(page.locator(".seg")).toHaveCSS("flex-grow", "0");
   expect((await box(page, ".seg")).h).toBeLessThan(52);
   await page.getByRole("button", { name: "Agents" }).click();
   await expect(page.locator(".av.agent").first()).toBeVisible();

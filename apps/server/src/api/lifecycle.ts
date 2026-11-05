@@ -1,3 +1,4 @@
+import { agentLabel, UNNAMED_AGENT } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
@@ -20,7 +21,7 @@ import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { reanchorThreads } from "../publish/routes.ts";
 import { diffRegions, type Region } from "../review/regions.ts";
-import { artifactParam, findArtifact, type LoadedArtifact } from "./artifacts-db.ts";
+import { artifactParam, findArtifacts } from "./artifacts-db.ts";
 import type { Deps } from "./deps.ts";
 import type { ApiContext, Routes } from "./routes.ts";
 
@@ -83,6 +84,17 @@ async function changedRegions(
   return result;
 }
 
+/** Rows about no artifact, so nothing to check them against: they're for the people who run the place. */
+const ADMIN_ACTIVITY = [
+  "purged",
+  "team_created",
+  "team_deleted",
+  "team_member_added",
+  "team_member_removed",
+  "project_access_changed",
+  "identity_linked",
+];
+
 export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
   const artifact = artifactParam(deps);
@@ -100,7 +112,9 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       projectId: row.projectId,
       actorPersonId: actorId(c.get("caller")),
       agent:
-        c.get("caller").kind === "person" ? null : (c.req.header("artifacts-agent")?.slice(0, 60) ?? null),
+        c.get("caller").kind === "person"
+          ? null
+          : c.req.header("artifacts-agent")?.slice(0, 60) || UNNAMED_AGENT,
       kind,
       payload,
       createdAt: clock.now(),
@@ -378,6 +392,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           backendHash: version.backendHash,
           message: `Restored v${version.n}`,
           notes: {},
+          summary: version.summary,
+          tags: version.tags,
           publishedBy: publisher,
           restoredFrom: version.n,
           publishedAt: now,
@@ -385,7 +401,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         const [pageRows, frameRows, blockRows] = await Promise.all([
           tx.select().from(pages).where(eq(pages.versionId, version.id)),
           tx.select().from(frames).where(eq(frames.versionId, version.id)),
-          tx.select().from(blocks).where(eq(blocks.versionId, version.id)),
+          // By id: that's the order they were written in, and `read` and search's fallback depend on it.
+          tx.select().from(blocks).where(eq(blocks.versionId, version.id)).orderBy(blocks.id),
         ]);
         if (pageRows.length > 0) {
           await tx
@@ -504,13 +521,15 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       .limit(200);
 
     // Only what this caller can see: a private artifact's activity mustn't reach anyone else.
-    const seen = new Map<string, LoadedArtifact | null>();
+    const seen = await findArtifacts(deps, orgId, [
+      ...new Set(rows.flatMap(({ row }) => (row.artifactId ? [row.artifactId] : []))),
+    ]);
     const visible: typeof rows = [];
     for (const entry of rows) {
       const id = entry.row.artifactId;
       if (!id) {
         if (
-          entry.row.kind === "purged" &&
+          ADMIN_ACTIVITY.includes(entry.row.kind) &&
           caller.kind === "person" &&
           ["owner", "admin"].includes(caller.person.role)
         ) {
@@ -518,7 +537,6 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         }
         continue;
       }
-      if (!seen.has(id)) seen.set(id, await findArtifact(deps, orgId, id));
       const resource = seen.get(id);
       // Deletion hides the artifact, not its history: SPEC §5.5 wants the line in Activity.
       if (resource && seesArtifact(caller, resource)) visible.push(entry);
@@ -528,8 +546,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       items: visible.map(({ row, actor, title, slug, project }) => ({
         id: row.id,
         kind: row.kind,
-        actor: row.agent ?? actor ?? "A guest",
-        agent: row.agent,
+        actor: (row.agent && actor ? agentLabel(actor, row.agent) : (row.agent ?? actor)) ?? "A guest",
+        agent: row.agent && actor ? agentLabel(actor, row.agent) : row.agent,
         artifact: title ? { title, slug, project } : null,
         payload: row.payload,
         createdAt: row.createdAt.toISOString(),

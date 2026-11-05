@@ -115,7 +115,7 @@ describe("lists and artifacts", () => {
     expect((await status()).kind).toBe("not_reviewed");
     t.clock.advance(1000);
     await decide("changes_requested", 2);
-    expect(await status()).toMatchObject({ kind: "with_agent", agent: "Zahin" });
+    expect(await status()).toMatchObject({ kind: "with_agent", agent: "Zahin's agent" });
     t.clock.advance(1000);
     await publish(t, token, { frameHash: "b".repeat(64) });
     expect((await status()).kind).toBe("waiting");

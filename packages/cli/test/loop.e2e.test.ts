@@ -106,7 +106,10 @@ describe("the review loop", () => {
     const after = JSON.parse((await cli(["status", "--json"], agent(), dir)).stdout);
     expect(after.open).toHaveLength(0);
     expect(after.fixedAwaiting[0]).toMatchObject({ id: 1, status: "fixed" });
-    expect(after.fixedAwaiting[0].replies[0]).toMatchObject({ agent: "Claude Code", marksFixed: true });
+    expect(after.fixedAwaiting[0].replies[0]).toMatchObject({
+      agent: "Zahin's Claude Code",
+      marksFixed: true,
+    });
 
     // 5. Only the person can resolve.
     expect((await t.api(`/api/threads/${thread.id}/resolve`, { method: "POST", bearer: token })).status).toBe(

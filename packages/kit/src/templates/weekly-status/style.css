@@ -1,0 +1,47 @@
+.cover {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+/* A wall calendar page: the week is the biggest thing on it. */
+.cover .week {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 420px;
+  padding: 44px 48px;
+  background: var(--art-accent);
+  color: var(--art-on-accent);
+  display: flex;
+  flex-direction: column;
+}
+.cover .week b {
+  margin-top: auto;
+  font: 800 200px / 0.86 var(--art-display);
+  letter-spacing: -0.04em;
+}
+.cover .week span {
+  font: 600 22px var(--art-ui);
+}
+.cover .body {
+  position: absolute;
+  left: 480px;
+  right: 60px;
+  top: 50px;
+  bottom: 50px;
+  display: flex;
+  flex-direction: column;
+}
+.cover h1 {
+  margin: 0 0 auto;
+  font: 800 48px / 1.06 var(--art-display);
+  letter-spacing: -0.02em;
+}
+.cover .art-stats b {
+  font-size: 54px;
+}

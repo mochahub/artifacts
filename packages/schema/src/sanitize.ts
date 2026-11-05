@@ -89,7 +89,15 @@ export const ARTICLE_SCHEMA: Options = {
   protocols: { href: ["http", "https", "mailto"], src: ["artifacts"], cite: ["http", "https"] },
   attributes: {
     ...defaultSchema.attributes,
-    "*": ["id", "ariaHidden", "dataBlock", "dataVerdict", "dataCallout", "dataFrameRef"],
+    "*": [
+      "id",
+      "ariaHidden",
+      "dataBlock",
+      "dataVerdict",
+      "dataCallout",
+      "dataFrameRef",
+      ["dataComponent", "stats", "compare", "steps"],
+    ],
     a: ["href", "title"],
     img: [["src", BLOB_SRC], "alt", "title", "width", "height"],
     code: [["className", /^language-[\w-]+$/]],

@@ -21,6 +21,14 @@ const lint = async (name: string, env: Record<string, string>) => {
   };
 };
 
+test("only outermost elements are frames, so a component's own data-frame is left alone", async () => {
+  const { env } = sandbox();
+  const result = await cli(["render", "--json"], env, fixture("nested"));
+  expect(result.code).toBe(0);
+  const { frames } = JSON.parse(result.stdout) as { frames: number };
+  expect(frames).toBe(1);
+}, 60_000);
+
 describe("lint catches seeded problems", () => {
   const { env } = sandbox();
   const cases = [
@@ -66,6 +74,33 @@ describe("lint catches seeded problems", () => {
       expect(rules).toContain(rule);
     }
     expect(result.code).toBe(1);
+  }, 60_000);
+
+  test("render with no frames names no contact sheet, and leaves no old one", async () => {
+    const dir = copyFixture(fixture("small"));
+    const sheet = join(dir, ".artifacts/contact-sheet.png");
+    expect((await cli(["render"], env, dir)).code).toBe(0);
+    expect(existsSync(sheet)).toBe(true);
+
+    writeFileSync(join(dir, "plan.md"), "# Plan\n\nText.\n");
+    writeFileSync(join(dir, "app.html"), "<!doctype html><p>Live</p>");
+    writeFileSync(
+      join(dir, "artifact.json"),
+      JSON.stringify({
+        project: "probe",
+        slug: "no-frames",
+        title: "No frames",
+        summary: "An article and a prototype.",
+        pages: [
+          { id: "plan", kind: "article", src: "plan.md" },
+          { id: "app", kind: "prototype", src: "app.html" },
+        ],
+      }),
+    );
+    const json = await cli(["render", "--json"], env, dir);
+    expect(JSON.parse(json.stdout)).toMatchObject({ frames: 0, contactSheet: null });
+    expect(existsSync(sheet)).toBe(false);
+    expect((await cli(["render"], env, dir)).stdout).not.toContain("Look at it");
   }, 60_000);
 
   test("a broken manifest reports its path", async () => {
@@ -226,10 +261,16 @@ describe("publishing with the real CLI", () => {
   test("init makes something that renders", async () => {
     const dir = copyFixture(fixture("refs"));
     for (const file of ["artifact.json", "board.html"]) Bun.spawnSync(["rm", join(dir, file)]);
-    expect((await cli(["init", "--project", "demo", "--slug", "fresh"], box.env, dir)).code).toBe(0);
-    expect((await cli(["init"], box.env, dir)).code).toBe(1);
+    expect(
+      (await cli(["init", "--in-repo", "--project", "demo", "--slug", "fresh"], box.env, dir)).code,
+    ).toBe(0);
+    expect((await cli(["init", "--in-repo"], box.env, dir)).code).toBe(1);
+    // It asks for a summary, and nothing else.
     const result = await cli(["lint", "--json"], box.env, dir);
-    expect(JSON.parse(result.stdout).problems).toEqual([]);
+    expect(JSON.parse(result.stdout).problems.map((p: { rule: string }) => p.rule)).toEqual([
+      "manifest/summary",
+    ]);
+    expect((await cli(["render", "--json"], box.env, dir)).code).toBe(0);
     expect(readFileSync(join(dir, ".gitignore"), "utf8")).toContain(".artifacts/");
     expect(existsSync(join(dir, "vendor/artifacts-kit/frames.js"))).toBe(true);
   }, 60_000);

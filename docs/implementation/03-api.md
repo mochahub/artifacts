@@ -60,8 +60,8 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | Method, path | Auth | Body → response |
 |---|---|---|
 | `GET /api/health` | none | `{ ok: true, version, setupMode: bool }` (Railway health check) |
-| `GET /api/meta` | none | `{ version, minCliVersion, orgName, homeDomain, publicUrl, contentUrl, viewerOrigins: [] }`. `orgName` and `homeDomain` are null in setup mode; `contentUrl` is null until `CONTENT_URL` is set. |
-| `POST /api/setup` | `setupToken` in body | `{ setupToken, orgName, name, email, password, clientName, agent? }` → `{ person, token }`. Only in setup mode; creates org (with `home_domain` = request `Host`), owner, password and a CLI token. 403 if the token is wrong (constant-time compare), 409 once set up. |
+| `GET /api/meta` | none | `{ version, minCliVersion, orgName, homeDomain, publicUrl, contentUrl, viewerOrigins: [], google }`. `orgName` and `homeDomain` are null in setup mode; `contentUrl` is null until `CONTENT_URL` is set. `google` says whether Continue with Google shows. |
+| `POST /api/setup` | `setupToken` in body | `{ setupToken, orgName, name, email, password, clientName, agent?, google?: { clientId, clientSecret } }` → `{ person, token }`. A Google client is stored, and stays off until an admin tests it. Only in setup mode; creates org (with `home_domain` = request `Host`), owner, password and a CLI token. 403 if the token is wrong (constant-time compare), 409 once set up. |
 | `POST /api/recover` | `setupToken` in body | `{ setupToken, email }` → `{ resetUrl }` for an owner. Rate-limited to 5 per IP per hour. |
 | `GET /.well-known/webauthn` | none | Only on the home domain: `{ "origins": [<other viewer origins>] }` (never the content origin). |
 
@@ -74,24 +74,30 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `POST /api/auth/passkey/verify` | none | `{ challengeId, response }` → sets cookie; `{ person }` |
 | `POST /api/auth/logout` | session or CLI token | Ends this session, or revokes the token that called it, so `artifacts logout` leaves nothing valid behind. |
 | `GET /api/me` | any person caller | `{ person: { id, name, email, role }, org: { name }, recentAuth: bool }` |
-| `GET /api/me/sessions` | session | Sessions and CLI tokens: `[{ id, kind: "session"\|"cli", name, userAgent, lastSeenAt, current }]` |
-| `DELETE /api/me/sessions/:id` | session | Ends a session or revokes a CLI token. |
+| `GET /api/me/sessions` | session | Sessions, CLI tokens and connectors: `[{ id, kind: "session"\|"cli"\|"connector", name, userAgent, lastSeenAt, current }]` |
+| `DELETE /api/me/sessions/:id` | session | Ends a session, revokes a CLI token, or ends a connector and every token from it. |
 | `POST /api/me/password` | session, recent auth | `{ password }` (12+ chars) → ends other sessions. |
 | `GET /api/me/passkeys` | session | `{ passkeys: [{ id, name, rpId, createdAt, lastUsedAt }], passwordSetAt }` |
 | `POST /api/me/passkeys/options` | session, recent auth | → registration options for `rpId` = home domain (or the current domain when the client says it lacks Related Origin Requests). |
 | `POST /api/me/passkeys/verify` | session, recent auth | `{ challengeId, response, name? }` → `{ passkey }` |
 | `PATCH /api/me/passkeys/:id` | session | `{ name }` |
-| `DELETE /api/me/passkeys/:id` | session, recent auth | Refused if it's the person's only credential. |
+| `DELETE /api/me/passkeys/:id` | session, recent auth | Refused if it's the person's only credential. A linked Google account counts while Google is on. |
 | `POST /api/auth/reauth` | session | `{ password }` or a passkey assertion → refreshes `auth_at`. |
+| `POST /api/auth/reauth/check` | session, recent auth | `{ ok: true }`, or 401 `recent_auth_required`. It lets the viewer confirm someone before a redirect, which it can't retry. |
+| `GET /api/auth/google/start?intent=&next=&invite=` | none | 302 to Google, with a cookie for this round trip. `intent` is `signin` (the default), `invite`, `link`, `reauth` or `test`; the last three need a session, and refuse a request from another site. 404 while Google is off, except `test`. A link, not a form, because of CSP `form-action 'self'`. Viewer origins only. 60 per IP per 15 minutes. |
+| `GET /api/auth/google/callback?state=&code=` | none | Finishes it, then 302 to the viewer with `?google=<result>`: `expired`, `off`, `cancelled`, `failed`, `unverified`, `link-first`, `no-account`, `invite-mismatch`, `invite-gone`, `in-use`, `recent`, `mismatch`, `linked`, `confirmed` or `tested`. The redirect URI is this path on each viewer origin. 60 per IP per 15 minutes. |
+| `GET /api/me/identities` | session | `{ identities: [{ id, provider, email, lastUsedAt }], passkeys, password, google }`: what the person can confirm themselves with, for the re-auth sheet. |
+| `DELETE /api/me/identities/:id` | session, recent auth | Refused if it's the person's only way in. |
+
 
 ### Invites, resets and joining
 
 | Method, path | Auth | Notes |
 |---|---|---|
-| `GET /api/invites/:token` | none | Preview: `{ orgName, invitedBy, role, email, artifact?: { title } }`; 410 if used or expired. |
+| `GET /api/invites/:token` | none | Preview: `{ orgName, invitedBy, role, email, artifact?: { title }, project?: { name }, teams?: [name] }`; 410 if used or expired. |
 | `POST /api/invites/:token/accept` | none | `{ name, password? }` → creates the person, sets `art_session`; the viewer then offers passkey registration. |
 | `GET /api/reset/:token` | none | Preview: `{ email }` or 410. |
-| `POST /api/reset/:token` | none | `{ password }` → sets it, ends the person's other sessions, signs in. |
+| `POST /api/reset/:token` | none | `{ password }` → sets it, ends the person's other sessions, deletes their linked Google account, signs in. |
 
 ### Device flow (CLI sign-in)
 
@@ -117,32 +123,80 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 |---|---|---|
 | `GET /api/org` | `org.read` | Name, settings, domains (read-only view of `PUBLIC_URL`, `MORE_URLS`, `CONTENT_URL`, home domain). |
 | `PATCH /api/org` | `org.manage` | `{ name?, settings? }` |
-| `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. |
+| `GET /api/org/google` | `org.manage` | `{ clientId, hasSecret, enabled, tested, redirectUris, autoJoin }`. The secret is never returned. `tested` is about the admin asking. |
+| `PUT /api/org/google` | `org.manage`, recent auth | `{ clientId, clientSecret? }`. Saving turns Google off and clears the test. 409 for someone with no password or passkey, here and on turning it off or removing it, because they'd lose their way in. |
+| `PATCH /api/org/google` | `org.manage`, recent auth | `{ enabled?, autoJoin? }`. `enabled: true` is 409 until this admin has finished a test. `autoJoin` is `{ domain, role, teamIds }` or null: `role` is `member` or `reviewer`, and `gmail.com` and `googlemail.com` are refused. |
+| `DELETE /api/org/google` | `org.manage`, recent auth | Removes the client. Linked accounts stay, unused. |
+| `GET /api/people` | `people.read` | Members and pending invites: `{ people: [], invites: [] }`; `?kind=outside` lists outside people with what's shared with them. Each person lists `teams: [{ slug, name, role }]`, `projects: [{ slug, name, permission }]` and `google`, whether one is linked. |
+| `GET /api/people/search?q=` | `people.search` | `{ people: [{ id, name, email, role }] }`, 20 at most, matching a name or an email, outside people included. Under 2 characters finds nothing. Members and up, in a browser only. 60 a minute per person. |
 | `PATCH /api/people/:id` | `people.manage` | `{ role }`. Only an owner changes owners; there's always at least one owner. An admin or owner who becomes a member or reviewer also loses the invites and reset links they issued that are still unused. |
-| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
-| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner or itself. |
-| `POST /api/invites` | `people.invite` | `{ email, role }` → `{ invite, url }` |
+| `DELETE /api/people/:id` | `people.manage` | Sets `removed_at`, ends sessions and tokens, deletes their teams, project grants and linked Google account, and revokes what they created: unused invites and reset links, organization tokens, share links (04). |
+| `POST /api/people/:id/reset-link` | `people.invite` | → `{ url, expiresAt }`. A token gets 403 for an admin, an owner, itself, or anyone who leads a team or manages a project. |
+| `POST /api/invites` | `people.invite` | `{ email, role, teamIds? }` → `{ invite, url }`. `teamIds` are joined on accepting, and a team deleted meanwhile is skipped. A token gets 403 for an invite with teams. |
 | `DELETE /api/invites/:id` | `people.manage` | Revoke. |
-| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. A token gets 403 unless the invite is for a member or reviewer. |
+| `POST /api/invites/:id/link` | `people.invite` | → `{ url }`. Secrets are stored hashed, so this makes a new link and the old one stops; it's what "Copy" does on a pending invite. A token gets 403 unless the invite is for a member or reviewer, with no teams. |
 | `GET /api/tokens` / `POST /api/tokens` / `DELETE /api/tokens/:id` | `tokens.manage` + recent auth to create | Org tokens: `{ name, scopes, projectIds?, expiresAt? }` → `{ id, token }`, shown once. |
-| `GET /api/shares` | `org.manage` | Every outside share (people and links) across artifacts. |
+| `GET /api/shares` | `org.manage` | Every outside share: `{ links, people, projects, teams }`, the last two being project grants and team memberships held by outside people. |
+
+## Teams
+
+| Method, path | Action | Notes |
+|---|---|---|
+| `GET /api/teams` | `team.read` | `{ teams: [{ id, slug, name, description, members, role }] }`. `members` is a count; `role` is the caller's: `lead`, `member` or null. |
+| `POST /api/teams` | `team.manage` | `{ name, slug?, description? }` → `{ team }`. The slug comes from the name if it's left out. 409 if it's taken. |
+| `GET /api/teams/:slug` | `team.read` | `{ team, members: [{ id, name, email, role, orgRole }], shared: [{ id, project, slug, title, level }], permissions: { manage, members } }`. `shared` holds only what the caller can see. `members` is empty for a token, because it's the people directory. |
+| `PATCH /api/teams/:slug` | `team.manage` | `{ name?, slug?, description? }` |
+| `DELETE /api/teams/:slug` | `team.manage` | Ends the team and everything it was given. |
+| `PUT /api/teams/:slug/members/:personId` | `team.members` | `{ role? }`, `member` by default. Adds someone, or changes their role. 400 for making a reviewer or an outside person a lead. |
+| `DELETE /api/teams/:slug/members/:personId` | `team.members` | |
 
 ## Projects, artifacts and lists
 
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/home` | `home.read` | `{ waiting: [ArtifactCard], recent: [ArtifactCard] }` |
-| `GET /api/projects?q=&sort=recent\|name` | `project.list` | `[{ id, slug, name, repo, artifactCount, openCount, updatedAt }]`, only projects with something visible. |
-| `GET /api/projects/:slug/artifacts?q=&status=all\|your_turn\|approved\|archived&sort=recent\|name` | `project.read` | `{ project: { slug, name, repo }, artifacts: [ArtifactCard] }` |
+| `GET /api/projects?q=&sort=recent\|name&team=` | `project.list` | `[{ id, slug, name, repo, artifactCount, openCount, updatedAt, restricted }]`, the projects with something visible, plus any the caller holds a grant on. `team` narrows to projects that team has, or holds an artifact in, for callers with `team.read`. |
+| `GET /api/projects/:slug/artifacts?q=&status=all\|your_turn\|approved\|archived&sort=recent\|name` | `project.read` | `{ project: { slug, name, repo, restricted, canShare }, artifacts: [ArtifactCard] }`. 404 if nothing in it is visible and the caller holds no grant on it. |
 | `GET /api/artifacts/by-slug/:project/:slug` | `artifact.read` | `Artifact`. If deleted: 410 `gone` with only `details: { deletedAt }` for a caller who passes the visibility rule in 04 with `deleted_at` ignored, otherwise 404. |
 | `GET /api/artifacts/:id` | `artifact.read` | Same. |
 | `PATCH /api/artifacts/:id` | `artifact.manage` | `{ visibility? }` |
-| `GET /api/search?q=` | `home.read` | Phase 2 (⌘K, Search tab): `{ artifacts, pages, comments }`, 20 each, only what the caller can see. 60 a minute per caller. |
+| `GET /api/search?q=` | `home.read` | ⌘K and the Search tab: `{ artifacts, pages, comments, content }`, 20 each, only what the caller can see, leaving out archived artifacts (SPEC §5.5). `content` is words in the work itself, on the latest version: `{ id, project, slug, title, source, pageKey, ref, snippet }`, with `source` one of `block`, `frame`, `summary`, `tag`, `note`. 60 a minute per caller, shared with `/api/library/search`. |
 | `GET /api/activity?filter=all\|agents\|people&before=` | `home.read` | Activity rows the caller can see. |
 
 `ArtifactCard` = `{ id, project, slug, title, cover: { renderHash } | { title }, pageCount, latestVersion, status: { kind: "waiting"|"with_agent"|"approved"|"not_reviewed", agent?, version? }, counts: { open, repliesToYou, changedFrames }, publishedBy, agent, publishedAt, archivedAt }`.
 
 `Artifact` = the card plus `{ visibility, publisherId, hasBackend, pages: [{ key, kind, title, group, changed: bool, open: int }], decision: { kind, note, version, by, at } | null, permissions: { comment, decide, manage, share, delete, purge } }`. `decide` is whether the caller may approve, request changes or resolve threads (`artifact.decide`); a viewer can hide those buttons with it. Older servers omit it.
+
+## The library (agents)
+
+Compact, paged answers for agents, which the CLI's `search`, `list`, `read` and `view` and both MCP servers use. Each works without an `artifact.json`. `:project` and `:slug` are names, not ids. All of them start from the same `can()` filter as the lists above, so a hidden artifact can't reach a count, a snippet or a summary. No answer gives a total.
+
+| Method, path | Action | Notes |
+|---|---|---|
+| `GET /api/library/search?q=&project=&repo=&archived=&limit=&cursor=` | `home.read` | `{ cards: [LibraryCard], nextCursor }`, the best match per artifact, on the latest version of what the caller can see. Searches titles, slugs, tags, summaries, page and frame titles, article text, version messages, names and notes, and comments. Every word must match, stemmed with Postgres's `english` configuration, and the last word is a prefix; titles, slugs, summaries and tags also match as substrings. Includes archived artifacts, with `outcome.archived` set, unless `archived=false`. 60 a minute per caller. |
+| `GET /api/library/projects?repo=&limit=&cursor=` | `project.list` | `{ projects: [{ slug, name, repo, artifacts, updatedAt }], nextCursor }`, the projects with something visible, plus any the caller holds a grant on. `repo` takes any form of a git remote. |
+| `GET /api/library/projects/:project?limit=&cursor=` | `project.read` | `{ cards, nextCursor }`, newest first. 404 if nothing in it is visible. |
+| `GET /api/library/projects/:project/:slug?limit=&cursor=` | `artifact.read` | `{ card, pages: [{ key, kind, title, group, frames, blocks }], nextCursor }`. |
+| `GET /api/library/projects/:project/:slug/pages/:page?limit=&cursor=` | `artifact.read` | `{ page, frames: [{ key, board, title, device, note }], nextCursor }`. |
+| `GET /api/library/projects/:project/:slug/read?page=&version=&cursor=&chars=` | `artifact.read` | `{ project, slug, title, version, items: [{ page, kind, ref, title, text }], nextCursor }`. Paged by characters, 8,000 by default and 32,000 at most, so the cursor can stop inside a long block. |
+| `GET /api/library/projects/:project/:slug/view?page=&frame=&size=&version=` | `artifact.read` | `{ page, frame, title, size, image }`. `size` is `thumb` (the default), `1x` or `2x`. `image` is a path under this API, for `GET /api/artifacts/:id/r/:hash?via=app`. An artifact with no frames gives its OG image. |
+| `GET /api/library/projects/:project/:slug/bundle?version=` | `artifact.read` | `VersionBundle`, for `artifacts pull` and `export`: `{ project, slug, version, manifest, rebuilt, files: [{ path, hash, size, type, url }] }`. `url` is a presigned GET on the bucket, which needs no token. `manifest` is the stored `artifact.json`, or, with `rebuilt: true`, a best guess for a version from before it was stored. |
+| `GET /api/artifacts/:id/decisions` | `artifact.read` | `[{ version, kind, note, by, at }]`, newest first. |
+
+`limit` defaults to 20 and stops at 50. Cursors are opaque.
+
+`LibraryCard` = `{ project, slug, title, summary, tags, status, outcome: { decision, decisionVersion, openComments, archived }, latestVersion, updatedAt, match: { source, page, ref, snippet } | null }`. `status` is `ArtifactCard.status.kind`. `match.source` is `title`, `summary`, `tag`, `block`, `frame`, `page`, `note` or `comment`, and a snippet is at most 200 characters of plain text. `summary` falls back to the first block's text, then the version message, then frame titles, cut to 280 characters. A card is at most 1,800 characters of JSON, a test holds it there.
+
+## Brand
+
+| Method, path | Action | Notes |
+|---|---|---|
+| `GET /api/brand` | `brand.read` | `{ brand, fonts: [{ hash, url }] }`. `brand` is null for the default look; `url` is a presigned GET. |
+| `PUT /api/brand` | `brand.apply` (a person) | `{ name, theme }`, set by hand in Settings, and applied at once. It's kept as a proposal with no sample, and saving a name again replaces that proposal. `fonts` is refused: `theme.font` and `theme.display` name a built-in font, or a family of the brand applied now, whose files stay. |
+| `DELETE /api/brand` | `brand.apply` | Back to the default look. Proposals stay, so any can be applied again. |
+| `GET /api/brand/proposals` | `brand.read` | The latest 50: `[{ id, name, brand, sample: { project, slug } \| null, proposedBy, agent, createdAt, appliedAt, current }]`. `current` is true for any that match the brand applied now. `sample` is null for a caller who can't see it. |
+| `POST /api/brand/proposals` | `brand.propose` | `{ brand, project, slug, agent? }`, naming a published sample the caller may publish to. Each font's hash must be a file in its latest version → `{ id }`. Changes nothing until it's applied. |
+| `POST /api/brand/proposals/:id/apply` | `brand.apply` (a person) | Copies it to `org.brand`, as often as you like. |
 
 ## Lifecycle: archive and delete
 
@@ -162,18 +216,25 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 | Method, path | Action | Notes |
 |---|---|---|
-| `GET /api/artifacts/:id/access` | `artifact.share` | People added and links. |
-| `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. `publish` is refused (400) for people outside the organization. Called with a token, the access or invite is marked `via_token`, so that person can comment but not decide or resolve; the same call by a person clears the mark (04). |
+| `GET /api/artifacts/:id/access` | `artifact.share` | `{ people, teams, inherited, links, project, canShareOutside }`. `project` is `{ slug, name, restricted }`. `people` were added directly. `teams` are `[{ id, slug, name, permission, viaToken, members }]`. `inherited` is everyone with access another way: `[{ id, name, email, role, level, via, sources: [{ slug, name }], capped }]`, with `via` one of `publisher`, `role` or `grant`, `sources` entries of `{ kind: "team"|"project", slug, name }`, and `capped` when their role holds them below what they were given. `level` comes from the same function as `can()`. `inherited` is empty for a token or a reviewer, because it's the people directory. |
+| `POST /api/artifacts/:id/access` | `artifact.share` | `{ email, permission }` with `permission` in `view`, `comment`, `publish`. Existing member: added directly. Otherwise creates an outside `artifact` invite: `{ url }`. Adding someone outside, or inviting them, needs `artifact.share_outside`. `publish` is refused (400) for people outside the organization. Called with a token, the access or invite is marked `via_token`, so that person can comment but not decide or resolve; the same call by a person clears the mark (04). |
 | `DELETE /api/artifacts/:id/access/:personId` | `artifact.share` | |
-| `POST /api/artifacts/:id/links` | `artifact.share` (and `org.settings.linkSharing`) | `{ permission, expiresIn?: "1d"\|"7d"\|"30d"\|null }` → `{ link, url }` |
+| `PUT /api/artifacts/:id/teams/:teamId` | `artifact.share` | `{ permission }`. A team with someone outside in it needs `artifact.share_outside`. A token may give `view` or `comment`, and gets 403 for `publish`. Its grant is marked `via_token`, cleared by a person granting it again, as for people above. |
+| `DELETE /api/artifacts/:id/teams/:teamId` | `artifact.share` | |
+| `POST /api/artifacts/:id/links` | `artifact.share_outside` (and `org.settings.linkSharing`) | `{ permission, expiresIn?: "1d"\|"7d"\|"30d"\|null }` → `{ link, url }` |
 | `DELETE /api/artifacts/:id/links/:linkId` | `artifact.share` | Revoke; guests lose access at once. |
+| `GET /api/projects/:slug/access` | `project.access.read` | `{ project, people: [{ id, name, email, role, permission, capped }], teams: [{ id, slug, name, permission, members }], inherited, impact: { loses, names, links, invites, tokens }, canChange }`. `impact` is what restricting does: how many people lose access, up to 5 of their names, live links and outside invites that stay, and organization tokens over all projects that stop reaching it. A token gets no `email` and an empty `inherited`. |
+| `PATCH /api/projects/:slug/access` | `project.update` | `{ restricted, revokeLinks? }`. `revokeLinks` also revokes the project's share links, and pending outside invites to it or to anything in it. |
+| `POST /api/projects/:slug/access` | `project.access.write` | `{ email, permission }`. Someone here gets the grant. Anyone else gets a `project` invite, an outside account with that grant: `{ url }`. Outside people can have `view` or `comment`; anything above is 400. |
+| `PUT /api/projects/:slug/access/:subject` | `project.access.write` | `{ permission }`. `:subject` is `person:<id>` or `team:<id>`. |
+| `DELETE /api/projects/:slug/access/:subject` | `project.access.write` | |
 
 ## Versions
 
 | Method, path | Action | Notes |
 |---|---|---|
 | `GET /api/artifacts/:id/versions` | `artifact.read` | `[{ n, name, message, publishedBy, agent, publishedAt, restoredFrom, decision?, changes: { frames, blocks } }]` |
-| `GET /api/artifacts/:id/versions/:n` | `artifact.read` | `{ n, pages: [Page], notes }`. `Page` for canvas: `{ key, kind, title, boards, frames: [{ key, board, title, device, x, y, w, h, contentHash, renders, live: bool, changed: bool }] }`; for article: `{ key, kind, title, htmlHash, outline, blocks: [{ key, contentHash, changed }] }`. |
+| `GET /api/artifacts/:id/versions/:n` | `artifact.read` | `{ n, pages: [Page], notes }`. `Page` for canvas: `{ key, kind, title, boards, frames: [{ key, board, title, device, x, y, w, h, contentHash, renders, live: bool, changed: bool }] }`; for article: `{ key, kind, title, htmlHash, outline, theme, blocks: [{ key, contentHash, changed }] }`, where `theme` is null or `{ accent?, font?, display?, radius? }` (05). |
 | `PATCH /api/artifacts/:id/versions/:n` | `artifact.publish` | `{ name }` |
 | `POST /api/artifacts/:id/versions/:n/restore` | `artifact.publish` | Publishes a copy as the next version (same `files`, `backend_hash`, frames, blocks), with `restored_from = n`; re-anchors threads; → `{ n }` |
 | `GET /api/artifacts/:id/compare?from=&to=` | `artifact.read` | `{ frames: { added, removed, changed }, blocks: { added, removed, changed }, notes }`. `frames.regions` maps each changed frame (the first 40) to `{ before, after, regions }`: the two @2x render hashes and `[{ x, y, w, h }]` as 0–1 fractions, at most 12. |
@@ -192,18 +253,19 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 
 | Method, path | Action | Notes |
 |---|---|---|
-| `POST /api/publish/prepare` | `artifact.publish` (or `project.create` for a new project/artifact) | Body below → `{ uploadId, artifactId, missing: [{ sha256, url, headers }] }`. Presigned PUTs valid 15 minutes. |
-| `POST /api/publish/commit` | same | Body below → `PublishResult` |
+| `POST /api/publish/prepare` | `artifact.publish`, `project.publish` for a new artifact in an existing project, or `project.create` for a new project | Body below → `{ uploadId, artifactId, missing: [{ sha256, url, headers }] }`. Presigned PUTs valid 15 minutes. |
+| `POST /api/publish/commit` | same | Body below → `PublishResult`. Someone outside a restricted project gets 409 `conflict`, "That project name is taken", whether or not the slug exists in it, so the answer confirms no more than a taken name. |
 
 ```jsonc
 // prepare
-{ "project": "camerabuddy", "projectName": "Camera Buddy", "repo": "zahin-mohammad/CameraBuddy",
+{ "project": "camerabuddy", "projectName": "Camera Buddy", "repo": "zahin-mohammad/camerabuddy",
   "slug": "roadmap", "title": "Camera Buddy roadmap", "visibility": "org",
   "files": [{ "path": "mocks/body-01-onboarding.html", "sha256": "…", "size": 18342, "type": "text/html" }] }
 
 // commit
 { "uploadId": "…", "message": "Move MF above the strip", "name": null,
   "notes": { "live-view": "Moved MF above the strip" }, "agent": "Claude Code",
+  "summary": "The plan, research and mocks for Camera Buddy.", "tags": ["roadmap"],
   "files": { "<path>": { "hash": "…", "size": 1, "type": "…" } },
   "backendHash": null,
   "pages": [ /* Page records as produced by render, see 05 */ ],
@@ -212,10 +274,13 @@ Every write route below checks `archived_at` and answers 403 `read_only` for arc
 // PublishResult
 { "version": 5, "url": "https://art.zahin.ca/camerabuddy/roadmap",
   "changes": { "frames": { "added": [], "removed": [], "changed": ["live-view"] }, "blocks": { "changed": ["phase-1"] } },
-  "threadsOnChanged": [3, 4, 6, 8], "orphaned": [], "uploaded": { "files": 7, "bytes": 421888 }, "reused": 214 }
+  "threadsOnChanged": [3, 4, 6, 8], "orphaned": [], "uploaded": { "files": 7, "bytes": 421888 }, "reused": 214,
+  "audience": "Design team and 2 people" }
 ```
 
-Commit checks: every hash in `files` and every render hash is proved, either by a `blobs` row or by downloading the object, hashing it and comparing it with the declared hash and size (05, "Presigned URLs"; a mismatch deletes the object and answers 400 `invalid`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
+`commit` also takes `summary` (a string up to 280 characters) and `tags` (up to 8 strings up to 32 characters), both optional, so an older CLI still publishes; `manifest/summary` is what asks for one (07). `prepare` normalizes `repo` to `owner/name` and drops anything else, credentials included.
+
+Commit checks: every path in `files` passes `isBundlePath` (400 `invalid`), every hash in `files` and every render hash is proved, either by a `blobs` row or by downloading the object, hashing it and comparing it with the declared hash and size (05, "Presigned URLs"; a mismatch deletes the object and answers 400 `invalid`), the artifact isn't archived or deleted (409 `slug_deleted` with details, or `conflict` for a caller who couldn't see it), and the caller may publish. It then creates the version, re-anchors threads, sets `latest_version`, writes activity, and returns. One commit at a time per artifact (Postgres advisory lock on the artifact id).
 
 ## Review
 
@@ -227,7 +292,7 @@ Commit checks: every hash in `files` and every render hash is proved, either by 
 | `POST /api/threads/:id/resolve` / `reopen` | `thread.resolve` (people only, never tokens) | |
 | `PATCH /api/comments/:id` / `DELETE` | author only | Edit or delete your own comment within 24 hours. |
 | `POST /api/artifacts/:id/decisions` | `artifact.decide` (people only) | `{ version, kind, note }` (note up to 10,000 characters) |
-| `GET /api/artifacts/:id/status` | `artifact.read` | For `artifacts status`: `{ version, decision, decisionVersion, note, open: [Thread], fixedAwaiting: [Thread] }` |
+| `GET /api/artifacts/:id/status` | `artifact.read` | For `artifacts status`: `{ version, decision, decisionVersion, note, open: [Thread], fixedAwaiting: [Thread], audience? }`. `audience` says who can see it, in words, for callers with `artifact.share` and organization tokens. |
 | `POST /api/artifacts/:id/seen` | `artifact.read` | `{ version, pageKey?, position? }` updates `views` or `guest_views`. `version` is capped at the latest; a position is kept only for a page the artifact has, up to 2,000 characters. |
 
 `Thread` = `{ id, n, pageKey, anchor, anchorState, status, createdVersion, fixedVersion, author: { name, kind: "person"|"guest"|"agent" }, crop: url|null, comments: [{ id, author, agent, body, version, marksFixed, createdAt }], createdAt, resolvedAt }`.
@@ -285,10 +350,35 @@ The CSP's `sandbox allow-scripts` forces an opaque origin on any document from t
 
 Backends don't use the internal API: they run in sandbox processes that talk to the app over IPC ([08](08-micro-apps.md#backends-the-sandbox-appsserversrcsandbox)).
 
+## OAuth and the hosted MCP
+
+Both are on viewer origins only, never the Live-preview origin. Issuer, resource and audience are the origin the client used, so each domain in `MORE_URLS` describes itself. Built against MCP revision `2026-07-28` (checked 2026-11-01).
+
+| Method, path | Auth | Notes |
+|---|---|---|
+| `GET /.well-known/oauth-protected-resource/api/mcp`, `GET /.well-known/oauth-protected-resource` | none | RFC 9728: `{ resource, authorization_servers, scopes_supported, bearer_methods_supported }`. |
+| `GET /.well-known/oauth-authorization-server` | none | RFC 8414, with `code_challenge_methods_supported: ["S256"]`, `client_id_metadata_document_supported`, and `authorization_response_iss_parameter_supported`. |
+| `GET /api/oauth/authorize` | none | Checks `client_id` and `redirect_uri` first and answers 400 if they fail, without redirecting. Other failures redirect back with `error` and `iss`. A good request goes to the viewer's `/device/connect`. Needs `response_type=code`, S256 PKCE, and `resource` equal to this origin's MCP endpoint. 60 per IP per 15 minutes. |
+| `GET /api/oauth/consent?<the same query>` | session | What the consent screen shows: `{ client, clientId, redirectHost, local, scopes, resource }`. |
+| `POST /api/oauth/consent` | session, and a recent sign-in to approve | `{ approve, request }`. Checks `request` again → `{ redirect }`, with `code`, `state` and `iss`, or `error=access_denied`. |
+| `POST /api/oauth/token` | none, form-encoded | `authorization_code` or `refresh_token`, for public clients. Access tokens last an hour; refresh tokens rotate. A code or refresh token used twice revokes the grant. Errors are RFC 6749's. 120 per IP per 15 minutes. |
+| `POST /api/oauth/revoke` | none, form-encoded | RFC 7009: `{ token }`. Revoking a refresh token ends the grant. Always 200. |
+| `POST /api/oauth/register` | none | RFC 7591, deprecated by MCP and kept for clients that need it. Public clients only; redirects must be https, or http on loopback. 20 per IP per hour. |
+| `POST /api/mcp` | Bearer | Streamable HTTP, JSON responses, no sessions. An access token or a CLI or organization token. Up to 4 MB. An `Origin` that isn't a viewer origin gets 403, even with a good token. No valid token: 401 with `WWW-Authenticate` pointing at the metadata. Too little scope: 403 with `error="insufficient_scope"`. |
+| `GET`, `DELETE /api/mcp` | | 405. |
+
+**Protocol.** `2026-07-28` requests (`_meta` version, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) and the older handshake (`initialize`, for `2025-11-25`, `2025-06-18` and `2025-03-26`) both work. Headers that disagree with the body get 400 with `-32020`, an unknown version 400 with `-32022`, and an unknown method 404 with `-32601`. Methods: `server/discover`, `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`.
+
+**Tools:** `artifacts_search`, `_list`, `_read`, `_view`, `_status`, `_comments`, `_reply`, `_versions`, `_publish_article`, `_publish_prepare` and `_publish_commit`, each a call to the same server functions as the routes above. `_status` carries `audience` on the same terms as `GET /api/artifacts/:id/status`, and publishing answers with it. They need `read`, except `_reply` (`comment`) and publishing (`publish`). Answers that can hold other people's text start with a block saying it's data, and each comment carries `untrusted: true` and `authorKind`. **Resources:** `artifacts://guides/<name>` and `artifacts://templates/<name>/<path>`.
+
+**Publishing.** The client renders; the server runs no browser. `artifacts_publish_prepare` takes the fields `artifacts pack` prints, including `payload: { sha256, size }`. If the payload isn't in the bucket yet it answers `{ step: "upload_payload", plan }`; call it again after uploading, and it reads the payload (`PublishCommit` without `uploadId`, plus `declared`, the file list) and answers `{ step: "upload_files", uploadId, missing, plan }`. `plan` is a presigned GET of a JSON file of signed PUTs, so a long list never passes through a model. `artifacts_publish_commit` takes `{ uploadId, payload }`. The ticket is bound to that payload hash, the payload is proved by hash like any other blob, and the commit is the same code and checks as `POST /api/publish/commit`.
+
+**Articles with no CLI.** `artifacts_publish_article` takes `{ project, slug, title, summary, markdown, tags?, message?, repo? }`: `summary` is required here, `markdown` is at most 1 MB, and 30 a minute per token. The server builds the article with the CLI's own pipeline, and it goes through the same prepare and commit, so the same sanitizer and checks apply. It's for articles with text only: a local image, Mermaid, `::chart` or `::frame` is refused, and a remote image is dropped by the allowlist as usual. Images need `artifacts pack`. The artifact has one page, `doc`, and the tool won't replace an artifact with any other page. `artifact.json` and `doc.md` are stored, so `artifacts pull` works.
+
 ## Realtime and push (Phase 2)
 
 | Method, path | Notes |
 |---|---|
-| `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. A stream closes after 5 minutes and the browser reconnects, which rechecks access. 10 streams per caller. |
+| `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. Access is checked again on each 25-second heartbeat, with the caller as they are now, so a stream closes within one heartbeat of a removed person, an ended session, a revoked token or a lost team. A stream also closes after 5 minutes and the browser reconnects. 10 streams per caller. |
 | `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. `keys.p256dh` must be an uncompressed P-256 point (65 bytes) and `keys.auth` 16 bytes, base64url. 10 devices per person; ended sessions' devices are removed daily. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |

@@ -1,11 +1,11 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, ChevronRight, Diff, Ellipsis, FileText, Images, Share } from "lucide-preact";
+import { ChevronLeft, ChevronRight, Diff, Ellipsis, FileText, Images } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { isMissing } from "../api.ts";
-import { AgentMark, StatusWord } from "../components/cards.tsx";
+import { StatusWord } from "../components/cards.tsx";
 import { ArchivedBanner, ArtifactMenu } from "../components/manage.tsx";
-import { PlaceholderRows } from "../components/placeholder.tsx";
+import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
 import { DecideSheet } from "../components/review.tsx";
 import { ShareSheet } from "../components/share.tsx";
 import { VersionSheet } from "../components/sheets.tsx";
@@ -40,7 +40,7 @@ function Detail() {
   const history = useSignal(false);
   const deciding = useSignal(false);
   // Another artifact's detail must not stand in for this one while it loads: the shape does.
-  const artifact = loading.value ? null : data.value;
+  const artifact = loading ? null : data.value;
   useTitle(artifact?.title);
 
   if (error.value?.status === 410) return <Deleted at={error.value.details.deletedAt as string} />;
@@ -53,9 +53,15 @@ function Detail() {
           <ChevronLeft />
           Back
         </a>
-        <span class="ph-line" style="width:70%;height:30px;margin:8px 0" />
-        <span class="ph-line short" />
-        <PlaceholderRows rows={4} />
+        {error.value && !loading ? (
+          <LoadFailed retry={() => remote.refresh().catch(() => {})} />
+        ) : (
+          <>
+            <span class="ph-line" style="width:70%;height:30px;margin:8px 0" />
+            <span class="ph-line short" />
+            <PlaceholderRows rows={4} />
+          </>
+        )}
       </Shell>
     );
   }
@@ -71,36 +77,21 @@ function Detail() {
           <ChevronLeft />
           {artifact.projectName ?? artifact.project}
         </a>
-        <div class="row actions">
-          {artifact.permissions.share && (
-            <button
-              type="button"
-              class="round"
-              aria-label="Share"
-              onClick={() => {
-                sharing.value = true;
-              }}
-            >
-              <Share />
-            </button>
-          )}
-          <button
-            type="button"
-            class="round"
-            aria-label="More"
-            onClick={() => {
-              menu.value = true;
-            }}
-          >
-            <Ellipsis />
-          </button>
-        </div>
+        <button
+          type="button"
+          class="round"
+          aria-label="More"
+          onClick={() => {
+            menu.value = true;
+          }}
+        >
+          <Ellipsis />
+        </button>
       </div>
       <ArchivedBanner artifact={artifact} onChanged={() => remote.refresh()} />
       <h1 class="h1">{artifact.title}</h1>
-      <div class="row ss">
-        {artifact.agent && <AgentMark agent={artifact.agent} small />}
-        <span class="grow">
+      <div class="byline">
+        <span>
           <button
             type="button"
             class="vchip"
@@ -198,10 +189,7 @@ function Detail() {
           onClose={() => {
             deciding.value = false;
           }}
-          onDone={() => {
-            deciding.value = false;
-            remote.refresh();
-          }}
+          onDone={() => remote.refresh()}
         />
       )}
       {history.value && (

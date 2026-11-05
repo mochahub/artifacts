@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { BlockRecord, FrameRecord, Manifest, PageRecord } from "@artifacts/schema";
-import { buildArticle, mermaidSources } from "../article/build.ts";
+import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@artifacts/schema";
+import { buildArticle, mermaidSources } from "@artifacts/schema/article";
+import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
+import type { LocalBrand } from "../brand/cache.ts";
 import { typeOf } from "../bundle/crawl.ts";
 import type { Problem } from "../bundle/manifest.ts";
 import { CliError, type Output } from "../output.ts";
@@ -46,6 +48,28 @@ type HelperResult = {
   images: Record<string, string>;
   og: string;
 };
+
+const isWebp = (body: Uint8Array) =>
+  body.length > 12 &&
+  Buffer.from(body.subarray(0, 4)).toString() === "RIFF" &&
+  Buffer.from(body.subarray(8, 12)).toString() === "WEBP";
+
+/** Lowest first: a template's look, then the org's brand, then what the artifact says. */
+export function resolveTheme(
+  manifest: Manifest,
+  brand?: Pick<LocalBrand, "theme"> | null,
+): Theme | undefined {
+  const layers = [manifest.templateTheme, brand?.theme, manifest.theme].filter(
+    (layer): layer is Theme => layer !== undefined,
+  );
+  if (layers.length === 0) return undefined;
+  return layers.reduce((merged, layer) => ({
+    ...merged,
+    ...layer,
+    neutrals: { ...merged.neutrals, ...layer.neutrals },
+    neutralsDark: { ...merged.neutralsDark, ...layer.neutralsDark },
+  }));
+}
 
 const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
 
@@ -113,13 +137,14 @@ export function render(
   root: string,
   manifest: Manifest,
   bundle: Map<string, string>,
-  options: { lint: boolean },
+  options: { lint: boolean; brand?: LocalBrand | null },
   out: Output,
 ): RenderResult {
   const outDir = join(root, ".artifacts/render");
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const contactSheet = join(root, ".artifacts/contact-sheet.png");
+  rmSync(contactSheet, { force: true }); // With no frames nothing replaces it.
 
   const boards = manifest.pages.flatMap((page) =>
     page.kind === "canvas"
@@ -140,6 +165,16 @@ export function render(
     .filter(([path, absolute]) => /\.(png|jpe?g)$/i.test(path) && Bun.file(absolute).size > 500 * 1024)
     .map(([path]) => path);
 
+  const merged = resolveTheme(manifest, options.brand);
+  // Fonts ship in the bundle, so each page finds them by a path that depends on its folder.
+  const fonts = (options.brand?.fonts ?? []).filter((font) => options.brand?.fontFiles.has(font.hash));
+  const fontDir = join(root, ".artifacts/brand-fonts");
+  for (const font of fonts) {
+    mkdirSync(fontDir, { recursive: true });
+    copyFileSync(options.brand?.fontFiles.get(font.hash) as string, join(root, fontPath(font)));
+  }
+  const themeWith = (up: string) => `${fontFaceCss(fonts, up)}\n${themeCss(merged)}`.trim();
+  const theme = themeWith("{{up}}");
   const backendPath = manifest.backend ? bundleBackend(root, manifest.backend.src, outDir) : null;
 
   const helper = runHelper(
@@ -153,6 +188,7 @@ export function render(
       out: outDir,
       lint: options.lint,
       fixtures: fixtures(root),
+      theme,
       contactSheet,
       title: manifest.title,
     },
@@ -169,7 +205,8 @@ export function render(
       path,
       hash: converted ?? sha256(body),
       size: body.length,
-      type: converted ? "image/webp" : typeOf(path),
+      // A converted image keeps its path, so a pulled one is still WebP under its old name.
+      type: converted || isWebp(body) ? "image/webp" : typeOf(path),
       source,
     });
   }
@@ -178,6 +215,21 @@ export function render(
     writeFileSync(source, body);
     files.set(path, { path, hash: sha256(body), size: Buffer.byteLength(body), type, source });
   };
+
+  for (const font of fonts) {
+    const path = fontPath(font);
+    const source = join(root, path);
+    files.set(path, {
+      path,
+      hash: font.hash,
+      size: statSync(source).size,
+      type: `font/${font.format}`,
+      source,
+    });
+  }
+
+  // Stored with each version, so `artifacts pull` can give back what was published (05).
+  addGenerated("artifact.json", readFileSync(join(root, "artifact.json")), "application/json");
 
   let backendHash: string | null = null;
   if (backendPath) {
@@ -242,7 +294,7 @@ export function render(
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 ${definition.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}
 ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join("\n")}
-<style>html,body{margin:0}</style></head><body>${frame.html}</body></html>`,
+<style>html,body{margin:0}</style>${theme ? `<style>${themeWith(up)}</style>` : ""}</head><body>${frame.html}</body></html>`,
           "text/html",
         );
       }
@@ -265,6 +317,16 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
 
   const blocks: BlockRecord[] = [];
   const pages: PageRecord[] = [];
+  const { accent, font, display, radius } = merged ?? {};
+  const articleTheme =
+    accent || font || display || radius !== undefined
+      ? {
+          ...(accent ? { accent } : {}),
+          ...(font ? { font } : {}),
+          ...(display ? { display } : {}),
+          ...(radius === undefined ? {} : { radius }),
+        }
+      : null;
   manifest.pages.forEach((page, position) => {
     const title = "title" in page ? (page.title ?? null) : null;
     const group = "group" in page ? (page.group ?? null) : null;
@@ -272,7 +334,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
       const built = buildArticle({
         path: page.src,
         source: readFileSync(join(root, page.src), "utf8"),
-        root,
+        readFile: (path) => readFileSync(join(root, path), "utf8"),
         blobHash: (path) => files.get(path)?.hash,
         frameHash: (ref) => frameHashes.get(ref),
         mermaid: new Map(Object.entries(helper.mermaid)),
@@ -291,6 +353,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
           htmlHash: files.get(htmlPath)?.hash,
           outline: built.outline,
           readingMinutes: built.readingMinutes,
+          ...(articleTheme ? { theme: articleTheme } : {}),
         },
       });
     } else if (page.kind === "canvas") {

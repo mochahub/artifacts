@@ -15,11 +15,21 @@ const PUBLIC_ROUTES = [
   "POST /api/device/poll",
   "POST /api/auth/passkey/options",
   "POST /api/auth/passkey/verify",
+  "GET /api/auth/google/start",
+  "GET /api/auth/google/callback",
+
   "GET /api/invites/:token",
   "POST /api/invites/:token/accept",
   "GET /api/s/:token",
   "GET /api/s/:token/cover",
   "POST /api/s/:token/guest",
+  "GET /api/oauth/authorize",
+  "POST /api/oauth/token",
+  "POST /api/oauth/revoke",
+  "POST /api/oauth/register",
+  "GET /.well-known/oauth-protected-resource/api/mcp",
+  "GET /.well-known/oauth-protected-resource",
+  "GET /.well-known/oauth-authorization-server",
 ].sort();
 
 describe("the route list", () => {

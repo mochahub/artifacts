@@ -1,3 +1,4 @@
+import { agentLabel } from "@artifacts/schema";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { blocks, decisions, frames, pages, people, versions } from "../db/schema.ts";
 import { ApiError } from "../http/errors.ts";
@@ -69,9 +70,11 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         name: version.name,
         message: version.message,
         publishedBy: by,
-        agent: version.agent,
+        agent: version.agent ? agentLabel(by, version.agent) : null,
         publishedAt: version.publishedAt.toISOString(),
         restoredFrom: version.restoredFrom,
+        summary: version.summary,
+        tags: version.tags ?? [],
         decision: decided.find((entry) => entry.version === version.n)?.kind,
         changes: counts[index],
       })),
@@ -90,7 +93,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
       : [];
     if (!version) throw new ApiError("not_found", "Not found.");
     const [previous] = await db
-      .select({ id: versions.id })
+      .select({ id: versions.id, n: versions.n })
       .from(versions)
       .where(and(eq(versions.artifactId, id), lt(versions.n, n), isNull(versions.deletedAt)))
       .orderBy(desc(versions.n))
@@ -107,6 +110,8 @@ export function versionRoutes(routes: Routes, deps: Deps) {
 
     return etagJson(c, {
       n: version.n,
+      // The version this one is compared with: the one before it that isn't deleted.
+      previous: previous?.n ?? null,
       notes: version.notes,
       message: version.message,
       pages: pageRows.map((page) => {
@@ -118,6 +123,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
             htmlHash: meta.htmlHash,
             outline: meta.outline,
             readingMinutes: meta.readingMinutes,
+            theme: meta.theme ?? null,
             blocks: now.blockRows
               .filter((block) => block.pageKey === page.pageKey)
               .map((block) => {

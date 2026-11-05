@@ -1,0 +1,44 @@
+{
+  "project": "{{project}}",
+  "slug": "{{slug}}",
+  "title": "{{title}}",
+  "summary": "Replace this: say what this holds and why it mattered, in up to 280 characters.",
+  "tags": ["design review"],
+  "templateTheme": {
+    "mode": "light",
+    "accent": "#c8391b",
+    "display": "didone",
+    "font": "humanist",
+    "radius": 10,
+    "neutrals": {
+      "bg": "#f4f0e7",
+      "card": "#fffdf8",
+      "text": "#1e1a14",
+      "muted": "#655c4e",
+      "line": "#d9d1c0"
+    }
+  },
+  "pages": [
+    {
+      "id": "review",
+      "kind": "canvas",
+      "title": "Review",
+      "boards": [
+        {
+          "id": "journey",
+          "title": "Journey name",
+          "subtitle": "One board for each journey, frames in flow order",
+          "src": "boards/journey.html"
+        },
+        {
+          "id": "variants",
+          "title": "Variants",
+          "subtitle": "The same step, side by side",
+          "src": "boards/variants.html"
+        }
+      ],
+      "styles": ["vendor/artifacts-kit/tokens.css", "vendor/artifacts-kit/components.css", "style.css"],
+      "scripts": ["vendor/artifacts-kit/frames.js", "vendor/artifacts-kit/icons.js"]
+    }
+  ]
+}

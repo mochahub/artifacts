@@ -2,6 +2,8 @@ import postgres from "postgres";
 import { findArtifact, isUuid } from "../api/artifacts-db.ts";
 import type { Deps } from "../api/deps.ts";
 import type { ApiContext, Routes } from "../api/routes.ts";
+import { can } from "../auth/can.ts";
+import { currentCaller } from "../auth/resolve.ts";
 import { callerKey } from "../data/store.ts";
 import { ApiError } from "../http/errors.ts";
 
@@ -12,7 +14,7 @@ const CHANNEL = "artifacts_events";
 const PING = "ping";
 const PING_MS = 30_000;
 const HEARTBEAT_MS = 25_000;
-/** Closing often means access is checked again on each reconnect, by the same guard as anything else. */
+/** Each stream ends here at the latest, so nothing about it can go stale for longer. */
 const STREAM_MS = 5 * 60_000;
 const MAX_STREAMS_PER_CALLER = 10;
 
@@ -27,6 +29,7 @@ export class Events {
   constructor(
     private readonly url: string,
     private readonly pingMs = PING_MS,
+    readonly heartbeatMs = HEARTBEAT_MS,
   ) {
     this.client = this.connect();
   }
@@ -119,6 +122,18 @@ export function eventRoutes(routes: Routes, deps: Deps) {
     // Bun closes a quiet connection after 10 seconds unless told otherwise.
     (c.env as { timeout?(request: Request, seconds: number): void } | undefined)?.timeout?.(c.req.raw, 0);
     const encoder = new TextEncoder();
+    /** Losing a team can take many artifacts away at once, so a stream looks again on every beat. */
+    const stillAllowed = async () => {
+      try {
+        const [fresh, current] = await Promise.all([
+          currentCaller(deps, caller),
+          findArtifact(deps, c.get("org").id, resource.id),
+        ]);
+        return fresh !== null && current !== null && can(fresh, "artifact.read", current);
+      } catch {
+        return false; // The browser reconnects, and that goes through the guard.
+      }
+    };
     let finish = () => {};
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -126,14 +141,20 @@ export function eventRoutes(routes: Routes, deps: Deps) {
         const unsubscribe = deps.events.subscribe(resource.id, ({ type, data }) => {
           write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
         });
-        const heartbeat = setInterval(() => write(": ok\n\n"), HEARTBEAT_MS);
+        let done = false;
         const end = () => {
+          if (done) return;
           finish();
           controller.close();
         };
+        const heartbeat = setInterval(async () => {
+          const allowed = await stillAllowed();
+          if (done) return;
+          if (allowed) write(": ok\n\n");
+          else end();
+        }, deps.events.heartbeatMs);
         const limit = setTimeout(end, STREAM_MS);
         const forget = deps.events.onLost(end);
-        let done = false;
         finish = () => {
           if (done) return;
           done = true;

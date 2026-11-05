@@ -1,4 +1,5 @@
 import type { Artifact, Thread } from "@artifacts/schema";
+import { type ArticleThemeValues, articleStyle } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
 import { Diff, List, Menu, MessageCircle, MessagesSquare } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
@@ -12,14 +13,18 @@ import {
 } from "../components/review.tsx";
 import { Sheet } from "../components/sheets.tsx";
 import { plural } from "../format.ts";
+import { tapped } from "../notify.ts";
 import type { Remote } from "../poll.ts";
 import { readStored, writeStored } from "../storage.ts";
+import { firstChange, markChanges } from "./diff.ts";
+import { useLiquidChrome, usePool } from "./liquid.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
 
 export type ArticlePage = {
   key: string;
   title: string | null;
   readingMinutes: number;
+  theme?: ArticleThemeValues | null;
   outline: { id: string; title: string; level: number }[];
   blocks: { key: string; contentHash: string; changed: boolean }[];
 };
@@ -28,6 +33,8 @@ type Props = {
   artifact: Artifact;
   page: ArticlePage;
   version: number;
+  /** The version this one is compared with, if any. */
+  previous: number | null;
   latest: boolean;
   threads: Remote<Thread[]>;
   onPages(): void;
@@ -37,8 +44,20 @@ type Props = {
 const SIZES = [17, 19, 21];
 const stored = (key: string, fallback: string) => readStored(`artifacts.read.${key}`) ?? fallback;
 
-export function ArticleView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
+export function ArticleView({
+  artifact,
+  page,
+  version,
+  previous,
+  latest,
+  threads,
+  onPages,
+  onVersions,
+}: Props) {
   const body = useRef<HTMLDivElement>(null);
+  const capsule = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const pool = useRef<HTMLElement>(null);
   const contents = useSignal(false);
   const settings = useSignal(false);
   const changes = useSignal(false);
@@ -51,28 +70,39 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
     draft.value = { pageKey: page.key, anchor: { type: "block", blockKey: key }, where: where(key) };
   };
   const size = useSignal(Number(stored("size", "19")));
-  const font = useSignal(stored("font", "serif"));
+  // "theme" until the reader picks: an artifact's own font, and a choice of theirs that isn't stored.
+  const font = useSignal(stored("font", page.theme?.font ? "theme" : "serif"));
   const theme = useSignal(stored("theme", "auto"));
-  const changedCount = page.blocks.filter((block) => block.changed).length;
+  // Places changed since `previous`, once both versions are in; "new" when the page wasn't in it.
+  const changed = useSignal<number | "new" | null>(null);
   const loaded = useSignal(0);
+  useLiquidChrome({ capsule, bar, body, loaded: loaded.value });
   const draft = useSignal<Draft | null>(null);
   const picking = useSignal(false);
+  usePool(bar, pool, [changes.value, picking.value]);
   const selection = useSignal<{ draft: Draft; x: number; y: number } | null>(null);
   const openId = useSignal<string | null>(null);
   const listOpen = useSignal(false);
   const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
   const openThread = all.find((thread) => thread.id === openId.value) ?? null;
 
-  // ?c=<n> opens a thread, once.
-  const deepLinked = useRef(false);
+  // ?c=<n> opens a thread, once for each link or tapped notification.
+  const deepLinked = useRef("");
+  const link = `${location.search}/${tapped.value}`;
   useEffect(() => {
     const n = Number(new URLSearchParams(location.search).get("c"));
-    if (deepLinked.current || !n || all.length === 0) return;
+    if (deepLinked.current === link || !n || all.length === 0) return;
     const thread = all.find((entry) => entry.n === n);
     if (!thread) return;
-    deepLinked.current = true;
+    deepLinked.current = link;
     openId.value = thread.id;
   });
+  const toggleChanges = () => {
+    changes.value = !changes.value;
+    // Marks below the fold look like nothing changed on a phone: bring the first one into view.
+    const first = changes.value && body.current ? firstChange(body.current) : null;
+    if (first) requestAnimationFrame(() => first.scrollIntoView({ block: "center", behavior: "smooth" }));
+  };
   const openCount = all.filter((thread) => thread.status === "open").length;
   const canComment = artifact.permissions.comment && latest;
   const where = (key: string) =>
@@ -113,7 +143,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
 
   useEffect(() => {
     writeStored("artifacts.read.size", String(size.value));
-    writeStored("artifacts.read.font", font.value);
+    if (font.value !== "theme") writeStored("artifacts.read.font", font.value);
     writeStored("artifacts.read.theme", theme.value);
   }, [size.value, font.value, theme.value]);
 
@@ -132,25 +162,27 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
 
   useEffect(() => {
     let live = true;
-    api<string>(`/api/artifacts/${artifact.id}/v/${version}/article/${page.key}`, { text: true }).then(
-      (html) => {
-        if (!live || !body.current) return;
+    const article = (n: number) =>
+      api<string>(`/api/artifacts/${artifact.id}/v/${n}/article/${page.key}`, { text: true }).then(
         // Sanitized by the server at commit (05); only `artifacts:blob/` needs mapping.
-        body.current.innerHTML = html.replaceAll("artifacts:blob/", `/api/artifacts/${artifact.id}/r/`);
-        for (const block of page.blocks) {
-          if (block.changed) {
-            body.current
-              .querySelector(`[data-block="${CSS.escape(block.key)}"]`)
-              ?.setAttribute("data-changed", "");
-          }
-        }
-        loaded.value += 1;
-      },
-    );
+        (html) => html.replaceAll("artifacts:blob/", `/api/artifacts/${artifact.id}/r/`),
+      );
+    // A page the version before didn't have answers 404: all of it is new.
+    const before = previous ? article(previous).catch(() => null) : Promise.resolve(undefined);
+    Promise.all([article(version), before]).then(([html, old]) => {
+      if (!live || !body.current) return;
+      // The publisher's theme stops at this element: the review UI around it keeps its own look.
+      for (const [name, value] of Object.entries(articleStyle(page.theme))) {
+        body.current.style.setProperty(name, value);
+      }
+      body.current.innerHTML = html;
+      changed.value = old === undefined ? null : old === null ? "new" : markChanges(body.current, old);
+      loaded.value += 1;
+    });
     return () => {
       live = false;
     };
-  }, [artifact.id, version, page]);
+  }, [artifact.id, version, previous, page]);
   useEffect(() => {
     let sent = 0;
     const onScroll = () => {
@@ -176,22 +208,33 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         onClick={pick}
         style={{
           "--read-size": `${size.value}px`,
-          "--read-font": font.value === "serif" ? "var(--serif)" : "var(--ui)",
+          ...(font.value === "theme"
+            ? {}
+            : { "--read-font": font.value === "serif" ? "var(--serif)" : "var(--ui)" }),
         }}
       >
-        {changedCount > 0 && !changes.value && (
+        {(changes.value || (typeof changed.value === "number" && changed.value > 0)) && (
           <div class="banner" style="margin-bottom:16px">
             <Diff class="chev" style="color:var(--agent-word)" />
-            <span class="grow">{plural(changedCount, "section")} changed since the last version.</span>
-            <button
-              type="button"
-              class="vchip"
-              onClick={() => {
-                changes.value = true;
-              }}
-            >
-              Show
-            </button>
+            <span class="grow">
+              {changed.value === null
+                ? "This is the first version."
+                : changed.value === "new"
+                  ? `This page is new in v${version}.`
+                  : changed.value === 0
+                    ? `Nothing on this page changed since v${previous}.`
+                    : `Changed in ${plural(changed.value, "place")} since v${previous}.`}
+              {changes.value && typeof changed.value === "number" && changed.value > 0 && (
+                <span class="chg-key">
+                  <ins class="chg">Added</ins> <del class="chg gap-l">Removed</del>
+                </span>
+              )}
+            </span>
+            {typeof changed.value === "number" && changed.value > 0 && (
+              <button type="button" class="vchip" onClick={toggleChanges}>
+                {changes.value ? "Hide" : "Show"}
+              </button>
+            )}
           </div>
         )}
         <div class="meta">
@@ -201,7 +244,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         </div>
         <div ref={body} />
       </article>
-      <div class="capsule glass">
+      <div ref={capsule} class="capsule glass liquid">
         <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
           <Menu />
         </button>
@@ -225,7 +268,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         </button>
       </div>
       {settings.value && (
-        <div class="popover glass">
+        <div class="popover glass liquid thick">
           <span class="gh">Text size</span>
           <div class="seg">
             {SIZES.map((value, index) => (
@@ -274,63 +317,58 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
           </div>
         </div>
       )}
-      {/* The toolbar steps aside for a sheet without a dim, or its labels show through the glass. */}
-      {!draft.value && (
-        <div class="vbar glass">
+      <div ref={bar} class={`vbar glass liquid${draft.value ? " hidden" : ""}`}>
+        <i ref={pool} class="pool" />
+        <button
+          type="button"
+          class="vb"
+          onClick={() => {
+            contents.value = true;
+          }}
+        >
+          <List />
+          <span class="l">Contents</span>
+        </button>
+        <button type="button" class="vb" aria-pressed={changes.value} onClick={toggleChanges}>
+          <Diff />
+          <span class="l">Changes</span>
+        </button>
+        <i class="vsep" />
+        {canComment && (
           <button
             type="button"
             class="vb"
+            aria-pressed={picking.value}
             onClick={() => {
-              contents.value = true;
+              picking.value = !picking.value;
             }}
           >
-            <List />
-            Contents
+            <MessageCircle />
+            <span class="l">Comment</span>
           </button>
-          <button
-            type="button"
-            class="vb"
-            aria-pressed={changes.value}
-            onClick={() => {
-              changes.value = !changes.value;
-            }}
-          >
-            <Diff />
-            Changes
-          </button>
-          <i class="vsep" />
-          {canComment && (
-            <button
-              type="button"
-              class="vb"
-              aria-pressed={picking.value}
-              onClick={() => {
-                picking.value = !picking.value;
-              }}
-            >
-              <MessageCircle />
-              Comment
-            </button>
-          )}
-          <button
-            type="button"
-            class="vb"
-            onClick={() => {
-              listOpen.value = true;
-            }}
-          >
-            <MessagesSquare />
-            Comments
-            {openCount > 0 && <b class="count">{openCount}</b>}
-          </button>
-        </div>
-      )}
-      {picking.value && <div class="hint glass">Tap a paragraph</div>}
+        )}
+        <button
+          type="button"
+          class="vb"
+          onClick={() => {
+            listOpen.value = true;
+          }}
+        >
+          <MessagesSquare />
+          <span class="l">Comments</span>
+          {openCount > 0 && <b class="count">{openCount}</b>}
+        </button>
+      </div>
+      {picking.value && <div class="hint glass liquid thick">Tap a paragraph</div>}
       {selection.value && !draft.value && (
         <button
           type="button"
           class="btn mark selbtn"
-          style={{ left: `${Math.max(12, selection.value.x)}px`, top: `${selection.value.y}px` }}
+          style={{
+            left: `${Math.max(12, selection.value.x)}px`,
+            // A long paragraph can end below the screen. This keeps the button on it, above the bar.
+            top: `min(${selection.value.y}px, calc(100dvh - env(safe-area-inset-bottom) - 138px))`,
+          }}
           onClick={() => {
             draft.value = selection.value?.draft ?? null;
             selection.value = null;
@@ -341,6 +379,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
         </button>
       )}
       <CommentsPanel
+        artifact={artifact}
         threads={all}
         onOpen={(thread) => {
           openId.value = thread.id;
@@ -374,6 +413,7 @@ export function ArticleView({ artifact, page, version, latest, threads, onPages,
       )}
       {listOpen.value && (
         <CommentsSheet
+          artifact={artifact}
           threads={all}
           onOpen={(thread) => {
             listOpen.value = false;

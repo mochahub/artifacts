@@ -1,0 +1,54 @@
+.cover {
+  position: relative;
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+  background: var(--art-bg);
+  color: var(--art-tx);
+  font-family: var(--art-ui);
+}
+/* The question is the cover. Dots stand for the sources behind the answer. */
+.cover h1 {
+  position: absolute;
+  left: 60px;
+  top: 104px;
+  width: 760px;
+  margin: 0;
+  font: 400 72px / 1.06 var(--art-display);
+  letter-spacing: -0.015em;
+}
+.cover small {
+  position: absolute;
+  left: 60px;
+  top: 58px;
+  font: 600 17px var(--art-ui);
+  color: var(--art-accent);
+}
+.cover p {
+  position: absolute;
+  left: 60px;
+  bottom: 54px;
+  margin: 0;
+  font: 19px / 1.4 var(--art-ui);
+  color: var(--art-tx2);
+}
+.cover .dots {
+  position: absolute;
+  right: 60px;
+  top: 60px;
+  bottom: 60px;
+  width: 270px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  align-content: space-between;
+  justify-items: center;
+}
+.cover .dots i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--art-sep);
+}
+.cover .dots i.on {
+  background: var(--art-accent);
+}

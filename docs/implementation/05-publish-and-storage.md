@@ -12,11 +12,11 @@ const Manifest = z.object({
   projectName: z.string().optional(),
   slug: Slug,
   title: z.string().min(1).max(120),
+  summary: z.string().trim().min(1).max(280).optional(),     // required by lint: manifest/summary (07)
+  tags: z.array(z.string().trim().min(1).max(32)).max(8).optional(),
   visibility: z.enum(["me", "org"]).optional(),
-  theme: z.object({
-    accent: Hex.optional(), font: z.string().optional(),
-    mode: z.enum(["light", "dark", "auto"]).default("auto"),
-  }).optional(),
+  theme: Theme.optional(),
+  templateTheme: Theme.optional(),                           // a template's own look; everything else wins over it
   backend: z.object({ src: RelPath }).optional(),            // Phase 2
   pages: z.array(Page).min(1),
 });
@@ -28,17 +28,35 @@ const Page = z.discriminatedUnion("kind", [
   z.object({ id: Key, kind: z.literal("prototype"), src: RelPath, device: Device.default("iphone") }),   // Phase 2
   z.object({ id: Key, kind: z.literal("gallery"), title: z.string().optional(), items: z.array(z.object({ src: RelPath, caption: z.string().optional() })) }), // Phase 2
 ]);
+const Theme = z.object({
+  accent: Hex.optional(), font: FontName.optional(), display: FontName.optional(),
+  mode: z.enum(["light", "dark", "auto"]).optional(),        // leaving it out means auto
+  radius: z.number().min(0).max(32).optional(), scale: z.number().min(0.85).max(1.25).optional(),
+  neutrals: Neutrals.optional(), neutralsDark: Neutrals.optional(),   // { bg, card, text, muted, line }, each Hex, no other keys
+});
+// FontName: letters, digits, spaces and -, up to 40. Hex: #rrggbb.
 // Key: a-z0-9-, 1–60. RelPath: relative, no "..", no leading "/", must exist.
 ```
 
 **Fixtures** (SPEC §7.9) live next to the manifest: `fixtures/data.json` (`{ "shared": { key: value }, "me": { key: value } }`) and `fixtures/files/{shared,me}/<name>`.
+
+**Theme.** `render` merges `templateTheme`, then the org's brand, then `theme`, into tokens (`themeCss` in `packages/schema/src/theme-css.ts`). On a canvas they're the last stylesheet in each board and live frame, so every template and any CSS using `var(--art-…)` follows them. On an article, `accent`, `font`, `display` and `radius` go in `pages.meta.theme`, which `commit` validates with the same rules, and the viewer sets them as custom properties on the article body only. Prototypes are the author's own page and aren't themed.
+
+**Brand.** The CLI fetches `GET /api/brand` at each render, waiting at most 3 seconds, and caches it, so a render works offline; a stale copy prints a warning. Brand fonts are files in the bundle at `.artifacts/brand-fonts/<hash>.<format>`, with `@font-face` rules beside the tokens, because lint bans external fonts. They reach canvases and live frames. The viewer loads no publisher's fonts, so an article body names the family and falls back to a system font.
+
+**`summary` and `tags` are the artifact's frontmatter:** what an agent reads instead of the whole document, so they're stored per version and capped in `packages/schema`. A version from before they existed stays valid, and shows a truncated first block instead (03).
 
 ## What gets uploaded
 
 The bundle is:
 - every file the manifest references
 - everything those files reference by relative URL: `src`, `href`, CSS `url()`, `@import`, and JS `import` and `fetch` of literal relative paths
+- the backend's source, with its relative imports
+- `fixtures/data.json` and everything in `fixtures/files/`
+- `artifact.json`, as written
 - the generated outputs below
+
+The first four are what `artifacts pull` gives back. Files nothing references aren't uploaded, so they aren't restored either.
 
 Files are collected by a crawler that parses HTML (htmlparser2), CSS (postcss) and JS (es-module-lexer). Anything unreferenced isn't uploaded. Absolute URLs and paths outside the manifest's folder are lint errors.
 
@@ -71,10 +89,11 @@ The **contact sheet** `.artifacts/contact-sheet.png` tiles every 1x render with 
 
 ## Building articles (CLI)
 
-Pipeline: unified, then `remark-parse`, `remark-gfm` and `remark-directive`. Custom plugins handle:
+The pipeline is in `packages/schema/src/article.ts`, which the CLI uses and the server uses for `artifacts_publish_article` (03). Pipeline: unified, then `remark-parse`, `remark-gfm` and `remark-directive`. Custom plugins handle:
 - **callouts:** `> [!NOTE]`
 - **figures:** an image followed by an italic paragraph becomes `figure` with `figcaption`
 - **verdict badges:** `{Verified}`, `{Unverified}`
+- **components:** `:::stats`, `:::compare` and `:::steps` containers around ordinary lists and tables become `data-component`, from a closed list the allowlist enforces
 - **`::frame{ref="mocks/onboarding/welcome"}`:** resolves to the frame's render hash in this version
 - **`::chart{src="charts/x.json"}`:** `{ "type": "bar"|"line", "labels": [...], "series": [{ "name", "values": [...] }] }` drawn to SVG by the CLI at publish
 - **Mermaid code blocks:** rendered to SVG in WebKit at publish
@@ -102,7 +121,7 @@ Images referenced by articles are bundle files; the viewer loads them through `G
 5. **Commit.** `POST /api/publish/commit` with files, pages, frames, blocks, message, `--name`, `--note` and the detected agent. The server re-anchors threads and returns the summary.
 6. **Report.** Print the result (format in [07-cli-and-skill.md](07-cli-and-skill.md#publish)). With `--json`, print the `PublishResult` as is.
 
-**Agent detection:** `CLAUDECODE=1` means "Claude Code"; `CODEX_*` environment variables mean "Codex". `ARTIFACTS_AGENT` overrides it. Otherwise it's null, meaning a person published.
+**Agent detection:** `CLAUDECODE=1` means "Claude Code"; `CODEX_*` environment variables mean "Codex". `ARTIFACTS_AGENT` overrides it. Otherwise it's null, and the server records `agent` for any token (04).
 
 ## Re-anchoring
 

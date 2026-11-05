@@ -13,7 +13,7 @@ test("setup mode: every route shows Almost ready, under the real CSP", async ({ 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Almost ready");
   }
   await expect(page.getByText("artifacts setup http://localhost:18080")).toBeVisible();
-  await page.screenshot({ path: "../../docs/mocks/shots/06-1-almost-ready.png" });
+  await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-1-almost-ready.png" });
   expect(errors).toEqual([]);
 });
 
@@ -36,7 +36,7 @@ test("home: a new version is waiting, before anyone has looked at it", async ({ 
   await expect(page.getByText("Claude published v2")).toBeVisible();
   await expect(page.locator(".tab .count")).toHaveText("1");
   await page.locator(".cover img").evaluate((img: HTMLImageElement) => img.decode());
-  await page.screenshot({ path: "../../docs/mocks/shots/01-1-review.png" });
+  await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/01-1-review.png" });
   // Every other test reuses this session: signing in each time would hit the real per-IP limit.
   // The install sheet would otherwise cover every test's first comment; live-review.e2e.ts clears this.
   await page.evaluate(() => localStorage.setItem("artifacts.install-asked", "1"));

@@ -27,6 +27,7 @@ export function metaRoutes(app: ReturnType<typeof createApp>, env: Env, db: Db) 
       publicUrl: env.publicUrl,
       contentUrl: env.contentUrl,
       viewerOrigins: viewerOrigins(env, org?.homeDomain ?? null),
+      google: Boolean(org?.googleEnabled && org.googleClientId),
     };
     return c.json(body);
   });

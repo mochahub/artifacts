@@ -2,8 +2,10 @@ import { expect, type Page, test } from "@playwright/test";
 import { box, overflowsSideways, watchErrors } from "./helpers.ts";
 
 const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone") await page.screenshot({ path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop") await page.screenshot({ path: `../../docs/mocks/shots/desktop-${name}.png` });
+  if (project === "iphone")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
+  if (project === "desktop")
+    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
 };
 
 const transform = (page: Page) =>
@@ -24,7 +26,7 @@ test("projects and a project list the fixture", async ({ page }, info) => {
   await page.goto("/camerabuddy");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy");
   await expect(page.locator(".tile").first()).toBeVisible();
-  // Every filter and the sort control fit on a phone, side by side with nothing past the edge.
+  // Every filter and the sort control fit on a phone, with nothing past the edge.
   expect(await overflowsSideways(page)).toBe(false);
   const width = (page.viewportSize() as { width: number }).width;
   for (const name of ["All", "Your turn", "Approved", "Archived"]) {
@@ -82,14 +84,15 @@ test("the artifact shows what changed, with the page switcher and version histor
   // The detail page lives in the shell: tabs on a phone, the rail on a desktop, and the project by name.
   await expect(page.getByRole("navigation", { name: "Main" }).first()).toBeVisible();
   await expect(page.locator(".back")).toHaveText(/Camera Buddy$/);
-  await expect(page.locator(".top .round")).toHaveCount(2);
+  await expect(page.locator(".top .round")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Approve or request changes" })).toHaveText(
     "Approve or request changes",
   );
   await expect(page).toHaveTitle("Camera Buddy roadmap – Mochahub");
   await shot(page, info.project.name, "01-4-artifact");
 
-  await page.getByRole("button", { name: "Version history" }).click();
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Version history" }).click();
   await expect(page.getByRole("dialog", { name: "Version history" }).getByText("v1")).toBeVisible();
   await shot(page, info.project.name, "01-6-versions");
   await page.keyboard.press("Escape");
@@ -223,18 +226,13 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   await expect(page.locator('[data-block="phase-0/p2"]')).toBeVisible();
   await expect(page.locator('[data-verdict="verified"]')).toBeVisible();
   await expect(page.locator(".article svg").first()).toBeVisible();
-  await expect(page.locator(".article figure img").first()).toHaveJSProperty("complete", true);
-  await page
-    .locator(".article figure img")
-    .first()
-    .evaluate((img: HTMLImageElement) => img.decode());
-  expect(
-    await page
-      .locator(".article figure img")
-      .first()
-      .evaluate((img: HTMLImageElement) => img.naturalWidth),
-  ).toBeGreaterThan(0);
-  await expect(page.getByText("1 section changed since the last version.")).toBeVisible();
+  // Visible: a picture v2 replaced is kept, hidden, until Changes is on.
+  const figure = page.locator(".article figure img").filter({ visible: true }).first();
+  await expect(figure).toHaveJSProperty("complete", true);
+  await figure.evaluate((img: HTMLImageElement) => img.decode());
+  expect(await figure.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  // The fixture's v2 rewords a sentence and swaps a board picture, which an embedded frame may show.
+  await expect(page.getByText(/^Changed in \d+ places? since v1\.$/)).toBeVisible();
   await expect(page).toHaveTitle("Plan – Camera Buddy roadmap – Mochahub");
   await shot(page, info.project.name, "03-1-reading");
   if (info.project.name === "desktop") {
@@ -244,8 +242,10 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
     expect(capsule.x + capsule.w / 2).toBeCloseTo(panel.x / 2, -1);
   }
 
+  // The words v2 added, marked where they are; hidden until Changes is on.
+  await expect(page.locator(".article ins.chg")).toHaveText("a faster");
   await page.getByRole("button", { name: "Show" }).click();
-  await expect(page.locator(".show-changes [data-changed]")).toHaveCount(1);
+  await expect(page.locator(".show-changes ins.chg", { hasText: "a faster" })).toBeInViewport();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   expect(overflow).toBe(false);
@@ -281,6 +281,35 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   await expect(page.getByRole("dialog", { name: "Contents" })).toBeFocused();
   await page.getByRole("dialog").getByRole("button", { name: "Phase 2" }).click();
   await expect(page.locator('[data-block="phase-2"]')).toBeInViewport();
+  expect(errors).toEqual([]);
+});
+
+test("the reader's glass draws back on the way down and fits its ink to a picture", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "iphone", "phone only");
+  const errors = watchErrors(page);
+  await page.goto("/camerabuddy/roadmap/plan");
+  const root = page.locator("html");
+  const bar = page.locator(".vbar");
+  const picture = page.locator(".article img").filter({ visible: true }).first();
+  await expect(picture).toBeAttached();
+  await expect(root).not.toHaveClass(/reading/);
+  await expect(bar.getByText("Contents")).toBeVisible();
+
+  await picture.evaluate((image) => {
+    const box = image.getBoundingClientRect();
+    const barTop = (document.querySelector(".vbar") as HTMLElement).getBoundingClientRect().top;
+    scrollTo(0, scrollY + box.top + box.height / 2 - barTop - 26);
+  });
+  await expect(root).toHaveClass(/reading/);
+  await expect(bar).toHaveCSS("height", "52px");
+  await expect(bar).toHaveAttribute("data-tone", /dark|light/);
+  if (process.env.GLASS_SHOT) await page.screenshot({ animations: "disabled", path: process.env.GLASS_SHOT });
+
+  await page.evaluate(() => scrollBy(0, -40));
+  await expect(root).not.toHaveClass(/reading/);
+  await expect(bar).toHaveCSS("height", "68px");
   expect(errors).toEqual([]);
 });
 

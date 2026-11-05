@@ -2,6 +2,7 @@
   "project": "demo",
   "slug": "poll",
   "title": "Which direction?",
+  "summary": "Fixture: Which direction?.",
   "pages": [
     { "id": "poll", "kind": "prototype", "src": "index.html", "device": "iphone" },
     {

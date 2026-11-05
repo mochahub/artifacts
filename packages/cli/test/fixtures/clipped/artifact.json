@@ -2,6 +2,7 @@
   "project": "demo",
   "slug": "clipped",
   "title": "clipped",
+  "summary": "Fixture: clipped.",
   "pages": [
     {
       "id": "mocks",
