@@ -40,16 +40,20 @@ test("projects and a project list the fixture", async ({ page }, info) => {
   }
   expect((await box(page, ".sort")).right).toBeLessThanOrEqual(width);
 
-  // Retyping never empties the grid: the last list stays until the next answer lands.
-  await page.route("**/artifacts?*", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    await route.continue();
-  });
+  // Retyping never empties the grid: the last list stays until the next answer lands. The one
+  // delayed handler removes itself; unrouting a sleeping handler makes its continue() throw.
+  await page.route(
+    "**/artifacts?*",
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await route.continue();
+    },
+    { times: 1 },
+  );
   await page.getByLabel("Find in this project").fill("ro");
   await page.waitForTimeout(200);
   await expect(page.locator(".tile").first()).toBeVisible();
   await expect(page.getByText("Nothing here.")).toHaveCount(0);
-  await page.unrouteAll({ behavior: "wait" });
 
   await page.getByRole("button", { name: "Approved" }).click();
   await expect(page.getByText("Nothing here.")).toBeVisible();
@@ -77,7 +81,6 @@ test("the artifact shows what changed, with the page switcher and version histor
   );
   await page.goto("/camerabuddy/roadmap");
   await expect(page.locator(".ph-line").first()).toBeVisible();
-  await page.unrouteAll({ behavior: "wait" });
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy roadmap");
   await expect(page.getByText("What changed in v2")).toBeVisible();
   await expect(page.getByText("9 pages")).toBeVisible();
