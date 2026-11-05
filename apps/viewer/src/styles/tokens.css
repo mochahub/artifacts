@@ -12,6 +12,8 @@
   --warn: #ff7a59;
   --warn-word: #c0392b;
   --soft: rgba(0, 0, 0, 0.06);
+  --hover: rgba(0, 0, 0, 0.04);
+  --press: rgba(0, 0, 0, 0.11);
   --sheet: rgba(250, 250, 252, 0.985);
   --glass: rgba(255, 255, 255, 0.78);
   --glass-line: rgba(0, 0, 0, 0.08);
@@ -40,6 +42,8 @@
     --ok-word: var(--ok);
     --warn-word: var(--warn);
     --soft: rgba(255, 255, 255, 0.1);
+    --hover: rgba(255, 255, 255, 0.06);
+    --press: rgba(255, 255, 255, 0.18);
     --sheet: rgba(34, 36, 42, 0.96);
     --glass: rgba(36, 38, 44, 0.72);
     --glass-line: rgba(255, 255, 255, 0.16);
@@ -61,6 +65,8 @@
   --ok-word: var(--ok);
   --warn-word: var(--warn);
   --soft: rgba(255, 255, 255, 0.1);
+  --hover: rgba(255, 255, 255, 0.06);
+  --press: rgba(255, 255, 255, 0.18);
   --sheet: rgba(34, 36, 42, 0.96);
   --glass: rgba(36, 38, 44, 0.72);
   --glass-line: rgba(255, 255, 255, 0.16);
@@ -82,6 +88,8 @@
   --card: #20232a;
   --bg: #15171c;
   --soft: rgba(255, 255, 255, 0.1);
+  --hover: rgba(255, 255, 255, 0.06);
+  --press: rgba(255, 255, 255, 0.18);
   --sheet: rgba(34, 36, 42, 0.96);
   --glass: rgba(36, 38, 44, 0.72);
   --glass-line: rgba(255, 255, 255, 0.16);

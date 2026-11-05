@@ -1652,3 +1652,160 @@
   margin: 0;
 }
 
+/* Interactive states: hover where a pointer can, a press that shows on touch, and one ring for the keyboard. */
+:where(
+  .btn,
+  .li[href],
+  .btn-li,
+  .tab,
+  .rail a,
+  .round,
+  .icon-btn,
+  .x,
+  .vb,
+  .vchip,
+  .seg button,
+  .thread-row,
+  .vrow,
+  .pin,
+  .card.pad,
+  .tile,
+  .back,
+  .sort,
+  a.word,
+  a.av
+) {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    scale 120ms ease,
+    opacity 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .li[href]:hover,
+  .btn-li:hover,
+  .thread-row:hover,
+  .vrow:hover,
+  .icon-btn:hover,
+  .x:hover,
+  .vb:not([aria-pressed="true"]):hover,
+  .vchip:hover,
+  .seg button:not([aria-pressed="true"]):hover,
+  .tab:not([aria-current="page"]):hover,
+  .rail a:not([aria-current="page"]):hover,
+  .btn:not(.ink, .mark, .soft, :disabled):hover {
+    background: var(--hover);
+  }
+  .btn.soft:not(:disabled):hover,
+  .round:hover,
+  .sort:hover {
+    background: var(--press);
+  }
+  .btn.ink:not(:disabled):hover {
+    background: color-mix(in srgb, var(--tx) 86%, var(--bg));
+  }
+  .btn.mark:not(:disabled):hover {
+    background: color-mix(in srgb, var(--mark) 90%, var(--mark-ink));
+  }
+  .card.pad:hover,
+  .tile:hover {
+    box-shadow:
+      0 0 0 0.5px var(--sep),
+      0 6px 18px rgba(0, 0, 0, 0.08);
+  }
+  .pin:hover {
+    scale: 1.08;
+  }
+  .back:hover,
+  a.word:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+.btn:not(:disabled):active,
+.round:active,
+.icon-btn:active,
+.x:active,
+.vb:active,
+.vchip:active,
+.seg button:active,
+.sort:active,
+a.av:active {
+  transform: scale(0.96);
+}
+.pin:active {
+  scale: 0.94;
+}
+.li[href]:active,
+.btn-li:active,
+.thread-row:active,
+.vrow:active,
+.tab:active,
+.rail a:active {
+  background: var(--press);
+}
+.card.pad:active,
+.tile:active {
+  transform: scale(0.99);
+}
+:where(
+  .btn,
+  .li,
+  .btn-li,
+  .tab,
+  .rail a,
+  .round,
+  .icon-btn,
+  .x,
+  .vb,
+  .vchip,
+  .seg button,
+  .thread-row,
+  .vrow,
+  .pin,
+  .card.pad,
+  .tile,
+  .back,
+  a.word,
+  a.av,
+  .capsule .where,
+  .cell-g
+):focus {
+  outline: none;
+}
+:where(
+  .btn,
+  .tab,
+  .rail a,
+  .round,
+  .icon-btn,
+  .x,
+  .vb,
+  .vchip,
+  .pin,
+  .card.pad,
+  .tile,
+  .back,
+  a.word,
+  a.av,
+  .capsule .where
+):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}
+/* Inside a clipped group or the segmented pill, the ring sits just inside the edge so nothing cuts it. */
+:where(.li, .btn-li, .thread-row, .vrow, .seg button):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: -2px;
+}
+.search:focus-within {
+  box-shadow:
+    0 0 0 0.5px var(--mark),
+    0 0 0 3px rgba(255, 216, 77, 0.25);
+}
+.sort:focus-within {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}
