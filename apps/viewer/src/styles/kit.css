@@ -467,10 +467,13 @@
   object-fit: cover;
   object-position: top;
 }
+/* The whole first page, never a slice through a line: the box takes the render's shape, within reason. */
 .cover {
-  height: 106px;
+  aspect-ratio: var(--cover-ar, 1.6);
+  width: 100%;
 }
 .cover img {
+  object-fit: contain;
   object-position: center;
 }
 .kind {
@@ -615,7 +618,7 @@
   font-weight: 600;
 }
 .paper {
-  height: 106px;
+  aspect-ratio: var(--cover-ar, 1.6);
   background: var(--card);
   padding: 12px 14px;
   border-bottom: 0.5px solid var(--sep);

@@ -32,21 +32,34 @@ export function StatusWord({ card }: { card: ArtifactCard }) {
   return <span class="word">Not reviewed yet</span>;
 }
 
-export function Cover({ card }: { card: ArtifactCard }) {
-  if ("renderHash" in card.cover) {
+/**
+ * The first page, whole. The box takes the render's own shape, kept between a portrait and a wide
+ * landscape, so a phone mock stands in a square and a desktop page lies in a letterbox; neither is
+ * ever sliced through a line of text. A wide card keeps to landscape, or one card would fill the page.
+ */
+export function Cover({ card, wide }: { card: ArtifactCard; wide?: boolean }) {
+  const [min, max] = wide ? [1.5, 1.8] : [0.85, 1.6];
+  const cover = card.cover;
+  const ratio = "renderHash" in cover && cover.w && cover.h ? cover.w / cover.h : max;
+  const style = { "--cover-ar": String(Math.min(max, Math.max(min, ratio))) };
+  if ("renderHash" in cover) {
     return (
-      <span class="th cover">
-        <img src={renderUrl(card.id, card.cover.renderHash)} alt="" loading="lazy" />
+      <span class="th cover" style={style}>
+        <img src={renderUrl(card.id, cover.renderHash)} alt="" loading="lazy" />
       </span>
     );
   }
-  return <div class="paper">{card.title}</div>;
+  return (
+    <div class="paper" style={style}>
+      {card.title}
+    </div>
+  );
 }
 
 export function ReviewCard({ card }: { card: ArtifactCard }) {
   return (
     <a class="card pad" href={`/${card.project}/${card.slug}`}>
-      <Cover card={card} />
+      <Cover card={card} wide />
       <div>
         <div class="t3">{card.title}</div>
         <Byline card={card} />
