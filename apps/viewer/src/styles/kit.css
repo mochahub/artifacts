@@ -519,10 +519,20 @@
 }
 .seg {
   display: flex;
-  flex: 1;
+  /* Never grows down a column; across a row it takes the width it's given and scrolls past it. */
+  flex: none;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   background: var(--soft);
   border-radius: 99px;
   padding: 3px;
+}
+.seg::-webkit-scrollbar {
+  display: none;
+}
+.row > .seg {
+  flex: 1 1 auto;
 }
 .seg button {
   flex: 1;
@@ -542,11 +552,37 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .sort {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 46px;
+  padding: 0 10px 0 14px;
+  border-radius: 99px;
+  background: var(--card);
+  box-shadow: 0 0 0 0.5px var(--sep);
+  color: var(--tx);
+  font: 600 15px var(--ui);
+  cursor: pointer;
+}
+.sort select {
+  appearance: none;
+  -webkit-appearance: none;
   border: 0;
   background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0 22px 0 0;
+  cursor: pointer;
+  outline: none;
+}
+.sort svg {
+  position: absolute;
+  right: 11px;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
   color: var(--tx2);
-  font: 15px var(--ui);
-  min-height: 44px;
 }
 .grid {
   display: grid;
