@@ -1,4 +1,4 @@
-import { SNIPPET_MAX } from "@artifacts/schema";
+import { MINUTE_MS, SNIPPET_MAX } from "@artifacts/schema";
 import { sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { limiterKey } from "../auth/caller.ts";
@@ -21,7 +21,7 @@ export type Hit = {
 };
 
 export function rateLimitSearch(deps: Deps, caller: Caller) {
-  deps.limits.hit(`search:${limiterKey(caller) ?? "none"}`, SEARCHES_PER_MINUTE, 60_000);
+  deps.limits.hit(`search:${limiterKey(caller) ?? "none"}`, SEARCHES_PER_MINUTE, MINUTE_MS);
 }
 
 /** Words of a query, letters and digits only, so nothing in it reaches the tsquery syntax. */

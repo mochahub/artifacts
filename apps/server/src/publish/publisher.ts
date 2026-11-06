@@ -1,6 +1,7 @@
 import {
   agentLabel,
   FILES_MAX,
+  HOUR_MS,
   isBundlePath,
   normalizeRepo,
   type PageRecord,
@@ -164,7 +165,7 @@ export function createPublisher(deps: Deps) {
       uploaded: { files: missing.length, bytes: missing.reduce((sum, [, file]) => sum + file.size, 0) },
       reused: known.size,
       payload,
-      exp: clock.now().getTime() + UPLOAD_HOURS * 3600_000,
+      exp: clock.now().getTime() + UPLOAD_HOURS * HOUR_MS,
     };
     return {
       uploadId: signPayload(ticket, env.sessionSecret, UPLOAD_INFO),

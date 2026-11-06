@@ -5,6 +5,9 @@
 
 // Enums (02 owns them; the database's pgEnums are built from these lists).
 export const ROLES = ["owner", "admin", "member", "reviewer", "outside"] as const;
+/** The roles an invite can give: an owner is made at setup, and outside people come in through a share. */
+export const INVITE_ROLES = ["admin", "member", "reviewer"] as const;
+export type InviteRole = (typeof INVITE_ROLES)[number];
 export const VISIBILITIES = ["me", "org"] as const;
 export const PERMISSIONS = ["view", "comment", "publish"] as const;
 export const PROJECT_PERMISSIONS = ["view", "comment", "publish", "manage"] as const;
@@ -116,4 +119,6 @@ export const INVITE_DAYS = 7;
 export const RESET_HOURS = 1;
 /** A deleted artifact can be restored for this long, then it's purged. */
 export const PURGE_DAYS = 30;
-export const DAY_MS = 24 * 3600_000;
+export const MINUTE_MS = 60_000;
+export const HOUR_MS = 60 * MINUTE_MS;
+export const DAY_MS = 24 * HOUR_MS;

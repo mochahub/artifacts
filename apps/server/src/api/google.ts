@@ -3,6 +3,7 @@ import {
   CONSUMER_DOMAINS,
   type GoogleOutcome,
   type GoogleSettings,
+  MINUTE_MS,
   PatchGoogle,
   SaveGoogle,
 } from "@artifacts/schema";
@@ -34,8 +35,8 @@ import type { RouteRequest, Routes } from "../http/routes.ts";
 export const CALLBACK_PATH = "/api/auth/google/callback";
 const COOKIE = "art_google";
 const COOKIE_PATH = "/api/auth/google";
-const STATE_MS = 10 * 60_000;
-const WINDOW_MS = 15 * 60_000;
+const STATE_MS = 10 * MINUTE_MS;
+const WINDOW_MS = 15 * MINUTE_MS;
 const PROVIDER = "google";
 const SIGNED_IN = ["link", "reauth", "test"];
 const INTENTS = ["signin", "invite", ...SIGNED_IN];

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { RecoverResponse, SetupResponse } from "@artifacts/schema";
-import { DEFAULT_ORG_SETTINGS, RESET_HOURS, RecoverRequest, SetupRequest } from "@artifacts/schema";
+import { DEFAULT_ORG_SETTINGS, HOUR_MS, RESET_HOURS, RecoverRequest, SetupRequest } from "@artifacts/schema";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { randomSecret, safeEqual, sha256 } from "../auth/secrets.ts";
 import { createCliToken, personView } from "../auth/sessions.ts";
@@ -12,15 +12,13 @@ import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import type { Routes } from "../http/routes.ts";
 
-const HOUR = 3600_000;
-
 export function setupRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock } = deps;
 
   routes.post("/api/setup", { public: true }, async (c) => {
     // Checked first, so once there's an owner nobody can test guesses at the token here (it still opens /api/recover).
     if (await findOrg(db)) throw new ApiError("conflict", "This deployment is already set up.");
-    deps.limits.hit(`setup:${deps.clientIp(c)}`, 20, HOUR);
+    deps.limits.hit(`setup:${deps.clientIp(c)}`, 20, HOUR_MS);
     const body = await parseBody(c, SetupRequest);
     if (!safeEqual(body.setupToken, env.setupToken))
       throw new ApiError("forbidden", "That setup token is wrong.");
@@ -62,7 +60,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.post("/api/recover", { public: true }, async (c) => {
-    deps.limits.hit(`recover:${deps.clientIp(c)}`, 5, HOUR);
+    deps.limits.hit(`recover:${deps.clientIp(c)}`, 5, HOUR_MS);
     const body = await parseBody(c, RecoverRequest);
     if (!safeEqual(body.setupToken, env.setupToken))
       throw new ApiError("forbidden", "That setup token is wrong.");
@@ -91,7 +89,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       tokenHash: sha256(secret),
       createdBy: null,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + RESET_HOURS * HOUR),
+      expiresAt: new Date(now.getTime() + RESET_HOURS * HOUR_MS),
     });
     await db.insert(activity).values({
       id: Bun.randomUUIDv7(),

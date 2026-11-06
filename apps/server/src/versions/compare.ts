@@ -1,4 +1,5 @@
 import type { Renders } from "@artifacts/schema";
+import { MINUTE_MS } from "@artifacts/schema";
 import type { Deps } from "../deps.ts";
 import { blobKey } from "../layout.ts";
 import { keyOf } from "./diff.ts";
@@ -43,7 +44,7 @@ export function createComparer(deps: Pick<Deps, "bucket" | "limits">) {
       if (!a || !b) continue;
       let regions = cache.get(`${a}:${b}`);
       if (!regions) {
-        if (!counted) deps.limits.hit(`compare:${who}`, COMPARES_PER_MINUTE, 60_000);
+        if (!counted) deps.limits.hit(`compare:${who}`, COMPARES_PER_MINUTE, MINUTE_MS);
         counted = true;
         regions = await oneAtATime(() => regionsOf(a, b));
         if (!regions) continue;

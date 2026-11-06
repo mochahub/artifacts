@@ -1,5 +1,5 @@
 import type { PasskeyList, PersonResponse } from "@artifacts/schema";
-import { AddPasskeyVerify, PasskeyOptions, PasskeyVerify, RenamePasskey } from "@artifacts/schema";
+import { AddPasskeyVerify, MINUTE_MS, PasskeyOptions, PasskeyVerify, RenamePasskey } from "@artifacts/schema";
 import {
   type AuthenticatorTransport,
   generateAuthenticationOptions,
@@ -29,7 +29,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps, keys: Passkeys) {
 
   routes.post("/api/auth/passkey/options", { public: true }, async (c) => {
     // Every call writes a row for 5 minutes, and anyone can make one.
-    deps.limits.hit(`passkey-options:${deps.clientIp(c)}`, 60, 15 * 60_000);
+    deps.limits.hit(`passkey-options:${deps.clientIp(c)}`, 60, 15 * MINUTE_MS);
     const { local } = await parseBody(c, PasskeyOptions);
     const options = await generateAuthenticationOptions({
       rpID: rpFor(c, local),

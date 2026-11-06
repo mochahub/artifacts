@@ -1,5 +1,5 @@
 import type { DeviceDetails, DeviceStarted } from "@artifacts/schema";
-import { DevicePoll, DeviceStart } from "@artifacts/schema";
+import { DevicePoll, DeviceStart, HOUR_MS, MINUTE_MS } from "@artifacts/schema";
 import { and, eq, gt } from "drizzle-orm";
 import type { CallerFor } from "../auth/can.ts";
 import { newUserCode, randomSecret, sha256 } from "../auth/secrets.ts";
@@ -12,7 +12,6 @@ import type { RouteRequest, Routes } from "../http/routes.ts";
 
 const EXPIRES_IN = 600;
 const INTERVAL = 5;
-const HOUR = 3600_000;
 
 const normalize = (code: string) => {
   const letters = code.toUpperCase().replace(/[^A-Z]/g, "");
@@ -23,7 +22,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock, limits } = deps;
 
   routes.post("/api/device/start", { public: true }, async (c) => {
-    limits.hit(`device-start:${deps.clientIp(c)}`, 10, HOUR);
+    limits.hit(`device-start:${deps.clientIp(c)}`, 10, HOUR_MS);
     const body = await parseBody(c, DeviceStart);
     const deviceCode = randomSecret();
     const userCode = newUserCode();
@@ -89,7 +88,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
 
   async function pending(c: RouteRequest<CallerFor<"account.manage">>) {
     // Codes are short enough to type, so a signed-in person can't be left to try them all.
-    limits.hit(`device-code:${c.var.caller.person.id}`, 30, 15 * 60_000);
+    limits.hit(`device-code:${c.var.caller.person.id}`, 30, 15 * MINUTE_MS);
     const [row] = await db
       .select()
       .from(deviceCodes)

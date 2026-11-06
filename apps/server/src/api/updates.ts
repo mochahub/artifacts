@@ -1,6 +1,7 @@
+import { HOUR_MS } from "@artifacts/schema";
 import type { Deps } from "../deps.ts";
 
-const SIX_HOURS = 6 * 3600_000;
+const SIX_HOURS = 6 * HOUR_MS;
 
 /**
  * The newest release, for the admin's "new version" notice; null when GitHub can't say. One answer, or

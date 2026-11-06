@@ -1,4 +1,5 @@
 import { type DataOp, preflight, runBackend as runInSandbox } from "@artifacts/sandbox";
+import { MINUTE_MS } from "@artifacts/schema";
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { findArtifact } from "../auth/access.ts";
@@ -17,7 +18,6 @@ import { PreconditionFailed } from "../s3.ts";
 import type { SandboxPool } from "../sandbox/pool.ts";
 import type { ContentPayload } from "./token.ts";
 
-const MINUTE = 60_000;
 const LOG_BYTES_PER_MINUTE = 1024 * 1024;
 
 export const corsPreflight = preflight;
@@ -117,7 +117,7 @@ export async function runBackend(
   const hash = version.hash;
 
   const key = callerKey(caller) ?? "nobody";
-  deps.limits.hit(`backend:${payload.a}:${key}`, limits.backendRequestsPerMinute, MINUTE);
+  deps.limits.hit(`backend:${payload.a}:${key}`, limits.backendRequestsPerMinute, MINUTE_MS);
 
   const body = Buffer.from(await readLimited(c.req.raw, limits.backendRequestBytes)).toString();
 
@@ -174,7 +174,7 @@ export async function runBackend(
   });
 
   const bytes = logs.reduce((sum, line) => sum + Buffer.byteLength(line.message), 0);
-  if (logs.length > 0 && deps.limits.spend(`logs:${payload.a}`, bytes, LOG_BYTES_PER_MINUTE, MINUTE)) {
+  if (logs.length > 0 && deps.limits.spend(`logs:${payload.a}`, bytes, LOG_BYTES_PER_MINUTE, MINUTE_MS)) {
     // A log that can't be saved isn't this request's failure.
     await deps.db
       .insert(backendLogs)

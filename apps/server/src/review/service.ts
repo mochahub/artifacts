@@ -6,6 +6,7 @@ import {
   type CreateComment,
   type CreateDecision,
   type CreateThread,
+  MINUTE_MS,
   type Thread,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -22,7 +23,6 @@ import { audienceOf } from "../library/audience.ts";
 import { notifyReply } from "../push/notify.ts";
 import { cropAround } from "./crop.ts";
 
-const MINUTE = 60_000;
 const COMMENTS_PER_MINUTE = 30;
 
 export type ThreadRow = typeof threads.$inferSelect;
@@ -136,7 +136,7 @@ export function createReview(deps: Deps) {
 
   /** 30 comments a minute per caller (04, "Rate limits"). */
   const countComment = (caller: Caller) =>
-    limits.hit(`comment:${limiterKey(caller) ?? caller.kind}`, COMMENTS_PER_MINUTE, MINUTE);
+    limits.hit(`comment:${limiterKey(caller) ?? caller.kind}`, COMMENTS_PER_MINUTE, MINUTE_MS);
 
   async function listThreads(
     artifactId: string,

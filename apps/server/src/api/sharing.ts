@@ -1,15 +1,17 @@
-import type { ArtifactAccess, ShareLinkCreated } from "@artifacts/schema";
+import type { AccessAdded, ArtifactAccess, ShareLinkCreated, ShareLinkPreview } from "@artifacts/schema";
 import {
   AddAccess,
   CreateShareLink,
   DAY_MS,
   GuestName,
+  HOUR_MS,
   PatchArtifact,
   ShareWithTeam,
 } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getCookie } from "hono/cookie";
 import { can, effective } from "../auth/can.ts";
+import { createInvite, findPersonByEmail } from "../auth/invites.ts";
 import { findLiveLink, isLiveLink } from "../auth/links.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
 import { GUEST_COOKIE, isSecureRequest, setSessionCookie } from "../auth/sessions.ts";
@@ -21,7 +23,6 @@ import {
   frames,
   guestLinks,
   guests,
-  invites,
   people,
   projects,
   shareLinks,
@@ -175,17 +176,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       const { email, permission } = await parseBody(c, AddAccess);
       const orgId = c.var.org.id;
       const me = caller.person;
-      const [person] = await db
-        .select()
-        .from(people)
-        .where(
-          and(
-            eq(people.orgId, orgId),
-            sql`lower(${people.email}) = lower(${email})`,
-            isNull(people.removedAt),
-          ),
-        )
-        .limit(1);
+      const person = await findPersonByEmail(db, orgId, email);
       const isMember = person && ["owner", "admin", "member"].includes(person.role);
       if (permission === "publish" && !isMember) {
         throw new ApiError("invalid", "Only members of the organization can publish.");
@@ -226,11 +217,9 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
                 : false,
             },
           });
-        return c.json({ added: { id: person.id, name: person.name, permission } });
+        return c.json({ added: { id: person.id, name: person.name, permission } } satisfies AccessAdded);
       }
-      const secret = randomSecret();
-      await db.insert(invites).values({
-        id: Bun.randomUUIDv7(),
+      const { url } = await createInvite(deps, {
         orgId,
         kind: "artifact",
         email,
@@ -238,12 +227,9 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
         artifactId: resource.id,
         permission,
         viaToken,
-        tokenHash: sha256(secret),
         createdBy: me.id,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 7 * DAY_MS),
       });
-      return c.json({ url: `${env.publicUrl}/join/${secret}` });
+      return c.json({ url } satisfies AccessAdded);
     },
   );
 
@@ -452,7 +438,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       permission: link.permission,
       needsName: !named,
       sharedBy,
-    });
+    } satisfies ShareLinkPreview);
   });
 
   routes.get("/api/s/:token/cover", { public: true }, async (c) => {
@@ -471,7 +457,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.post("/api/s/:token/guest", { public: true }, async (c) => {
-    limits.hit(`guest:${deps.clientIp(c)}`, 20, 3600_000);
+    limits.hit(`guest:${deps.clientIp(c)}`, 20, HOUR_MS);
     const { link } = await liveLink(c);
     const { name } = await parseBody(c, GuestName);
     const orgId = c.get("org").id;

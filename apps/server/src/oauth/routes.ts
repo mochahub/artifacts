@@ -1,4 +1,12 @@
-import { OAUTH_SCOPES, type OAuthConsent, OAuthConsentDecision, type OAuthScope } from "@artifacts/schema";
+import {
+  DAY_MS,
+  HOUR_MS,
+  MINUTE_MS,
+  OAUTH_SCOPES,
+  type OAuthConsent,
+  OAuthConsentDecision,
+  type OAuthScope,
+} from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { revokeGrant } from "../auth/revoke.ts";
@@ -15,7 +23,6 @@ import { findClient, redirectAllowed, validRedirect } from "./clients.ts";
 const CODE_MINUTES = 5;
 const ACCESS_SECONDS = 3600;
 const REFRESH_DAYS = 60;
-const HOUR = 3600_000;
 
 /** Answers from the token endpoint are JSON with these exact shapes (RFC 6749 5.2). */
 const oauthError = (c: Context, error: string, description: string, status: 400 | 401 = 400) =>
@@ -93,7 +100,7 @@ async function issueTokens(deps: Deps, grant: typeof oauthGrants.$inferSelect) {
     grantId: grant.id,
     tokenHash: sha256(refresh),
     createdAt: now,
-    expiresAt: new Date(now.getTime() + REFRESH_DAYS * 24 * HOUR),
+    expiresAt: new Date(now.getTime() + REFRESH_DAYS * DAY_MS),
   });
   await deps.db.update(oauthGrants).set({ lastUsedAt: now }).where(eq(oauthGrants.id, grant.id));
   return {
@@ -118,7 +125,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
   const { db, clock, limits } = deps;
 
   routes.get("/api/oauth/authorize", { public: true }, async (c) => {
-    limits.hit(`oauth-authorize:${deps.clientIp(c)}`, 60, 15 * 60_000);
+    limits.hit(`oauth-authorize:${deps.clientIp(c)}`, 60, 15 * MINUTE_MS);
     const origin = await requestOrigin(c, deps);
     if (!origin) throw new ApiError("misdirected", "This server doesn't answer on that host.");
     const query = c.req.query();
@@ -193,14 +200,14 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         redirectUri: checked.redirectUri,
         codeChallenge: body.request.code_challenge as string,
         createdAt: now,
-        expiresAt: new Date(now.getTime() + CODE_MINUTES * 60_000),
+        expiresAt: new Date(now.getTime() + CODE_MINUTES * MINUTE_MS),
       });
     });
     return c.json({ redirect: redirectTo(checked.redirectUri, origin, { code, state: checked.state }) });
   });
 
   routes.post("/api/oauth/token", { public: true }, async (c) => {
-    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * 60_000);
+    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * MINUTE_MS);
     const body = await form(c);
     if (!body) return oauthError(c, "invalid_request", "Send a form.");
     const origin = await requestOrigin(c, deps);
@@ -278,7 +285,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
 
   /** RFC 7009: the same answer for a token that exists and one that doesn't. */
   routes.post("/api/oauth/revoke", { public: true }, async (c) => {
-    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * 60_000);
+    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * MINUTE_MS);
     const body = await form(c);
     if (!body?.token) return oauthError(c, "invalid_request", "Send a token.");
     const orgId = c.get("org").id;
@@ -298,7 +305,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
 
   /** Deprecated by MCP but some clients still need it (RFC 7591). Public clients only. */
   routes.post("/api/oauth/register", { public: true }, async (c) => {
-    limits.hit(`oauth-register:${deps.clientIp(c)}`, 20, HOUR);
+    limits.hit(`oauth-register:${deps.clientIp(c)}`, 20, HOUR_MS);
     const body = (await c.req.json().catch(() => null)) as {
       client_name?: unknown;
       redirect_uris?: unknown;

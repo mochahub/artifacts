@@ -1,3 +1,4 @@
+import { HOUR_MS } from "@artifacts/schema";
 import { and, eq } from "drizzle-orm";
 import { oauthClients } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
@@ -73,7 +74,7 @@ export async function findClient(deps: Deps, orgId: string, clientId: string): P
   const url = metadataUrl(clientId);
   if (!url) return row ? { clientId, name: row.name, redirectUris: row.redirectUris } : null;
   const now = deps.clock.now();
-  if (row?.fetchedAt && now.getTime() - row.fetchedAt.getTime() < METADATA_HOURS * 3600_000) {
+  if (row?.fetchedAt && now.getTime() - row.fetchedAt.getTime() < METADATA_HOURS * HOUR_MS) {
     return { clientId, name: row.name, redirectUris: row.redirectUris };
   }
   const client = await deps

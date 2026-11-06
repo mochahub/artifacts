@@ -1,4 +1,4 @@
-import { CLI_SCOPES, DAY_MS } from "@artifacts/schema";
+import { CLI_SCOPES, DAY_MS, MINUTE_MS } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
@@ -10,7 +10,7 @@ import { newApiToken, randomSecret, sha256 } from "./secrets.ts";
 export const SESSION_COOKIE = "art_session";
 export const GUEST_COOKIE = "art_guest";
 export const SESSION_DAYS = 30;
-export const RECENT_AUTH_MS = 10 * 60_000;
+export const RECENT_AUTH_MS = 10 * MINUTE_MS;
 
 /** `Secure` everywhere except plain-http origins, where a browser would drop it (local Compose, dev, e2e). */
 export function isSecureRequest(c: Context, origins: string[]): boolean {

@@ -1,3 +1,4 @@
+import { MINUTE_MS } from "@artifacts/schema";
 import { type AuthenticatorTransport, verifyAuthenticationResponse } from "@simplewebauthn/server";
 import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import type { OrgRow } from "../db/index.ts";
@@ -7,7 +8,7 @@ import { ApiError } from "../http/errors.ts";
 import type { Caller } from "./caller.ts";
 import { markReauthed } from "./sessions.ts";
 
-const CHALLENGE_MS = 5 * 60_000;
+const CHALLENGE_MS = 5 * MINUTE_MS;
 
 export const bytes = (base64url: string) => new Uint8Array(Buffer.from(base64url, "base64url"));
 

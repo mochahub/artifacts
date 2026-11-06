@@ -1,4 +1,11 @@
-import type { ActivityKind, ActivityPage, Compare, DeletedList, RestoreResult } from "@artifacts/schema";
+import type {
+  ActivityKind,
+  ActivityPage,
+  Compare,
+  DeletedList,
+  DeleteResult,
+  RestoreResult,
+} from "@artifacts/schema";
 import { AGENT_MAX, agentLabel, DAY_MS, NameVersion, PURGE_DAYS, VERSION_NAME_MAX } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt } from "drizzle-orm";
 import { findArtifacts, type LoadedArtifact } from "../auth/access.ts";
@@ -108,7 +115,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         .where(eq(artifacts.id, resource.id));
     });
     await record(c, "deleted", { title: resource.row.title });
-    return c.json({ purgeAfter: purgeAfter.toISOString() });
+    return c.json({ purgeAfter: purgeAfter.toISOString() } satisfies DeleteResult);
   });
 
   routes.post("/api/artifacts/:id/undelete", { action: "artifact.delete", resource: artifact }, async (c) => {
@@ -258,7 +265,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           .where(and(eq(threads.artifactId, resource.id), eq(threads.createdVersion, version.n)));
       });
       await record(c, "version_deleted", { version: version.n });
-      return c.json({ purgeAfter: purgeAfter.toISOString() });
+      return c.json({ purgeAfter: purgeAfter.toISOString() } satisfies DeleteResult);
     },
   );
 

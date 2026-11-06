@@ -1,3 +1,4 @@
+import { MINUTE_MS } from "@artifacts/schema";
 import { type ClaimAnswers, claim, IMAGE, meta, waitFor } from "../admin.ts";
 import { saveServer } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
@@ -19,7 +20,7 @@ import {
 
 const VIEWER_PORT = 8080;
 const CONTENT_PORT = 8081;
-const TIMEOUT_MS = 10 * 60_000;
+const TIMEOUT_MS = 10 * MINUTE_MS;
 
 /** Railway drops plain values from a generated template and then asks for them, which needs a terminal. */
 const TEMPLATE_VALUES = [

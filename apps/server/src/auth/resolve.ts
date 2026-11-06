@@ -1,4 +1,4 @@
-import { DAY_MS } from "@artifacts/schema";
+import { DAY_MS, HOUR_MS } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
@@ -19,8 +19,6 @@ import {
   SESSION_DAYS,
   setSessionCookie,
 } from "./sessions.ts";
-
-const HOUR = 3600_000;
 
 /**
  * A connector's token is for the MCP endpoint on the origin it was issued for, and nothing else:
@@ -55,7 +53,7 @@ async function byToken(c: Context, deps: Deps, org: OrgRow, secret: string): Pro
     throw new ApiError("unauthenticated", "This token isn't valid. Run artifacts login.");
   }
   if (token.kind === "oauth") await checkAudience(c, deps, token);
-  if (!token.lastUsedAt || now.getTime() - token.lastUsedAt.getTime() > HOUR) {
+  if (!token.lastUsedAt || now.getTime() - token.lastUsedAt.getTime() > HOUR_MS) {
     await deps.db.update(tokens).set({ lastUsedAt: now }).where(eq(tokens.id, token.id));
   }
   if (token.kind === "org") {

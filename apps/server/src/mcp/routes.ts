@@ -4,6 +4,7 @@ import {
   COMMENT_MAX,
   FILES_MAX,
   KEY_PATTERN,
+  MINUTE_MS,
   normalizeRepo,
   OAUTH_SCOPES,
   PublishCommit,
@@ -404,7 +405,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           }
         }
         const who = "tokenId" in caller ? caller.tokenId : "none";
-        deps.limits.hit(`article:${who}`, ARTICLES_PER_MINUTE, 60_000);
+        deps.limits.hit(`article:${who}`, ARTICLES_PER_MINUTE, MINUTE_MS);
         const built = buildArticle({
           path: "doc.md",
           source: markdown,

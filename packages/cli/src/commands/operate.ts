@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { MINUTE_MS } from "@artifacts/schema";
 import { IMAGE, latestVersion, meta, releasesUrl, VERSION_NUMBER, waitHealthy } from "../admin.ts";
 import type { Input } from "../command.ts";
 import { InsecureServerError, pickServer, readConfig, type ServerEntry } from "../config.ts";
@@ -122,7 +123,7 @@ export async function upgradeCommand(
   }
   await waitHealthy(url, {
     version,
-    timeoutMs: 10 * 60_000,
+    timeoutMs: 10 * MINUTE_MS,
     pollMs: railwaySettings().pollMs,
     failure: "The server didn't come back on the new version.",
   });

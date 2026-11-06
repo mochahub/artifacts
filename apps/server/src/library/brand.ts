@@ -1,6 +1,7 @@
 import {
   type Brand,
   type BrandProposal,
+  type BrandProposalCreated,
   Brand as BrandSchema,
   type OrgBrand,
   ProposeBrand,
@@ -115,7 +116,7 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       agent: agentOf(caller, body.agent),
       createdAt: clock.now(),
     });
-    return c.json({ id });
+    return c.json({ id } satisfies BrandProposalCreated);
   });
 
   /**

@@ -1,4 +1,4 @@
-import { DAY_MS } from "@artifacts/schema";
+import { DAY_MS, HOUR_MS } from "@artifacts/schema";
 import { and, eq, gt, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { findArtifacts } from "../auth/access.ts";
@@ -10,7 +10,7 @@ import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { encryptPayload, generateVapid, vapidHeader } from "./webpush.ts";
 
-const DIGEST_GAP = 20 * 3600_000;
+const DIGEST_GAP = 20 * HOUR_MS;
 const TIMEOUT_MS = 10_000;
 
 /**

@@ -1,3 +1,4 @@
+import { MINUTE_MS } from "@artifacts/schema";
 import { findArtifact } from "../auth/access.ts";
 import { limiterKey } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
@@ -8,7 +9,7 @@ import { isUuid } from "../http/params.ts";
 import type { ApiContext, Routes } from "../http/routes.ts";
 
 /** Each stream ends here at the latest, so nothing about it can go stale for longer. */
-const STREAM_MS = 5 * 60_000;
+const STREAM_MS = 5 * MINUTE_MS;
 const MAX_STREAMS_PER_CALLER = 10;
 
 export function eventRoutes(routes: Routes, deps: Deps) {

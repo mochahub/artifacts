@@ -8,6 +8,7 @@ import {
   DECISION_KINDS,
   FILES_MAX,
   GUEST_NAME_MAX,
+  INVITE_ROLES,
   PAGE_KINDS,
   PASSWORD_MAX,
   PASSWORD_MIN,
@@ -136,6 +137,7 @@ export const SessionRow = z.object({
   lastSeenAt: Time.nullable(),
   current: z.boolean(),
 });
+export type SessionRow = z.infer<typeof SessionRow>;
 export const ChangePassword = z.object({ password: Password });
 export const AddPasskeyVerify = PasskeyVerify.extend({ name: z.string().optional() });
 export const RenamePasskey = z.object({ name: z.string().min(1) });
@@ -186,6 +188,7 @@ export const DevicePollResult = z.discriminatedUnion("status", [
   z.object({ status: z.literal("denied") }),
   z.object({ status: z.literal("approved"), token: z.string(), person: Person }),
 ]);
+export type DevicePollResult = z.infer<typeof DevicePollResult>;
 export const DeviceDetails = z.object({
   clientName: z.string(),
   agent: z.string().nullable(),
@@ -200,7 +203,6 @@ export type DeviceDetails = z.infer<typeof DeviceDetails>;
 export const GuestName = z.object({ name: z.string().trim().min(1).max(GUEST_NAME_MAX) });
 
 // Organization and people
-export const INVITE_ROLES = ["admin", "member", "reviewer"] as const;
 export const CreateInvite = z.object({
   email: Email,
   role: z.enum(INVITE_ROLES),
@@ -429,6 +431,7 @@ export type Team = z.infer<typeof Team>;
 export const TeamList = z.object({
   teams: z.array(Team.extend({ role: TeamRole.nullable() })),
 });
+export type TeamList = z.infer<typeof TeamList>;
 export const TeamDetail = z.object({
   team: Team,
   /** Empty for a token: this is the people directory, and that's for browsers (04). */
@@ -560,6 +563,8 @@ export const BoardRecord = z.object({
   h: z.number(),
 });
 export const OutlineEntry = z.object({ id: z.string(), title: z.string(), level: z.number().int() });
+export type BoardRecord = z.infer<typeof BoardRecord>;
+export type OutlineEntry = z.infer<typeof OutlineEntry>;
 export const PageRecord = z.object({
   key: Key,
   kind: PageKind,
@@ -1035,6 +1040,34 @@ export const ShareLinkCreated = z.object({
 });
 export type ShareLinkCreated = z.infer<typeof ShareLinkCreated>;
 
+/** What a share link opens on, before the guest gives a name. */
+export const ShareLinkPreview = z.object({
+  artifact: z.object({
+    id: Id,
+    project: z.string(),
+    slug: z.string(),
+    title: z.string(),
+    cover: z.union([z.object({ renderHash: Sha256 }), z.object({ title: z.string() })]),
+  }),
+  permission: Permission,
+  needsName: z.boolean(),
+  sharedBy: z.string(),
+});
+export type ShareLinkPreview = z.infer<typeof ShareLinkPreview>;
+
+/** Someone in the organization is added; anyone else gets an invite link to send. */
+export const AccessAdded = z.union([
+  z.object({ added: z.object({ id: Id, name: z.string(), permission: Permission }) }),
+  z.object({ url: z.string() }),
+]);
+export type AccessAdded = z.infer<typeof AccessAdded>;
+
+export const ResetLinkCreated = z.object({ url: z.string(), expiresAt: Time });
+export type ResetLinkCreated = z.infer<typeof ResetLinkCreated>;
+
+export const BrandProposalCreated = z.object({ id: Id });
+export type BrandProposalCreated = z.infer<typeof BrandProposalCreated>;
+
 export const ActivityItem = z.object({
   id: Id,
   kind: ActivityKind,
@@ -1047,6 +1080,7 @@ export const ActivityItem = z.object({
   createdAt: Time,
 });
 export const ActivityPage = z.object({ items: z.array(ActivityItem), nextCursor: Time.nullable() });
+export type ActivityItem = z.infer<typeof ActivityItem>;
 export type ActivityPage = z.infer<typeof ActivityPage>;
 
 const Found = z.object({ id: Id, project: z.string(), slug: z.string(), title: z.string() });
@@ -1080,12 +1114,17 @@ export const DeletedRow = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("version"), version: z.number().int(), ...Removed }),
 ]);
 export const DeletedList = z.array(DeletedRow);
+export type DeletedRow = z.infer<typeof DeletedRow>;
 export type DeletedList = z.infer<typeof DeletedList>;
 
 export const RestoreResult = z.object({ n: z.number().int() });
 export type RestoreResult = z.infer<typeof RestoreResult>;
+/** A delete moves to Recently deleted until `purgeAfter`. */
+export const DeleteResult = z.object({ purgeAfter: Time });
+export type DeleteResult = z.infer<typeof DeleteResult>;
 
 export const Region = z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() });
+export type Region = z.infer<typeof Region>;
 const Changes = z.object({
   added: z.array(z.string()),
   removed: z.array(z.string()),
@@ -1133,6 +1172,7 @@ export const VersionPage = z.discriminatedUnion("kind", [
   framed("deck"),
 ]);
 export type VersionPage = z.infer<typeof VersionPage>;
+export type VersionPageOf<K extends VersionPage["kind"]> = Extract<VersionPage, { kind: K }>;
 /** One version: its pages, frames and blocks, each marked if it's new or different since `previous`. */
 export const VersionDetail = z.object({
   n: z.number().int(),
@@ -1152,6 +1192,7 @@ export const BackendLog = z.object({
   createdAt: Time,
 });
 export const BackendLogs = z.array(BackendLog);
+export type BackendLog = z.infer<typeof BackendLog>;
 export type BackendLogs = z.infer<typeof BackendLogs>;
 
 export const DataFiles = z.object({

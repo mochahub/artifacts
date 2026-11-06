@@ -1,5 +1,5 @@
 import type { ContentToken } from "@artifacts/schema";
-import { ContentTokenRequest, SHA256_HEX } from "@artifacts/schema";
+import { ContentTokenRequest, HOUR_MS, SHA256_HEX } from "@artifacts/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { can } from "../auth/can.ts";
 import { signContentToken } from "../content/token.ts";
@@ -11,7 +11,7 @@ import { artifactParam } from "../http/resources.ts";
 import type { Routes } from "../http/routes.ts";
 import { blobKey } from "../layout.ts";
 
-const CONTENT_TOKEN_MS = 2 * 3600_000;
+const CONTENT_TOKEN_MS = 2 * HOUR_MS;
 const IMAGE = /^image\//;
 /** A picture bigger than this goes by the redirect, rather than through the app's memory. */
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024;

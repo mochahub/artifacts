@@ -7,12 +7,15 @@ import type {
   PeopleList,
   PeopleSearch,
   PersonResponse,
+  ResetLinkCreated,
 } from "@artifacts/schema";
 import {
   AcceptInvite,
   ChangeRole,
   CreateInvite,
   CreateOrgToken,
+  HOUR_MS,
+  MINUTE_MS,
   OrgSettings,
   PatchOrg,
   RESET_HOURS,
@@ -163,7 +166,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/people/search", { action: "people.search" }, async (c) => {
     const q = (c.req.query("q") ?? "").trim().slice(0, 100);
     if (q.length < 2) return c.json({ people: [] });
-    deps.limits.hit(`people-search:${c.var.caller.person.id}`, SEARCHES_PER_MINUTE, 60_000);
+    deps.limits.hit(`people-search:${c.var.caller.person.id}`, SEARCHES_PER_MINUTE, MINUTE_MS);
     const like = containing(q);
     const rows = await db
       .select()
@@ -355,7 +358,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     await guardTokenReset(c.var.caller, person);
     const secret = randomSecret();
     const now = clock.now();
-    const expiresAt = new Date(now.getTime() + RESET_HOURS * 3600_000);
+    const expiresAt = new Date(now.getTime() + RESET_HOURS * HOUR_MS);
     await db.insert(resetLinks).values({
       id: Bun.randomUUIDv7(),
       orgId: person.orgId,
@@ -365,7 +368,10 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       createdAt: now,
       expiresAt,
     });
-    return c.json({ url: `${env.publicUrl}/reset/${secret}`, expiresAt: expiresAt.toISOString() });
+    return c.json({
+      url: `${env.publicUrl}/reset/${secret}`,
+      expiresAt: expiresAt.toISOString(),
+    } satisfies ResetLinkCreated);
   });
 
   routes.post("/api/invites", { action: "people.invite" }, async (c) => {
