@@ -13,7 +13,7 @@ const paging = { limit: { type: "string" }, cursor: { type: "string" } } as cons
 const where = { repo: { type: "string" }, here: { type: "boolean" } } as const;
 
 /** The commands (07), in the order `artifacts --help` lists them. */
-export const COMMANDS: Command[] = [
+const COMMANDS: Command[] = [
   command({
     name: "setup",
     usage:

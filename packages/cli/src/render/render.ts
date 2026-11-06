@@ -85,10 +85,7 @@ const isWebp = (body: Uint8Array) =>
   Buffer.from(body.subarray(8, 12)).toString() === "WEBP";
 
 /** Lowest first: a template's look, then the org's brand, then what the artifact says. */
-export function resolveTheme(
-  manifest: Manifest,
-  brand?: Pick<LocalBrand, "theme"> | null,
-): Theme | undefined {
+function resolveTheme(manifest: Manifest, brand?: Pick<LocalBrand, "theme"> | null): Theme | undefined {
   const layers = [manifest.templateTheme, brand?.theme, manifest.theme].filter(
     (layer): layer is Theme => layer !== undefined,
   );
@@ -121,7 +118,7 @@ function bundleBackend(root: string, src: string, outDir: string) {
 }
 
 /** What the sandbox would refuse anyway, found before publishing (07). */
-export function backendProblems(source: string): Problem[] {
+function backendProblems(source: string): Problem[] {
   const problems: Problem[] = [];
   if (Buffer.byteLength(source) > MAX_BACKEND) {
     problems.push({ rule: "backend/size", severity: "error", message: "The bundled backend is over 1 MB." });

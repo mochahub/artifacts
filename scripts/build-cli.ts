@@ -23,42 +23,38 @@ const assets: Record<string, string> = {};
 for (const path of new Bun.Glob("**/*").scanSync("apps/viewer/dist")) {
   assets[`/${path}`] = readFileSync(join("apps/viewer/dist", path)).toString("base64");
 }
-const generated = "packages/cli/src/dev/viewer.gen.ts";
-const STUB =
-  "// Filled in by scripts/build-cli.ts for the compiled binary, then put back.\nexport const VIEWER: Record<string, string> = {};\n";
-writeFileSync(generated, `export const VIEWER: Record<string, string> = ${JSON.stringify(assets)};\n`);
+// Built in, without touching the tracked file: the build reads this table in its place.
+const viewer: Bun.BunPlugin = {
+  name: "viewer",
+  setup(build) {
+    build.onLoad({ filter: /dev\/viewer\.gen\.ts$/ }, () => ({
+      contents: `export const VIEWER: Record<string, string> = ${JSON.stringify(assets)};\n`,
+      loader: "ts",
+    }));
+  },
+};
 
 mkdirSync(out, { recursive: true });
 const sums: string[] = [];
-let failed = 0;
-try {
-  for (const [target, name] of TARGETS) {
-    if (only && only !== target) continue;
-    const path = join(out, name);
-    const compile = Bun.spawnSync(
-      [
-        "bun",
-        "build",
-        "packages/cli/src/index.ts",
-        "--compile",
-        // The folder a person runs the CLI in isn't configuration. A repo's .env could point it elsewhere.
-        "--no-compile-autoload-dotenv",
-        "--no-compile-autoload-bunfig",
-        `--target=bun-${target}`,
-        `--outfile=${path}`,
-      ],
-      { stdout: "ignore", stderr: "inherit" },
-    );
-    if (!compile.success) {
-      failed = compile.exitCode ?? 1;
-      break;
-    }
-    sums.push(`${createHash("sha256").update(readFileSync(path)).digest("hex")}  ${name}`);
-    console.log(`built ${name}`);
+for (const [target, name] of TARGETS) {
+  if (only && only !== target) continue;
+  const path = join(out, name);
+  const built = await Bun.build({
+    entrypoints: ["packages/cli/src/index.ts"],
+    compile: {
+      target: `bun-${target}` as Bun.Build.CompileTarget,
+      outfile: path,
+      // The folder a person runs the CLI in isn't configuration. A repo's .env could point it elsewhere.
+      autoloadDotenv: false,
+      autoloadBunfig: false,
+    },
+    plugins: [viewer],
+  });
+  if (!built.success) {
+    for (const log of built.logs) console.error(log);
+    process.exit(1);
   }
-} finally {
-  // Put back even when a build fails, so the multi-megabyte generated file is never left in the tree.
-  writeFileSync(generated, STUB);
+  sums.push(`${createHash("sha256").update(readFileSync(path)).digest("hex")}  ${name}`);
+  console.log(`built ${name}`);
 }
-if (failed) process.exit(failed);
 writeFileSync(join(out, "SHA256SUMS"), `${sums.join("\n")}\n`);

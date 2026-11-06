@@ -11,7 +11,7 @@ import helper from "./helper.mjs" with { type: "text" };
 
 const PACKAGES = ["playwright-core@1.64.1", "sharp@0.35.5", "mermaid@12.2.0", "quickjs-emscripten@0.32.0"];
 
-export const helperDir = () => process.env.ARTIFACTS_HELPER_DIR ?? join(home(), ".artifacts/playwright");
+const helperDir = () => process.env.ARTIFACTS_HELPER_DIR ?? join(home(), ".artifacts/playwright");
 
 const marker = (dir: string) => join(dir, ".installed");
 

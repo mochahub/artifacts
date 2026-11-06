@@ -5,10 +5,10 @@ import type { Problem } from "../lint/problem.ts";
 import { CliError } from "../output.ts";
 import { MANIFEST, WORK } from "./layout.ts";
 
-export const manifestPath = (root: string) => join(root, MANIFEST);
+const manifestPath = (root: string) => join(root, MANIFEST);
 
 /** Every working folder in the nearest `.artifacts/work/`, from `from` upward. */
-export function workFolders(from = process.cwd()): string[] {
+function workFolders(from = process.cwd()): string[] {
   let dir = resolve(from);
   for (;;) {
     const work = join(dir, WORK);

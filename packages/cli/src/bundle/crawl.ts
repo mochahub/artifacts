@@ -36,7 +36,7 @@ function classify(reference: string): "skip" | "absolute" | "relative" {
   return "relative";
 }
 
-export function htmlRefs(html: string) {
+function htmlRefs(html: string) {
   const refs: string[] = [];
   let inStyle = false;
   const css: string[] = [];
@@ -79,7 +79,7 @@ export function htmlRefs(html: string) {
   return { refs, css, scripts };
 }
 
-export function cssRefs(css: string): string[] {
+function cssRefs(css: string): string[] {
   const refs: string[] = [];
   let root: postcss.Root;
   try {
@@ -116,7 +116,7 @@ export function jsRefs(js: string): string[] {
   return refs;
 }
 
-export function markdownRefs(markdown: string): string[] {
+function markdownRefs(markdown: string): string[] {
   const tree = unified().use(remarkParse).use(remarkGfm).use(remarkDirective).parse(markdown);
   const refs: string[] = [];
   visit(tree, "image", (node) => {

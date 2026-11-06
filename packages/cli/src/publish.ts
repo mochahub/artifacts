@@ -150,7 +150,7 @@ export async function uploadFiles(
 }
 
 /** `--note <frame>=<text>`, as many as given. */
-export function parseNotes(notes: string[]) {
+function parseNotes(notes: string[]) {
   const parsed: Record<string, string> = {};
   for (const note of notes) {
     const split = note.indexOf("=");

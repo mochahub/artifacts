@@ -8,7 +8,7 @@ import { FIXTURE_DATA, KIT_DIR, typeOf } from "../bundle/layout.ts";
 const MB = 1024 * 1024;
 
 /** Every data-frame in a board's HTML, in order. */
-export function frameIds(html: string): string[] {
+function frameIds(html: string): string[] {
   const ids: string[] = [];
   const parser = new Parser({
     onopentag(_name, attrs) {
