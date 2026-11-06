@@ -162,7 +162,6 @@ export function createReview(deps: Deps) {
     return { rows, views: await threadViews(rows) };
   }
 
-  /** A version still there, or 400: a thread or a decision names one. */
   async function liveVersion(artifactId: string, n: number) {
     const [version] = await db
       .select({ id: versions.id, n: versions.n })

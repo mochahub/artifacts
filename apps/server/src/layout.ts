@@ -16,7 +16,6 @@ export const planKey = (id: string) => `${PLANS}${id}.json`;
 
 export type DataScope = "shared" | "me";
 
-/** Everything an artifact's data store holds: values, files, both scopes. */
 export const dataPrefix = (artifactId: string) => `${DATA}${artifactId}/`;
 
 /**

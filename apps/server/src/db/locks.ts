@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Tx } from "./index.ts";
 
-/** Advisory lock ids, so no two things that must happen one at a time share one by accident. */
 const SETUP = 7_316_002;
 const OWNERS = 7_316_003;
 const JOBS = 7_316_004;

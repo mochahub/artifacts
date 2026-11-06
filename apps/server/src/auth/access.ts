@@ -228,7 +228,6 @@ export async function findArtifact(deps: Deps, orgId: string, id: string): Promi
   return row ? toResource(deps, row) : null;
 }
 
-/** By its project's slug and its own, as links name it. */
 export async function findArtifactBySlug(
   deps: Deps,
   orgId: string,

@@ -162,7 +162,6 @@ export class Bucket {
     };
   }
 
-  /** Every object under a prefix, a page at a time. */
   async *listAll(prefix: string): AsyncGenerator<ObjectInfo[]> {
     let cursor: string | undefined;
     do {

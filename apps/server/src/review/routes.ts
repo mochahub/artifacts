@@ -30,7 +30,6 @@ export function reviewRoutes(routes: Routes, deps: Deps, review: Review) {
   const { db, clock, bucket } = deps;
   const artifact = artifactParam(deps);
 
-  /** The `:id` thread, guarded as its artifact. */
   async function threadParam(c: ApiContext): Promise<LoadedArtifact & { thread: ThreadRow }> {
     const id = c.req.param("id");
     const [thread] = isUuid(id)

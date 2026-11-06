@@ -2,7 +2,6 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { people, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 
-/** An artifact's live versions, newest first, each with who published it. */
 export const listVersions = (deps: Pick<Deps, "db">, artifactId: string, limit?: number) => {
   const query = deps.db
     .select({ version: versions, by: people.name })

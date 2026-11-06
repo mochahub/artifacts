@@ -36,5 +36,4 @@ export const isUniqueViolation = (error: unknown) => {
   return (cause?.code ?? code) === "23505";
 };
 
-/** A LIKE pattern matching `text` anywhere, with its own `%`, `_` and `\\` taken literally. */
 export const containing = (text: string) => `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
