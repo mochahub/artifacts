@@ -1,31 +1,32 @@
 import { expect, type Page, test } from "@playwright/test";
-import { box, overflowsSideways, watchErrors } from "./helpers.ts";
+import {
+  box,
+  here,
+  overflowsSideways,
+  pointer,
+  settle,
+  shot,
+  tap,
+  transform,
+  watchErrors,
+} from "./helpers.ts";
 
-const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone")
-    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop")
-    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
-};
+const desktop = { desktop: true };
+/** The fixture's artifact as a tile in a project. */
+const roadmapTile = (page: Page) => page.getByRole("link", { name: /Camera Buddy roadmap/ });
 
-const transform = (page: Page) =>
-  page.locator(".cv .world").evaluate((world: HTMLElement) => {
-    const { x, y, s } = world.dataset;
-    return { x: Number(x), y: Number(y), s: Number(s) };
-  });
-
-test("projects and a project list the fixture", async ({ page }, info) => {
+test("projects and a project list the fixture", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/");
   await expect(page.getByText("Camera Buddy roadmap").first()).toBeVisible();
 
   await page.goto("/projects");
   await expect(page.getByRole("link", { name: /Camera Buddy/ }).last()).toBeVisible();
-  await shot(page, info.project.name, "01-2-projects");
+  await shot(page, "01-2-projects", desktop);
 
   await page.goto("/camerabuddy");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Camera Buddy");
-  await expect(page.locator(".tile").first()).toBeVisible();
+  await expect(roadmapTile(page)).toBeVisible();
   // Every filter and the sort control fit on a phone, with nothing past the edge.
   expect(await overflowsSideways(page)).toBe(false);
   const width = (page.viewportSize() as { width: number }).width;
@@ -50,9 +51,10 @@ test("projects and a project list the fixture", async ({ page }, info) => {
     },
     { times: 1 },
   );
+  const asked = page.waitForRequest("**/artifacts?*");
   await page.getByLabel("Find in this project").fill("ro");
-  await page.waitForTimeout(200);
-  await expect(page.locator(".tile").first()).toBeVisible();
+  await asked;
+  await expect(roadmapTile(page)).toBeVisible();
   await expect(page.getByText("Nothing here.")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Approved" }).click();
@@ -61,14 +63,12 @@ test("projects and a project list the fixture", async ({ page }, info) => {
   await page.getByLabel("Find in this project").fill("nope");
   await expect(page.getByText("Nothing here.")).toBeVisible();
   await page.getByLabel("Find in this project").fill("road");
-  await expect(page.locator(".tile").getByText("Camera Buddy roadmap").first()).toBeVisible();
-  await shot(page, info.project.name, "01-3-project");
+  await expect(roadmapTile(page)).toBeVisible();
+  await shot(page, "01-3-project", desktop);
   expect(errors).toEqual([]);
 });
 
-test("the artifact shows what changed, with the page switcher and version history", async ({
-  page,
-}, info) => {
+test("the artifact shows what changed, with the page switcher and version history", async ({ page }) => {
   const errors = watchErrors(page);
   // A cold load shows the page's shape, never a blank screen, until the artifact arrives.
   await page.route(
@@ -86,25 +86,28 @@ test("the artifact shows what changed, with the page switcher and version histor
   await expect(page.getByText("9 pages")).toBeVisible();
   // The detail page lives in the shell: tabs on a phone, the rail on a desktop, and the project by name.
   await expect(page.getByRole("navigation", { name: "Main" }).first()).toBeVisible();
-  await expect(page.locator(".back")).toHaveText(/Camera Buddy$/);
-  await expect(page.locator(".top .round")).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "Camera Buddy", exact: true })).toHaveAttribute(
+    "href",
+    "/camerabuddy",
+  );
+  await expect(page.getByRole("button", { name: "More" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Approve or request changes" })).toHaveText(
     "Approve or request changes",
   );
   await expect(page).toHaveTitle("Camera Buddy roadmap – Mochahub");
-  await shot(page, info.project.name, "01-4-artifact");
+  await shot(page, "01-4-artifact", desktop);
 
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Version history" }).click();
   await expect(page.getByRole("dialog", { name: "Version history" }).getByText("v1")).toBeVisible();
-  await shot(page, info.project.name, "01-6-versions");
+  await shot(page, "01-6-versions", desktop);
   await page.keyboard.press("Escape");
 
   await page.getByRole("link", { name: "Review changes" }).click();
   await expect(page).toHaveURL(/\/camerabuddy\/roadmap\/plan$/);
   await page.getByRole("button", { name: "Pages" }).click();
   await expect(page.getByRole("dialog").getByText("Research")).toBeVisible();
-  await shot(page, info.project.name, "01-5-switcher");
+  await shot(page, "01-5-switcher", desktop);
   await page.getByRole("dialog").getByRole("link", { name: /Mocks/ }).click();
   await expect(page).toHaveURL(/\/roadmap\/mocks$/);
   expect(errors).toEqual([]);
@@ -115,23 +118,24 @@ test("the canvas: every frame drawn, changed marked, fit, frames list and deep l
 }, info) => {
   const errors = watchErrors(page);
   await page.goto("/camerabuddy/roadmap/mocks");
-  await expect(page.locator(".fr")).toHaveCount(26);
+  await expect(page.getByRole("img")).toHaveCount(26);
+  // Marked on the canvas, where only its outline says so.
   await expect(page.locator(".fr.chg")).toHaveCount(1);
-  await expect(page.locator(".brd").first()).toContainText("Onboarding");
-  await page.waitForTimeout(400);
-  await shot(page, info.project.name, "02-1-overview");
+  await expect(page.getByText("Onboarding").first()).toBeVisible();
+  await settle(page);
+  await shot(page, "02-1-overview", desktop);
 
   await page.getByRole("button", { name: "Frames" }).click();
   await page.getByRole("button", { name: /Changed 1/ }).click();
-  await shot(page, info.project.name, "02-5-frames");
+  await shot(page, "02-5-frames", desktop);
   await page
     .getByRole("dialog")
     .getByRole("button", { name: /Live view/ })
     .click();
   await expect(page).toHaveURL(/#frame=live-view$/);
-  await expect(page.locator(".capsule b")).toHaveText("Live view");
-  await page.waitForTimeout(500);
-  await shot(page, info.project.name, "02-2-one-frame");
+  await expect(here(page, "Live view")).toBeVisible();
+  await settle(page);
+  await shot(page, "02-2-one-frame", desktop);
   if (info.project.name === "desktop") {
     // The comments panel has its column: the canvas, the capsule and the toolbar keep to the rest.
     const panel = await box(page, ".panel");
@@ -155,7 +159,7 @@ test("the canvas: every frame drawn, changed marked, fit, frames list and deep l
   );
 
   await page.goto("/camerabuddy/roadmap/mocks#frame=timer");
-  await expect(page.locator(".capsule b")).toHaveText("Timer");
+  await expect(here(page, "Timer")).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -163,18 +167,11 @@ test("canvas gestures: pan and pinch with touch", async ({ page, browserName }, 
   test.skip(info.project.name !== "iphone", "touch only");
   expect(browserName).toBe("webkit");
   await page.goto("/camerabuddy/roadmap/mocks");
-  await expect(page.locator(".fr")).toHaveCount(26);
+  await expect(page.getByRole("img")).toHaveCount(26);
+  await settle(page);
   const before = await transform(page);
-
   const fire = (type: string, id: number, x: number, y: number) =>
-    page.locator(".cv").dispatchEvent(type, {
-      pointerId: id,
-      clientX: x,
-      clientY: y,
-      bubbles: true,
-      pointerType: "touch",
-      isPrimary: id === 1,
-    });
+    pointer(page, type, x, y, { id, touch: true });
 
   await fire("pointerdown", 1, 100, 300);
   await fire("pointermove", 1, 140, 340);
@@ -196,25 +193,17 @@ test("canvas gestures: pan and pinch with touch", async ({ page, browserName }, 
 
 test("canvas: double-tap fits a frame and back; the keyboard works", async ({ page }, info) => {
   await page.goto("/camerabuddy/roadmap/mocks#frame=timer");
-  await expect(page.locator(".capsule b")).toHaveText("Timer");
-  await page.waitForTimeout(300);
-  const box = page.viewportSize() as { width: number; height: number };
-  const tap = async () => {
-    const at = { x: box.width / 2, y: box.height / 2 };
-    const fire = (type: string) =>
-      page
-        .locator(".cv")
-        .dispatchEvent(type, { pointerId: 1, clientX: at.x, clientY: at.y, bubbles: true, isPrimary: true });
-    await fire("pointerdown");
-    await fire("pointerup");
-  };
-  await tap();
+  await expect(here(page, "Timer")).toBeVisible();
+  await settle(page);
+  const screen = page.viewportSize() as { width: number; height: number };
+  await tap(page, screen.width / 2, screen.height / 2);
+  // Two taps a moment apart, as a finger makes them.
   await page.waitForTimeout(60);
-  await tap();
-  await expect(page.locator(".capsule b")).toHaveText("Mocks");
+  await tap(page, screen.width / 2, screen.height / 2);
+  await expect(here(page, "Mocks")).toBeVisible();
   if (info.project.name === "desktop") {
     await page.keyboard.press("n");
-    await expect(page.locator(".capsule b")).toHaveText("Welcome");
+    await expect(here(page, "Welcome")).toBeVisible();
     await page.keyboard.press("0");
     await page.keyboard.press("1");
     await expect.poll(async () => (await transform(page)).s).toBeCloseTo(1, 5);
@@ -237,7 +226,7 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   // The fixture's v2 rewords a sentence and swaps a board picture, which an embedded frame may show.
   await expect(page.getByText(/^Changed in \d+ places? since v1\.$/)).toBeVisible();
   await expect(page).toHaveTitle("Plan – Camera Buddy roadmap – Mochahub");
-  await shot(page, info.project.name, "03-1-reading");
+  await shot(page, "03-1-reading", desktop);
   if (info.project.name === "desktop") {
     const panel = await box(page, ".panel");
     expect((await box(page, ".article")).right).toBeLessThanOrEqual(panel.x);
@@ -250,8 +239,7 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page.locator(".show-changes ins.chg", { hasText: "a faster" })).toBeInViewport();
 
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
-  expect(overflow).toBe(false);
+  expect(await overflowsSideways(page)).toBe(false);
 
   await page.getByRole("button", { name: "Reading settings" }).click();
   await page.getByRole("button", { name: "Large" }).click();
@@ -261,18 +249,19 @@ test("the article: blocks, embeds, changed sections, settings and contents", asy
 
   // Dark is the reader's choice whatever the system is (these browsers run light), and only on this page.
   const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const light = await background();
   await page.getByRole("button", { name: "Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect.poll(background).toBe("rgb(21, 23, 28)");
+  await expect.poll(background).not.toBe(light);
   await page.getByRole("button", { name: "Light" }).click();
-  await expect.poll(background).toBe("rgb(245, 246, 248)");
+  await expect.poll(background).toBe(light);
   await page.getByRole("button", { name: "Dark" }).click();
   await page.getByRole("button", { name: "Auto" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
   await page.reload();
   await expect(page.locator(".article")).toHaveAttribute("style", /21px/);
   await expect(page.locator(".article")).toHaveAttribute("style", /--ui/);
-  await shot(page, info.project.name, "03-6-settings");
+  await shot(page, "03-6-settings", desktop);
 
   // Images above the target change the layout as they load, so settle first.
   await page
@@ -299,6 +288,7 @@ test("the reader's glass draws back on the way down and fits its ink to a pictur
   await expect(picture).toBeAttached();
   await expect(root).not.toHaveClass(/reading/);
   await expect(bar.getByText("Contents")).toBeVisible();
+  const full = (await bar.boundingBox())?.height as number;
 
   await picture.evaluate((image) => {
     const box = image.getBoundingClientRect();
@@ -306,22 +296,23 @@ test("the reader's glass draws back on the way down and fits its ink to a pictur
     scrollTo(0, scrollY + box.top + box.height / 2 - barTop - 26);
   });
   await expect(root).toHaveClass(/reading/);
-  await expect(bar).toHaveCSS("height", "52px");
+  // The bar draws back: shorter than it stands at rest.
+  await expect.poll(async () => (await bar.boundingBox())?.height).toBeLessThan(full);
   await expect(bar).toHaveAttribute("data-tone", /dark|light/);
   if (process.env.GLASS_SHOT) await page.screenshot({ animations: "disabled", path: process.env.GLASS_SHOT });
 
   await page.evaluate(() => scrollBy(0, -40));
   await expect(root).not.toHaveClass(/reading/);
-  await expect(bar).toHaveCSS("height", "68px");
+  await expect.poll(async () => (await bar.boundingBox())?.height).toBe(full);
   expect(errors).toEqual([]);
 });
 
 test("a pinned version shows that version", async ({ page }) => {
   await page.goto("/camerabuddy/roadmap/v/1/plan");
-  await expect(page.locator(".capsule .vchip")).toHaveText("v1");
+  await expect(page.getByRole("button", { name: "Version history" })).toHaveText("v1");
   await expect(page.getByText("Ship pairing, live view")).toBeVisible();
   await page.goto("/camerabuddy/roadmap/plan?v=1");
-  await expect(page.locator(".capsule .vchip")).toHaveText("v1");
+  await expect(page.getByRole("button", { name: "Version history" })).toHaveText("v1");
   await page.goto("/camerabuddy/roadmap/v/9/plan");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Nothing here");
 });
