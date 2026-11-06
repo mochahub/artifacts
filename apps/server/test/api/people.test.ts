@@ -1,36 +1,45 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { artifacts, invites, people } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { publish } from "../publish-helper.ts";
-
-const code = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
-const PASSWORD = "a perfectly long password";
+import { Artifact } from "@artifacts/schema";
+import {
+  acceptInvite,
+  claim,
+  code,
+  inviteSecret,
+  joinAsGuest,
+  json,
+  OWNER,
+  orgToken,
+  PASSWORD,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount, published } from "../publish-helper.ts";
 
 describe("people, invites and tokens", () => {
   let t: TestServer;
   let token: string;
   let owner: string;
   let ownerId: string;
+  let orgId: string;
 
   const invite = async (
     email: string,
     role: string,
     auth: { cookie?: string; bearer?: string } = { bearer: token },
   ) => t.api("/api/invites", { method: "POST", json: { email, role }, ...auth });
-  const join = async (url: string, name: string) => {
-    const secret = url.split("/join/")[1] as string;
-    const response = await t.api(`/api/invites/${secret}/accept`, {
-      method: "POST",
-      json: { name, password: PASSWORD },
-    });
-    expect(response.status).toBe(200);
-    return (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
-  };
+  /** Someone invited by the owner who has joined: their id and session. */
   const invited = async (email: string, role: string) => {
-    const body = (await (await invite(email, role, { cookie: owner })).json()) as { url: string };
-    return { cookie: await join(body.url, email.split("@")[0] as string), url: body.url };
+    const { url } = await json<{ url: string }>(await invite(email, role, { cookie: owner }));
+    const { person, cookie } = await acceptInvite(t, url, email.split("@")[0] as string);
+    return { id: person.id, cookie, url };
+  };
+  /** A person's id, as the People page shows it. */
+  const idOf = async (email: string) => {
+    const list = await json<{ people: { id: string; email: string }[] }>(
+      await t.api("/api/people", { cookie: owner }),
+    );
+    return list.people.find((row) => row.email === email)?.id as string;
   };
 
   beforeAll(async () => {
@@ -38,6 +47,7 @@ describe("people, invites and tokens", () => {
     const made = await claim(t);
     token = made.token;
     ownerId = made.person.id;
+    orgId = made.orgId;
     owner = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
@@ -46,14 +56,14 @@ describe("people, invites and tokens", () => {
     const response = await invite("sam@example.com", "reviewer");
     const { url } = (await response.json()) as { url: string };
     expect(url).toStartWith("http://viewer.test/join/");
-    const secret = url.split("/join/")[1] as string;
+    const secret = inviteSecret(url);
     expect(await (await t.api(`/api/invites/${secret}`)).json()).toMatchObject({
       orgName: "Mochahub",
       invitedBy: "Zahin",
       role: "reviewer",
       email: "sam@example.com",
     });
-    const cookie = await join(url, "Sam");
+    const { cookie } = await acceptInvite(t, url, "Sam");
     const me = (await (await t.api("/api/me", { cookie })).json()) as { person: { role: string } };
     expect(me.person.role).toBe("reviewer");
     expect((await t.api(`/api/invites/${secret}`)).status).toBe(410);
@@ -67,19 +77,19 @@ describe("people, invites and tokens", () => {
       url: string;
       invite: { id: string };
     };
-    const secret = one.url.split("/join/")[1];
+    const secret = inviteSecret(one.url);
     const fresh = await t.api(`/api/invites/${one.invite.id}/link`, { method: "POST", cookie: owner });
     const { url } = (await fresh.json()) as { url: string };
     expect((await t.api(`/api/invites/${secret}`)).status).toBe(410);
-    expect((await t.api(`/api/invites/${url.split("/join/")[1]}`)).status).toBe(200);
+    expect((await t.api(`/api/invites/${inviteSecret(url)}`)).status).toBe(200);
     expect((await t.api(`/api/invites/${one.invite.id}`, { method: "DELETE", cookie: owner })).status).toBe(
       200,
     );
-    expect((await t.api(`/api/invites/${url.split("/join/")[1]}`)).status).toBe(410);
+    expect((await t.api(`/api/invites/${inviteSecret(url)}`)).status).toBe(410);
 
     const two = (await (await invite("a2@example.com", "member")).json()) as { url: string };
     t.clock.advance(7 * 24 * 3600_000 + 1000);
-    expect((await t.api(`/api/invites/${two.url.split("/join/")[1]}`)).status).toBe(410);
+    expect((await t.api(`/api/invites/${inviteSecret(two.url)}`)).status).toBe(410);
     owner = await signIn(t, OWNER.email, OWNER.password);
   });
 
@@ -95,12 +105,12 @@ describe("people, invites and tokens", () => {
   });
 
   test("an admin's CLI token can invite, but a token can't change or remove anyone", async () => {
-    const [sam] = await t.server.db.select().from(people).where(eq(people.email, "sam@example.com"));
+    const sam = await idOf("sam@example.com");
     expect(
-      (await t.api(`/api/people/${sam?.id}`, { method: "PATCH", bearer: token, json: { role: "member" } }))
+      (await t.api(`/api/people/${sam}`, { method: "PATCH", bearer: token, json: { role: "member" } }))
         .status,
     ).toBe(403);
-    expect((await t.api(`/api/people/${sam?.id}`, { method: "DELETE", bearer: token })).status).toBe(403);
+    expect((await t.api(`/api/people/${sam}`, { method: "DELETE", bearer: token })).status).toBe(403);
     expect((await t.api("/api/people", { bearer: token })).status).toBe(200);
   });
 
@@ -113,16 +123,15 @@ describe("people, invites and tokens", () => {
 
   test("removing an admin ends what they issued", async () => {
     const admin = await invited("issuer@example.com", "admin");
-    const [row] = await t.server.db.select().from(people).where(eq(people.email, "issuer@example.com"));
     const made = (await (
       await invite("throwaway@example.com", "admin", { cookie: admin.cookie })
     ).json()) as { url: string };
-    const [sam] = await t.server.db.select().from(people).where(eq(people.email, "sam@example.com"));
+    const sam = await idOf("sam@example.com");
     const reset = (await (
-      await t.api(`/api/people/${sam?.id}/reset-link`, { method: "POST", cookie: admin.cookie })
+      await t.api(`/api/people/${sam}/reset-link`, { method: "POST", cookie: admin.cookie })
     ).json()) as { url: string };
-    expect((await t.api(`/api/people/${row?.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
-    expect((await t.api(`/api/invites/${made.url.split("/join/")[1]}`)).status).toBe(410);
+    expect((await t.api(`/api/people/${admin.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+    expect((await t.api(`/api/invites/${inviteSecret(made.url)}`)).status).toBe(410);
     expect((await t.api(`/api/reset/${reset.url.split("/reset/")[1]}`)).status).toBe(410);
   });
 
@@ -143,10 +152,10 @@ describe("people, invites and tokens", () => {
     expect(
       await code(await t.api(`/api/people/${ownerId}/reset-link`, { method: "POST", cookie: admin.cookie })),
     ).toBe("forbidden");
-    const [sam] = await t.server.db.select().from(people).where(eq(people.email, "sam@example.com"));
+    const sam = await idOf("sam@example.com");
     expect(
       await code(
-        await t.api(`/api/people/${sam?.id}`, {
+        await t.api(`/api/people/${sam}`, {
           method: "PATCH",
           cookie: admin.cookie,
           json: { role: "owner" },
@@ -161,7 +170,7 @@ describe("people, invites and tokens", () => {
     expect(await code(await t.api(`/api/people/${ownerId}`, { method: "DELETE", cookie: owner }))).toBe(
       "conflict",
     );
-    const ok = await t.api(`/api/people/${sam?.id}`, {
+    const ok = await t.api(`/api/people/${sam}`, {
       method: "PATCH",
       cookie: admin.cookie,
       json: { role: "member" },
@@ -170,23 +179,25 @@ describe("people, invites and tokens", () => {
   });
 
   test("removing someone ends their sessions and tokens, and frees their email", async () => {
-    const { cookie } = await invited("gone@example.com", "member");
-    const [row] = await t.server.db.select().from(people).where(eq(people.email, "gone@example.com"));
-    expect((await t.api(`/api/people/${row?.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
-    expect((await t.api("/api/me", { cookie })).status).toBe(401);
+    const joined = await invited("gone@example.com", "member");
+    const withToken = await makeAccount(t, orgId, "member");
+    for (const who of [joined, withToken]) {
+      expect((await t.api("/api/me", { cookie: who.cookie })).status).toBe(200);
+    }
+    expect((await t.api("/api/me", { bearer: withToken.token })).status).toBe(200);
+
+    for (const who of [joined, withToken]) {
+      expect((await t.api(`/api/people/${who.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+      expect((await t.api("/api/me", { cookie: who.cookie })).status).toBe(401);
+    }
+    expect((await t.api("/api/me", { bearer: withToken.token })).status).toBe(401);
     expect((await invite("gone@example.com", "member")).status).toBe(200);
   });
 
   test("removing someone ends the organization tokens and share links they created", async () => {
-    await publish(t, token, { slug: "removal-target", visibility: "org" });
-    const [target] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "removal-target"));
-    const artifactId = target?.id as string;
+    const artifactId = (await published(t, token, { slug: "removal-target", visibility: "org" })).id;
     const leaving = await invited("leaving@example.com", "admin");
-    const [row] = await t.server.db.select().from(people).where(eq(people.email, "leaving@example.com"));
-    const makeToken = async (cookie: string, name: string) =>
-      (await (
-        await t.api("/api/tokens", { method: "POST", cookie, json: { name, scopes: ["read"] } })
-      ).json()) as { token: string };
+    const makeToken = (cookie: string, name: string) => orgToken(t, cookie, { name });
     const makeLink = async (cookie: string) => {
       const made = await t.api(`/api/artifacts/${artifactId}/links`, {
         method: "POST",
@@ -200,17 +211,12 @@ describe("people, invites and tokens", () => {
     const ownersToken = await makeToken(owner, "owner's");
     const theirLink = await makeLink(leaving.cookie);
     const ownersLink = await makeLink(owner);
-    const guestOn = async (secret: string) => {
-      const response = await t.api(`/api/s/${secret}/guest`, { method: "POST", json: { name: "Riley" } });
-      expect(response.status).toBe(200);
-      return (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
-    };
-    const theirGuest = await guestOn(theirLink);
-    const ownersGuest = await guestOn(ownersLink);
+    const theirGuest = await joinAsGuest(t, theirLink, "Riley");
+    const ownersGuest = await joinAsGuest(t, ownersLink, "Riley");
     expect((await t.api("/api/home", { bearer: theirToken.token })).status).toBe(200);
     expect((await t.api(`/api/artifacts/${artifactId}`, { cookie: theirGuest })).status).toBe(200);
 
-    expect((await t.api(`/api/people/${row?.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+    expect((await t.api(`/api/people/${leaving.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
 
     expect((await t.api("/api/home", { bearer: theirToken.token })).status).toBe(401);
     expect(await code(await t.api(`/api/s/${theirLink}`))).toBe("gone");
@@ -255,9 +261,9 @@ describe("people, invites and tokens", () => {
     );
     const meta = (await (await t.api("/api/meta")).json()) as { orgName: string };
     expect(meta.orgName).toBe("Mocha");
-    await publish(t, token, { slug: "by-default" });
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "by-default"));
-    expect(row?.visibility).toBe("me");
+    const { id } = await published(t, token, { slug: "by-default" });
+    const artifact = Artifact.parse(await json(await t.api(`/api/artifacts/${id}`, { bearer: token })));
+    expect(artifact.visibility).toBe("me");
     await t.api("/api/org", {
       method: "PATCH",
       cookie: owner,
@@ -274,9 +280,9 @@ describe("people, invites and tokens", () => {
     expect(made.token).toStartWith("art_");
     const rows = (await (await t.api("/api/tokens", { cookie: owner })).json()) as { name: string }[];
     expect(JSON.stringify(rows)).not.toContain(made.token);
-    expect((await publish(t, made.token, { project: "ci-project", slug: "built" })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "built"));
-    expect(row?.publisherId).toBe(ownerId);
+    const { id } = await published(t, made.token, { project: "ci-project", slug: "built" });
+    const artifact = Artifact.parse(await json(await t.api(`/api/artifacts/${id}`, { cookie: owner })));
+    expect(artifact.publisherId).toBe(ownerId);
     expect((await t.api(`/api/tokens/${made.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
     expect((await t.api("/api/home", { bearer: made.token })).status).toBe(401);
     expect((await t.api("/api/tokens", { bearer: token })).status).toBe(403);
@@ -288,13 +294,15 @@ describe("people, invites and tokens", () => {
 
   test("an invite can't be accepted twice at once", async () => {
     const { url } = (await (await invite("race@example.com", "member")).json()) as { url: string };
-    const secret = url.split("/join/")[1];
     const accept = () =>
-      t.api(`/api/invites/${secret}/accept`, { method: "POST", json: { name: "R", password: PASSWORD } });
+      t.api(`/api/invites/${inviteSecret(url)}/accept`, {
+        method: "POST",
+        json: { name: "R", password: PASSWORD },
+      });
     const results = await Promise.all([accept(), accept(), accept()]);
     expect(results.filter((r) => r.status === 200)).toHaveLength(1);
-    const rows = await t.server.db.select().from(invites).where(eq(invites.email, "race@example.com"));
-    expect(rows).toHaveLength(1);
+    const list = await json<{ people: { email: string }[] }>(await t.api("/api/people", { cookie: owner }));
+    expect(list.people.filter((row) => row.email === "race@example.com")).toHaveLength(1);
   });
 
   test("a token can't get a fresh link for an admin invite either", async () => {
@@ -305,7 +313,7 @@ describe("people, invites and tokens", () => {
     const asToken = await t.api(`/api/invites/${made.invite.id}/link`, { method: "POST", bearer: token });
     expect(await code(asToken)).toBe("forbidden");
     // The old link is untouched, and the viewer can still copy a new one.
-    expect((await t.api(`/api/invites/${made.url.split("/join/")[1]}`)).status).toBe(200);
+    expect((await t.api(`/api/invites/${inviteSecret(made.url)}`)).status).toBe(200);
     expect(
       (await t.api(`/api/invites/${made.invite.id}/link`, { method: "POST", cookie: owner })).status,
     ).toBe(200);
@@ -320,37 +328,35 @@ describe("people, invites and tokens", () => {
 
   test("a token can't issue a reset link for another owner", async () => {
     const second = await invited("second-owner@example.com", "admin");
-    const [row] = await t.server.db.select().from(people).where(eq(people.email, "second-owner@example.com"));
-    const promoted = await t.api(`/api/people/${row?.id}`, {
+    const promoted = await t.api(`/api/people/${second.id}`, {
       method: "PATCH",
       cookie: owner,
       json: { role: "owner" },
     });
     expect(promoted.status).toBe(200);
-    const asToken = await t.api(`/api/people/${row?.id}/reset-link`, { method: "POST", bearer: token });
+    const asToken = await t.api(`/api/people/${second.id}/reset-link`, { method: "POST", bearer: token });
     expect(await code(asToken)).toBe("forbidden");
     // An owner in the viewer still can.
-    const asPerson = await t.api(`/api/people/${row?.id}/reset-link`, { method: "POST", cookie: owner });
+    const asPerson = await t.api(`/api/people/${second.id}/reset-link`, { method: "POST", cookie: owner });
     expect(asPerson.status).toBe(200);
     expect((await t.api("/api/me", { cookie: second.cookie })).status).toBe(200);
   });
 
   test("losing admin ends what they issued, like removal does", async () => {
     const admin = await invited("demoted@example.com", "admin");
-    const [row] = await t.server.db.select().from(people).where(eq(people.email, "demoted@example.com"));
-    const [sam] = await t.server.db.select().from(people).where(eq(people.email, "sam@example.com"));
+    const sam = await idOf("sam@example.com");
     const made = (await (
       await invite("comes-back@example.com", "admin", { cookie: admin.cookie })
     ).json()) as { url: string };
     const reset = (await (
-      await t.api(`/api/people/${sam?.id}/reset-link`, { method: "POST", cookie: admin.cookie })
+      await t.api(`/api/people/${sam}/reset-link`, { method: "POST", cookie: admin.cookie })
     ).json()) as { url: string };
-    const inviteUrl = `/api/invites/${made.url.split("/join/")[1]}`;
+    const inviteUrl = `/api/invites/${inviteSecret(made.url)}`;
     const resetUrl = `/api/reset/${reset.url.split("/reset/")[1]}`;
     expect((await t.api(inviteUrl)).status).toBe(200);
 
     // Losing admin takes the invite and the reset link back, so they can't hand the power over again.
-    const demote = await t.api(`/api/people/${row?.id}`, {
+    const demote = await t.api(`/api/people/${admin.id}`, {
       method: "PATCH",
       cookie: owner,
       json: { role: "member" },
