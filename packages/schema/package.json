@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./constants": "./src/constants.ts",
+    "./bundle": "./src/bundle.ts",
     "./sanitize": "./src/sanitize.ts",
     "./brand-prompt": "./src/brand-prompt.ts",
     "./theme-css": "./src/theme-css.ts",

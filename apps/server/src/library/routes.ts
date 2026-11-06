@@ -1,5 +1,5 @@
 import type { DecisionList } from "@artifacts/schema";
-import { isBundlePath, type VersionBundle } from "@artifacts/schema";
+import { isBundlePath, MANIFEST, type VersionBundle } from "@artifacts/schema";
 import { desc, eq } from "drizzle-orm";
 import { decisions, pages, people } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
@@ -119,7 +119,7 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
       const number = c.req.query("version");
       const version = await liveVersion(deps, loaded, number ? Number(number) : undefined);
       const files = version.files;
-      const stored = files["artifact.json"];
+      const stored = files[MANIFEST];
       const object = stored ? await bucket.get(blobKey(stored.hash)) : null;
       let manifest: Record<string, unknown> | null = null;
       try {

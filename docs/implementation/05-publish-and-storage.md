@@ -58,6 +58,8 @@ The bundle is:
 
 The first four are what `artifacts pull` gives back. Files nothing references aren't uploaded, so they aren't restored either.
 
+The generated outputs have fixed names, in `packages/schema/src/bundle.ts`: `__og.webp` and `__backend.js` at the root, `__articles/<page>.html`, `__renders/<hash>.webp`, and `__board-<id>.html` and `__live-<frame>.html` beside a board's file. Only those count as generated. `artifacts pull` leaves them out, and so does a manifest rebuilt for an old version, so an author's own file whose name starts with `__` is kept.
+
 Files are collected by a crawler that parses HTML (htmlparser2), CSS (postcss) and JS (es-module-lexer). Anything unreferenced isn't uploaded. Absolute URLs and paths outside the manifest's folder are lint errors.
 
 | Output | Made by | Stored as |

@@ -1,9 +1,11 @@
 import { TEMPLATES } from "@artifacts/kit/templates";
 import {
   ArticleTheme,
+  articleHtmlPath,
   COMMENT_MAX,
   FILES_MAX,
   KEY_PATTERN,
+  MANIFEST,
   MINUTE_MS,
   normalizeRepo,
   OAUTH_SCOPES,
@@ -16,7 +18,7 @@ import {
   type Thread,
   UNTRUSTED_NOTICE,
 } from "@artifacts/schema";
-import { articleHtmlPath, articleRecords, buildArticle } from "@artifacts/schema/article";
+import { articleRecords, buildArticle } from "@artifacts/schema/article";
 import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
@@ -435,7 +437,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         );
         const types: [string, string, string][] = [
           ["doc.md", markdown, "text/markdown"],
-          ["artifact.json", manifest, "application/json"],
+          [MANIFEST, manifest, "application/json"],
           [articleHtmlPath(ARTICLE_PAGE), built.html, "text/html; charset=utf-8"],
         ];
         const stored = await Promise.all(

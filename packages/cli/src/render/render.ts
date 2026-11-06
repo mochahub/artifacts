@@ -8,13 +8,13 @@ import {
   type PageRecord,
   type Theme,
 } from "@artifacts/schema";
-import { buildArticle, mermaidSources } from "@artifacts/schema/article";
+import { articleRecords, buildArticle, mermaidSources } from "@artifacts/schema/article";
 import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
 import type { Caller } from "../../../sandbox/src/index.js";
 import type { LocalBrand } from "../brand/cache.ts";
 import { asBun } from "../bun.ts";
 import {
-  articlePath,
+  articleHtmlPath,
   BACKEND_BUNDLE,
   BRAND_FONTS,
   boardShell,
@@ -361,22 +361,18 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
         mermaid: new Map(Object.entries(helper.mermaid)),
       });
       problems.push(...built.problems);
-      const htmlPath = articlePath(page.id);
+      const htmlPath = articleHtmlPath(page.id);
       addGenerated(htmlPath, built.html, "text/html; charset=utf-8");
-      blocks.push(...built.blocks.map((block) => ({ ...block, pageKey: page.id })));
-      pages.push({
-        key: page.id,
-        kind: "article",
+      const article = articleRecords(built, {
+        id: page.id,
         title: title ?? built.outline[0]?.title ?? page.id,
         group,
         position,
-        meta: {
-          htmlHash: files.get(htmlPath)?.hash,
-          outline: built.outline,
-          readingMinutes: built.readingMinutes,
-          ...(articleTheme ? { theme: articleTheme } : {}),
-        },
+        htmlHash: files.get(htmlPath)?.hash,
+        theme: articleTheme,
       });
+      pages.push(article.page);
+      blocks.push(...article.blocks);
     } else if (page.kind === "canvas") {
       pages.push({
         key: page.id,

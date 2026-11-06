@@ -55,9 +55,6 @@ export type ArticleOutput = {
   problems: { rule: string; severity: "error" | "warning"; message: string }[];
 };
 
-/** Where a built article's HTML goes in the bundle. */
-export const articleHtmlPath = (pageId: string) => `__articles/${pageId}.html`;
-
 /**
  * A built article as a publish records it: its page, with the hash of its HTML, and its blocks on that
  * page. The CLI and the hosted MCP both publish articles, so they make the same records.

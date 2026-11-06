@@ -5,6 +5,7 @@ import {
   DAY_MS,
   GuestName,
   HOUR_MS,
+  OG_IMAGE,
   PatchArtifact,
   ShareWithTeam,
 } from "@artifacts/schema";
@@ -404,7 +405,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       .from(versions)
       .where(and(eq(versions.artifactId, artifactId), eq(versions.n, n)))
       .limit(1);
-    return version?.files["__og.webp"]?.hash ?? null;
+    return version?.files[OG_IMAGE]?.hash ?? null;
   };
 
   routes.get("/api/s/:token", { public: true }, async (c) => {

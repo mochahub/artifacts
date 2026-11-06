@@ -1,7 +1,15 @@
-// Where things live in a working folder (07), and what the CLI names the files it generates (05).
+// Where things live in a working folder (07). The bundle's generated names are shared with the server (05).
 import { dirname, extname } from "node:path";
+import { boardShellName, livePageName } from "@artifacts/schema/bundle";
 
-export const MANIFEST = "artifact.json";
+export {
+  articleHtmlPath,
+  BACKEND_BUNDLE,
+  isGenerated,
+  MANIFEST,
+  OG_IMAGE,
+  renderPath,
+} from "@artifacts/schema/bundle";
 /** A project's own lint rules. The CLI runs this file, so a pulled copy must never land in a folder. */
 export const PROJECT_RULES = "lint.rules.js";
 
@@ -19,18 +27,12 @@ export const FIXTURE_DATA = `${FIXTURES}/data.json`;
 export const FIXTURE_FILES = `${FIXTURES}/files`;
 export const KIT_DIR = "vendor/artifacts-kit";
 
-export const BACKEND_BUNDLE = "__backend.js";
-export const OG_IMAGE = "__og.webp";
-export const articlePath = (page: string) => `__articles/${page}.html`;
-export const renderPath = (hash: string) => `__renders/${hash}.webp`;
 const besideBoard = (boardSrc: string, name: string) => {
   const dir = dirname(boardSrc);
   return `${dir === "." ? "" : `${dir}/`}${name}`;
 };
-/** A board's generated page, beside the board's own file so its relative links still work. */
-export const boardShell = (boardSrc: string, board: string) => besideBoard(boardSrc, `__board-${board}.html`);
-export const livePage = (boardSrc: string, frame: string) => besideBoard(boardSrc, `__live-${frame}.html`);
-export const isGenerated = (path: string) => path.split("/").some((part) => part.startsWith("__"));
+export const boardShell = (boardSrc: string, board: string) => besideBoard(boardSrc, boardShellName(board));
+export const livePage = (boardSrc: string, frame: string) => besideBoard(boardSrc, livePageName(frame));
 
 /** `../` once for each folder in `dir`, so a generated page reaches the bundle's root. */
 export const upTo = (dir: string) =>

@@ -1,4 +1,4 @@
-import { type LibraryRead, type LibraryView, READ_CHARS, READ_CHARS_MAX } from "@artifacts/schema";
+import { type LibraryRead, type LibraryView, OG_IMAGE, READ_CHARS, READ_CHARS_MAX } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { blocks, frames, pages, versions } from "../db/schema.ts";
@@ -155,6 +155,6 @@ export async function viewArtifact(
     frame: null,
     title: loaded.row.title,
     size: "thumb",
-    image: image(version.files["__og.webp"]?.hash),
+    image: image(version.files[OG_IMAGE]?.hash),
   };
 }
