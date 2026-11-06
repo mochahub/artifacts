@@ -79,6 +79,24 @@ function fileStore(dir: string): LocalStore {
 
 /** The local API answers in the server's shapes (03), so a change to one fails to compile here. */
 type Shape<T extends z.ZodType> = z.input<T>;
+/** `work`, one run at a time. A call while it runs means one more run after, so the last change is built. */
+export function coalesced(work: () => Promise<unknown>) {
+  let running = false;
+  let again = false;
+  return async () => {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    do {
+      again = false;
+      await work();
+    } while (again);
+    running = false;
+  };
+}
+
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const answer = <T extends z.ZodType>(body: Shape<T>) => json(body);
 const fail = (status: number, code: string, message: string) =>
@@ -426,22 +444,8 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
   Bun.serve({ port: flags.port, hostname: "localhost", fetch: handle });
   Bun.serve({ port: flags.port + 1, hostname: "127.0.0.1", fetch: content });
 
-  // A change made while a rebuild runs is built once that one ends, so the last edit is always served.
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let building = false;
-  let dirty = false;
-  const build = async () => {
-    if (building) {
-      dirty = true;
-      return;
-    }
-    building = true;
-    do {
-      dirty = false;
-      await rebuild().catch((error) => out.warn((error as Error).message));
-    } while (dirty);
-    building = false;
-  };
+  const build = coalesced(() => rebuild().catch((error) => out.warn((error as Error).message)));
   watch(root, { recursive: true }, (_event, name) => {
     const path = String(name ?? "");
     if (path.startsWith(LOCAL) || path.startsWith(".git") || path.startsWith("node_modules")) return;
