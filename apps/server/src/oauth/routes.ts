@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { OAUTH_SCOPES, type OAuthConsent, OAuthConsentDecision } from "@artifacts/schema";
+import { OAUTH_SCOPES, type OAuthConsent, OAuthConsentDecision, type OAuthScope } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
@@ -21,11 +21,13 @@ const HOUR = 3600_000;
 const oauthError = (c: Context, error: string, description: string, status: 400 | 401 = 400) =>
   c.json({ error, error_description: description }, status, { "Cache-Control": "no-store" });
 
-const parseScopes = (scope: string | undefined): string[] | null => {
+const isOAuthScope = (word: string): word is OAuthScope => (OAUTH_SCOPES as readonly string[]).includes(word);
+
+const parseScopes = (scope: string | undefined): OAuthScope[] | null => {
   const words = (scope ?? "").split(/\s+/).filter(Boolean);
   // A client can ask for refresh this way. It's implied, and not a permission.
   const wanted = words.filter((word) => word !== "offline_access");
-  if (wanted.some((word) => !(OAUTH_SCOPES as readonly string[]).includes(word))) return null;
+  if (!wanted.every(isOAuthScope)) return null;
   return wanted.length > 0 ? [...new Set(wanted)] : [...OAUTH_SCOPES];
 };
 

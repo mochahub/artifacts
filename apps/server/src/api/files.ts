@@ -1,4 +1,4 @@
-import { ContentTokenRequest } from "@artifacts/schema";
+import { ContentTokenRequest, SHA256_HEX } from "@artifacts/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { can } from "../auth/can.ts";
 import { signContentToken } from "../content/token.ts";
@@ -22,7 +22,7 @@ export function fileRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/artifacts/:id/r/:hash", { action: "artifact.read", resource: artifact }, async (c) => {
     const id = c.req.param("id") as string;
     const hash = c.req.param("hash") as string;
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new ApiError("not_found", "Not found.");
+    if (!SHA256_HEX.test(hash)) throw new ApiError("not_found", "Not found.");
     // Only hashes a live version of this artifact uses, or any artifact's file could be read by hash.
     const hashJson = JSON.stringify({ h: hash });
     const [found] = await db
@@ -86,7 +86,7 @@ export function fileRoutes(routes: Routes, deps: Deps) {
             )
             .limit(1)
         : [];
-      const hash = (row?.meta as { htmlHash?: string } | undefined)?.htmlHash;
+      const hash = row?.meta.htmlHash;
       const object = hash ? await bucket.get(blobKey(hash)) : null;
       if (!object) throw new ApiError("not_found", "Not found.");
       // Never rendered on the viewer's origin, even if someone opens this URL directly (03).

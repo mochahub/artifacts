@@ -221,7 +221,6 @@ export async function libraryFrames(
     .from(frames)
     .where(and(eq(frames.versionId, version.id), eq(frames.pageKey, input.page)))
     .orderBy(frames.y, frames.x);
-  const notes = version.notes as Record<string, string>;
   return {
     page: input.page,
     frames: rows.slice(offset, offset + limit).map((frame) => ({
@@ -229,7 +228,7 @@ export async function libraryFrames(
       board: frame.boardKey,
       title: frame.title,
       device: frame.device,
-      note: notes[frame.frameKey] ?? null,
+      note: version.notes[frame.frameKey] ?? null,
     })),
     nextCursor: nextCursor(offset, limit, rows.length > offset + limit),
   } satisfies LibraryFrames;

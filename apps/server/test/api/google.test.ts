@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import type { OrgSettings } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import type { GoogleExchange } from "../../src/auth/google.ts";
 import { sha256 } from "../../src/auth/secrets.ts";
@@ -731,7 +732,7 @@ describe("Google sign-in", () => {
       const current = (await findOrg(t.server.db))?.settings;
       await t.server.db
         .update(org)
-        .set({ settings: { ...current, googleAutoJoin: autoJoin } })
+        .set({ settings: { ...current, googleAutoJoin: autoJoin as OrgSettings["googleAutoJoin"] } })
         .where(eq(org.id, orgId));
     };
     const WORKSPACE = { domain: "acme.test", role: "reviewer", teamIds: [] };

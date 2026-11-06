@@ -1,4 +1,4 @@
-import type { Permission, Role } from "@artifacts/schema";
+import type { Permission, Role, TokenScope } from "@artifacts/schema";
 
 export type CallerPerson = { id: string; name: string; email: string; role: Role };
 
@@ -14,8 +14,14 @@ export type GuestLink = {
 /** Who is asking. Every request resolves to exactly one of these (04, "Callers"). */
 export type Caller =
   | { kind: "person"; person: CallerPerson; sessionId: string; recentAuth: boolean }
-  | { kind: "cliToken"; person: CallerPerson; tokenId: string; scopes: string[]; agent: string | null }
-  | { kind: "orgToken"; tokenId: string; createdBy: string; scopes: string[]; projectIds: string[] | null }
+  | { kind: "cliToken"; person: CallerPerson; tokenId: string; scopes: TokenScope[] }
+  | {
+      kind: "orgToken";
+      tokenId: string;
+      createdBy: string;
+      scopes: TokenScope[];
+      projectIds: string[] | null;
+    }
   | { kind: "guest"; guestId: string; links: GuestLink[] }
   | {
       kind: "content";

@@ -39,15 +39,14 @@ async function referencedHashes(deps: Deps) {
     .from(versions);
   for (const row of versionRows) {
     add(row.backend);
-    for (const file of Object.values(row.files as Record<string, { hash: string }>)) add(file.hash);
+    for (const file of Object.values(row.files)) add(file.hash);
   }
   for (const row of await deps.db.select({ renders: frames.renders }).from(frames)) {
-    for (const hash of Object.values(row.renders as Record<string, string>)) add(hash);
+    for (const hash of Object.values(row.renders)) add(hash);
   }
   for (const row of await deps.db.select({ meta: pages.meta }).from(pages)) {
-    const meta = row.meta as { htmlHash?: string; items?: { hash: string }[] };
-    add(meta.htmlHash);
-    for (const item of meta.items ?? []) add(item.hash);
+    add(row.meta.htmlHash);
+    for (const item of row.meta.items ?? []) add(item.hash);
   }
   return referenced;
 }

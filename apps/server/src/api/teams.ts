@@ -1,3 +1,4 @@
+import type { ActivityKind } from "@artifacts/schema";
 import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
@@ -43,7 +44,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
     return { type: "team", id: row.id, leadIds: leads.map((lead) => lead.id), row };
   }
 
-  const record = (c: ApiContext, kind: typeof activity.$inferInsert.kind, payload: Record<string, unknown>) =>
+  const record = (c: ApiContext, kind: ActivityKind, payload: Record<string, unknown>) =>
     db.insert(activity).values({
       id: Bun.randomUUIDv7(),
       orgId: c.get("org").id,

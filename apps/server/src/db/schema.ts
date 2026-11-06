@@ -1,14 +1,22 @@
 import {
   ACTIVITY_KINDS,
   ANCHOR_STATES,
+  type Anchor,
+  type Brand,
   COMMENT_MAX,
   DECISION_KINDS,
+  type OAuthScope,
+  type OrgSettings,
   PAGE_KINDS,
+  type PageMeta,
   PERMISSIONS,
   PROJECT_PERMISSIONS,
+  type Renders,
   ROLES,
   TEAM_ROLES,
   THREAD_STATUSES,
+  type TokenScope,
+  type VersionFiles,
   VISIBILITIES,
 } from "@artifacts/schema";
 import { sql } from "drizzle-orm";
@@ -65,11 +73,12 @@ export const org = pgTable("org", {
   id: id(),
   name: text("name").notNull(),
   homeDomain: text("home_domain").notNull(),
-  settings: jsonb("settings").notNull(),
+  /** Stored before a setting existed, a row lacks it: findOrg fills in the defaults. */
+  settings: jsonb("settings").$type<Partial<OrgSettings>>().notNull(),
   vapidPublic: text("vapid_public"),
   vapidPrivate: text("vapid_private"),
   lastDigestAt: time("last_digest_at"),
-  brand: jsonb("brand"),
+  brand: jsonb("brand").$type<Brand>(),
   /** Stored as is, like `vapid_private`: tying it to SESSION_SECRET would stop that being rotated (04). */
   googleClientId: text("google_client_id"),
   googleClientSecret: text("google_client_secret"),
@@ -274,7 +283,7 @@ export const brandProposals = pgTable("brand_proposals", {
     .notNull()
     .references(() => org.id),
   name: text("name").notNull(),
-  brand: jsonb("brand").notNull(),
+  brand: jsonb("brand").$type<Brand>().notNull(),
   artifactId: uuid("artifact_id").references(() => artifacts.id, { onDelete: "set null" }),
   proposedBy: uuid("proposed_by")
     .notNull()
@@ -526,7 +535,7 @@ export const tokens = pgTable("tokens", {
   personId: uuid("person_id").references(() => people.id),
   name: text("name").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
-  scopes: text("scopes").array().notNull(),
+  scopes: text("scopes").array().$type<TokenScope[]>().notNull(),
   projectIds: uuid("project_ids").array(),
   createdBy: uuid("created_by")
     .notNull()
@@ -569,7 +578,7 @@ export const oauthGrants = pgTable("oauth_grants", {
   clientId: text("client_id").notNull(),
   clientName: text("client_name").notNull(),
   audience: text("audience").notNull(),
-  scopes: text("scopes").array().notNull(),
+  scopes: text("scopes").array().$type<OAuthScope[]>().notNull(),
   createdAt: createdAt(),
   lastUsedAt: time("last_used_at"),
   revokedAt: time("revoked_at"),
@@ -632,11 +641,11 @@ export const versions = pgTable(
       .notNull()
       .references(() => artifacts.id),
     n: integer("n").notNull(),
-    files: jsonb("files").notNull(),
+    files: jsonb("files").$type<VersionFiles>().notNull(),
     backendHash: text("backend_hash"),
     message: text("message"),
     name: text("name"),
-    notes: jsonb("notes").notNull().default({}),
+    notes: jsonb("notes").$type<Record<string, string>>().notNull().default({}),
     summary: text("summary"),
     tags: text("tags").array(),
     publishedBy: uuid("published_by")
@@ -667,7 +676,7 @@ export const pages = pgTable(
     title: text("title"),
     group: text("group"),
     position: integer("position").notNull(),
-    meta: jsonb("meta").notNull().default({}),
+    meta: jsonb("meta").$type<PageMeta>().notNull().default({}),
   },
   (t) => [unique("pages_version_key_unique").on(t.versionId, t.pageKey)],
 );
@@ -692,7 +701,7 @@ export const frames = pgTable(
     w: real("w").notNull(),
     h: real("h").notNull(),
     contentHash: text("content_hash").notNull(),
-    renders: jsonb("renders").notNull(),
+    renders: jsonb("renders").$type<Renders>().notNull(),
     livePath: text("live_path"),
   },
   (t) => [unique("frames_version_page_frame_unique").on(t.versionId, t.pageKey, t.frameKey)],
@@ -735,7 +744,7 @@ export const threads = pgTable(
       .references(() => artifacts.id),
     n: integer("n").notNull(),
     pageKey: text("page_key").notNull(),
-    anchor: jsonb("anchor"),
+    anchor: jsonb("anchor").$type<Anchor>(),
     anchorState: anchorState("anchor_state").notNull().default("ok"),
     status: threadStatus("status").notNull().default("open"),
     createdVersion: integer("created_version").notNull(),
@@ -813,7 +822,7 @@ export const views = pgTable(
       .references(() => artifacts.id),
     lastSeenVersion: integer("last_seen_version").notNull(),
     lastSeenAt: time("last_seen_at").notNull(),
-    positions: jsonb("positions").notNull().default({}),
+    positions: jsonb("positions").$type<Record<string, unknown>>().notNull().default({}),
   },
   (t) => [primaryKey({ columns: [t.personId, t.artifactId] })],
 );
@@ -832,7 +841,7 @@ export const guestViews = pgTable(
       .references(() => artifacts.id),
     lastSeenVersion: integer("last_seen_version").notNull(),
     lastSeenAt: time("last_seen_at").notNull(),
-    positions: jsonb("positions").notNull().default({}),
+    positions: jsonb("positions").$type<Record<string, unknown>>().notNull().default({}),
   },
   (t) => [primaryKey({ columns: [t.guestId, t.artifactId] })],
 );
@@ -890,7 +899,7 @@ export const activity = pgTable(
     actorGuestId: uuid("actor_guest_id").references(() => guests.id),
     agent: text("agent"),
     kind: activityKind("kind").notNull(),
-    payload: jsonb("payload").notNull().default({}),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
   (t) => [index("activity_org_created_idx").on(t.orgId, t.createdAt.desc())],
@@ -924,7 +933,7 @@ export const pushSubscriptions = pgTable(
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
     endpoint: text("endpoint").notNull().unique(),
-    keys: jsonb("keys").notNull(),
+    keys: jsonb("keys").$type<{ p256dh: string; auth: string }>().notNull(),
     createdAt: createdAt(),
     lastOkAt: time("last_ok_at"),
   },

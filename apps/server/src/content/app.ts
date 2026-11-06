@@ -146,7 +146,7 @@ export function createContentApp(deps: Deps) {
       .from(versions)
       .where(and(eq(versions.artifactId, payload.a), eq(versions.n, version)))
       .limit(1);
-    const files = row?.files as Record<string, { hash: string; type: string; size: number }> | undefined;
+    const files = row?.files;
     const file = files && Object.hasOwn(files, path) ? files[path] : undefined;
     if (!file) throw new ApiError("not_found", "Not found.");
 

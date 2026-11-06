@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { CONSUMER_DOMAINS, type GoogleSettings, PatchGoogle, SaveGoogle } from "@artifacts/schema";
+import {
+  CONSUMER_DOMAINS,
+  type GoogleOutcome,
+  type GoogleSettings,
+  PatchGoogle,
+  SaveGoogle,
+} from "@artifacts/schema";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -48,7 +54,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
   const { db, clock, limits } = deps;
   const provider = deps.google;
 
-  const back = (c: Context, path: string, code: string) =>
+  const back = (c: Context, path: string, code: GoogleOutcome) =>
     c.redirect(`${path}${path.includes("?") ? "&" : "?"}google=${code}`, 302);
 
   const hasClient = (row: OrgRow) => Boolean(row.googleClientId && row.googleClientSecret);
@@ -496,7 +502,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
       enabled: row?.googleEnabled ?? false,
       tested: caller.kind === "person" && row?.googleTestedBy === caller.person.id,
       redirectUris: (await deps.origins()).map((origin) => `${origin}${CALLBACK_PATH}`),
-      autoJoin: (row?.settings as OrgRow["settings"] | undefined)?.googleAutoJoin ?? null,
+      autoJoin: row?.settings.googleAutoJoin ?? null,
     };
   }
 

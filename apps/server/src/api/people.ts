@@ -44,7 +44,6 @@ import { latestRelease } from "./updates.ts";
 
 const HOUR = 3600_000;
 const INVITE_DAYS = 7;
-const ORG_SCOPES_NEED = ["publish", "comment", "read", "manage", "data", "org"];
 const SEARCH_RESULTS = 20;
 const SEARCHES_PER_MINUTE = 60;
 
@@ -543,7 +542,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         kind: "org",
         name: body.name,
         tokenHash: sha256(secret),
-        scopes: body.scopes.filter((scope) => ORG_SCOPES_NEED.includes(scope)),
+        scopes: body.scopes,
         projectIds: body.projectIds ?? null,
         createdBy: actorOf(c.get("caller")).id,
         createdAt: clock.now(),

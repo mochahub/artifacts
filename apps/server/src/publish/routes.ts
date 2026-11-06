@@ -1,5 +1,6 @@
 import {
   agentLabel,
+  FILES_MAX,
   isBundlePath,
   normalizeRepo,
   type PageRecord,
@@ -32,7 +33,6 @@ import { blobKey, IMMUTABLE, knownBlobs, putBlob, verifyBlobs } from "./blobs.ts
 const UPLOAD_INFO = "upload";
 const UPLOAD_HOURS = 2;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
-const MAX_FILES = 20_000;
 /** `type/subtype`, then optional parameters, in printable ASCII only: it becomes a response header (03). */
 const MEDIA_TYPE = /^[A-Za-z0-9][\w.+-]*\/[\w.+-]+(;[\x20-\x7e]*)?$/;
 const checkType = (path: string, type: string) => {
@@ -219,8 +219,8 @@ export function createPublisher(deps: Deps) {
     }
     // Prepare declared at most this many files, renders included, and each hash is looked up and maybe
     // downloaded here, so a manifest can't name more.
-    if (wanted.size > MAX_FILES) {
-      throw new ApiError("too_large", "That's too many files.", { limit: MAX_FILES });
+    if (wanted.size > FILES_MAX) {
+      throw new ApiError("too_large", "That's too many files.", { limit: FILES_MAX });
     }
     await verifyBlobs(deps, org.id, wanted);
     // The sandbox fetches this module on every request, so a huge one must never get in (08).

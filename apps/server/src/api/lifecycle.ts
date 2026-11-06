@@ -1,4 +1,5 @@
-import { agentLabel, UNNAMED_AGENT } from "@artifacts/schema";
+import type { ActivityKind } from "@artifacts/schema";
+import { AGENT_MAX, agentLabel, DAY_MS, PURGE_DAYS, UNNAMED_AGENT } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt } from "drizzle-orm";
 import { findArtifacts } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -26,8 +27,6 @@ import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { reanchorThreads } from "../review/reanchor.ts";
 import { diffRegions, type Region } from "../versions/regions.ts";
-
-const PURGE_MS = 30 * 24 * 3600_000;
 
 const actorId = (caller: Caller) => {
   if (caller.kind === "person" || caller.kind === "cliToken") return caller.person.id;
@@ -57,7 +56,7 @@ async function changedRegions(
   who: string,
 ) {
   const rendersOf = (rows: typeof before, key: string) =>
-    rows.find((row) => `${row.pageKey}/${row.frameKey}` === key)?.renders as { "2x": string } | undefined;
+    rows.find((row) => `${row.pageKey}/${row.frameKey}` === key)?.renders;
   const result: Record<string, { before: string; after: string; regions: Region[] }> = {};
   let counted = false;
   for (const key of keys.slice(0, MAX_FRAMES_DIFFED)) {
@@ -101,7 +100,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const record = async (
     c: ApiContext,
     row: { id: string; projectId: string },
-    kind: typeof activity.$inferInsert.kind,
+    kind: ActivityKind,
     payload: Record<string, unknown> = {},
   ) => {
     await db.insert(activity).values({
@@ -113,7 +112,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       agent:
         c.get("caller").kind === "person"
           ? null
-          : c.req.header("artifacts-agent")?.slice(0, 60) || UNNAMED_AGENT,
+          : c.req.header("artifacts-agent")?.slice(0, AGENT_MAX) || UNNAMED_AGENT,
       kind,
       payload,
       createdAt: clock.now(),
@@ -148,7 +147,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
     const resource = await artifact(c as ApiContext);
     if (resource.deletedAt) throw new ApiError("conflict", "It's already in Recently deleted.");
     const now = clock.now();
-    const purgeAfter = new Date(now.getTime() + PURGE_MS);
+    const purgeAfter = new Date(now.getTime() + PURGE_DAYS * DAY_MS);
     await db.transaction(async (tx) => {
       await lockArtifact(tx, resource.id, "content");
       await tx
@@ -270,7 +269,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         throw new ApiError("conflict", "The latest version can't be removed. Publish a fix first.");
       }
       const now = clock.now();
-      const purgeAfter = new Date(now.getTime() + PURGE_MS);
+      const purgeAfter = new Date(now.getTime() + PURGE_DAYS * DAY_MS);
       await db.transaction(async (tx) => {
         await lockArtifact(tx, resource.id, "content");
         await tx

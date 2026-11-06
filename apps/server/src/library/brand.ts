@@ -1,4 +1,5 @@
 import {
+  type Brand,
   type BrandProposal,
   Brand as BrandSchema,
   type OrgBrand,
@@ -17,9 +18,7 @@ import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
 import { blobKey } from "../publish/blobs.ts";
 
 /** The brand everyone renders with. One link per font, so the CLI needs no route of its own for them. */
-export async function orgBrand(deps: Deps, stored: unknown): Promise<OrgBrand> {
-  const parsed = BrandSchema.nullable().safeParse(stored ?? null);
-  const brand = parsed.success ? parsed.data : null;
+export async function orgBrand(deps: Deps, brand: Brand | null): Promise<OrgBrand> {
   return {
     brand,
     fonts: await Promise.all(
@@ -65,17 +64,20 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       return sample !== undefined && can(c.get("caller"), "artifact.read", sample);
     };
     const applied = c.get("org").brand;
-    const list: BrandProposal[] = rows.map(({ row, by, slug, project }) => ({
-      id: row.id,
-      name: row.name,
-      brand: BrandSchema.parse(row.brand),
-      sample: slug && project && visible(row.artifactId) ? { project, slug } : null,
-      proposedBy: by,
-      agent: row.agent,
-      createdAt: row.createdAt.toISOString(),
-      appliedAt: row.appliedAt?.toISOString() ?? null,
-      current: Bun.deepEquals(row.brand, applied),
-    }));
+    const list: BrandProposal[] = rows.map(({ row, by, slug, project }) => {
+      const brand = BrandSchema.parse(row.brand);
+      return {
+        id: row.id,
+        name: row.name,
+        brand,
+        sample: slug && project && visible(row.artifactId) ? { project, slug } : null,
+        proposedBy: by,
+        agent: row.agent,
+        createdAt: row.createdAt.toISOString(),
+        appliedAt: row.appliedAt?.toISOString() ?? null,
+        current: Bun.deepEquals(brand, applied),
+      };
+    });
     return c.json(list);
   });
 
@@ -134,7 +136,7 @@ export function brandRoutes(routes: Routes, deps: Deps) {
     const caller = c.get("caller");
     if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
     // Only fonts someone already published can stay: a hash sent here would presign any blob.
-    const kept = BrandSchema.nullable().safeParse(c.get("org").brand ?? null).data?.fonts ?? [];
+    const kept = c.get("org").brand?.fonts ?? [];
     const named = [body.theme.font, body.theme.display].filter((name) => name !== undefined);
     const fonts = kept.filter((font) => named.includes(font.family));
     for (const name of named) {

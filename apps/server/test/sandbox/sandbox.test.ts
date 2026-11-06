@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { OrgSettings } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
@@ -165,7 +166,7 @@ describe("the backend sandbox", () => {
     const settings = row?.settings as { limits: { writesPerSecond: number } };
     const original = settings.limits.writesPerSecond;
     settings.limits.writesPerSecond = 1000;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const { call, id } = await deploy(`export default { async fetch(r, env) {
       const code = (p) => p.then(() => "ok", (e) => e.code);
       const keys = ["../x", "a/../x", "a/..", "./x", "a/./x", "/abs", "me/../x", "files/../../x", "",
@@ -191,7 +192,7 @@ describe("the backend sandbox", () => {
     }
     expect((await t.server.bucket.list(`data/${id}/`)).objects).toEqual([]);
     settings.limits.writesPerSecond = original;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
 
   test("env.DATA: etags, only-if-new, listing every scope, and bad keys", async () => {
@@ -275,10 +276,10 @@ describe("the backend sandbox", () => {
     expect((await call("votes")).status).toBe(200);
     const original = settings.limits.backendCodeBytes;
     settings.limits.backendCodeBytes = 10;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     expect((await call("votes")).status).toBe(413);
     settings.limits.backendCodeBytes = original;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
 
   test("query strings are read as the URL standard reads them, so a backend sees what the client sent", async () => {
@@ -316,13 +317,13 @@ describe("the backend sandbox", () => {
     const [row] = await t.server.db.select().from(org);
     const settings = row?.settings as { limits: { backendTimeoutMs: number } };
     settings.limits.backendTimeoutMs = 700;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const stuck = await deploy(`while (true) {} export default { fetch() {} };`);
     const started = performance.now();
     expect((await stuck.call("x")).status).toBe(504);
     expect(performance.now() - started).toBeLessThan(1900);
     settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
 
   test("a stuck backend times out alone, and others keep answering", async () => {
@@ -330,7 +331,7 @@ describe("the backend sandbox", () => {
     const { org } = await import("../../src/db/schema.ts");
     const settings = row?.settings as { limits: { backendTimeoutMs: number } };
     settings.limits.backendTimeoutMs = 700;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const stuck = await deploy(`export default { fetch() { while (true) {} } };`);
     const other = await deploy(`export default { fetch() { return Response.json("ok"); } };`);
     const hung = stuck.call("x");
@@ -341,7 +342,7 @@ describe("the backend sandbox", () => {
     expect(timedOut.status).toBe(504);
     expect(performance.now() - started).toBeLessThan(3000);
     settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
 
   test("busy loops on a child can't get a waiting backend on it killed", async () => {
@@ -349,7 +350,7 @@ describe("the backend sandbox", () => {
     const [row] = await t.server.db.select().from(org);
     const settings = row?.settings as { limits: { backendTimeoutMs: number } };
     settings.limits.backendTimeoutMs = 500;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     // A child runs one request at a time, and an author can pick which child a backend lands on.
     const onFirstChild = (make: (i: number) => string) => {
       for (let i = 0; ; i++) if (Number.parseInt(hash(make(i)).slice(0, 8), 16) % 2 === 0) return make(i);
@@ -368,7 +369,7 @@ describe("the backend sandbox", () => {
     expect(answer.status).toBe(200);
     expect(await Promise.all(running.map(async (r) => (await r).status))).toEqual(Array(8).fill(504));
     settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   }, 30_000);
 
   for (const [name, source] of [
@@ -405,7 +406,7 @@ describe("the backend sandbox", () => {
     const { org } = await import("../../src/db/schema.ts");
     const settings = row?.settings as { limits: { backendTimeoutMs: number } };
     settings.limits.backendTimeoutMs = 500;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const { call } = await deploy(`
       export default { async fetch(r, env) {
         await env.DATA.get("a");
@@ -414,7 +415,7 @@ describe("the backend sandbox", () => {
       } };`);
     expect((await call("x")).status).toBe(504);
     settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const next = await deploy(`export default { fetch() { return Response.json("fine"); } };`);
     expect((await next.call("x")).status).toBe(200);
   });
@@ -551,13 +552,13 @@ describe("the backend sandbox", () => {
     const [row] = await t.server.db.select().from(org);
     const settings = row?.settings as { limits: { backendRequestsPerMinute: number } };
     settings.limits.backendRequestsPerMinute = 3;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const { call } = await deploy(`export default { fetch() { return Response.json(1); } };`);
     const statuses: number[] = [];
     for (let i = 0; i < 5; i++) statuses.push((await call("x")).status);
     expect(statuses).toEqual([200, 200, 200, 429, 429]);
     settings.limits.backendRequestsPerMinute = 120;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
 
   test("a busy backend queues, then refuses", async () => {

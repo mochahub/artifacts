@@ -1,4 +1,4 @@
-import { ChangePassword, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
+import { ChangePassword, PASSWORD_MAX, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
 import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { sha256 } from "../auth/secrets.ts";
@@ -18,8 +18,6 @@ import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import type { ApiContext, Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
-
-const MAX_PASSWORD = 256;
 
 /** Verifying against this when the email is unknown keeps both answers the same speed. */
 const dummyHash = Bun.password.hash("not a real password", { algorithm: "argon2id" });
@@ -60,7 +58,7 @@ export function authRoutes(
     const account = body.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
     // No password this long exists (04), so don't hash it, and don't count it against the account.
-    if (body.password.length > MAX_PASSWORD) {
+    if (body.password.length > PASSWORD_MAX) {
       throw new ApiError("unauthenticated", "That email or password isn't right.");
     }
     const person = await checkPassword(c.get("org").id, body.email, body.password);
@@ -94,7 +92,7 @@ export function authRoutes(
     }
     const account = caller.person.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
-    if (body.password.length > MAX_PASSWORD)
+    if (body.password.length > PASSWORD_MAX)
       throw new ApiError("unauthenticated", "That password isn't right.");
     const person = await checkPassword(c.get("org").id, caller.person.email, body.password);
     if (!person) {

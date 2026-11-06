@@ -1,11 +1,15 @@
 import { TEMPLATES } from "@artifacts/kit/templates";
 import {
   ArticleTheme,
-  Brand,
+  COMMENT_MAX,
+  FILES_MAX,
+  KEY_PATTERN,
   normalizeRepo,
   OAUTH_SCOPES,
   PublishCommit,
   PublishPrepare,
+  SHA256_HEX,
+  SLUG_PATTERN,
   Summary,
   Tags,
   type Thread,
@@ -98,9 +102,11 @@ const whole = (value: unknown, name: string) => {
   return value as number;
 };
 const artifactOf = (value: unknown) => {
-  const match = /^([a-z0-9-]{1,40})\/([a-z0-9-]{1,40})$/.exec(String(value ?? ""));
-  if (!match) throw new ToolError("artifact must look like project/artifact.");
-  return { project: match[1] as string, slug: match[2] as string };
+  const [project = "", slug = "", ...more] = String(value ?? "").split("/");
+  if (more.length > 0 || !SLUG_PATTERN.test(project) || !SLUG_PATTERN.test(slug)) {
+    throw new ToolError("artifact must look like project/artifact.");
+  }
+  return { project, slug };
 };
 const load = ({ orgId, caller, input }: Context, deps: Deps) => {
   const { project, slug } = artifactOf(input.artifact);
@@ -137,7 +143,9 @@ const fileEntry = z.object({
   type: z.string(),
 });
 /** `artifacts pack` writes this. The server treats it exactly as it would the same JSON sent to the API. */
-const Payload = PublishCommit.omit({ uploadId: true }).extend({ declared: z.array(fileEntry).max(20_000) });
+const Payload = PublishCommit.omit({ uploadId: true }).extend({
+  declared: z.array(fileEntry).max(FILES_MAX),
+});
 
 function tools(deps: Deps, { publisher, review }: Services): Tool[] {
   const paging = {
@@ -205,7 +213,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         };
         const path = str(input.path, "path", 200);
         const parts = path ? path.split("/") : [];
-        if (parts.length > 3 || !parts.every((part) => /^[a-z0-9-]{1,60}$/.test(part))) {
+        if (parts.length > 3 || !parts.every((part) => KEY_PATTERN.test(part))) {
           throw new ToolError("path must look like project, project/artifact or project/artifact/page.");
         }
         const [project, slug, page] = parts;
@@ -336,7 +344,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         const { rows } = await review.listThreads(loaded.row.id);
         const thread = rows.find((row) => row.n === input.n);
         if (!thread) throw new ToolError("There's no such comment.");
-        const body = str(input.message, "message", 10_000);
+        const body = str(input.message, "message", COMMENT_MAX);
         if (!body?.trim()) throw new ToolError("message is required.");
         const comment = await review.replyTo(c, thread, {
           body,
@@ -458,8 +466,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         );
         const repoName = normalizeRepo(str(input.repo, "repo"));
         const prepared = await publisher.prepare(c, { project, slug, title, repo: repoName, files: stored });
-        const brand = Brand.safeParse(c.get("org").brand);
-        const theme = ArticleTheme.safeParse(brand.success ? brand.data.theme : {});
+        const theme = ArticleTheme.safeParse(c.get("org").brand?.theme ?? {});
         return publisher.commit(c, {
           uploadId: prepared.uploadId,
           message: str(input.message, "message", 2000) ?? null,
@@ -509,7 +516,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
       required: ["project", "slug", "title", "payload"],
       async run({ c, input, orgId }) {
         const payload = z
-          .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive() })
+          .object({ sha256: z.string().regex(SHA256_HEX), size: z.number().int().positive() })
           .safeParse(input.payload);
         if (!payload.success)
           throw new ToolError("payload wants the sha256 and size artifacts pack printed.");
@@ -557,7 +564,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
       required: ["uploadId", "payload"],
       async run({ c, input, orgId }) {
         const hash = str(input.payload, "payload", 64) ?? "";
-        if (!/^[0-9a-f]{64}$/.test(hash)) throw new ToolError("payload wants the payload's sha256.");
+        if (!SHA256_HEX.test(hash)) throw new ToolError("payload wants the payload's sha256.");
         const { declared: _, ...body } = await readPayload(orgId, hash, null);
         const commit = PublishCommit.parse({ ...body, uploadId: str(input.uploadId, "uploadId", 8000) });
         return publisher.commit(c, commit, hash);

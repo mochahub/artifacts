@@ -31,7 +31,6 @@ async function itemsOf(deps: Deps, version: VersionRow, onlyPage?: string): Prom
     deps.db.select().from(blocks).where(eq(blocks.versionId, version.id)).orderBy(blocks.id),
     deps.db.select().from(frames).where(eq(frames.versionId, version.id)).orderBy(frames.y, frames.x),
   ]);
-  const notes = version.notes as Record<string, string>;
   const items: Item[] = [];
   for (const page of pageRows) {
     if (onlyPage && page.pageKey !== onlyPage) continue;
@@ -42,11 +41,15 @@ async function itemsOf(deps: Deps, version: VersionRow, onlyPage?: string): Prom
       }
     } else if (page.kind === "canvas") {
       for (const frame of frameRows.filter((row) => row.pageKey === page.pageKey)) {
-        items.push({ ...base, ref: frame.frameKey, title: frame.title, text: notes[frame.frameKey] ?? "" });
+        items.push({
+          ...base,
+          ref: frame.frameKey,
+          title: frame.title,
+          text: version.notes[frame.frameKey] ?? "",
+        });
       }
     } else if (page.kind === "gallery") {
-      const list = ((page.meta as { items?: { caption?: string }[] }).items ?? []) as { caption?: string }[];
-      list.forEach((item, index) => {
+      (page.meta.items ?? []).forEach((item, index) => {
         items.push({ ...base, ref: `item-${index + 1}`, title: null, text: item.caption ?? "" });
       });
     } else {
@@ -142,17 +145,16 @@ export async function viewArtifact(
       frame: frame.frameKey,
       title: frame.title,
       size,
-      image: image((frame.renders as Record<string, string>)[size]),
+      image: image(frame.renders[size]),
     };
   }
   if (options.frame) throw new ApiError("not_found", "That frame isn't in this version.");
   // No frames to show here: an article or a micro app has its share picture.
-  const files = version.files as Record<string, { hash: string }>;
   return {
     page: options.page ?? null,
     frame: null,
     title: loaded.row.title,
     size: "thumb",
-    image: image(files["__og.webp"]?.hash),
+    image: image(version.files["__og.webp"]?.hash),
   };
 }

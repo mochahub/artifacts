@@ -425,7 +425,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       .from(versions)
       .where(and(eq(versions.artifactId, artifactId), eq(versions.n, n)))
       .limit(1);
-    return (version?.files as Record<string, { hash: string }> | undefined)?.["__og.webp"]?.hash ?? null;
+    return version?.files["__og.webp"]?.hash ?? null;
   };
 
   routes.get("/api/s/:token", { public: true }, async (c) => {
@@ -454,7 +454,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
         project,
         slug: row.slug,
         title: row.title,
-        cover: first ? { renderHash: (first.renders as { thumb: string }).thumb } : { title: row.title },
+        cover: first ? { renderHash: first.renders.thumb } : { title: row.title },
       },
       permission: link.permission,
       needsName: !named,
@@ -474,10 +474,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       .orderBy(asc(frames.y), asc(frames.x))
       .limit(1);
     if (!first) throw new ApiError("not_found", "Not found.");
-    return c.redirect(
-      await deps.bucket.presignGet(`blobs/${(first.renders as { "2x": string })["2x"]}`),
-      302,
-    );
+    return c.redirect(await deps.bucket.presignGet(`blobs/${first.renders["2x"]}`), 302);
   });
 
   routes.post("/api/s/:token/guest", { public: true }, async (c) => {

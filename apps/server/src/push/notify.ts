@@ -83,7 +83,7 @@ async function send(
       TTL: String(DAY / 1000),
       Urgency: "normal",
     },
-    body: encryptPayload(JSON.stringify(message), row.keys as { p256dh: string; auth: string }),
+    body: encryptPayload(JSON.stringify(message), row.keys),
   });
   if (response.status === 404 || response.status === 410) {
     await deps.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, row.id));

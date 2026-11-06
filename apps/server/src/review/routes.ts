@@ -1,9 +1,11 @@
+import type { ActivityKind } from "@artifacts/schema";
 import {
-  type Anchor,
   agentLabel,
+  COMMENT_MAX,
   CreateComment,
   CreateDecision,
   CreateThread,
+  DAY_MS,
   EditComment,
   UNNAMED_AGENT,
 } from "@artifacts/schema";
@@ -37,9 +39,6 @@ import { notifyReply } from "../push/notify.ts";
 import { cropAround } from "./crop.ts";
 
 const MINUTE = 60_000;
-const DAY = 24 * 3600_000;
-/** The same limit as a comment's body. */
-const MAX_COMMENT_CHARS = 10_000;
 /** A page key, or the words around a quote. */
 const MAX_KEY_CHARS = 500;
 
@@ -108,7 +107,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
           id: row.id,
           n: row.n,
           pageKey: row.pageKey,
-          anchor: row.anchor as Anchor | null,
+          anchor: row.anchor,
           anchorState:
             row.movedFromVersion !== null && row.anchorState === "ok"
               ? ("moved_version" as const)
@@ -141,7 +140,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
   const recordActivity = (
     c: ApiContext,
     row: { artifactId: string },
-    kind: typeof activity.$inferInsert.kind,
+    kind: ActivityKind,
     payload: Record<string, unknown>,
     agent: string | null = null,
   ) => {
@@ -219,7 +218,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     if (
       body.pageKey.length > MAX_KEY_CHARS ||
       (anchor?.type === "text" &&
-        (anchor.quote.exact.length > MAX_COMMENT_CHARS ||
+        (anchor.quote.exact.length > COMMENT_MAX ||
           anchor.quote.prefix.length > MAX_KEY_CHARS ||
           anchor.quote.suffix.length > MAX_KEY_CHARS))
     ) {
@@ -253,7 +252,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
         )
         .limit(1);
       if (!frame) throw new ApiError("invalid", "That frame isn't in this version.");
-      render = (frame.renders as { "2x": string })["2x"];
+      render = frame.renders["2x"];
     } else if (body.anchor) {
       const [block] = await db
         .select({ id: blocks.id })
@@ -473,7 +472,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
         ? row.authorPersonId === caller.person.id
         : caller.kind === "guest" && row.authorGuestId === caller.guestId;
     if (!mine) throw new ApiError("forbidden", "That's someone else's comment.");
-    if (clock.now().getTime() - row.createdAt.getTime() > DAY) {
+    if (clock.now().getTime() - row.createdAt.getTime() > DAY_MS) {
       throw new ApiError("forbidden", "Comments can only be changed for 24 hours.");
     }
     return { row, thread: thread as ThreadRow };
@@ -515,8 +514,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     { action: "artifact.decide", resource: artifact },
     async (c) => {
       const body = await parseBody(c, CreateDecision);
-      if ((body.note?.length ?? 0) > MAX_COMMENT_CHARS)
-        throw new ApiError("invalid", "That note is too long.");
+      if ((body.note?.length ?? 0) > COMMENT_MAX) throw new ApiError("invalid", "That note is too long.");
       const caller = c.get("caller");
       if (caller.kind !== "person") throw new ApiError("forbidden", "Only people decide.");
       const artifactId = c.req.param("id") as string;

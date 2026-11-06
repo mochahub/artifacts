@@ -139,7 +139,7 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
       const loaded = await byName(c as ApiContext);
       const number = c.req.query("version");
       const version = await liveVersion(deps, loaded, number ? Number(number) : undefined);
-      const files = version.files as Record<string, { hash: string; size: number; type: string }>;
+      const files = version.files;
       const stored = files["artifact.json"];
       const object = stored ? await bucket.get(blobKey(stored.hash)) : null;
       let manifest: Record<string, unknown> | null = null;

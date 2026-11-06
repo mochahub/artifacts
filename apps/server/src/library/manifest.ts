@@ -1,6 +1,6 @@
-import { isBundlePath } from "@artifacts/schema";
+import { isBundlePath, type PageMeta } from "@artifacts/schema";
 
-type Page = { pageKey: string; kind: string; title: string | null; group: string | null; meta: unknown };
+type Page = { pageKey: string; kind: string; title: string | null; group: string | null; meta: PageMeta };
 type Files = Record<string, { hash: string }>;
 
 const generated = (path: string) => (path.split("/").pop() ?? "").startsWith("__") || path.startsWith("__");
@@ -25,12 +25,7 @@ export function rebuildManifest(
     return pick ?? `${key}.missing`;
   };
   const rebuilt = pages.map((page) => {
-    const meta = page.meta as {
-      boards?: { key: string; title: string; subtitle?: string }[];
-      device?: string;
-      livePath?: string;
-      items?: { hash: string; caption?: string }[];
-    };
+    const { meta } = page;
     const base = { id: page.pageKey, ...(page.title ? { title: page.title } : {}) };
     if (page.kind === "article") {
       return {

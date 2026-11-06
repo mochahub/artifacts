@@ -1,3 +1,4 @@
+import type { TokenScope } from "@artifacts/schema";
 import type { Caller, CallerPerson } from "./caller.ts";
 
 export const ACTIONS = [
@@ -166,7 +167,7 @@ const reaches = (
   (token.projectIds === null ? !project.restricted : token.projectIds.includes(project.id));
 
 /** Sessions have no scopes; tokens have only theirs. */
-const hasScope = (caller: Caller, scope: string) =>
+const hasScope = (caller: Caller, scope: TokenScope) =>
   caller.kind === "person" ||
   ((caller.kind === "cliToken" || caller.kind === "orgToken") && caller.scopes.includes(scope));
 

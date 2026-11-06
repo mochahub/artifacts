@@ -1,5 +1,5 @@
 import type { Anchor } from "@artifacts/schema";
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { Tx } from "../db/index.ts";
 import { threads, versions } from "../db/schema.ts";
 import { hashesOf, NOTHING, type VersionHashes } from "../versions/diff.ts";
@@ -81,7 +81,7 @@ export async function reanchorThreads(
   const open = await tx
     .select()
     .from(threads)
-    .where(and(eq(threads.artifactId, artifactId), ne(threads.status, "resolved"), isNotNull(threads.anchor)))
+    .where(and(eq(threads.artifactId, artifactId), ne(threads.status, "resolved")))
     .orderBy(threads.n);
   const pageKeys = new Set(pageRows.map((page) => page.key));
   const threadsOnChanged: number[] = [];
@@ -89,7 +89,7 @@ export async function reanchorThreads(
   const cache = new Map<number, VersionHashes>();
 
   for (const thread of open) {
-    if (!pageKeys.has(thread.pageKey)) continue;
+    if (!thread.anchor || !pageKeys.has(thread.pageKey)) continue;
     if (onlyCreatedOn !== undefined && thread.createdVersion !== onlyCreatedOn) continue;
     let then = cache.get(thread.createdVersion);
     if (!then) {
@@ -109,7 +109,7 @@ export async function reanchorThreads(
           .map(([key, hash]) => [key.slice(prefix.length), hash]),
       );
     const result = reanchor(
-      thread.anchor as Anchor,
+      thread.anchor,
       { frames: unprefix(then.frames), blocks: unprefix(then.blocks) },
       {
         frames: new Map(

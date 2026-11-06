@@ -591,6 +591,12 @@ export const BlockRecord = z.object({
 });
 export type BlockRecord = z.infer<typeof BlockRecord>;
 
+/** A version's files by bundle path, as `versions.files` holds them (02). */
+export const VersionFiles = z.record(z.string(), FileRef);
+export type VersionFiles = z.infer<typeof VersionFiles>;
+export type PageMeta = PageRecord["meta"];
+export type Renders = FrameRecord["renders"];
+
 export const PublishCommit = z.object({
   uploadId: z.string(),
   message: z.string().nullable().optional(),
@@ -600,7 +606,7 @@ export const PublishCommit = z.object({
   tags: Tags.nullable().optional(),
   notes: z.record(z.string(), z.string()).default({}),
   agent: z.string().nullable().optional(),
-  files: z.record(z.string(), FileRef),
+  files: VersionFiles,
   backendHash: Sha256.nullable().optional(),
   pages: z.array(PageRecord),
   frames: z.array(FrameRecord),

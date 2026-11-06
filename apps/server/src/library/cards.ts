@@ -272,9 +272,7 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
         project: projectSlug,
         slug: row.slug,
         title: row.title,
-        cover: first
-          ? { renderHash: (first.renders as { thumb: string }).thumb, w: first.w, h: first.h }
-          : { title: row.title },
+        cover: first ? { renderHash: first.renders.thumb, w: first.w, h: first.h } : { title: row.title },
         pageCount: pageCounts.find((entry) => entry.versionId === latest.id)?.count ?? 0,
         latestVersion: latest.n,
         status,

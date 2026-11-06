@@ -142,15 +142,14 @@ export async function purgeVersion(
       .select()
       .from(threads)
       .where(and(eq(threads.artifactId, artifact.id), eq(threads.movedFromVersion, version.n)));
-    for (const thread of moved) {
-      const anchor = thread.anchor as { type: string; blockKey?: string } | null;
+    for (const { id, anchor } of moved) {
       await tx
         .update(threads)
         .set({
           cropKey: null,
-          anchor: anchor?.type === "text" ? { type: "block", blockKey: anchor.blockKey } : thread.anchor,
+          anchor: anchor?.type === "text" ? { type: "block", blockKey: anchor.blockKey } : anchor,
         })
-        .where(eq(threads.id, thread.id));
+        .where(eq(threads.id, id));
     }
 
     await deleteVersionRows(tx, [version.id]);

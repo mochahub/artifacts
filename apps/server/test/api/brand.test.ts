@@ -71,7 +71,13 @@ describe("setting a brand by hand", () => {
 
   test("fonts in use stay when a brand is edited, and go when it stops using them", async () => {
     const hash = "b".repeat(64);
-    const font = { family: "Acme Sans", weight: "400", style: "normal", format: "woff2", hash };
+    const font = {
+      family: "Acme Sans",
+      weight: "400",
+      style: "normal" as const,
+      format: "woff2" as const,
+      hash,
+    };
     await t.server.db
       .update(org)
       .set({ brand: { name: "Fonts", theme: { font: "Acme Sans" }, fonts: [font] } })

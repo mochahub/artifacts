@@ -75,7 +75,6 @@ async function byToken(c: Context, deps: Deps, org: OrgRow, secret: string): Pro
     kind: "cliToken",
     tokenId: token.id,
     scopes: token.scopes,
-    agent: null,
     person: { id: person.id, name: person.name, email: person.email, role: person.role },
   };
 }
