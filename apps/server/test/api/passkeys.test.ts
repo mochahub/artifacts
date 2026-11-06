@@ -1,10 +1,22 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { passkeys, passwords, people } from "../../src/db/schema.ts";
+import { PasskeyList } from "@artifacts/schema";
+import { RECENT_AUTH_MS } from "../../src/auth/sessions.ts";
 import { softAuthenticator } from "../authenticator.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import {
+  addPasskey,
+  claim,
+  code,
+  cookieOf,
+  ORIGIN,
+  OWNER,
+  orgToken,
+  PASSWORD,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount } from "../publish-helper.ts";
 
-const ORIGIN = "http://viewer.test";
 type Registration = {
   rp: { id: string };
   challenge: string;
@@ -22,7 +34,10 @@ type Authentication = {
 describe("passkeys", () => {
   let t: TestServer;
   let cookie: string;
+  let orgId: string;
   const key = softAuthenticator();
+  const list = async (as: string) =>
+    PasskeyList.parse(await (await t.api("/api/me/passkeys", { cookie: as })).json()).passkeys;
 
   const signInOptions = async (json: unknown = {}) =>
     (await (await t.api("/api/auth/passkey/options", { method: "POST", json })).json()) as Authentication;
@@ -35,7 +50,7 @@ describe("passkeys", () => {
 
   beforeAll(async () => {
     t = await startTestServer();
-    await claim(t);
+    orgId = (await claim(t)).orgId;
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
@@ -79,9 +94,9 @@ describe("passkeys", () => {
 
   test("adding one needs a recent sign-in", async () => {
     const stale = await signIn(t, OWNER.email, OWNER.password);
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 60_000);
     const response = await t.api("/api/me/passkeys/options", { method: "POST", cookie: stale, json: {} });
-    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("recent_auth_required");
+    expect(await code(response)).toBe("recent_auth_required");
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
 
@@ -91,10 +106,10 @@ describe("passkeys", () => {
     expect(options.allowCredentials ?? []).toEqual([]);
     const response = await verifyLogin(options.challengeId, key.assert(options, ORIGIN));
     expect(response.status).toBe(200);
-    const session = (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    const session = cookieOf(response);
     expect((await t.api("/api/me", { cookie: session })).status).toBe(200);
-    const [row] = await t.server.db.select().from(passkeys);
-    expect(row?.lastUsedAt).not.toBeNull();
+    const [used] = await list(session);
+    expect(used?.lastUsedAt).not.toBeNull();
   });
 
   test("a second viewer domain works, with the home domain's RP ID (Related Origin Requests)", async () => {
@@ -146,7 +161,7 @@ describe("passkeys", () => {
 
   test("re-authenticating with a passkey refreshes a stale session", async () => {
     const stale = await signIn(t, OWNER.email, OWNER.password);
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 60_000);
     const options = await signInOptions();
     const response = await t.api("/api/auth/reauth", {
       method: "POST",
@@ -161,45 +176,47 @@ describe("passkeys", () => {
   });
 
   test("rename, and the only credential can't be removed", async () => {
-    const [row] = await t.server.db.select().from(passkeys);
-    const url = `/api/me/passkeys/${row?.id}`;
-    expect((await t.api(url, { method: "PATCH", cookie, json: { name: "Phone" } })).status).toBe(200);
-    expect(
-      (await t.api("/api/me/passkeys/nope", { method: "PATCH", cookie, json: { name: "x" } })).status,
-    ).toBe(404);
+    const [mine] = await list(cookie);
+    const rename = (id: string) =>
+      t.api(`/api/me/passkeys/${id}`, { method: "PATCH", cookie, json: { name: "Phone" } });
+    expect((await rename(mine?.id as string)).status).toBe(200);
+    expect((await list(cookie))[0]?.name).toBe("Phone");
+    expect((await rename("nope")).status).toBe(404);
 
-    const backup = await t.server.db.select().from(passwords);
-    await t.server.db.delete(passwords).where(eq(passwords.personId, row?.personId as string));
-    const refused = await t.api(url, { method: "DELETE", cookie });
-    expect(refused.status).toBe(409);
-    await t.server.db.insert(passwords).values(backup);
-    expect((await t.api(url, { method: "DELETE", cookie })).status).toBe(200);
+    // Someone with no password: their passkey is all they can sign in with.
+    const solo = await makeAccount(t, orgId, "member");
+    expect((await addPasskey(t, solo.cookie, softAuthenticator())).status).toBe(200);
+    const [only] = await list(solo.cookie);
+    const remove = () => t.api(`/api/me/passkeys/${only?.id}`, { method: "DELETE", cookie: solo.cookie });
+    expect((await remove()).status).toBe(409);
+    const set = await t.api("/api/me/password", {
+      method: "POST",
+      cookie: solo.cookie,
+      json: { password: PASSWORD },
+    });
+    expect(set.status).toBe(200);
+    expect((await remove()).status).toBe(200);
+    expect(await list(solo.cookie)).toEqual([]);
   });
 
   test("a passkey-only account has no password, not even the dummy one", async () => {
-    const [row] = await t.server.db.select().from(people);
-    const backup = await t.server.db.select().from(passwords);
-    await t.server.db.delete(passwords).where(eq(passwords.personId, row?.id as string));
+    const solo = await makeAccount(t, orgId, "member");
+    expect((await addPasskey(t, solo.cookie, softAuthenticator())).status).toBe(200);
     const attempt = await t.api("/api/auth/password", {
       method: "POST",
-      json: { email: OWNER.email, password: "not a real password" },
+      json: { email: solo.email, password: "not a real password" },
     });
     expect(attempt.status).toBe(401);
     const reauth = await t.api("/api/auth/reauth", {
       method: "POST",
-      cookie,
+      cookie: solo.cookie,
       json: { password: "not a real password" },
     });
     expect(reauth.status).toBe(401);
-    await t.server.db.insert(passwords).values(backup);
-    t.clock.advance(3600_000 * 2);
-    cookie = await signIn(t, OWNER.email, OWNER.password);
   });
 
   test("tokens can't touch passkeys", async () => {
-    const { token } = (await (
-      await t.api("/api/tokens", { method: "POST", cookie, json: { name: "x", scopes: ["read"] } })
-    ).json()) as { token: string };
+    const { token } = await orgToken(t, cookie);
     expect((await t.api("/api/me/passkeys", { bearer: token })).status).toBe(403);
   });
 });
