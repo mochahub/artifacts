@@ -1,8 +1,9 @@
 import type { Home as HomeData, ProjectRow } from "@artifacts/schema";
-import { Bell, Folder, Inbox, Search } from "lucide-preact";
-import type { ComponentChildren } from "preact";
+import { Bell, Folder, Inbox, Menu, Search } from "lucide-preact";
+import type { ComponentChildren, Ref } from "preact";
 import { useLocation } from "preact-iso";
 import { initials } from "../format.ts";
+import { projectHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
 import { meta } from "../session.ts";
 
@@ -35,9 +36,9 @@ export function Shell({ children, wide }: { children: ComponentChildren; wide?: 
         {(projects.data.value?.length ?? 0) > 0 && <div class="rh">Projects</div>}
         {projects.data.value?.map((project) => (
           <a
-            href={`/${project.slug}`}
+            href={projectHref(project.slug)}
             key={project.id}
-            aria-current={path === `/${project.slug}` ? "page" : undefined}
+            aria-current={path === projectHref(project.slug) ? "page" : undefined}
           >
             {project.name}
           </a>
@@ -58,3 +59,41 @@ export function Shell({ children, wide }: { children: ComponentChildren; wide?: 
 }
 
 export const ProjectTile = ({ name }: { name: string }) => <span class="kind">{initials(name)}</span>;
+
+/** The floating bar over every page: the page switcher, where you are, and the version (board 01). */
+export function PageCapsule({
+  title,
+  subtitle,
+  version,
+  onPages,
+  onVersions,
+  liquid,
+  box,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  version: number;
+  onPages(): void;
+  onVersions(): void;
+  /** The reader's Liquid Glass (article/liquid.ts), which needs the element too. */
+  liquid?: boolean;
+  box?: Ref<HTMLDivElement>;
+  children?: ComponentChildren;
+}) {
+  return (
+    <div ref={box} class={`capsule glass${liquid ? " liquid" : ""}`}>
+      <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
+        <Menu />
+      </button>
+      <button type="button" class="where" onClick={onPages}>
+        <b>{title}</b>
+        <span>{subtitle}</span>
+      </button>
+      <button type="button" class="vchip" aria-label="Version history" onClick={onVersions}>
+        v{version}
+      </button>
+      {children}
+    </div>
+  );
+}

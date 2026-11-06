@@ -1,7 +1,9 @@
+import { GUEST_NAME_MAX } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { useLocation, useRoute } from "preact-iso";
-import { ApiFailure, api, post } from "../api.ts";
+import { api, message, post } from "../api.ts";
+import { artifactHref } from "../paths.ts";
 
 type Preview = {
   artifact: {
@@ -25,7 +27,7 @@ export function GuestLanding() {
   const name = useSignal("");
   const error = useSignal<string | null>(null);
   const token = encodeURIComponent(params.token ?? "");
-  const open = (body: Preview) => route(`/${body.artifact.project}/${body.artifact.slug}`, true);
+  const open = (body: Preview) => route(artifactHref(body.artifact), true);
 
   useEffect(() => {
     api<Preview>(`/api/s/${token}`)
@@ -44,7 +46,7 @@ export function GuestLanding() {
       await post(`/api/s/${token}/guest`, { name: name.value });
       if (preview.value) open(preview.value);
     } catch (failure) {
-      error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+      error.value = message(failure);
     }
   }
 
@@ -76,7 +78,7 @@ export function GuestLanding() {
           class="field"
           autocomplete="name"
           required
-          maxLength={60}
+          maxLength={GUEST_NAME_MAX}
           value={name.value}
           onInput={(e) => {
             name.value = e.currentTarget.value;

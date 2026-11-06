@@ -9,9 +9,9 @@ const shot = async (page: Page, project: string, name: string) => {
 };
 
 const transform = (page: Page) =>
-  page.evaluate(() => {
-    const c = (window as unknown as { __canvas: { x: number; y: number; s: number } }).__canvas;
-    return { x: c.x, y: c.y, s: c.s };
+  page.locator(".cv .world").evaluate((world: HTMLElement) => {
+    const { x, y, s } = world.dataset;
+    return { x: Number(x), y: Number(y), s: Number(s) };
   });
 
 test("projects and a project list the fixture", async ({ page }, info) => {

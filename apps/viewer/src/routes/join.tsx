@@ -1,21 +1,17 @@
-import type { Person } from "@artifacts/schema";
+import type { InvitePreview, Person } from "@artifacts/schema";
+import { INVITE_DAYS, PASSWORD_MIN } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { ScanFace } from "lucide-preact";
 import { useEffect } from "preact/hooks";
 import { useLocation, useRoute } from "preact-iso";
-import { ApiFailure, api, post } from "../api.ts";
+import { api, message, post } from "../api.ts";
+import { plural } from "../format.ts";
 import { addPasskey, passkeyName } from "../passkey.ts";
+import { googleStart } from "../paths.ts";
 import { me, meta } from "../session.ts";
+import type { Infer } from "../types.ts";
 
-type Preview = {
-  orgName: string;
-  invitedBy: string;
-  role: string;
-  email: string;
-  artifact?: { title: string };
-  project?: { name: string };
-  teams?: string[];
-};
+type Preview = Infer<typeof InvitePreview>;
 
 /** One screen: a passkey is the default, because it's one tap on a phone (06·6). */
 export function Join() {
@@ -50,10 +46,7 @@ export function Join() {
       if (withPasskey) await addPasskey(passkeyName());
       route("/", true);
     } catch (failure) {
-      error.value =
-        failure instanceof ApiFailure
-          ? failure.message
-          : "That didn't work. You can add a passkey in Settings.";
+      error.value = message(failure, "That didn't work. You can add a passkey in Settings.");
       if (me.value) route("/settings/sign-in", true);
     }
   }
@@ -62,7 +55,7 @@ export function Join() {
     return (
       <main class="screen">
         <h1 class="h1 m">This invite no longer works</h1>
-        <p class="sub">Invites work once, for 7 days. Ask for a new one.</p>
+        <p class="sub">Invites work once, for {plural(INVITE_DAYS, "day")}. Ask for a new one.</p>
       </main>
     );
   }
@@ -110,7 +103,7 @@ export function Join() {
             class="field"
             type="password"
             autocomplete="new-password"
-            minLength={12}
+            minLength={PASSWORD_MIN}
             value={password.value}
             onInput={(e) => {
               password.value = e.currentTarget.value;
@@ -124,7 +117,7 @@ export function Join() {
         <button
           type="button"
           class="btn ink"
-          disabled={!name.value || password.value.length < 12}
+          disabled={!name.value || password.value.length < PASSWORD_MIN}
           onClick={() => accept(false)}
         >
           Join
@@ -136,7 +129,7 @@ export function Join() {
             Create a passkey
           </button>
           {meta.value?.google && (
-            <a class="btn soft" href={`/api/auth/google/start?intent=invite&invite=${token}`}>
+            <a class="btn soft" href={googleStart("invite", { invite: params.token ?? "" })}>
               Continue with Google
             </a>
           )}

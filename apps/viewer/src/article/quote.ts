@@ -1,4 +1,8 @@
-export type Quote = { exact: string; prefix?: string; suffix?: string };
+import type { Anchor } from "@artifacts/schema";
+
+type AnchorQuote = Extract<Anchor, { type: "text" }>["quote"];
+/** A text anchor's quote; the words around it are optional here, for a quote still being made. */
+export type Quote = Pick<AnchorQuote, "exact"> & Partial<AnchorQuote>;
 
 /**
  * Where a quoted passage sits in a block's text, as `[start, end)` into that text.

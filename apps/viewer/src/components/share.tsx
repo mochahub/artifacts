@@ -1,13 +1,24 @@
-import type { Artifact, ProjectAccessList } from "@artifacts/schema";
+import type {
+  Artifact,
+  PeopleSearch,
+  ProjectAccessList,
+  ProjectPermission,
+  TeamList,
+} from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check, Copy, Eye, Link2Off, MessageCircle, Users, X } from "lucide-preact";
 import { useEffect } from "preact/hooks";
-import { api, message, post } from "../api.ts";
-import { plural } from "../format.ts";
+import { api, del, post } from "../api.ts";
+import { copy } from "../clipboard.ts";
+import { capitalize, plural } from "../format.ts";
+import { projectHref, teamHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
-import { Sheet } from "./sheets.tsx";
+import type { Infer } from "../types.ts";
+import { Avatar } from "./cards.tsx";
+import { useAction } from "./reauth.tsx";
+import { Sheet } from "./sheet.tsx";
 
-export type Level = "view" | "comment" | "publish" | "manage";
+type Level = ProjectPermission;
 export const LEVELS: Record<Level, string> = {
   view: "Can view",
   comment: "Can comment",
@@ -15,15 +26,7 @@ export const LEVELS: Record<Level, string> = {
   manage: "Can manage",
 };
 
-type Inherited = {
-  id: string;
-  name: string;
-  role: string;
-  level: Level;
-  via: "publisher" | "role" | "grant";
-  sources: { kind: string; name: string; slug: string }[];
-  capped: boolean;
-};
+type Inherited = ProjectAccessList["inherited"][number];
 type Access = {
   people: { id: string; name: string; email: string; role: string; permission: Level }[];
   teams: { id: string; slug: string; name: string; permission: Level; viaToken: boolean; members: number }[];
@@ -32,15 +35,13 @@ type Access = {
   project: { slug: string; name: string; restricted: boolean } | null;
   canShareOutside: boolean;
 };
-export type Picked =
-  | { kind: "person"; id: string; name: string; email: string; role: string }
-  | { kind: "team"; id: string; slug: string; name: string; members: number };
-
-const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => {});
+type Picked =
+  | ({ kind: "person" } & Infer<typeof PeopleSearch>["people"][number])
+  | ({ kind: "team" } & Infer<typeof TeamList>["teams"][number]);
 const looksLikeEmail = (text: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 
 /** A level, always in the same words. It's a native menu, so it works the same with a thumb. */
-export function LevelSelect({
+function LevelSelect({
   value,
   levels,
   label,
@@ -90,7 +91,7 @@ export function Picker({
   const allTeams = useSignal<Picked[]>([]);
   useEffect(() => {
     if (!teams) return;
-    api<{ teams: Omit<Extract<Picked, { kind: "team" }>, "kind">[] }>("/api/teams")
+    api<Infer<typeof TeamList>>("/api/teams")
       .then((body) => {
         allTeams.value = body.teams.map((team) => ({ ...team, kind: "team" }));
       })
@@ -103,9 +104,7 @@ export function Picker({
       return;
     }
     const timer = setTimeout(() => {
-      api<{ people: Omit<Extract<Picked, { kind: "person" }>, "kind">[] }>(
-        `/api/people/search?q=${encodeURIComponent(q)}`,
-      )
+      api<Infer<typeof PeopleSearch>>(`/api/people/search?q=${encodeURIComponent(q)}`)
         .then((body) => {
           people.value = body.people.map((person) => ({ ...person, kind: "person" }));
         })
@@ -148,7 +147,7 @@ export function Picker({
               key={choice.id}
               onClick={() => finish(() => onPick(choice))}
             >
-              {choice.kind === "team" ? <Users /> : <span class="av">{choice.name[0]}</span>}
+              {choice.kind === "team" ? <Users /> : <Avatar name={choice.name} />}
               <div class="grow">
                 <div class="tt">{choice.name}</div>
                 <div class="ss">
@@ -171,8 +170,6 @@ export function Picker({
   );
 }
 
-const roleName = (role: string) => `${role[0]?.toUpperCase()}${role.slice(1)}`;
-
 /** Why someone has access, in a word or two. A team links to itself, because that's where it changes. */
 function Reason({ row }: { row: Inherited }) {
   if (row.via === "publisher") return <>, published this</>;
@@ -182,7 +179,7 @@ function Reason({ row }: { row: Inherited }) {
       {row.sources.map((source, i) => (
         <span key={source.slug}>
           {i === 0 ? ", via " : " and "}
-          <a href={source.kind === "team" ? `/settings/teams/${source.slug}` : `/${source.slug}`}>
+          <a href={source.kind === "team" ? teamHref(source.slug) : projectHref(source.slug)}>
             {source.name}
           </a>
         </span>
@@ -192,17 +189,17 @@ function Reason({ row }: { row: Inherited }) {
   );
 }
 
-export function InheritedRows({ rows }: { rows: Inherited[] }) {
+function InheritedRows({ rows }: { rows: Inherited[] }) {
   if (rows.length === 0) return null;
   return (
     <div class="group">
       {rows.map((row) => (
         <div class="li" key={row.id}>
-          <span class="av">{row.name[0]}</span>
+          <Avatar name={row.name} />
           <div class="grow">
             <div class="tt">{row.name}</div>
             <div class="ss">
-              {row.role !== "member" ? `${roleName(row.role)}, ` : ""}
+              {row.role !== "member" ? `${capitalize(row.role)}, ` : ""}
               {LEVELS[row.level]}
               <Reason row={row} />
             </div>
@@ -228,20 +225,11 @@ export function ShareSheet({
   const expires = useSignal<string>("");
   const url = useSignal<string | null>(null);
   const adding = useSignal<Level>("comment");
-  const error = useSignal<string | null>(null);
+  const action = useAction({ after: access.refresh });
+  const { run, error } = action;
   const data = access.data.value;
   // The sheet's own answer: the page's copy comes from a poll, and an older one can land after this.
   const visibility = useSignal(artifact.visibility);
-
-  async function run(work: () => Promise<void>) {
-    error.value = null;
-    try {
-      await work();
-      await access.refresh();
-    } catch (failure) {
-      error.value = message(failure);
-    }
-  }
   const createLink = () =>
     run(async () => {
       const made = await post<{ url: string }>(`/api/artifacts/${artifact.id}/links`, {
@@ -317,7 +305,7 @@ export function ShareSheet({
               <Users />
               <div class="grow">
                 <div class="tt">
-                  <a href={`/settings/teams/${team.slug}`}>{team.name}</a>
+                  <a href={teamHref(team.slug)}>{team.name}</a>
                 </div>
                 <div class="ss">
                   {plural(team.members, "person", "people")}
@@ -339,9 +327,7 @@ export function ShareSheet({
                 type="button"
                 class="icon-btn"
                 aria-label={`Remove ${team.name}`}
-                onClick={() =>
-                  run(() => api(`/api/artifacts/${artifact.id}/teams/${team.id}`, { method: "DELETE" }))
-                }
+                onClick={() => run(() => del(`/api/artifacts/${artifact.id}/teams/${team.id}`))}
               >
                 <X />
               </button>
@@ -349,10 +335,10 @@ export function ShareSheet({
           ))}
           {data?.people.map((person) => (
             <div class="li" key={person.id}>
-              <span class="av">{person.name[0]}</span>
+              <Avatar name={person.name} />
               <div class="grow">
                 <div class="tt">{person.name}</div>
-                {person.role !== "member" && <div class="ss">{roleName(person.role)}</div>}
+                {person.role !== "member" && <div class="ss">{capitalize(person.role)}</div>}
               </div>
               <LevelSelect
                 value={person.permission}
@@ -364,9 +350,7 @@ export function ShareSheet({
                 type="button"
                 class="icon-btn"
                 aria-label={`Remove ${person.name}`}
-                onClick={() =>
-                  run(() => api(`/api/artifacts/${artifact.id}/access/${person.id}`, { method: "DELETE" }))
-                }
+                onClick={() => run(() => del(`/api/artifacts/${artifact.id}/access/${person.id}`))}
               >
                 <X />
               </button>
@@ -444,9 +428,7 @@ export function ShareSheet({
                 type="button"
                 class="icon-btn"
                 aria-label="Revoke this link"
-                onClick={() =>
-                  run(() => api(`/api/artifacts/${artifact.id}/links/${link.id}`, { method: "DELETE" }))
-                }
+                onClick={() => run(() => del(`/api/artifacts/${artifact.id}/links/${link.id}`))}
               >
                 <Link2Off />
               </button>
@@ -454,6 +436,7 @@ export function ShareSheet({
           ))}
         </div>
       )}
+      {action.sheet}
     </Sheet>
   );
 }
@@ -538,19 +521,10 @@ export function ProjectShareSheet({
   const adding = useSignal<Level>("comment");
   const url = useSignal<string | null>(null);
   const confirming = useSignal(false);
-  const error = useSignal<string | null>(null);
+  const action = useAction({ after: access.refresh });
+  const { run, error } = action;
   const data = access.data.value;
   const levels: Level[] = ["view", "comment", "publish", "manage"];
-
-  async function run(work: () => Promise<void>) {
-    error.value = null;
-    try {
-      await work();
-      await access.refresh();
-    } catch (failure) {
-      error.value = message(failure);
-    }
-  }
   const set = (subject: string, level: Level) =>
     run(() => api(`${path}/${subject}`, { method: "PUT", json: { permission: level } }));
   const invite = (email: string) =>
@@ -586,6 +560,7 @@ export function ProjectShareSheet({
           }}
         />
         {error.value && <p class="err">{error.value}</p>}
+        {action.sheet}
       </Sheet>
     );
   }
@@ -644,7 +619,7 @@ export function ProjectShareSheet({
               <Users />
               <div class="grow">
                 <div class="tt">
-                  <a href={`/settings/teams/${team.slug}`}>{team.name}</a>
+                  <a href={teamHref(team.slug)}>{team.name}</a>
                 </div>
                 <div class="ss">{plural(team.members, "person", "people")}</div>
               </div>
@@ -663,7 +638,7 @@ export function ProjectShareSheet({
                   type="button"
                   class="icon-btn"
                   aria-label={`Remove ${team.name}`}
-                  onClick={() => run(() => api(`${path}/team:${team.id}`, { method: "DELETE" }))}
+                  onClick={() => run(() => del(`${path}/team:${team.id}`))}
                 >
                   <X />
                 </button>
@@ -672,12 +647,12 @@ export function ProjectShareSheet({
           ))}
           {data.people.map((person) => (
             <div class="li" key={person.id}>
-              <span class="av">{person.name[0]}</span>
+              <Avatar name={person.name} />
               <div class="grow">
                 <div class="tt">{person.name}</div>
                 {(person.role !== "member" || person.capped) && (
                   <div class="ss">
-                    {roleName(person.role)}
+                    {capitalize(person.role)}
                     {person.capped && ", capped by role"}
                   </div>
                 )}
@@ -697,7 +672,7 @@ export function ProjectShareSheet({
                   type="button"
                   class="icon-btn"
                   aria-label={`Remove ${person.name}`}
-                  onClick={() => run(() => api(`${path}/person:${person.id}`, { method: "DELETE" }))}
+                  onClick={() => run(() => del(`${path}/person:${person.id}`))}
                 >
                   <X />
                 </button>
@@ -706,12 +681,13 @@ export function ProjectShareSheet({
           ))}
         </div>
       )}
-      <InheritedRows rows={data.inherited as Inherited[]} />
+      <InheritedRows rows={data.inherited} />
       {error.value && <p class="err">{error.value}</p>}
       <p class="fn">
         Reviewers and outside people stop at commenting. Can publish adds new artifacts, and only managers
         change someone else's.
       </p>
+      {action.sheet}
     </Sheet>
   );
 }

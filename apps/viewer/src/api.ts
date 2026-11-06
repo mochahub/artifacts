@@ -1,3 +1,5 @@
+import type { ApiErrorBody } from "@artifacts/schema";
+
 export class ApiFailure extends Error {
   constructor(
     readonly status: number,
@@ -9,34 +11,60 @@ export class ApiFailure extends Error {
   }
 }
 
-/** Calls the API, re-prompting once if it asks for a recent sign-in. */
-export async function api<T>(
-  path: string,
-  init: { method?: string; json?: unknown; text?: boolean } = {},
-): Promise<T> {
+const FALLBACK = "Something went wrong.";
+
+/** The failure an error answer describes. A proxy's error page isn't JSON, and then the status is what's left. */
+function failureOf(status: number, text: string) {
+  let error: Partial<ApiErrorBody["error"]> = {};
+  try {
+    error = (text ? JSON.parse(text).error : null) ?? {};
+  } catch {}
+  return new ApiFailure(status, error.code ?? "unknown", error.message ?? FALLBACK, error.details);
+}
+
+/** A good answer's text, or the failure an error answer describes. */
+export async function readText(response: Response): Promise<string> {
+  const text = await response.text();
+  if (!response.ok) throw failureOf(response.status, text);
+  return text;
+}
+
+/** A good answer's JSON. An answer that isn't JSON fails like any other, rather than as a SyntaxError. */
+export function parseJson<T>(status: number, text: string): T {
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiFailure(status, "unknown", FALLBACK);
+  }
+}
+
+type Init = {
+  method?: string;
+  json?: unknown;
+  body?: BodyInit;
+  headers?: Record<string, string>;
+  /** The answer's text, unparsed. */
+  text?: boolean;
+};
+
+export async function api<T>(path: string, init: Init = {}): Promise<T> {
+  const json = init.json !== undefined;
   const response = await fetch(path, {
     method: init.method ?? "GET",
-    headers: init.json === undefined ? {} : { "Content-Type": "application/json" },
-    body: init.json === undefined ? undefined : JSON.stringify(init.json),
+    headers: { ...(json ? { "Content-Type": "application/json" } : {}), ...init.headers },
+    body: json ? JSON.stringify(init.json) : init.body,
   });
-  const text = await response.text();
-  if (!response.ok) {
-    const error = (text ? JSON.parse(text) : {}).error ?? {};
-    throw new ApiFailure(
-      response.status,
-      error.code ?? "unknown",
-      error.message ?? "Something went wrong.",
-      error.details,
-    );
-  }
-  if (init.text) return text as T;
-  return (text ? JSON.parse(text) : undefined) as T;
+  const text = await readText(response);
+  return init.text ? (text as T) : parseJson<T>(response.status, text);
 }
 
 export const post = <T>(path: string, json: unknown = {}) => api<T>(path, { method: "POST", json });
-export const del = <T>(path: string, json: unknown = {}) => api<T>(path, { method: "DELETE", json });
-export const message = (failure: unknown) =>
-  failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+export const del = <T>(path: string, json?: unknown) => api<T>(path, { method: "DELETE", json });
+
+/** What to tell someone: the API's own words, or `fallback` for anything else (a network error, a passkey prompt). */
+export const message = (failure: unknown, fallback = FALLBACK) =>
+  failure instanceof ApiFailure ? failure.message : fallback;
 
 /**
  * Whether a failure means this address has nothing for you, as opposed to a bad moment (429, 5xx, a 503

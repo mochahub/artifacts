@@ -1,15 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { CACHES, TAPPED } from "./notify.ts";
+import { articleUrl, renderUrl, safeNext } from "./paths.ts";
 
 const source = readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
 const ORIGIN = "https://art.test";
 
 /** Runs the worker's file against a stand-in for its global scope. */
-function load(windows: unknown[] = []) {
+function load(windows: unknown[] = [], network = async (_: unknown) => new Response("{}")) {
   const handlers: Record<string, (event: unknown) => unknown> = {};
   const shown: { title: string; options: { body?: string; data: { url: string } } }[] = [];
   const opened: string[] = [];
   const kept: string[] = [];
+  const keptIn: string[] = [];
+  const deleted: string[] = [];
+  const fetched: string[] = [];
   const self = {
     addEventListener: (type: string, handler: (event: unknown) => unknown) => {
       handlers[type] = handler;
@@ -29,25 +34,35 @@ function load(windows: unknown[] = []) {
     },
   };
   const caches = {
-    open: async () => ({
+    open: async (name: string) => ({
       match: async () => undefined,
       put: async (request: Request | string) => {
         kept.push(typeof request === "string" ? request : new URL(request.url).pathname);
+        keptIn.push(name);
       },
       keys: async () => [],
       delete: async () => true,
       add: async () => {},
     }),
-    delete: async () => true,
+    delete: async (name: string) => {
+      deleted.push(name);
+      return true;
+    },
   };
-  const network = async () => new Response("{}");
-  new Function("self", "caches", "location", "fetch", source)(self, caches, { origin: ORIGIN }, network);
+  const fetch = (request: unknown) => {
+    fetched.push(typeof request === "string" ? request : new URL((request as Request).url).pathname);
+    return network(request);
+  };
+  new Function("self", "caches", "location", "fetch", source)(self, caches, { origin: ORIGIN }, fetch);
 
   /** Whether the worker took the request over, and what it kept. */
-  const handles = async (path: string) => {
+  const handles = async (path: string, destination = "") => {
     let responded: Promise<unknown> | null = null;
+    const request = new Request(`${ORIGIN}${path}`);
     handlers.fetch?.({
-      request: new Request(`${ORIGIN}${path}`),
+      request: destination
+        ? { url: request.url, method: "GET", headers: request.headers, mode: request.mode, destination }
+        : request,
       respondWith: (answer: Promise<unknown>) => {
         responded = answer;
       },
@@ -69,7 +84,7 @@ function load(windows: unknown[] = []) {
     });
     await Promise.all(waits);
   };
-  return { handles, push, click, shown, opened, kept };
+  return { handles, push, click, shown, opened, kept, keptIn, deleted, fetched };
 }
 
 describe("what the worker keeps", () => {
@@ -172,5 +187,47 @@ describe("push", () => {
     expect(worker.opened).toEqual([]);
     expect(worker.kept).toEqual(["/tapped-notification"]);
     expect(steps).toEqual(["tapped", "focus"]);
+  });
+});
+
+// The worker is plain JavaScript served as it is, so it keeps its own copies of these. These tests tie
+// each copy to the app's.
+describe("what the worker shares with the app", () => {
+  const id = "0b9f1e8c-1111-2222-3333-444444444444";
+  const hash = "a".repeat(64);
+
+  test("a lost artifact clears the caches the app clears at sign-out", async () => {
+    const worker = load([], async () => new Response("", { status: 404 }));
+    await worker.handles(`/api/artifacts/${id}`);
+    expect(worker.deleted.sort()).toEqual([CACHES.api, CACHES.content].sort());
+  });
+
+  test("a tapped notification is left in the cache, under the key, that the app reads", async () => {
+    const worker = load([{ postMessage: () => {}, focus: async () => {} }]);
+    await worker.click("/camerabuddy/roadmap");
+    expect(worker.kept).toEqual([TAPPED]);
+    expect(worker.keptIn).toEqual([CACHES.shell]);
+  });
+
+  test.each(["/", "/p/a?c=2", "//evil.test", "/\\evil.test", "/\t/evil.test", "https://evil.test", "", 42])(
+    "goes where sign-in would for %p",
+    async (url) => {
+      const worker = load();
+      await worker.click(url);
+      expect(worker.opened).toEqual([safeNext(typeof url === "string" ? url : undefined)]);
+    },
+  );
+
+  test("keeps the renders the app shows, fetched the way a bucket allows", async () => {
+    const worker = load();
+    expect(await worker.handles(renderUrl(id, hash), "image")).toBe(true);
+    expect(worker.fetched).toEqual([`${renderUrl(id, hash)}?via=app`]);
+    expect(worker.keptIn).toEqual([CACHES.content]);
+  });
+
+  test("keeps the article HTML the app reads", async () => {
+    const worker = load();
+    expect(await worker.handles(articleUrl(id, 3, "plan"))).toBe(true);
+    expect(worker.keptIn).toEqual([CACHES.content]);
   });
 });

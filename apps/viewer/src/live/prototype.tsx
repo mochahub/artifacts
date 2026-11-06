@@ -1,7 +1,7 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, DataScope } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { Menu } from "lucide-preact";
-import { LiveFrame, savedNotice } from "./frame.tsx";
+import { PageCapsule } from "../components/shell.tsx";
+import { LiveFrame, SavedNotice } from "./frame.tsx";
 
 export type PrototypePage = {
   key: string;
@@ -18,24 +18,17 @@ type Props = {
 };
 
 export function PrototypeView({ artifact, page, version, onPages, onVersions }: Props) {
-  const scope = useSignal<"shared" | "me" | null>(null);
+  const scope = useSignal<DataScope | null>(null);
   return (
     <div class="on-canvas proto">
-      <div class="capsule glass">
-        <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
-          <Menu />
-        </button>
-        <button type="button" class="where" onClick={onPages}>
-          <b>{page.title ?? page.key}</b>
-          <span>{artifact.title}</span>
-        </button>
-        <button type="button" class="vchip" aria-label="Version history" onClick={onVersions}>
-          v{version}
-        </button>
-      </div>
-      {scope.value && (
-        <div class="hint glass">{savedNotice(scope.value)}. Its author can see what's saved.</div>
-      )}
+      <PageCapsule
+        title={page.title ?? page.key}
+        subtitle={artifact.title}
+        version={version}
+        onPages={onPages}
+        onVersions={onVersions}
+      />
+      <SavedNotice scope={scope.value} place="hint" />
       <div class="stage">
         <LiveFrame
           artifact={artifact}

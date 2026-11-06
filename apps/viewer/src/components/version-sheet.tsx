@@ -1,121 +1,13 @@
 import type { Artifact, VersionRow } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { Check, FileText, Images, X } from "lucide-preact";
-import type { ComponentChildren } from "preact";
-import { useLayoutEffect, useRef } from "preact/hooks";
+import { Check } from "lucide-preact";
 import { useLocation } from "preact-iso";
-import { ApiFailure, api, post } from "../api.ts";
+import { api, post } from "../api.ts";
 import { agentShort, ago } from "../format.ts";
+import { compareHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
-
-export function Sheet({
-  title,
-  subtitle,
-  onClose,
-  children,
-  extra,
-}: {
-  title: string;
-  /** Where the sheet's subject lives, under the title: a page or a frame. */
-  subtitle?: string;
-  onClose(): void;
-  children: ComponentChildren;
-  extra?: ComponentChildren;
-}) {
-  const dialog = useRef<HTMLDivElement>(null);
-  // As the sheet appears, not a frame later, so a quick Escape still closes it.
-  useLayoutEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, [onClose]);
-  // Focus goes into the sheet, unless something inside already took it, and back to what opened it.
-  useLayoutEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    if (dialog.current && !dialog.current.contains(document.activeElement)) {
-      dialog.current.focus({ preventScroll: true });
-    }
-    return () => {
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
-    };
-  }, []);
-  return (
-    <>
-      <div class="dim" onClick={onClose} aria-hidden="true" />
-      <div class="sheet" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialog}>
-        <div class="grabber" />
-        <div class="shead">
-          <div class="t">
-            {title}
-            {subtitle && <span class="fn">{subtitle}</span>}
-          </div>
-          {extra}
-          <button type="button" class="x" aria-label="Close" onClick={onClose}>
-            <X />
-          </button>
-        </div>
-        {children}
-      </div>
-    </>
-  );
-}
-
-/** Every page, grouped as in the manifest, with changed dots and open counts (01·5). */
-export function PageSwitcher({
-  artifact,
-  current,
-  base,
-  onClose,
-}: {
-  artifact: Artifact;
-  current: string;
-  base: string;
-  onClose(): void;
-}) {
-  const groups = new Map<string | null, Artifact["pages"]>();
-  for (const page of artifact.pages) groups.set(page.group, [...(groups.get(page.group) ?? []), page]);
-  return (
-    <Sheet
-      title={artifact.title}
-      onClose={onClose}
-      extra={<span class="vchip">v{artifact.latestVersion}</span>}
-    >
-      {[...groups.entries()].map(([group, pages]) => (
-        <>
-          {group && (
-            <span class="gh split">
-              <span>{group}</span>
-              <span>{pages.length}</span>
-            </span>
-          )}
-          <div class="group" key={group}>
-            {pages.map((page, index) => (
-              <a
-                class={`li${page.key === current ? " on" : ""}`}
-                href={`${base}/${page.key}`}
-                onClick={onClose}
-                key={page.key}
-              >
-                {group ? (
-                  <span class="fn num">{String(index + 1).padStart(2, "0")}</span>
-                ) : (
-                  <span class="kind">{page.kind === "article" ? <FileText /> : <Images />}</span>
-                )}
-                <div class="grow">
-                  <div class="tt">{page.title ?? page.key}</div>
-                </div>
-                {page.changed && <span class="dot" title="Changed" />}
-                {page.open > 0 && <b class="count">{page.open}</b>}
-              </a>
-            ))}
-          </div>
-        </>
-      ))}
-    </Sheet>
-  );
-}
+import { useAction } from "./reauth.tsx";
+import { Sheet } from "./sheet.tsx";
 
 export function VersionSheet({ artifact, onClose }: { artifact: Artifact; onClose(): void }) {
   const { route, path } = useLocation();
@@ -123,19 +15,9 @@ export function VersionSheet({ artifact, onClose }: { artifact: Artifact; onClos
   const open = useSignal<number | null>(null);
   const naming = useSignal(false);
   const name = useSignal("");
-  const error = useSignal<string | null>(null);
+  const { run, error, sheet } = useAction();
   const clean = path.replace(/\/v\/\d+/, "");
-  const base = `/${artifact.project}/${artifact.slug}`;
   const canPublish = artifact.permissions.manage && !artifact.archivedAt;
-
-  async function run(work: () => Promise<void>) {
-    error.value = null;
-    try {
-      await work();
-    } catch (failure) {
-      error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
-    }
-  }
 
   return (
     <Sheet title="Version history" onClose={onClose}>
@@ -196,10 +78,7 @@ export function VersionSheet({ artifact, onClose }: { artifact: Artifact; onClos
                     </button>
                   )}
                   {!current && (
-                    <a
-                      class="btn soft fit"
-                      href={`${base}/compare?from=${version.n}&to=${artifact.latestVersion}`}
-                    >
+                    <a class="btn soft fit" href={compareHref(artifact, version.n, artifact.latestVersion)}>
                       Compare
                     </a>
                   )}
@@ -251,6 +130,7 @@ export function VersionSheet({ artifact, onClose }: { artifact: Artifact; onClos
         })}
       </div>
       {error.value && <p class="err">{error.value}</p>}
+      {sheet}
     </Sheet>
   );
 }

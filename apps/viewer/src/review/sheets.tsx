@@ -2,16 +2,15 @@ import type { Anchor, Artifact, Comment, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check, Copy, X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
-import { ApiFailure, api, post } from "../api.ts";
-import { agentPrompt, agentShort, ago } from "../format.ts";
+import { message, post } from "../api.ts";
+import { AgentMark, Avatar } from "../components/cards.tsx";
+import { Sheet } from "../components/sheet.tsx";
+import { agentShort, ago, capitalize } from "../format.ts";
 import { askInstall, shouldAsk } from "../notify.ts";
+import { compareHref } from "../paths.ts";
 import type { Remote } from "../poll.ts";
 import { me } from "../session.ts";
-import { AgentMark } from "./cards.tsx";
-import { Sheet } from "./sheets.tsx";
-
-const message = (failure: unknown) =>
-  failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+import { agentPrompt } from "./prompt.ts";
 
 /** Keeps a sheet on top of the on-screen keyboard (06). */
 function useKeyboardInset() {
@@ -120,9 +119,7 @@ function Message({ comment }: { comment: Comment }) {
       {agent ? (
         <AgentMark />
       ) : (
-        <span class={`av${comment.author.name === me.value?.name ? " you" : ""}`}>
-          {comment.author.name[0]}
-        </span>
+        <Avatar name={comment.author.name} you={comment.author.name === me.value?.name} />
       )}
       <div class="grow">
         <div class="name">
@@ -150,7 +147,6 @@ export function ThreadSheet({
   artifact,
   thread,
   subtitle,
-  base,
   threads,
   onClose,
 }: {
@@ -158,7 +154,6 @@ export function ThreadSheet({
   thread: Thread;
   /** The page or frame the comment sits on. The title is the comment's number, the same everywhere. */
   subtitle: string;
-  base: string;
   threads: Remote<Thread[]>;
   onClose(): void;
 }) {
@@ -203,10 +198,7 @@ export function ThreadSheet({
       ))}
       {thread.crop && <img class="crop" src={thread.crop} alt="The area this comment points at" />}
       {thread.fixedVersion && thread.fixedVersion > thread.createdVersion && (
-        <a
-          class="word agent"
-          href={`${base}/compare?from=${thread.createdVersion}&to=${thread.fixedVersion}`}
-        >
+        <a class="word agent" href={compareHref(artifact, thread.createdVersion, thread.fixedVersion)}>
           Compare v{thread.createdVersion} and v{thread.fixedVersion}
         </a>
       )}
@@ -331,51 +323,48 @@ function Tabs({ tab, threads }: { tab: { value: Tab }; threads: Thread[] }) {
             tab.value = value;
           }}
         >
-          {value[0]?.toUpperCase()}
-          {value.slice(1)} {threads.filter((thread) => thread.status === value).length}
+          {capitalize(value)} {threads.filter((thread) => thread.status === value).length}
         </button>
       ))}
     </div>
   );
 }
 
-export function CommentsSheet({
+/** The threads on a page by status, with the prompt for an agent while any are open. */
+function ThreadList({
   artifact,
   threads,
   onOpen,
-  onClose,
 }: {
   artifact: Artifact;
   threads: Thread[];
   onOpen(thread: Thread): void;
-  onClose(): void;
 }) {
   const tab = useSignal<Tab>("open");
   return (
-    <Sheet title="Comments" onClose={onClose}>
+    <>
       <Tabs tab={tab} threads={threads} />
       <ThreadRows list={threads.filter((thread) => thread.status === tab.value)} onOpen={onOpen} />
       <OpenPrompt artifact={artifact} tab={tab.value} threads={threads} />
+    </>
+  );
+}
+
+type ListProps = { artifact: Artifact; threads: Thread[]; onOpen(thread: Thread): void };
+
+export function CommentsSheet({ onClose, ...list }: ListProps & { onClose(): void }) {
+  return (
+    <Sheet title="Comments" onClose={onClose}>
+      <ThreadList {...list} />
     </Sheet>
   );
 }
 
 /** The right panel on wide screens (board 04). */
-export function CommentsPanel({
-  artifact,
-  threads,
-  onOpen,
-}: {
-  artifact: Artifact;
-  threads: Thread[];
-  onOpen(thread: Thread): void;
-}) {
-  const tab = useSignal<Tab>("open");
+export function CommentsPanel(list: ListProps) {
   return (
     <aside class="panel" aria-label="Comments">
-      <Tabs tab={tab} threads={threads} />
-      <ThreadRows list={threads.filter((thread) => thread.status === tab.value)} onOpen={onOpen} />
-      <OpenPrompt artifact={artifact} tab={tab.value} threads={threads} />
+      <ThreadList {...list} />
     </aside>
   );
 }
@@ -467,5 +456,3 @@ export function DecideSheet({
     </Sheet>
   );
 }
-
-export const reloadThreads = (id: string) => api<Thread[]>(`/api/artifacts/${id}/threads`);

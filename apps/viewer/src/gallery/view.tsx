@@ -1,8 +1,9 @@
 import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft, ChevronRight, Menu, X } from "lucide-preact";
+import { ChevronLeft, ChevronRight, X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
-import { renderUrl } from "../format.ts";
+import { PageCapsule } from "../components/shell.tsx";
+import { renderUrl } from "../paths.ts";
 
 type Item = { hash: string; caption?: string; type?: string };
 export type GalleryPage = { key: string; title: string | null; meta: { items: Item[] } };
@@ -53,18 +54,13 @@ export function GalleryView({
   const current = open.value === null ? null : items[open.value];
   return (
     <div class="on-canvas gallery">
-      <div class="capsule glass">
-        <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
-          <Menu />
-        </button>
-        <button type="button" class="where" onClick={onPages}>
-          <b>{page.title ?? page.key}</b>
-          <span>{artifact.title}</span>
-        </button>
-        <button type="button" class="vchip" aria-label="Version history" onClick={onVersions}>
-          v{version}
-        </button>
-      </div>
+      <PageCapsule
+        title={page.title ?? page.key}
+        subtitle={artifact.title}
+        version={version}
+        onPages={onPages}
+        onVersions={onVersions}
+      />
       <div class="grid-g">
         {items.map((item, index) => (
           <button

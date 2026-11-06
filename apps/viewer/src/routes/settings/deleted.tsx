@@ -1,11 +1,12 @@
+import { DAY_MS, PURGE_DAYS } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
-import { ChevronLeft } from "lucide-preact";
-import { ApiFailure, api, post } from "../api.ts";
-import { ReauthSheet } from "../components/reauth.tsx";
-import { Sheet } from "../components/sheets.tsx";
-import { plural } from "../format.ts";
-import { usePoll } from "../poll.ts";
-import { SignedIn } from "./guard.tsx";
+import { del, post } from "../../api.ts";
+import { SignedIn } from "../../components/guard.tsx";
+import { useAction } from "../../components/reauth.tsx";
+import { Sheet } from "../../components/sheet.tsx";
+import { plural } from "../../format.ts";
+import { usePoll } from "../../poll.ts";
+import { Frame } from "./frame.tsx";
 
 type Row = {
   kind: "artifact" | "version";
@@ -15,8 +16,7 @@ type Row = {
   purgeAfter: string;
 };
 
-const daysLeft = (iso: string) =>
-  Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / (24 * 3600_000)));
+const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / DAY_MS));
 const path = (row: Row) =>
   row.kind === "artifact"
     ? `/api/artifacts/${row.artifact.id}`
@@ -24,33 +24,16 @@ const path = (row: Row) =>
 
 function List() {
   const list = usePoll<Row[]>("/api/deleted", 60_000);
-  const retry = useSignal<(() => Promise<void>) | null>(null);
-  const error = useSignal<string | null>(null);
+  const action = useAction({ after: list.refresh });
   const confirming = useSignal(false);
-
-  async function run(work: () => Promise<void>) {
-    error.value = null;
-    try {
-      await work();
-      await list.refresh();
-    } catch (failure) {
-      if (failure instanceof ApiFailure && failure.code === "recent_auth_required") retry.value = work;
-      else error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
-    }
-  }
   const eraseAll = () =>
-    run(async () => {
-      for (const row of list.data.value ?? []) await api(path(row), { method: "DELETE" });
+    action.run(async () => {
+      for (const row of list.data.value ?? []) await del(path(row));
     });
 
   const rows = list.data.value ?? [];
   return (
-    <main class="main">
-      <a class="back" href="/settings">
-        <ChevronLeft />
-        Settings
-      </a>
-      <h1 class="h1">Recently deleted</h1>
+    <Frame title="Recently deleted">
       {list.data.value && rows.length === 0 && <div class="empty">Nothing here.</div>}
       {rows.length > 0 && (
         <div class="group">
@@ -66,7 +49,7 @@ function List() {
               <button
                 type="button"
                 class="btn soft fit"
-                onClick={() => run(() => post(`${path(row)}/undelete`))}
+                onClick={() => action.run(() => post(`${path(row)}/undelete`))}
               >
                 Restore
               </button>
@@ -74,7 +57,7 @@ function List() {
           ))}
         </div>
       )}
-      {error.value && <p class="err">{error.value}</p>}
+      {action.error.value && <p class="err">{action.error.value}</p>}
       {rows.length > 0 && (
         <button
           type="button"
@@ -88,7 +71,8 @@ function List() {
         </button>
       )}
       <p class="fn">
-        Erased for good after 30 days. Agents can move things here, but only a person can erase them.
+        Erased for good after {PURGE_DAYS} days. Agents can move things here, but only a person can erase
+        them.
       </p>
       {confirming.value && (
         <Sheet
@@ -124,19 +108,8 @@ function List() {
           </button>
         </Sheet>
       )}
-      {retry.value && (
-        <ReauthSheet
-          onCancel={() => {
-            retry.value = null;
-          }}
-          onDone={() => {
-            const work = retry.value;
-            retry.value = null;
-            if (work) run(work);
-          }}
-        />
-      )}
-    </main>
+      {action.sheet}
+    </Frame>
   );
 }
 

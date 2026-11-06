@@ -3,14 +3,14 @@ import { useSignal } from "@preact/signals";
 import { ChevronLeft, ChevronsUpDown, Search, Share } from "lucide-preact";
 import { useRoute } from "preact-iso";
 import { ArtifactTile } from "../components/cards.tsx";
-import { LoadFailed, PlaceholderTiles } from "../components/placeholder.tsx";
+import { SignedIn } from "../components/guard.tsx";
+import { Loaded, NotFound } from "../components/loaded.tsx";
+import { PlaceholderTiles } from "../components/placeholder.tsx";
 import { ProjectShareSheet } from "../components/share.tsx";
 import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
 import { meta } from "../session.ts";
 import { useTitle } from "../title.ts";
-import { SignedIn } from "./guard.tsx";
-import { NotFound } from "./not-found.tsx";
 
 const FILTERS = [
   ["all", "All"],
@@ -26,15 +26,14 @@ function Project() {
   const sort = useSignal("recent");
   const query = new URLSearchParams({ q: q.value, status: status.value, sort: sort.value });
   const sharing = useSignal(false);
-  const { data, error, loading, refresh } = usePoll<ProjectArtifacts>(
+  const poll = usePoll<ProjectArtifacts>(
     `/api/projects/${encodeURIComponent(params.project ?? "")}/artifacts?${query}`,
     60_000,
   );
-  const project = data.value?.project;
+  const project = poll.data.value?.project;
   useTitle(project?.name);
-  if (error.value?.status === 404) return <NotFound />;
-  // The last list stays while the next filter loads; only a settled, empty answer says so.
-  const artifacts = data.value?.artifacts;
+  // A project answers 404 when nothing in it is visible; never 410 (03).
+  if (poll.error.value?.status === 404) return <NotFound />;
   return (
     <Shell wide>
       <a class="back" href="/projects">
@@ -102,25 +101,26 @@ function Project() {
           </button>
         ))}
       </div>
-      {artifacts ? (
-        <div class="grid" aria-busy={loading}>
-          {artifacts.map((card) => (
-            <ArtifactTile card={card} key={card.id} />
-          ))}
-        </div>
-      ) : error.value && !loading ? (
-        <LoadFailed retry={() => refresh().catch(() => {})} />
-      ) : (
-        <PlaceholderTiles />
-      )}
-      {artifacts?.length === 0 && !loading && <div class="empty">Nothing here.</div>}
+      {/* The last list stays while the next filter loads; only a settled, empty answer says so. */}
+      <Loaded from={[poll]} value={poll.data.value?.artifacts} placeholder={<PlaceholderTiles />}>
+        {(artifacts) => (
+          <>
+            <div class="grid" aria-busy={poll.loading}>
+              {artifacts.map((card) => (
+                <ArtifactTile card={card} key={card.id} />
+              ))}
+            </div>
+            {artifacts.length === 0 && !poll.loading && <div class="empty">Nothing here.</div>}
+          </>
+        )}
+      </Loaded>
       {sharing.value && params.project && (
         <ProjectShareSheet
           slug={params.project}
           onClose={() => {
             sharing.value = false;
           }}
-          onChanged={refresh}
+          onChanged={poll.refresh}
         />
       )}
     </Shell>

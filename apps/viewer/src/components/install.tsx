@@ -1,7 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { message } from "../api.ts";
 import { needsInstall, turnOnNotifications } from "../notify.ts";
-import { Sheet } from "./sheets.tsx";
+import { Sheet } from "./sheet.tsx";
 
 /** Board 05, screen 6. On iPhone it explains installing; once installed it asks for alerts. */
 export function InstallSheet({ onClose }: { onClose(): void }) {

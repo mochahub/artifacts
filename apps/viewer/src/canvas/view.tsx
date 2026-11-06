@@ -1,22 +1,16 @@
-import type { Artifact, CanvasFrame, Thread } from "@artifacts/schema";
+import type { Artifact, CanvasFrame, DataScope, Thread } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { Images, List, Menu, MessageCircle, Move } from "lucide-preact";
+import { Images, List, MessageCircle, Move } from "lucide-preact";
 import { createPortal } from "preact/compat";
 import { useEffect, useRef } from "preact/hooks";
-import {
-  CommentSheet,
-  CommentsPanel,
-  CommentsSheet,
-  type Draft,
-  ThreadSheet,
-} from "../components/review.tsx";
-import { Sheet } from "../components/sheets.tsx";
-import { renderUrl } from "../format.ts";
-import { LiveFrame, savedNotice } from "../live/frame.tsx";
-import { tapped } from "../notify.ts";
+import { Sheet } from "../components/sheet.tsx";
+import { PageCapsule } from "../components/shell.tsx";
+import { LiveFrame, SavedNotice } from "../live/frame.tsx";
+import { frameFromHash, frameHash, renderUrl } from "../paths.ts";
 import type { Remote } from "../poll.ts";
+import type { Draft } from "../review/sheets.tsx";
+import { useReview } from "../review/use-review.tsx";
 import { type Board, CanvasEngine, type Pin } from "./engine.ts";
-import { frameFromHash, frameHash } from "./hash.ts";
 import { canvasCommand } from "./keys.ts";
 
 export type CanvasPage = { key: string; title: string | null; boards: Board[]; frames: CanvasFrame[] };
@@ -43,7 +37,7 @@ function TryIt({
   version: number;
   engine: CanvasEngine | null;
 }) {
-  const scope = useSignal<"shared" | "me" | null>(null);
+  const scope = useSignal<DataScope | null>(null);
   const host = useSignal<HTMLElement | null>(null);
   useEffect(() => {
     host.value = engine?.liveHost(frame.key) ?? null;
@@ -51,9 +45,7 @@ function TryIt({
   }, [engine, frame.key, host]);
   return (
     <>
-      {scope.value && (
-        <div class="notice glass">{savedNotice(scope.value)}. Its author can see what's saved.</div>
-      )}
+      <SavedNotice scope={scope.value} place="notice" />
       {host.value &&
         createPortal(
           <LiveFrame
@@ -81,13 +73,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
   const framesOpen = useSignal(false);
   const tab = useSignal<"all" | "open" | "changed">("all");
   const commenting = useSignal(false);
-  const draft = useSignal<(Draft & { pin: Pin }) | null>(null);
-  const openId = useSignal<string | null>(null);
-  const listOpen = useSignal(false);
   const trying = useSignal<CanvasFrame | null>(null);
-  const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
-  const openThread = all.find((thread) => thread.id === openId.value) ?? null;
-  const canComment = artifact.permissions.comment && latest;
   useEffect(() => {
     if (!root.current || !world.current || !overlay.current) return;
     const instance = new CanvasEngine(
@@ -127,7 +113,6 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
     const wanted = frameFromHash(location.hash);
     instance.fitAll();
     if (wanted) instance.focusFrame(wanted, false);
-    (window as unknown as { __canvas?: CanvasEngine }).__canvas = instance;
 
     const onKey = (event: KeyboardEvent) => {
       const command = canvasCommand(event);
@@ -155,6 +140,27 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
     root.current?.classList.toggle("commenting", commenting.value);
   }, [commenting.value]);
 
+  // After the engine starts, so a ?c= link can fly to its frame.
+  const review = useReview<Draft & { pin: Pin }>({
+    artifact,
+    page: page.key,
+    version,
+    threads,
+    openPosted: true,
+    where: (thread) =>
+      page.frames.find((f) => thread.anchor?.type === "frame" && f.key === thread.anchor.frameKey)?.title ??
+      page.title ??
+      page.key,
+    onShow(thread, from) {
+      if (thread.anchor?.type !== "frame") return;
+      // A link flies straight there. From a list, a thread whose frame is gone stays in the list.
+      if (from === "link") engine.current?.focusFrame(thread.anchor.frameKey, false);
+      else if (thread.anchorState !== "orphaned") engine.current?.focusFrame(thread.anchor.frameKey);
+    },
+  });
+  const { all, draft, openId, listOpen } = review;
+  const canComment = artifact.permissions.comment && latest;
+
   // Pins follow the threads, polled every 10 seconds. Orphaned threads live in the list only.
   const pins: Pin[] = all.flatMap((thread) =>
     thread.anchor?.type === "frame" && thread.anchorState !== "orphaned"
@@ -175,19 +181,6 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
     engine.current?.setPins(draft.value ? [...pins, draft.value.pin] : pins);
   });
 
-  // ?c=<n> opens a thread, once for each link or tapped notification.
-  const deepLinked = useRef("");
-  const link = `${location.search}/${tapped.value}`;
-  useEffect(() => {
-    const n = Number(new URLSearchParams(location.search).get("c"));
-    if (deepLinked.current === link || !n || all.length === 0) return;
-    const thread = all.find((entry) => entry.n === n);
-    if (!thread) return;
-    deepLinked.current = link;
-    openId.value = thread.id;
-    if (thread.anchor?.type === "frame") engine.current?.focusFrame(thread.anchor.frameKey, false);
-  });
-
   const frame = focus.value;
   const boardTitle = page.boards.find((board) => board.key === frame?.board)?.title ?? "";
   const siblings = frame ? page.frames.filter((f) => f.board === frame.board) : [];
@@ -196,14 +189,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
   const shown = page.frames.filter(
     (f) => tab.value === "all" || (tab.value === "changed" ? f.changed : openOn(f.key) > 0),
   );
-  const openCount = all.filter((thread) => thread.status === "open").length;
-  const select = (thread: Thread) => {
-    listOpen.value = false;
-    openId.value = thread.id;
-    if (thread.anchor?.type === "frame" && thread.anchorState !== "orphaned") {
-      engine.current?.focusFrame(thread.anchor.frameKey);
-    }
-  };
+  const openCount = review.openCount;
   const changedCount = page.frames.filter((f) => f.changed).length;
 
   return (
@@ -212,21 +198,17 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         <div class="world" ref={world} />
         <div class="overlay" ref={overlay} />
       </div>
-      <div class="capsule glass">
-        <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
-          <Menu />
-        </button>
-        <button type="button" class="where" onClick={onPages}>
-          <b>{frame ? (frame.title ?? frame.key) : (page.title ?? page.key)}</b>
-          <span>
-            {frame
-              ? `${page.title ?? page.key} / ${boardTitle}, ${siblings.findIndex((f) => f.key === frame.key) + 1} of ${siblings.length}`
-              : artifact.title}
-          </span>
-        </button>
-        <button type="button" class="vchip" aria-label="Version history" onClick={onVersions}>
-          v{version}
-        </button>
+      <PageCapsule
+        title={frame ? (frame.title ?? frame.key) : (page.title ?? page.key)}
+        subtitle={
+          frame
+            ? `${page.title ?? page.key} / ${boardTitle}, ${siblings.findIndex((f) => f.key === frame.key) + 1} of ${siblings.length}`
+            : artifact.title
+        }
+        version={version}
+        onPages={onPages}
+        onVersions={onVersions}
+      >
         {frame?.live && (
           <button
             type="button"
@@ -238,7 +220,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
             {trying.value ? "Done" : "Try it"}
           </button>
         )}
-      </div>
+      </PageCapsule>
       {trying.value && (
         <TryIt artifact={artifact} frame={trying.value} version={version} engine={engine.current} />
       )}
@@ -292,51 +274,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
         </button>
       </div>
       {commenting.value && <div class="hint glass">Tap a spot to comment</div>}
-      <CommentsPanel artifact={artifact} threads={all} onOpen={select} />
-      {draft.value && (
-        <CommentSheet
-          artifact={artifact}
-          version={version}
-          draft={draft.value}
-          onClose={() => {
-            draft.value = null;
-          }}
-          onPosted={(thread) => {
-            draft.value = null;
-            threads.refresh().then(() => {
-              openId.value = thread.id;
-            });
-          }}
-        />
-      )}
-      {openThread && (
-        <ThreadSheet
-          artifact={artifact}
-          thread={openThread}
-          subtitle={
-            page.frames.find(
-              (f) => openThread.anchor?.type === "frame" && f.key === openThread.anchor.frameKey,
-            )?.title ??
-            page.title ??
-            page.key
-          }
-          base={`/${artifact.project}/${artifact.slug}`}
-          threads={threads}
-          onClose={() => {
-            openId.value = null;
-          }}
-        />
-      )}
-      {listOpen.value && (
-        <CommentsSheet
-          artifact={artifact}
-          threads={all}
-          onOpen={select}
-          onClose={() => {
-            listOpen.value = false;
-          }}
-        />
-      )}
+      {review.sheets}
       {framesOpen.value && (
         <Sheet
           title="Frames"
