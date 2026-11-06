@@ -33,9 +33,7 @@ export function usePoll<T>(path: string | null, everyMs: number): Remote<T> {
   async function refresh() {
     if (!path) return;
     try {
-      const response = await fetch(path).catch(() => {
-        throw new ApiFailure(0, "network", "Couldn't reach the server.");
-      });
+      const response = await fetch(path);
       const text = await readText(response);
       // A slow answer for an old path (a search that's been retyped) must not replace a newer one.
       if (current.current !== path) return;
@@ -46,6 +44,7 @@ export function usePoll<T>(path: string | null, everyMs: number): Remote<T> {
       error.value = null;
     } catch (failure) {
       if (current.current !== path) return;
+      // Anything but an answer from the API is the network: fetch failing, or the body cut off.
       error.value =
         failure instanceof ApiFailure ? failure : new ApiFailure(0, "network", "Couldn't reach the server.");
       // The next good answer must land even if it reads the same as the last one.
