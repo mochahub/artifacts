@@ -1,13 +1,13 @@
 import { type LibraryRead, type LibraryView, READ_CHARS, READ_CHARS_MAX } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
+import type { LoadedArtifact } from "../auth/access.ts";
 import { blocks, frames, pages, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import type { Loaded } from "./visible.ts";
 
 type VersionRow = typeof versions.$inferSelect;
 
-export async function liveVersion(deps: Deps, loaded: Loaded, n?: number): Promise<VersionRow> {
+export async function liveVersion(deps: Deps, loaded: LoadedArtifact, n?: number): Promise<VersionRow> {
   const number = n ?? loaded.row.latestVersion;
   const [version] = Number.isSafeInteger(number)
     ? await deps.db
@@ -31,7 +31,6 @@ async function itemsOf(deps: Deps, version: VersionRow, onlyPage?: string): Prom
     deps.db.select().from(blocks).where(eq(blocks.versionId, version.id)).orderBy(blocks.id),
     deps.db.select().from(frames).where(eq(frames.versionId, version.id)).orderBy(frames.y, frames.x),
   ]);
-  const notes = version.notes as Record<string, string>;
   const items: Item[] = [];
   for (const page of pageRows) {
     if (onlyPage && page.pageKey !== onlyPage) continue;
@@ -42,11 +41,15 @@ async function itemsOf(deps: Deps, version: VersionRow, onlyPage?: string): Prom
       }
     } else if (page.kind === "canvas") {
       for (const frame of frameRows.filter((row) => row.pageKey === page.pageKey)) {
-        items.push({ ...base, ref: frame.frameKey, title: frame.title, text: notes[frame.frameKey] ?? "" });
+        items.push({
+          ...base,
+          ref: frame.frameKey,
+          title: frame.title,
+          text: version.notes[frame.frameKey] ?? "",
+        });
       }
     } else if (page.kind === "gallery") {
-      const list = ((page.meta as { items?: { caption?: string }[] }).items ?? []) as { caption?: string }[];
-      list.forEach((item, index) => {
+      (page.meta.items ?? []).forEach((item, index) => {
         items.push({ ...base, ref: `item-${index + 1}`, title: null, text: item.caption ?? "" });
       });
     } else {
@@ -69,7 +72,7 @@ const parseCursor = (cursor: string | undefined) => {
  */
 export async function readArtifact(
   deps: Deps,
-  loaded: Loaded,
+  loaded: LoadedArtifact,
   options: { page?: string; version?: number; cursor?: string; chars?: number },
 ): Promise<LibraryRead> {
   const budget = Math.min(Math.max(options.chars ?? READ_CHARS, 200), READ_CHARS_MAX);
@@ -101,7 +104,7 @@ export async function readArtifact(
     offset = 0;
   }
   return {
-    project: loaded.projectSlug,
+    project: loaded.project.slug,
     slug: loaded.row.slug,
     title: loaded.row.title,
     version: version.n,
@@ -113,7 +116,7 @@ export async function readArtifact(
 /** Which picture to show. A thumbnail by default; the frame's @1x or @2x when asked. */
 export async function viewArtifact(
   deps: Deps,
-  loaded: Loaded,
+  loaded: LoadedArtifact,
   options: { page?: string; frame?: string; size?: string; version?: number },
 ): Promise<LibraryView> {
   const size = options.size === "1x" || options.size === "2x" ? options.size : "thumb";
@@ -142,17 +145,16 @@ export async function viewArtifact(
       frame: frame.frameKey,
       title: frame.title,
       size,
-      image: image((frame.renders as Record<string, string>)[size]),
+      image: image(frame.renders[size]),
     };
   }
   if (options.frame) throw new ApiError("not_found", "That frame isn't in this version.");
   // No frames to show here: an article or a micro app has its share picture.
-  const files = version.files as Record<string, { hash: string }>;
   return {
     page: options.page ?? null,
     frame: null,
     title: loaded.row.title,
     size: "thumb",
-    image: image(files["__og.webp"]?.hash),
+    image: image(version.files["__og.webp"]?.hash),
   };
 }

@@ -5,6 +5,7 @@ import {
   Home,
   ProjectArtifacts,
   ProjectRow,
+  PublishPrepared,
   VersionRow,
 } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
@@ -12,7 +13,7 @@ import { z } from "zod";
 import { sha256 } from "../../src/auth/secrets.ts";
 import { artifacts, decisions, people, threads, tokens, views } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import { file, hash, makePerson, publish } from "../publish-helper.ts";
 
 describe("lists and artifacts", () => {
   let t: TestServer;
@@ -251,5 +252,62 @@ describe("lists and artifacts", () => {
     for (let i = 0; i < 60; i++) await get("/api/search?q=roadmap", busy);
     expect((await get("/api/search?q=roadmap", busy)).status).toBe(429);
     expect((await get("/api/search?q=roadmap", quiet)).status).toBe(200);
+  });
+  test("a card counts changed frames by page, so two pages' frames of one name don't collide", async () => {
+    const render = file("__renders/two.webp", "render-two-pages", "image/webp");
+    const frame = (pageKey: string) => ({
+      pageKey,
+      boardKey: "main",
+      frameKey: "hero",
+      title: null,
+      device: null,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      contentHash: hash(`hero on ${pageKey}`),
+      renders: { "1x": render.sha256, "2x": render.sha256, "3x": render.sha256, thumb: render.sha256 },
+      livePath: null,
+    });
+    const page = (key: string, position: number) => ({
+      key,
+      kind: "canvas",
+      title: key,
+      group: null,
+      position,
+      meta: { boards: [] },
+    });
+    for (let i = 0; i < 2; i++) {
+      const prepared = await t.api("/api/publish/prepare", {
+        method: "POST",
+        bearer: token,
+        json: {
+          project: "camerabuddy",
+          slug: "two-pages",
+          title: "Two pages",
+          files: [{ path: render.path, sha256: render.sha256, size: render.size, type: render.type }],
+        },
+      });
+      const ready = PublishPrepared.parse(await prepared.json());
+      for (const missing of ready.missing) {
+        await fetch(missing.url, { method: "PUT", headers: missing.headers, body: render.body });
+      }
+      const committed = await t.api("/api/publish/commit", {
+        method: "POST",
+        bearer: token,
+        json: {
+          uploadId: ready.uploadId,
+          files: {},
+          pages: [page("first", 0), page("second", 1)],
+          frames: [frame("first"), frame("second")],
+          blocks: [],
+        },
+      });
+      expect(committed.status).toBe(200);
+    }
+    const list = ProjectArtifacts.parse(await (await get("/api/projects/camerabuddy/artifacts")).json());
+    const card = list.artifacts.find((entry) => entry.slug === "two-pages");
+    expect(card?.latestVersion).toBe(2);
+    expect(card?.counts.changedFrames).toBe(0);
   });
 });

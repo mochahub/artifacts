@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
 import { UNTRUSTED_NOTICE } from "@artifacts/schema";
-import { isPrivateAddress, metadataUrl, redirectAllowed, validRedirect } from "../../src/oauth/clients.ts";
+import { metadataUrl, redirectAllowed, validRedirect } from "../../src/oauth/clients.ts";
+import { isPrivateAddress } from "../../src/oauth/metadata.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { makePerson, publish } from "../publish-helper.ts";
 

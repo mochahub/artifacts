@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createECDH, randomBytes } from "node:crypto";
+import type { TokenScope } from "@artifacts/schema";
 import { LibraryPage } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { sha256 } from "../../src/auth/secrets.ts";
@@ -62,7 +63,7 @@ describe("project access", () => {
     ).team;
   const addTo = (slug: string, who: { id: string }) =>
     t.api(`/api/teams/${slug}/members/${who.id}`, { method: "PUT", cookie: owner, json: {} });
-  const orgToken = async (values: { scopes?: string[]; projectIds?: string[] | null } = {}) => {
+  const orgToken = async (values: { scopes?: TokenScope[]; projectIds?: string[] | null } = {}) => {
     const secret = `art_org${Bun.randomUUIDv7()}`;
     const id = Bun.randomUUIDv7();
     await t.server.db.insert(tokens).values({
@@ -832,5 +833,13 @@ describe("project access", () => {
     const status = (auth: object) => t.api(`/api/artifacts/${row?.id}/status`, auth).then(json);
     expect(await status({ cookie: owner })).toMatchObject({ audience: expect.stringContaining("2 people") });
     expect(await status({ cookie: member.cookie })).not.toHaveProperty("audience");
+  });
+
+  test("the audience names the project as it is, not as a later publish calls it", async () => {
+    const project = unique("named");
+    await publish(t, token, { project, slug: "first", projectName: "Camera app" });
+    await restrict(project);
+    const again = await publish(t, token, { project, slug: "first", projectName: "Something else" });
+    expect((await json<{ audience: string }>(again)).audience).toBe("Only people added to Camera app");
   });
 });

@@ -1,8 +1,10 @@
-import { ChangePassword, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
-import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
-import type { Caller } from "../auth/caller.ts";
+import type { Me, PersonResponse, ResetPreview, SessionList } from "@artifacts/schema";
+import { ChangePassword, PASSWORD_MAX, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
+import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import type { Passkeys } from "../auth/passkeys.ts";
+import { endSignIns, revokeGrant } from "../auth/revoke.ts";
 import { sha256 } from "../auth/secrets.ts";
-import { clearCookie, personView, SESSION_COOKIE, startSession } from "../auth/sessions.ts";
+import { clearCookie, markReauthed, personView, SESSION_COOKIE, startSession } from "../auth/sessions.ts";
 import {
   identities,
   oauthGrants,
@@ -14,30 +16,14 @@ import {
   tokens,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
-import { revokeGrants } from "../oauth/revoke.ts";
-
-const MAX_PASSWORD = 256;
+import type { ApiContext, Routes } from "../http/routes.ts";
 
 /** Verifying against this when the email is unknown keeps both answers the same speed. */
 const dummyHash = Bun.password.hash("not a real password", { algorithm: "argon2id" });
 
-const personOf = (caller: Caller) => {
-  if (caller.kind !== "person" && caller.kind !== "cliToken")
-    throw new ApiError("unauthenticated", "Sign in first.");
-  return caller.person;
-};
-const sessionOf = (caller: Caller) => {
-  if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
-  return caller;
-};
-
-export function authRoutes(
-  routes: Routes,
-  deps: Deps,
-  passkeys: { reauth(c: ApiContext, challengeId: string, response: unknown): Promise<void> },
-) {
+export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
   const { db, clock, limits } = deps;
 
   async function checkPassword(orgId: string, email: string, password: string) {
@@ -59,7 +45,7 @@ export function authRoutes(
     const account = body.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
     // No password this long exists (04), so don't hash it, and don't count it against the account.
-    if (body.password.length > MAX_PASSWORD) {
+    if (body.password.length > PASSWORD_MAX) {
       throw new ApiError("unauthenticated", "That email or password isn't right.");
     }
     const person = await checkPassword(c.get("org").id, body.email, body.password);
@@ -69,12 +55,12 @@ export function authRoutes(
     }
     limits.passwordOk(account);
     await startSession(c, deps, person.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 
   // A CLI token can end itself, so `artifacts logout` leaves nothing valid behind.
   routes.post("/api/auth/logout", { action: "account.read" }, async (c) => {
-    const caller = c.get("caller");
+    const caller = c.var.caller;
     if (caller.kind === "person") {
       await db.delete(sessions).where(eq(sessions.id, caller.sessionId));
       clearCookie(c, SESSION_COOKIE);
@@ -85,23 +71,23 @@ export function authRoutes(
   });
 
   routes.post("/api/auth/reauth", { action: "account.manage" }, async (c) => {
-    const caller = sessionOf(c.get("caller"));
+    const caller = c.var.caller;
     const body = await parseBody(c, Reauth);
     if (!("password" in body)) {
-      await passkeys.reauth(c as ApiContext, body.challengeId, body.response);
+      await passkeys.reauth(c.var.org, caller, body.challengeId, body.response);
       return c.json({ ok: true });
     }
     const account = caller.person.email.toLowerCase();
     limits.checkPassword(account, deps.clientIp(c));
-    if (body.password.length > MAX_PASSWORD)
+    if (body.password.length > PASSWORD_MAX)
       throw new ApiError("unauthenticated", "That password isn't right.");
-    const person = await checkPassword(c.get("org").id, caller.person.email, body.password);
+    const person = await checkPassword(c.var.org.id, caller.person.email, body.password);
     if (!person) {
       limits.passwordFailed(account);
       throw new ApiError("unauthenticated", "That password isn't right.");
     }
     limits.passwordOk(account);
-    await db.update(sessions).set({ authAt: clock.now() }).where(eq(sessions.id, caller.sessionId));
+    await markReauthed(deps, caller.sessionId);
     return c.json({ ok: true });
   });
 
@@ -111,16 +97,16 @@ export function authRoutes(
   );
 
   routes.get("/api/me", { action: "account.read" }, (c) => {
-    const caller = c.get("caller");
+    const caller = c.var.caller;
     return c.json({
-      person: personOf(caller),
-      org: { name: c.get("org").name },
+      person: caller.person,
+      org: { name: c.var.org.name },
       recentAuth: caller.kind === "person" && caller.recentAuth,
-    });
+    } satisfies Me);
   });
 
   routes.get("/api/me/sessions", { action: "account.manage" }, async (c) => {
-    const caller = sessionOf(c.get("caller"));
+    const caller = c.var.caller;
     const now = clock.now();
     const [open, cli, connectors] = await Promise.all([
       db
@@ -164,11 +150,11 @@ export function authRoutes(
         lastSeenAt: row.lastUsedAt?.toISOString() ?? null,
         current: false,
       })),
-    ]);
+    ] satisfies SessionList);
   });
 
   routes.delete("/api/me/sessions/:id", { action: "account.manage" }, async (c) => {
-    const caller = sessionOf(c.get("caller"));
+    const caller = c.var.caller;
     const id = c.req.param("id") as string;
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new ApiError("not_found", "Not found.");
     const ended = await db
@@ -177,8 +163,8 @@ export function authRoutes(
       .returning({ id: sessions.id });
     if (ended.length > 0) return c.json({ ok: true });
     const [grant] = await db
-      .update(oauthGrants)
-      .set({ revokedAt: clock.now() })
+      .select({ id: oauthGrants.id })
+      .from(oauthGrants)
       .where(
         and(
           eq(oauthGrants.id, id),
@@ -186,8 +172,11 @@ export function authRoutes(
           isNull(oauthGrants.revokedAt),
         ),
       )
-      .returning({ id: oauthGrants.id });
-    if (grant) return c.json({ ok: true });
+      .limit(1);
+    if (grant) {
+      await revokeGrant(db, grant.id, clock.now());
+      return c.json({ ok: true });
+    }
     const revoked = await db
       .update(tokens)
       .set({ revokedAt: clock.now() })
@@ -198,9 +187,9 @@ export function authRoutes(
   });
 
   routes.post("/api/me/password", { action: "account.manage", recentAuth: true }, async (c) => {
-    const caller = sessionOf(c.get("caller"));
+    const caller = c.var.caller;
     const { password } = await parseBody(c, ChangePassword);
-    await setPassword(c.get("org").id, caller.person.id, password);
+    await setPassword(c.var.org.id, caller.person.id, password);
     await db
       .delete(sessions)
       .where(and(eq(sessions.personId, caller.person.id), ne(sessions.id, caller.sessionId)));
@@ -242,14 +231,14 @@ export function authRoutes(
   }
 
   routes.get("/api/reset/:token", { public: true }, async (c) => {
-    const link = await liveReset(c as ApiContext);
+    const link = await liveReset(c);
     const [person] = await db.select().from(people).where(eq(people.id, link.personId)).limit(1);
     if (!person || person.removedAt) throw new ApiError("gone", "This reset link no longer works.");
-    return c.json({ email: person.email });
+    return c.json({ email: person.email } satisfies ResetPreview);
   });
 
   routes.post("/api/reset/:token", { public: true }, async (c) => {
-    const link = await liveReset(c as ApiContext);
+    const link = await liveReset(c);
     const { password } = await parseBody(c, ResetPassword);
     const used = await db
       .update(resetLinks)
@@ -269,22 +258,11 @@ export function authRoutes(
     // Org tokens aren't personal, so they stay.
     const now = clock.now();
     await db.transaction(async (tx) => {
-      await tx.delete(sessions).where(eq(sessions.personId, person.id));
-      await tx
-        .update(tokens)
-        .set({ revokedAt: now })
-        .where(
-          and(
-            eq(tokens.personId, person.id),
-            inArray(tokens.kind, ["cli", "oauth"]),
-            isNull(tokens.revokedAt),
-          ),
-        );
-      await revokeGrants(tx, person.id, now);
+      await endSignIns(tx, person.id, now);
       await tx.delete(passkeyRows).where(eq(passkeyRows.personId, person.id));
       await tx.delete(identities).where(eq(identities.personId, person.id));
     });
     await startSession(c, deps, link.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 }

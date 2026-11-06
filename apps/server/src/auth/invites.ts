@@ -1,4 +1,6 @@
+import { DAY_MS, INVITE_DAYS } from "@artifacts/schema";
 import { and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
+import type { Db, Tx } from "../db/index.ts";
 import {
   activity,
   artifactAccess,
@@ -11,10 +13,58 @@ import {
   teams,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import type { Env } from "../env.ts";
 import { ApiError } from "../http/errors.ts";
+import { randomSecret, sha256 } from "./secrets.ts";
 
-type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
 export type InviteRow = typeof invites.$inferSelect;
+type PersonRow = typeof people.$inferSelect;
+
+/** Someone in the organization by address, as people type it: in any case, and never anyone removed. */
+export async function findPersonByEmail(
+  db: Pick<Db | Tx, "select">,
+  orgId: string,
+  email: string,
+): Promise<PersonRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(people)
+    .where(
+      and(eq(people.orgId, orgId), sql`lower(${people.email}) = lower(${email})`, isNull(people.removedAt)),
+    )
+    .limit(1);
+  return row;
+}
+
+/** Where an invite's secret opens it. */
+export const inviteUrl = (env: Pick<Env, "publicUrl">, secret: string) => `${env.publicUrl}/join/${secret}`;
+
+/** An invite lasts 7 days from when its link was made (04). */
+export const inviteExpiry = (now: Date) => new Date(now.getTime() + INVITE_DAYS * DAY_MS);
+
+/**
+ * An invite, to the organization, one artifact or one project, and the link that opens it. Secrets are
+ * stored hashed, so the link is shown once, and "copy it again" means a new one (02).
+ */
+export async function createInvite(
+  deps: Pick<Deps, "db" | "env" | "clock">,
+  values: Omit<typeof invites.$inferInsert, "id" | "tokenHash" | "createdAt" | "expiresAt">,
+) {
+  const secret = randomSecret();
+  const now = deps.clock.now();
+  const [row] = await deps.db
+    .insert(invites)
+    .values({
+      ...values,
+      id: Bun.randomUUIDv7(),
+      tokenHash: sha256(secret),
+      createdAt: now,
+      expiresAt: inviteExpiry(now),
+    })
+    .returning();
+  if (!row) throw new Error("no invite row");
+  return { invite: row, url: inviteUrl(deps.env, secret) };
+}
 
 /** An invite that can still be used. Secrets are stored hashed, so a link looks it up by hash. */
 export async function findLiveInvite(
@@ -56,18 +106,8 @@ export async function acceptInvite(
     .where(and(eq(invites.id, invite.id), isNull(invites.acceptedAt)))
     .returning({ id: invites.id });
   if (taken.length === 0) throw new ApiError("gone", "This invite was already used.");
-  const [existing] = await tx
-    .select({ id: people.id })
-    .from(people)
-    .where(
-      and(
-        eq(people.orgId, invite.orgId),
-        sql`lower(${people.email}) = lower(${invite.email})`,
-        isNull(people.removedAt),
-      ),
-    )
-    .limit(1);
-  if (existing) throw new ApiError("conflict", "That email already has an account. Sign in instead.");
+  if (await findPersonByEmail(tx, invite.orgId, invite.email))
+    throw new ApiError("conflict", "That email already has an account. Sign in instead.");
   const [row] = await tx
     .insert(people)
     .values({

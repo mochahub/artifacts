@@ -5,7 +5,7 @@ import type { Clock } from "./clock.ts";
 import type { Db } from "./db/index.ts";
 import type { Env } from "./env.ts";
 import type { Logger } from "./log.ts";
-import type { MetadataFetch } from "./oauth/clients.ts";
+import type { MetadataFetch } from "./oauth/metadata.ts";
 import type { Events } from "./realtime/events.ts";
 import type { Bucket } from "./s3.ts";
 import type { SandboxPool } from "./sandbox/pool.ts";
@@ -21,13 +21,11 @@ export type Deps = {
   /** Every viewer origin, including the home domain once setup has run. */
   origins(): Promise<string[]>;
   clientIp(c: Context): string;
-  /** Null until the first backend runs on a server with none; tests can leave it out. */
-  sandbox: SandboxPool | null;
+  sandbox: SandboxPool;
   events: Events;
-  /** Tests point this at a local push service. */
-  pushAllow?: (endpoint: string) => boolean;
-  /** Tests stand in for the internet here: the real fetch refuses every address a test could use. */
-  clientMetadata?: MetadataFetch;
-  /** Tests stand in for Google here. They never call it. */
-  google?: GoogleProvider;
+  /** Whether a push message may be sent to this endpoint: only the browsers' own push services. */
+  pushAllow(endpoint: string): boolean;
+  /** Fetches an OAuth client's metadata document, from wherever its client_id points. */
+  clientMetadata: MetadataFetch;
+  google: GoogleProvider;
 };

@@ -21,7 +21,7 @@ Agents stay free to build any UI. Artifacts adds three things around that freedo
 4. Each contract document (02 to 09) before you change what it owns.
 5. These files:
    - `apps/server/src/api/lists.ts`: `/api/search` and `visible()`
-   - `apps/server/src/publish/routes.ts`: `prepare` and `commit`
+   - `apps/server/src/publish/publisher.ts`: `prepare` and `commit`
    - `apps/server/src/api/device.ts`: the device flow
    - `apps/server/src/auth/can.ts` and `resolve.ts`: callers, scopes and agent limits
    - `packages/cli/src/commands/mcp.ts`, `write.ts`, `packages/cli/src/skill/install.ts`

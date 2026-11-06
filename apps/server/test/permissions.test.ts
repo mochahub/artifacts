@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { TokenScope } from "@artifacts/schema";
 import type { Caller } from "../src/auth/caller.ts";
 import {
   ACTIONS,
@@ -56,8 +57,8 @@ const MAKER_TOKEN = "00000000-0000-7000-8000-00000000003d";
 const ARTIFACT = "00000000-0000-7000-8000-0000000000f0";
 const PROJECT = "00000000-0000-7000-8000-0000000000e0";
 const OTHER_PROJECT = "00000000-0000-7000-8000-0000000000e1";
-const ALL_SCOPES = ["publish", "comment", "read", "manage", "data", "org"];
-const CLI_SCOPES = ["publish", "comment", "read", "manage", "data"];
+const ALL_SCOPES: TokenScope[] = ["publish", "comment", "read", "manage", "data", "org"];
+const CLI_SCOPES: TokenScope[] = ["publish", "comment", "read", "manage", "data"];
 
 const person = (id: string, role: "owner" | "admin" | "member" | "reviewer" | "outside"): Caller => ({
   kind: "person",
@@ -81,11 +82,10 @@ const orgToken = (projectIds: string[] | null, scopes = ALL_SCOPES, tokenId = "t
 const cliToken = (
   id: string,
   role: "admin" | "reviewer" | "outside" | "member",
-  scopes: string[],
+  scopes: TokenScope[],
 ): Caller => ({
   kind: "cliToken",
   tokenId: "t",
-  agent: null,
   scopes,
   person: { id, name: "x", email: "x@example.com", role },
 });
@@ -108,7 +108,6 @@ const CALLERS = {
   "cliToken (publisher)": {
     kind: "cliToken",
     tokenId: "t",
-    agent: null,
     scopes: CLI_SCOPES,
     person: { id: PUBLISHER, name: "x", email: "x@example.com", role: "member" },
   },
@@ -686,7 +685,6 @@ describe("rules the matrix can't express", () => {
     const owner: Caller = {
       kind: "cliToken",
       tokenId: "t",
-      agent: null,
       scopes: ALL_SCOPES,
       person: { id: OTHER, name: "x", email: "x@example.com", role: "owner" },
     };

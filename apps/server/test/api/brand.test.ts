@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { brandProposals, org } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson } from "../publish-helper.ts";
+import { makePerson, publish } from "../publish-helper.ts";
 
 describe("setting a brand by hand", () => {
   let t: TestServer;
@@ -71,7 +71,13 @@ describe("setting a brand by hand", () => {
 
   test("fonts in use stay when a brand is edited, and go when it stops using them", async () => {
     const hash = "b".repeat(64);
-    const font = { family: "Acme Sans", weight: "400", style: "normal", format: "woff2", hash };
+    const font = {
+      family: "Acme Sans",
+      weight: "400",
+      style: "normal" as const,
+      format: "woff2" as const,
+      hash,
+    };
     await t.server.db
       .update(org)
       .set({ brand: { name: "Fonts", theme: { font: "Acme Sans" }, fonts: [font] } })
@@ -81,6 +87,21 @@ describe("setting a brand by hand", () => {
     expect((await put({ name: "Fonts", theme: { font: "serif" } })).status).toBe(200);
     expect((await current())?.fonts).toEqual([]);
     expect((await put({ name: "Fonts", theme: { font: "Acme Sans" } })).status).toBe(400);
+  });
+
+  test("a token's proposal is marked as its agent's, named or not (04)", async () => {
+    expect((await publish(t, token, { slug: "brand-sample" })).status).toBe(200);
+    const proposed = await t.api("/api/brand/proposals", {
+      method: "POST",
+      bearer: token,
+      json: {
+        project: "camerabuddy",
+        slug: "brand-sample",
+        brand: { name: "Unnamed", theme: {}, fonts: [] },
+      },
+    });
+    expect(proposed.status).toBe(200);
+    expect((await row("Unnamed"))?.agent).toBe("agent");
   });
 
   test("only a signed-in admin can, and no token", async () => {

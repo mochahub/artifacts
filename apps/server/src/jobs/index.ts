@@ -1,10 +1,13 @@
+import { DAY_MS } from "@artifacts/schema";
 import { and, gt, inArray, lt, sql } from "drizzle-orm";
-import { expireLogs } from "../content/proxy.ts";
+import { expireLogs } from "../data/logs.ts";
 import { recountUsage } from "../data/store.ts";
+import { tryLockJobs } from "../db/locks.ts";
 import {
   artifacts,
   artifactUsage,
   blobs,
+  brandProposals,
   deviceCodes,
   frames,
   googleStates,
@@ -12,6 +15,7 @@ import {
   oauthClients,
   oauthCodes,
   oauthRefreshTokens,
+  org,
   pages,
   resetLinks,
   sessions,
@@ -20,15 +24,14 @@ import {
   webauthnChallenges,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { BLOBS, CROPS, DATA, hashOf, PLANS } from "../layout.ts";
 import { sendDigest } from "../push/notify.ts";
 import { purgeExpired } from "./purge.ts";
 
-const DAY = 24 * 3600_000;
-const JOB_LOCK = 7_316_004;
-const GC_MIN_AGE_MS = DAY;
+const GC_MIN_AGE_MS = DAY_MS;
 const FIRST_RUN_MS = 60_000;
 
-/** Every hash a version still needs (05, "Collect garbage"). */
+/** Every hash still in use: a version's files, renders and pages, and a brand's fonts (05, "Collect garbage"). */
 async function referencedHashes(deps: Deps) {
   const referenced = new Set<string>();
   const add = (hash: unknown) => {
@@ -39,15 +42,21 @@ async function referencedHashes(deps: Deps) {
     .from(versions);
   for (const row of versionRows) {
     add(row.backend);
-    for (const file of Object.values(row.files as Record<string, { hash: string }>)) add(file.hash);
+    for (const file of Object.values(row.files)) add(file.hash);
   }
   for (const row of await deps.db.select({ renders: frames.renders }).from(frames)) {
-    for (const hash of Object.values(row.renders as Record<string, string>)) add(hash);
+    for (const hash of Object.values(row.renders)) add(hash);
+  }
+  // A brand's fonts outlive the sample that brought them: the brand, and any proposal of it, still use them.
+  for (const row of await deps.db.select({ brand: org.brand }).from(org)) {
+    for (const font of row.brand?.fonts ?? []) add(font.hash);
+  }
+  for (const row of await deps.db.select({ brand: brandProposals.brand }).from(brandProposals)) {
+    for (const font of row.brand.fonts ?? []) add(font.hash);
   }
   for (const row of await deps.db.select({ meta: pages.meta }).from(pages)) {
-    const meta = row.meta as { htmlHash?: string; items?: { hash: string }[] };
-    add(meta.htmlHash);
-    for (const item of meta.items ?? []) add(item.hash);
+    add(row.meta.htmlHash);
+    for (const item of row.meta.items ?? []) add(item.hash);
   }
   return referenced;
 }
@@ -55,33 +64,27 @@ async function referencedHashes(deps: Deps) {
 /** Deletes blobs nothing uses, once they're a day old, so an upload awaiting commit is safe. */
 export async function collectGarbage(deps: Deps) {
   const cutoff = deps.clock.now().getTime() - GC_MIN_AGE_MS;
-  const hashOf = (key: string) => key.slice("blobs/".length);
-  let cursor: string | undefined;
   let deleted = 0;
   let bytes = 0;
-  do {
-    const page = await deps.bucket.list("blobs/", { cursor });
-    const old = page.objects.filter((object) => object.updatedAt.getTime() < cutoff);
-    if (old.length > 0) {
-      // Fresh for every page. Rows go first, so a publish reusing one of these can't commit.
-      const referenced = await referencedHashes(deps);
-      const stale = old.filter((object) => !referenced.has(hashOf(object.key)));
-      if (stale.length > 0) {
-        await deps.db.delete(blobs).where(
-          inArray(
-            blobs.hash,
-            stale.map((object) => hashOf(object.key)),
-          ),
-        );
-        const still = await referencedHashes(deps);
-        const gone = stale.filter((object) => !still.has(hashOf(object.key)));
-        await Promise.all(gone.map((object) => deps.bucket.delete(object.key)));
-        deleted += gone.length;
-        bytes += gone.reduce((sum, object) => sum + object.size, 0);
-      }
-    }
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
+  for await (const objects of deps.bucket.listAll(BLOBS)) {
+    const old = objects.filter((object) => object.updatedAt.getTime() < cutoff);
+    if (old.length === 0) continue;
+    // Fresh for every page. Rows go first, so a publish reusing one of these can't commit.
+    const referenced = await referencedHashes(deps);
+    const stale = old.filter((object) => !referenced.has(hashOf(object.key)));
+    if (stale.length === 0) continue;
+    await deps.db.delete(blobs).where(
+      inArray(
+        blobs.hash,
+        stale.map((object) => hashOf(object.key)),
+      ),
+    );
+    const still = await referencedHashes(deps);
+    const gone = stale.filter((object) => !still.has(hashOf(object.key)));
+    await Promise.all(gone.map((object) => deps.bucket.delete(object.key)));
+    deleted += gone.length;
+    bytes += gone.reduce((sum, object) => sum + object.size, 0);
+  }
   await sweepOrphans(deps, cutoff);
   deps.log.info("garbage collected", { deleted, bytes });
   return { deleted, bytes };
@@ -92,24 +95,19 @@ const UUID_AT = /^(?:crops|data)\/([0-9a-f-]{36})/;
 /** What a purge's bucket step left behind, if the bucket failed after the rows were gone. */
 async function sweepOrphans(deps: Deps, cutoff: number) {
   // Upload plans are only read during one publish, and their signed links last a day at most.
-  for (let cursor: string | undefined, more = true; more; ) {
-    const page = await deps.bucket.list("plans/", { cursor });
-    for (const object of page.objects) {
+  for await (const objects of deps.bucket.listAll(PLANS)) {
+    for (const object of objects) {
       if (object.updatedAt.getTime() < cutoff) await deps.bucket.delete(object.key);
     }
-    cursor = page.nextCursor ?? undefined;
-    more = cursor !== undefined;
   }
-  for (const prefix of ["crops/", "data/"]) {
-    let cursor: string | undefined;
-    do {
-      const page = await deps.bucket.list(prefix, { cursor });
-      const ids = [...new Set(page.objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
+  for (const prefix of [CROPS, DATA]) {
+    for await (const objects of deps.bucket.listAll(prefix)) {
+      const ids = [...new Set(objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
       // A crop lives while a thread names it as its crop: a purged version clears that, and the thread stays.
       // Data lives while its artifact does.
       const alive = new Set<string>();
-      if (ids.length && prefix === "crops/") {
-        const keys = page.objects.map((object) => object.key);
+      if (ids.length && prefix === CROPS) {
+        const keys = objects.map((object) => object.key);
         const rows = await deps.db
           .select({ key: threads.cropKey })
           .from(threads)
@@ -122,21 +120,20 @@ async function sweepOrphans(deps: Deps, cutoff: number) {
           .where(inArray(artifacts.id, ids));
         for (const row of rows) alive.add(row.id);
       }
-      const dead = page.objects.filter((object) => {
+      const dead = objects.filter((object) => {
         const id = UUID_AT.exec(object.key)?.[1];
-        const name = prefix === "crops/" ? object.key : id;
+        const name = prefix === CROPS ? object.key : id;
         return id && name && !alive.has(name) && object.updatedAt.getTime() < cutoff;
       });
       await Promise.all(dead.map((object) => deps.bucket.delete(object.key)));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
+    }
   }
 }
 
 /** Leftovers (05). */
 export async function expireLeftovers(deps: Deps) {
   const now = deps.clock.now();
-  const old = new Date(now.getTime() - 30 * DAY);
+  const old = new Date(now.getTime() - 30 * DAY_MS);
   await deps.db.delete(webauthnChallenges).where(lt(webauthnChallenges.expiresAt, now));
   await deps.db.delete(deviceCodes).where(lt(deviceCodes.expiresAt, now));
   await deps.db.delete(oauthCodes).where(lt(oauthCodes.expiresAt, now));
@@ -161,7 +158,7 @@ export async function expireLeftovers(deps: Deps) {
 
 /** Recounts usage for artifacts written since yesterday (08). */
 export async function recountRecent(deps: Deps) {
-  const since = new Date(deps.clock.now().getTime() - 2 * DAY);
+  const since = new Date(deps.clock.now().getTime() - 2 * DAY_MS);
   const rows = await deps.db
     .selectDistinct({ artifactId: artifactUsage.artifactId, orgId: artifactUsage.orgId })
     .from(artifactUsage)
@@ -184,10 +181,7 @@ export function startJobs(deps: Deps) {
   const { digest, ...jobs } = jobsFor(deps);
   const run = async () => {
     const reserved = await deps.db.transaction(async (tx) => {
-      const [{ locked } = { locked: false }] = (await tx.execute(
-        sql`select pg_try_advisory_xact_lock(${JOB_LOCK}) as locked`,
-      )) as unknown as { locked: boolean }[];
-      if (!locked) return false;
+      if (!(await tryLockJobs(tx))) return false;
       for (const [name, job] of Object.entries(jobs)) {
         try {
           await job();
@@ -203,7 +197,7 @@ export function startJobs(deps: Deps) {
   const tick = () => run().catch((error) => deps.log.error("jobs failed", { error: String(error) }));
   // Soon after boot too: a server redeployed daily would otherwise never reach its first run.
   const first = setTimeout(tick, FIRST_RUN_MS);
-  const timer = setInterval(tick, DAY);
+  const timer = setInterval(tick, DAY_MS);
   return () => {
     clearTimeout(first);
     clearInterval(timer);

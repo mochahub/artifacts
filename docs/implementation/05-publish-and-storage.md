@@ -175,7 +175,7 @@ A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_adviso
    - Delete the `crops/<thread id>.webp` objects and every object under `data/<artifact id>/`.
 2. **Collect garbage.**
    - **`blobs` rows** are deleted with their objects.
-   - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders` and `pages.meta.htmlHash` of non-purged versions.
+   - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders`, `pages.meta.htmlHash` and a gallery's `pages.meta.items` of non-purged versions, and every font in `org.brand` and in `brand_proposals`, which outlive the sample that brought them.
    - **Sweep:** list `blobs/` (paginated `ListObjectsV2`) and delete objects not in the set whose `LastModified` is more than 24 hours old. The age check protects uploads from a publish that hasn't committed yet.
    - **Orphans:** objects under `crops/` and `data/` whose thread or artifact row no longer exists, and are more than 24 hours old, are deleted too. That catches a purge whose bucket step failed after its rows were gone.
    - **Log:** record counts and bytes freed.

@@ -1,16 +1,15 @@
-import type { Artifact, Home } from "@artifacts/schema";
+import type { Artifact, Home, SearchResults } from "@artifacts/schema";
 import { Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
-import { type ArtifactRow, artifactParam, heldProjects, toProject, toResource } from "../auth/access.ts";
+import { heldProjects, type LoadedArtifact, toProject } from "../auth/access.ts";
 import { type Caller, viewerId } from "../auth/caller.ts";
-import { type ArtifactResource, can } from "../auth/can.ts";
+import { can, canAfterReauth } from "../auth/can.ts";
+import { containing } from "../db/index.ts";
 import {
   artifacts,
   artifactTeamAccess,
-  blocks,
   comments,
   decisions,
-  frames,
   guestViews,
   pages,
   people,
@@ -22,18 +21,21 @@ import {
   views,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { artifactBySlug, artifactParam } from "../http/resources.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
 import { buildCards } from "../library/cards.ts";
 import { rateLimitSearch, searchHits, snippet } from "../library/search.ts";
-import { type Loaded, visibleTo } from "../library/visible.ts";
+import { visibleTo } from "../library/visible.ts";
+import { changedSince, hashesOf } from "../versions/diff.ts";
 
 const RESULTS = 20;
 const MAX_POSITION_CHARS = 2000;
 
-const visible = (deps: Deps, c: ApiContext, projectId?: string) =>
-  visibleTo(deps, c.get("org").id, c.get("caller"), { projectId });
+const visible = (deps: Deps, c: RouteRequest, projectId?: string) =>
+  visibleTo(deps, c.var.org.id, c.var.caller, { projectId });
 
 const CONTENT_SOURCES = ["block", "frame", "summary", "tag", "note"] as const;
 const matches = (text: string, q: string | undefined) => !q || text.toLowerCase().includes(q.toLowerCase());
@@ -66,17 +68,17 @@ export function listRoutes(routes: Routes, deps: Deps) {
     if (q.length < 2) return c.json({ artifacts: [], pages: [], comments: [], content: [] });
     rateLimitSearch(deps, c.get("caller"));
     // SPEC 5.5: archived artifacts leave people's search. Agents ask for them through the library.
-    const list = (await visible(deps, c as ApiContext)).filter((entry) => !entry.row.archivedAt);
+    const list = (await visible(deps, c)).filter((entry) => !entry.row.archivedAt);
     const known = new Map(list.map((entry) => [entry.row.id, entry]));
     const ids = [...known.keys()];
     if (ids.length === 0) return c.json({ artifacts: [], pages: [], comments: [], content: [] });
-    const where = (entry: Loaded) => ({
+    const where = (entry: LoadedArtifact) => ({
       id: entry.row.id,
-      project: entry.projectSlug,
+      project: entry.project.slug,
       slug: entry.row.slug,
       title: entry.row.title,
     });
-    const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    const like = containing(q);
     const [pageRows, commentRows, content] = await Promise.all([
       deps.db
         .select({ artifactId: versions.artifactId, n: versions.n, key: pages.pageKey, title: pages.title })
@@ -113,29 +115,29 @@ export function listRoutes(routes: Routes, deps: Deps) {
         .slice(0, RESULTS)
         .map(where),
       pages: pageRows.map((row) => ({
-        ...where(known.get(row.artifactId) as Loaded),
+        ...where(known.get(row.artifactId) as LoadedArtifact),
         pageKey: row.key,
         pageTitle: row.title,
       })),
       comments: commentRows.map((row) => ({
-        ...where(known.get(row.artifactId) as Loaded),
+        ...where(known.get(row.artifactId) as LoadedArtifact),
         thread: row.thread,
         pageKey: row.pageKey,
         body: row.body.slice(0, 200),
         author: row.author,
       })),
       content: content.map((hit) => ({
-        ...where(known.get(hit.artifactId) as Loaded),
+        ...where(known.get(hit.artifactId) as LoadedArtifact),
         source: hit.source,
         pageKey: hit.page,
         ref: hit.ref,
         snippet: snippet(hit.text, q),
       })),
-    });
+    } satisfies SearchResults);
   });
 
   routes.get("/api/home", { action: "home.read" }, async (c) => {
-    const list = await visible(deps, c as ApiContext);
+    const list = await visible(deps, c);
     const caller = c.get("caller");
     const cards = (await buildCards(deps, caller, list)).filter((card) => !card.archivedAt);
     const who = viewerId(caller);
@@ -155,7 +157,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.get("/api/projects", { action: "project.list" }, async (c) => {
-    const list = await visible(deps, c as ApiContext);
+    const list = await visible(deps, c);
     const cards = await buildCards(deps, c.get("caller"), list);
     const orgId = c.get("org").id;
     const held = await heldProjects(deps, orgId, c.get("caller"));
@@ -204,7 +206,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
       .from(projects)
       .where(and(eq(projects.orgId, c.get("org").id), eq(projects.slug, c.req.param("slug") as string)))
       .limit(1);
-    const list = project ? await visible(deps, c as ApiContext, project.id) : [];
+    const list = project ? await visible(deps, c, project.id) : [];
     const place = project ? await toProject(deps, project) : null;
     const caller = c.get("caller");
     const holder = "person" in caller && place?.grants.some((row) => row.personId === caller.person.id);
@@ -237,10 +239,9 @@ export function listRoutes(routes: Routes, deps: Deps) {
     });
   });
 
-  async function detail(c: ApiContext, row: ArtifactRow, resource: ArtifactResource) {
-    const caller = c.get("caller");
-    const [project] = await db.select().from(projects).where(eq(projects.id, row.projectId)).limit(1);
-    const [card] = await buildCards(deps, caller, [{ row, resource, projectSlug: project?.slug ?? "" }]);
+  async function detail(caller: Caller, resource: LoadedArtifact): Promise<Artifact> {
+    const { row, project } = resource;
+    const [card] = await buildCards(deps, caller, [resource]);
     if (!card) throw new ApiError("not_found", "Not found.");
 
     const versionList = await db
@@ -257,26 +258,14 @@ export function listRoutes(routes: Routes, deps: Deps) {
       .select({ pageKey: threads.pageKey })
       .from(threads)
       .where(and(eq(threads.artifactId, row.id), eq(threads.status, "open")));
+    // A page has changed if anything on it is new or different since the version before.
     const changed = new Set<string>();
     if (latest && previous) {
-      const hashes = async (versionId: string) => {
-        const [frameRows, blockRows] = await Promise.all([
-          db
-            .select({ page: frames.pageKey, key: frames.frameKey, hash: frames.contentHash })
-            .from(frames)
-            .where(eq(frames.versionId, versionId)),
-          db
-            .select({ page: blocks.pageKey, key: blocks.blockKey, hash: blocks.contentHash })
-            .from(blocks)
-            .where(eq(blocks.versionId, versionId)),
-        ]);
-        return [...frameRows, ...blockRows];
-      };
-      const before = new Map(
-        (await hashes(previous.id)).map((entry) => [`${entry.page}/${entry.key}`, entry.hash]),
-      );
-      for (const entry of await hashes(latest.id)) {
-        if (before.get(`${entry.page}/${entry.key}`) !== entry.hash) changed.add(entry.page);
+      const [before, after] = await Promise.all([hashesOf(db, previous.id), hashesOf(db, latest.id)]);
+      for (const kind of ["frames", "blocks"] as const) {
+        for (const [key, hash] of after[kind]) {
+          if (changedSince(before[kind], key, hash)) changed.add(key.slice(0, key.indexOf("/")));
+        }
       }
     }
     const [decision] = await db
@@ -289,7 +278,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
 
     const body: Artifact = {
       ...card,
-      projectName: project?.name,
+      projectName: project.name,
       visibility: row.visibility,
       publisherId: row.publisherId,
       hasBackend: row.hasBackend,
@@ -316,69 +305,33 @@ export function listRoutes(routes: Routes, deps: Deps) {
         manage: can(caller, "artifact.manage", resource),
         share: can(caller, "artifact.share", resource),
         delete: can(caller, "artifact.delete", resource),
-        purge: can(
-          { ...caller, ...(caller.kind === "person" ? { recentAuth: true } : {}) },
-          "artifact.purge",
-          resource,
-        ),
+        purge: canAfterReauth(caller, "artifact.purge", resource),
       },
     };
-    return etagJson(c, body);
-  }
-
-  /** 410 only for someone who could see it; everyone else gets the same 404 as for nothing (04). */
-  function goneIfDeleted(c: ApiContext, resource: ArtifactResource) {
-    if (!resource.deletedAt) return;
-    if (can(c.get("caller"), "artifact.read", { ...resource, deletedAt: null, deletedBy: null })) {
-      throw new ApiError("gone", "This artifact was deleted.", {
-        deletedAt: resource.deletedAt.toISOString(),
-      });
-    }
-    throw new ApiError("not_found", "Not found.");
+    return body;
   }
 
   routes.get(
     "/api/artifacts/by-slug/:project/:slug",
-    { action: "artifact.read", inHandler: true },
-    async (c) => {
-      if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-      const orgId = c.get("org").id;
-      const [row] = await db
-        .select({ row: artifacts })
-        .from(artifacts)
-        .innerJoin(projects, eq(projects.id, artifacts.projectId))
-        .where(
-          and(
-            eq(artifacts.orgId, orgId),
-            eq(projects.slug, c.req.param("project") as string),
-            eq(artifacts.slug, c.req.param("slug") as string),
-          ),
-        )
-        .limit(1);
-      if (!row) throw new ApiError("not_found", "Not found.");
-      const resource = await toResource(deps, row.row);
-      goneIfDeleted(c as ApiContext, resource);
-      if (!can(c.get("caller"), "artifact.read", resource)) throw new ApiError("not_found", "Not found.");
-      return detail(c as ApiContext, row.row, resource);
-    },
+    { action: "artifact.read", resource: artifactBySlug(deps), page: true },
+    async (c) => etagJson(c, await detail(c.var.caller, c.var.resource)),
   );
 
-  routes.get("/api/artifacts/:id", { action: "artifact.read", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const resource = await artifactById(c as ApiContext);
-    goneIfDeleted(c as ApiContext, resource);
-    if (!can(c.get("caller"), "artifact.read", resource)) throw new ApiError("not_found", "Not found.");
-    return detail(c as ApiContext, resource.row, resource);
-  });
+  routes.get(
+    "/api/artifacts/:id",
+    { action: "artifact.read", resource: artifactById, page: true },
+    async (c) => etagJson(c, await detail(c.var.caller, c.var.resource)),
+  );
 
   routes.post("/api/artifacts/:id/seen", { action: "artifact.read", resource: artifactById }, async (c) => {
     const body = await parseBody(c, Seen);
-    const artifactId = c.req.param("id") as string;
-    const orgId = c.get("org").id;
-    const who = viewerId(c.get("caller"));
+    const { resource } = c.var;
+    const artifactId = resource.id;
+    const orgId = c.var.org.id;
+    const who = viewerId(c.var.caller);
     const now = clock.now();
     // Nobody has seen a version that doesn't exist yet, so it can't be marked seen in advance.
-    const version = Math.min(body.version, (await artifactById(c as ApiContext)).row.latestVersion);
+    const version = Math.min(body.version, resource.row.latestVersion);
     // A position is kept only for a page the artifact has, and small, so the row can't be filled with junk.
     const [page] = body.pageKey
       ? await db

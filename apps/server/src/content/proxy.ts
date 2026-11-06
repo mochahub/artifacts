@@ -1,23 +1,17 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
+import { callerKey } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import {
-  callerKey,
-  checkKey,
-  dataPrefix,
-  deleteValue,
-  listKeys,
-  pseudonym,
-  putValue,
-  readLimited,
-} from "../data/store.ts";
+import { checkKey, deleteValue, listKeys, pseudonym, putValue } from "../data/store.ts";
 import { findOrg } from "../db/index.ts";
 import { backendLogs, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { readLimited } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { blobKey, knownBlobs } from "../publish/blobs.ts";
+import { blobKey, dataPrefix } from "../layout.ts";
+import { knownBlobs } from "../publish/blobs.ts";
 import { PreconditionFailed } from "../s3.ts";
 import type { SandboxPool } from "../sandbox/pool.ts";
 import type { ContentPayload } from "./token.ts";
@@ -247,8 +241,3 @@ export async function runBackend(
     return refused("The backend gave an answer that can't be sent.");
   }
 }
-
-export const expireLogs = (deps: Deps) =>
-  deps.db
-    .delete(backendLogs)
-    .where(lt(backendLogs.createdAt, new Date(deps.clock.now().getTime() - 24 * 3600_000)));

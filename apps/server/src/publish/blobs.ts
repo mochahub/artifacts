@@ -3,24 +3,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import { blobs } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { blobKey } from "../layout.ts";
+import { mapLimit } from "../map-limit.ts";
 
-export const blobKey = (hash: string) => `blobs/${hash}`;
 export const IMMUTABLE = "public, max-age=31536000, immutable";
-
-/** Runs at most `limit` at a time. */
-export async function mapLimit<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (next < items.length) {
-        const index = next++;
-        results[index] = await work(items[index] as T);
-      }
-    }),
-  );
-  return results;
-}
 
 export async function knownBlobs(deps: Deps, orgId: string, hashes: string[]): Promise<Map<string, number>> {
   const known = new Map<string, number>();

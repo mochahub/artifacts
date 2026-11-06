@@ -527,6 +527,43 @@ describe("garbage collection", () => {
     expect(await t.server.bucket.head(`crops/${ghost}.webp`)).toBeNull();
   });
 
+  test("a brand's fonts stay after the sample that brought them is purged", async () => {
+    const unique = Bun.randomUUIDv7();
+    const fonts = ["Applied", "Proposed"].map((family) => ({
+      family,
+      file: file(`fonts/${family}.woff2`, `${family} ${unique}`, "font/woff2"),
+    }));
+    await publish(t, token, { slug: "sample", extra: fonts.map(({ file }) => file) });
+    const propose = (family: string, hash: string) =>
+      t.api("/api/brand/proposals", {
+        method: "POST",
+        bearer: token,
+        json: {
+          project: "camerabuddy",
+          slug: "sample",
+          brand: {
+            name: family,
+            theme: { font: family },
+            fonts: [{ family, weight: "400", style: "normal", format: "woff2", hash }],
+          },
+        },
+      });
+    const ids = [];
+    for (const { family, file } of fonts) {
+      ids.push(((await (await propose(family, file.sha256)).json()) as { id: string }).id);
+    }
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    const applied = await t.api(`/api/brand/proposals/${ids[0]}/apply`, { method: "POST", cookie });
+    expect(applied.status).toBe(200);
+
+    const [sample] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "sample"));
+    await t.api(`/api/artifacts/${sample?.id}/delete`, { method: "POST", cookie });
+    expect((await t.api(`/api/artifacts/${sample?.id}`, { method: "DELETE", cookie })).status).toBe(200);
+    t.clock.advance(25 * 3600_000);
+    await gc();
+    for (const { file } of fonts) expect(await t.server.bucket.head(`blobs/${file.sha256}`)).not.toBeNull();
+  });
+
   test("the sweep removes a crop no thread points at, even when its thread is still there", async () => {
     // What purging a version leaves if the bucket failed after the thread's crop_key was cleared.
     await publish(t, token, { slug: "crops", frameHash: hash("crops") });

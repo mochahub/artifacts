@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { OrgSettings } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { artifacts, people } from "../../src/db/schema.ts";
 import { claim, startTestServer, type TestServer } from "../helpers.ts";
@@ -324,7 +325,7 @@ describe("limits, with an org that's lowered them", () => {
     settings.limits.dataBytesPerScope = 100;
     settings.limits.fileBytes = 10;
     settings.limits.writesPerSecond = 100;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
   afterAll(() => t.stop());
 
@@ -394,7 +395,7 @@ describe("limits, with an org that's lowered them", () => {
     const [row] = await t.server.db.select().from(org);
     const settings = row?.settings as { limits: Record<string, number> };
     settings.limits.writesPerSecond = 2;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
     const statuses: number[] = [];
     for (let i = 0; i < 4; i++) {
       statuses.push(
@@ -404,6 +405,6 @@ describe("limits, with an org that's lowered them", () => {
     }
     expect(statuses).toContain(429);
     settings.limits.writesPerSecond = 100;
-    await t.server.db.update(org).set({ settings });
+    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
   });
 });

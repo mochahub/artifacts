@@ -9,8 +9,6 @@ import {
   teams,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
-import { ApiError } from "../http/errors.ts";
-import type { ApiContext } from "../http/routes.ts";
 import type { Caller } from "./caller.ts";
 import {
   type ArtifactResource,
@@ -23,12 +21,10 @@ import {
 } from "./can.ts";
 
 export type ArtifactRow = typeof artifacts.$inferSelect;
-export type LoadedArtifact = ArtifactResource & { row: ArtifactRow };
 export type ProjectRow = typeof projects.$inferSelect;
+/** What can() reads, with the rows it came from, so nothing needs looking up again. */
+export type LoadedArtifact = ArtifactResource & { row: ArtifactRow; project: ProjectRow };
 export type LoadedProject = ProjectResource & { row: ProjectRow };
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export const isUuid = (value: string | undefined): value is string => !!value && UUID.test(value);
 
 /**
  * Who holds what on each project, directly or through a team. Lists pass `personId`, which needs only
@@ -168,15 +164,19 @@ export async function toResources(deps: Deps, rows: ArtifactRow[]): Promise<Load
       .from(projects)
       .where(inArray(projects.id, [...new Set(rows.map((row) => row.projectId))])),
   ]);
-  return rows.map((row) => ({
-    ...artifactResource(
+  return rows.map((row) => {
+    const project = places.find((place) => place.id === row.projectId) as ProjectRow;
+    return {
+      ...artifactResource(
+        row,
+        project,
+        access.filter((entry) => entry.artifactId === row.id),
+        inherited.get(row.id) ?? [],
+      ),
       row,
-      places.find((place) => place.id === row.projectId) as ProjectRow,
-      access.filter((entry) => entry.artifactId === row.id),
-      inherited.get(row.id) ?? [],
-    ),
-    row,
-  }));
+      project,
+    };
+  });
 }
 
 export async function toResource(deps: Deps, row: ArtifactRow): Promise<LoadedArtifact> {
@@ -195,18 +195,6 @@ export async function toProject(deps: Deps, row: ProjectRow): Promise<LoadedProj
     row,
   };
 }
-
-/** The `:slug` project, for a route guard. */
-export const projectParam = (deps: Deps, name = "slug") =>
-  async function load(c: ApiContext): Promise<LoadedProject> {
-    const [row] = await deps.db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.orgId, c.get("org").id), eq(projects.slug, c.req.param(name) as string)))
-      .limit(1);
-    if (!row) throw new ApiError("not_found", "Not found.");
-    return toProject(deps, row);
-  };
 
 /** Projects a person holds a grant on, seen or not through any artifact, as can() allows. */
 export async function heldProjects(deps: Deps, orgId: string, caller: Caller): Promise<ProjectRow[]> {
@@ -237,6 +225,21 @@ export async function findArtifact(deps: Deps, orgId: string, id: string): Promi
   return row ? toResource(deps, row) : null;
 }
 
+export async function findArtifactBySlug(
+  deps: Deps,
+  orgId: string,
+  project: string,
+  slug: string,
+): Promise<LoadedArtifact | null> {
+  const [found] = await deps.db
+    .select({ row: artifacts })
+    .from(artifacts)
+    .innerJoin(projects, eq(projects.id, artifacts.projectId))
+    .where(and(eq(artifacts.orgId, orgId), eq(projects.slug, project), eq(artifacts.slug, slug)))
+    .limit(1);
+  return found ? toResource(deps, found.row) : null;
+}
+
 /** Many at once, for feeds that would otherwise ask per artifact. */
 export async function findArtifacts(deps: Deps, orgId: string, ids: string[]) {
   if (ids.length === 0) return new Map<string, LoadedArtifact>();
@@ -246,12 +249,3 @@ export async function findArtifacts(deps: Deps, orgId: string, ids: string[]) {
     .where(and(eq(artifacts.orgId, orgId), inArray(artifacts.id, ids)));
   return new Map((await toResources(deps, rows)).map((resource) => [resource.id, resource]));
 }
-
-/** The `:id` artifact, for a route guard. Unknown ids are the same 404 as ones you can't see. */
-export const artifactParam = (deps: Deps, name = "id") =>
-  async function load(c: ApiContext): Promise<LoadedArtifact> {
-    const id = c.req.param(name);
-    const found = isUuid(id) ? await findArtifact(deps, c.get("org").id, id) : null;
-    if (!found) throw new ApiError("not_found", "Not found.");
-    return found;
-  };

@@ -115,15 +115,19 @@ export const SetupRequest = z.object({
   google: z.object({ clientId: z.string().min(1), clientSecret: z.string().min(1) }).optional(),
 });
 export const SetupResponse = z.object({ person: Person, token: z.string() });
+export type SetupResponse = z.infer<typeof SetupResponse>;
 export const RecoverRequest = z.object({ setupToken: z.string(), email: Email });
 export const RecoverResponse = z.object({ resetUrl: z.string() });
+export type RecoverResponse = z.infer<typeof RecoverResponse>;
 
 // Sign-in and account
 export const PasswordSignIn = z.object({ email: Email, password: z.string() });
 export const PersonResponse = z.object({ person: Person });
+export type PersonResponse = z.infer<typeof PersonResponse>;
 export const PasskeyOptions = z.object({ local: z.boolean().optional() });
 export const PasskeyVerify = z.object({ challengeId: Id, response: z.unknown() });
 export const Me = z.object({ person: Person, org: z.object({ name: z.string() }), recentAuth: z.boolean() });
+export type Me = z.infer<typeof Me>;
 export const SessionRow = z.object({
   id: Id,
   kind: z.enum(["session", "cli", "connector"]),
@@ -157,11 +161,13 @@ export const InvitePreview = z.object({
   project: z.object({ name: z.string() }).optional(),
   teams: z.array(z.string()).optional(),
 });
+export type InvitePreview = z.infer<typeof InvitePreview>;
 export const AcceptInvite = z.object({
   name: z.string().trim().min(1).max(100),
   password: Password.optional(),
 });
 export const ResetPreview = z.object({ email: z.string() });
+export type ResetPreview = z.infer<typeof ResetPreview>;
 export const ResetPassword = ChangePassword;
 
 // Device flow
@@ -173,6 +179,7 @@ export const DeviceStarted = z.object({
   interval: z.number().int(),
   expiresIn: z.number().int(),
 });
+export type DeviceStarted = z.infer<typeof DeviceStarted>;
 export const DevicePoll = z.object({ deviceCode: z.string() });
 export const DevicePollResult = z.discriminatedUnion("status", [
   z.object({ status: z.literal("pending") }),
@@ -186,6 +193,7 @@ export const DeviceDetails = z.object({
   ip: z.string().nullable(),
   userAgent: z.string().nullable(),
 });
+export type DeviceDetails = z.infer<typeof DeviceDetails>;
 
 // Guests
 // Trimmed, so a name of spaces is no name: it would show as a blank author on every comment.
@@ -199,6 +207,7 @@ export const CreateInvite = z.object({
   teamIds: z.array(Id).max(50).optional(),
 });
 export const InviteCreated = z.object({ invite: z.object({ id: Id }).loose(), url: z.string() });
+export type InviteCreated = z.infer<typeof InviteCreated>;
 export const ChangeRole = z.object({ role: Role });
 export const CreateOrgToken = z.object({
   name: z.string().min(1),
@@ -434,6 +443,7 @@ export type TeamDetail = z.infer<typeof TeamDetail>;
 export const PeopleSearch = z.object({
   people: z.array(z.object({ id: Id, name: z.string(), email: z.string(), role: Role })),
 });
+export type PeopleSearch = z.infer<typeof PeopleSearch>;
 
 // Sharing
 export const AddAccess = z.object({ email: Email, permission: Permission });
@@ -564,7 +574,9 @@ export const PageRecord = z.object({
     boards: z.array(BoardRecord).optional(),
     device: z.string().optional(),
     livePath: z.string().optional(),
-    items: z.array(z.object({ hash: Sha256, caption: z.string().optional() })).optional(),
+    items: z
+      .array(z.object({ hash: Sha256, caption: z.string().optional(), type: z.string().optional() }))
+      .optional(),
   }),
 });
 export type PageRecord = z.infer<typeof PageRecord>;
@@ -591,6 +603,12 @@ export const BlockRecord = z.object({
 });
 export type BlockRecord = z.infer<typeof BlockRecord>;
 
+/** A version's files by bundle path, as `versions.files` holds them (02). */
+export const VersionFiles = z.record(z.string(), FileRef);
+export type VersionFiles = z.infer<typeof VersionFiles>;
+export type PageMeta = PageRecord["meta"];
+export type Renders = FrameRecord["renders"];
+
 export const PublishCommit = z.object({
   uploadId: z.string(),
   message: z.string().nullable().optional(),
@@ -600,7 +618,7 @@ export const PublishCommit = z.object({
   tags: Tags.nullable().optional(),
   notes: z.record(z.string(), z.string()).default({}),
   agent: z.string().nullable().optional(),
-  files: z.record(z.string(), FileRef),
+  files: VersionFiles,
   backendHash: Sha256.nullable().optional(),
   pages: z.array(PageRecord),
   frames: z.array(FrameRecord),
@@ -721,12 +739,15 @@ export const DataList = z.object({
   keys: z.array(z.object({ key: z.string(), etag: z.string(), size: z.number().int(), updatedAt: Time })),
   nextCursor: z.string().nullable(),
 });
+export type DataList = z.infer<typeof DataList>;
 export const DataValue = z.object({ value: z.json(), etag: z.string() });
+export type DataValue = z.infer<typeof DataValue>;
 export const DataClear = z.object({ scope: DataScope.optional() });
 
 // Content host
 export const ContentTokenRequest = z.object({ version: z.number().int() });
 export const ContentToken = z.object({ base: z.string(), expiresAt: Time });
+export type ContentToken = z.infer<typeof ContentToken>;
 
 /** What a token writes as when no agent name came with it. A token is never shown as its person. */
 export const UNNAMED_AGENT = "agent";
@@ -863,7 +884,9 @@ export const DecisionRow = z.object({
   by: z.string(),
   at: Time,
 });
+export type DecisionRow = z.infer<typeof DecisionRow>;
 export const DecisionList = z.array(DecisionRow);
+export type DecisionList = z.infer<typeof DecisionList>;
 
 // Brand (04)
 const BrandFontLink = z.object({ hash: Sha256, url: z.string() });
@@ -911,3 +934,228 @@ export const OAuthConsentDecision = z.object({
   /** The query the client sent, checked again here: the page is only a messenger. */
   request: z.record(z.string(), z.string()),
 });
+
+// What the viewer and the CLI read, so neither redeclares it. The server checks its answers against these.
+
+export const SessionList = z.array(SessionRow);
+export type SessionList = z.infer<typeof SessionList>;
+
+export const PasskeyList = z.object({
+  passkeys: z.array(
+    z.object({
+      id: Id,
+      name: z.string().nullable(),
+      rpId: z.string(),
+      createdAt: Time,
+      lastUsedAt: Time.nullable(),
+    }),
+  ),
+  passwordSetAt: Time.nullable(),
+});
+export type PasskeyList = z.infer<typeof PasskeyList>;
+
+export const OrgInfo = z.object({
+  name: z.string(),
+  /** A newer release, for an admin's notice; null when there's none or GitHub can't say. */
+  newVersion: z.string().nullable(),
+  settings: OrgSettings,
+  domains: z.object({
+    home: z.string(),
+    publicUrl: z.string(),
+    moreUrls: z.array(z.string()),
+    contentUrl: z.string().nullable(),
+  }),
+});
+export type OrgInfo = z.infer<typeof OrgInfo>;
+
+export const PeopleList = z.object({
+  people: z.array(
+    Person.extend({
+      password: z.boolean(),
+      passkeys: z.number().int(),
+      google: z.boolean(),
+      /** Outside people only: the artifacts each was added to. */
+      shares: z.array(z.object({ title: z.string(), permission: Permission })),
+      teams: z.array(z.object({ slug: z.string(), name: z.string(), role: TeamRole })),
+      projects: z.array(z.object({ slug: z.string(), name: z.string(), permission: ProjectPermission })),
+    }),
+  ),
+  invites: z.array(
+    z.object({ id: Id, email: z.string(), role: Role, invitedBy: z.string(), expiresAt: Time }),
+  ),
+});
+export type PeopleList = z.infer<typeof PeopleList>;
+
+export const OrgTokenRow = z.object({
+  id: Id,
+  name: z.string(),
+  scopes: z.array(TokenScope),
+  projectIds: z.array(Id).nullable(),
+  lastUsedAt: Time.nullable(),
+  expiresAt: Time.nullable(),
+});
+export type OrgTokenRow = z.infer<typeof OrgTokenRow>;
+export const OrgTokenList = z.array(OrgTokenRow);
+export type OrgTokenList = z.infer<typeof OrgTokenList>;
+export const OrgTokenCreated = z.object({ id: Id, token: z.string() });
+export type OrgTokenCreated = z.infer<typeof OrgTokenCreated>;
+
+const Level = z.enum(["none", ...PROJECT_PERMISSIONS]);
+
+/** The Share sheet: who holds an artifact, and how. */
+export const ArtifactAccess = z.object({
+  people: z.array(Person.extend({ permission: Permission })),
+  teams: z.array(
+    z.object({
+      id: Id,
+      slug: z.string(),
+      name: z.string(),
+      permission: Permission,
+      viaToken: z.boolean(),
+      members: z.number().int(),
+    }),
+  ),
+  inherited: z.array(
+    Person.extend({
+      level: Level,
+      via: z.enum(["publisher", "role", "grant"]),
+      sources: z.array(z.object({ kind: z.enum(["team", "project"]), slug: z.string(), name: z.string() })),
+      capped: z.boolean(),
+    }),
+  ),
+  project: z.object({ slug: z.string(), name: z.string(), restricted: z.boolean() }).nullable(),
+  canShareOutside: z.boolean(),
+  links: z.array(z.object({ id: Id, permission: Permission, expiresAt: Time.nullable(), createdAt: Time })),
+});
+export type ArtifactAccess = z.infer<typeof ArtifactAccess>;
+
+export const ShareLinkCreated = z.object({
+  link: z.object({ id: Id, permission: Permission, expiresAt: Time.nullable() }),
+  url: z.string(),
+});
+export type ShareLinkCreated = z.infer<typeof ShareLinkCreated>;
+
+export const ActivityItem = z.object({
+  id: Id,
+  kind: ActivityKind,
+  actor: z.string(),
+  agent: z.string().nullable(),
+  artifact: z
+    .object({ title: z.string(), slug: z.string().nullable(), project: z.string().nullable() })
+    .nullable(),
+  payload: z.record(z.string(), z.unknown()),
+  createdAt: Time,
+});
+export const ActivityPage = z.object({ items: z.array(ActivityItem), nextCursor: Time.nullable() });
+export type ActivityPage = z.infer<typeof ActivityPage>;
+
+const Found = z.object({ id: Id, project: z.string(), slug: z.string(), title: z.string() });
+/** ⌘K and the Search tab (03). */
+export const SearchResults = z.object({
+  artifacts: z.array(Found),
+  pages: z.array(Found.extend({ pageKey: z.string(), pageTitle: z.string().nullable() })),
+  comments: z.array(
+    Found.extend({ thread: z.number().int(), pageKey: z.string(), body: z.string(), author: z.string() }),
+  ),
+  content: z.array(
+    Found.extend({
+      source: MatchSource,
+      pageKey: z.string().nullable(),
+      ref: z.string().nullable(),
+      snippet: z.string(),
+    }),
+  ),
+});
+export type SearchResults = z.infer<typeof SearchResults>;
+
+const Removed = {
+  artifact: Found,
+  deletedBy: z.string().nullable(),
+  deletedAt: Time.optional(),
+  purgeAfter: Time.optional(),
+};
+/** Recently deleted: whole artifacts, and versions removed from ones that aren't. */
+export const DeletedRow = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("artifact"), ...Removed }),
+  z.object({ kind: z.literal("version"), version: z.number().int(), ...Removed }),
+]);
+export const DeletedList = z.array(DeletedRow);
+export type DeletedList = z.infer<typeof DeletedList>;
+
+export const RestoreResult = z.object({ n: z.number().int() });
+export type RestoreResult = z.infer<typeof RestoreResult>;
+
+export const Region = z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() });
+const Changes = z.object({
+  added: z.array(z.string()),
+  removed: z.array(z.string()),
+  changed: z.array(z.string()),
+});
+/** Two versions side by side: what changed, and where each changed frame differs (03). */
+export const Compare = z.object({
+  frames: Changes.extend({
+    regions: z.record(
+      z.string(),
+      z.object({ before: z.string(), after: z.string(), regions: z.array(Region) }),
+    ),
+  }),
+  blocks: Changes,
+  notes: z.record(z.string(), z.string()),
+});
+export type Compare = z.infer<typeof Compare>;
+
+const VersionPageBase = z.object({
+  key: z.string(),
+  title: z.string().nullable(),
+  group: z.string().nullable(),
+});
+export const ArticleVersionPage = VersionPageBase.extend({
+  kind: z.literal("article"),
+  htmlHash: z.string().optional(),
+  outline: z.array(OutlineEntry).optional(),
+  readingMinutes: z.number().optional(),
+  theme: ArticleTheme.nullable(),
+  blocks: z.array(z.object({ key: z.string(), contentHash: z.string(), changed: z.boolean() })),
+});
+/** Every kind but an article is laid out in frames, and keeps its whole meta (a gallery's items, a prototype's device). */
+const framed = <K extends Exclude<(typeof PAGE_KINDS)[number], "article">>(kind: K) =>
+  VersionPageBase.extend({
+    kind: z.literal(kind),
+    boards: z.array(BoardRecord),
+    meta: PageRecord.shape.meta,
+    frames: z.array(CanvasFrame),
+  });
+export const VersionPage = z.discriminatedUnion("kind", [
+  ArticleVersionPage,
+  framed("canvas"),
+  framed("prototype"),
+  framed("gallery"),
+  framed("deck"),
+]);
+export type VersionPage = z.infer<typeof VersionPage>;
+/** One version: its pages, frames and blocks, each marked if it's new or different since `previous`. */
+export const VersionDetail = z.object({
+  n: z.number().int(),
+  previous: z.number().int().nullable(),
+  notes: z.record(z.string(), z.string()),
+  message: z.string().nullable(),
+  pages: z.array(VersionPage),
+});
+export type VersionDetail = z.infer<typeof VersionDetail>;
+
+export const BackendLog = z.object({
+  id: Id,
+  version: z.number().int(),
+  level: z.string(),
+  message: z.string(),
+  requestId: z.string(),
+  createdAt: Time,
+});
+export const BackendLogs = z.array(BackendLog);
+export type BackendLogs = z.infer<typeof BackendLogs>;
+
+export const DataFiles = z.object({
+  files: z.array(z.object({ name: z.string(), etag: z.string(), size: z.number().int(), updatedAt: Time })),
+  nextCursor: z.string().nullable(),
+});
+export type DataFiles = z.infer<typeof DataFiles>;

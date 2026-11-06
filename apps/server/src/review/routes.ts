@@ -1,206 +1,67 @@
 import {
-  type Anchor,
-  agentLabel,
+  COMMENT_MAX,
   CreateComment,
   CreateDecision,
   CreateThread,
+  DAY_MS,
   EditComment,
-  UNNAMED_AGENT,
 } from "@artifacts/schema";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import type { z } from "zod";
-import { artifactParam, findArtifact, isUuid } from "../auth/access.ts";
+import { and, eq, sql } from "drizzle-orm";
+import { findArtifact, type LoadedArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import {
-  activity,
-  artifacts,
-  blocks,
-  comments,
-  decisions,
-  frames,
-  projects,
-  threads,
-  versions,
-} from "../db/schema.ts";
+import { comments, threads } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
-import { audienceOf } from "../library/audience.ts";
-import { blobKey } from "../publish/blobs.ts";
-import { notifyReply } from "../push/notify.ts";
-import { cropAround } from "./crop.ts";
+import { isUuid } from "../http/params.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { ApiContext, RouteRequest, Routes } from "../http/routes.ts";
+import { type CommentRow, commentView, type Review, type ThreadRow } from "./service.ts";
 
-const MINUTE = 60_000;
-const DAY = 24 * 3600_000;
-/** The same limit as a comment's body. */
-const MAX_COMMENT_CHARS = 10_000;
 /** A page key, or the words around a quote. */
 const MAX_KEY_CHARS = 500;
 
-type ThreadRow = typeof threads.$inferSelect;
-type CommentRow = typeof comments.$inferSelect;
+const notFound = () => new ApiError("not_found", "Not found.");
+type CommentResource = LoadedArtifact & { thread: ThreadRow; comment: CommentRow };
 
-/** Who a comment is by. Tokens write as their person, shown as the agent when one was detected. */
-function authorOf(caller: Caller, artifactId: string, agent: string | null | undefined) {
-  if (caller.kind === "person") {
-    return {
-      authorPersonId: caller.person.id,
-      authorGuestId: null,
-      authorName: caller.person.name,
-      agent: null,
-    };
-  }
-  if (caller.kind === "cliToken") {
-    return {
-      authorPersonId: caller.person.id,
-      authorGuestId: null,
-      authorName: caller.person.name,
-      // Every token is marked, named or not: what an agent wrote never reads as the person's own words.
-      agent: agent?.trim() || UNNAMED_AGENT,
-    };
-  }
-  if (caller.kind === "guest") {
-    const link = caller.links.find((entry) => entry.artifactId === artifactId && entry.active);
-    if (link)
-      return { authorPersonId: null, authorGuestId: caller.guestId, authorName: link.name, agent: null };
-  }
-  throw new ApiError("forbidden", "You can't comment.");
-}
-
-const commenterId = (caller: Caller) =>
-  caller.kind === "person" || caller.kind === "cliToken"
-    ? caller.person.id
-    : caller.kind === "guest"
-      ? caller.guestId
-      : caller.kind;
-
-const authorView = (row: { authorGuestId: string | null; authorName: string; agent?: string | null }) => ({
-  name: row.agent ? agentLabel(row.authorName, row.agent) : row.authorName,
-  kind: row.agent ? ("agent" as const) : row.authorGuestId ? ("guest" as const) : ("person" as const),
-});
-
-export function reviewRoutes(routes: Routes, deps: Deps) {
-  const { db, clock, bucket, limits, log } = deps;
+export function reviewRoutes(routes: Routes, deps: Deps, review: Review) {
+  const { db, clock, bucket } = deps;
   const artifact = artifactParam(deps);
 
-  async function threadViews(rows: ThreadRow[]) {
-    if (rows.length === 0) return [];
-    const commentRows = await db
-      .select()
-      .from(comments)
-      .where(
-        inArray(
-          comments.threadId,
-          rows.map((row) => row.id),
-        ),
-      )
-      .orderBy(asc(comments.createdAt), asc(comments.id));
-    return Promise.all(
-      rows.map(async (row) => {
-        const own = commentRows.filter((comment) => comment.threadId === row.id);
-        return {
-          id: row.id,
-          n: row.n,
-          pageKey: row.pageKey,
-          anchor: row.anchor as Anchor | null,
-          anchorState:
-            row.movedFromVersion !== null && row.anchorState === "ok"
-              ? ("moved_version" as const)
-              : row.anchorState,
-          status: row.status,
-          createdVersion: row.createdVersion,
-          fixedVersion: row.fixedVersion,
-          // Threads don't store an agent; the comment that opened one does.
-          author: authorView(own[0] ?? row),
-          crop: row.cropKey ? await bucket.presignGet(row.cropKey) : null,
-          comments: own.map(commentView),
-          createdAt: row.createdAt.toISOString(),
-          resolvedAt: row.resolvedAt?.toISOString() ?? null,
-        };
-      }),
-    );
-  }
-
-  const commentView = (row: CommentRow) => ({
-    id: row.id,
-    author: authorView(row),
-    agent: row.agent ? agentLabel(row.authorName, row.agent) : null,
-    body: row.body,
-    version: row.version,
-    marksFixed: row.marksFixed,
-    createdAt: row.createdAt.toISOString(),
-    editedAt: row.editedAt?.toISOString() ?? null,
-  });
-
-  const recordActivity = (
-    c: ApiContext,
-    row: { artifactId: string },
-    kind: typeof activity.$inferInsert.kind,
-    payload: Record<string, unknown>,
-    agent: string | null = null,
-  ) => {
-    const caller = c.get("caller");
-    return db.insert(activity).values({
-      id: Bun.randomUUIDv7(),
-      orgId: c.get("org").id,
-      artifactId: row.artifactId,
-      actorPersonId: caller.kind === "person" || caller.kind === "cliToken" ? caller.person.id : null,
-      actorGuestId: caller.kind === "guest" ? caller.guestId : null,
-      agent,
-      kind,
-      payload,
-      createdAt: clock.now(),
-    });
-  };
-
-  async function threadParam(c: ApiContext) {
+  async function threadParam(c: ApiContext): Promise<LoadedArtifact & { thread: ThreadRow }> {
     const id = c.req.param("id");
-    const [row] = isUuid(id)
+    const [thread] = isUuid(id)
       ? await db
           .select()
           .from(threads)
           .where(and(eq(threads.orgId, c.get("org").id), eq(threads.id, id)))
           .limit(1)
       : [];
-    if (!row) throw new ApiError("not_found", "Not found.");
-    return row;
+    const found = thread && (await findArtifact(deps, thread.orgId, thread.artifactId));
+    if (!thread || !found) throw notFound();
+    return { ...found, thread };
   }
-  /** A thread's permission is its artifact's. */
-  const threadArtifact = async (c: ApiContext) => {
-    const row = await threadParam(c);
-    const found = await findArtifact(deps, row.orgId, row.artifactId);
-    if (!found) throw new ApiError("not_found", "Not found.");
-    return found;
-  };
 
-  async function listThreads(
-    artifactId: string,
-    filter: { status?: string; page?: string; version?: number } = {},
-  ) {
-    const { status = "all", page, version } = filter;
-    const rows = await db
-      .select()
-      .from(threads)
-      .where(
-        and(
-          eq(threads.artifactId, artifactId),
-          status === "open" || status === "fixed" || status === "resolved"
-            ? eq(threads.status, status)
-            : undefined,
-          page ? eq(threads.pageKey, page) : undefined,
-          Number.isInteger(version) && (version as number) > 0
-            ? eq(threads.createdVersion, version as number)
-            : undefined,
-        ),
-      )
-      .orderBy(asc(threads.n));
-    return { rows, views: await threadViews(rows) };
+  /** The `:id` comment, guarded by reading its artifact: whether it may change is the author's question. */
+  async function commentParam(c: ApiContext): Promise<CommentResource> {
+    const id = c.req.param("id");
+    const [found] = isUuid(id)
+      ? await db
+          .select({ comment: comments, thread: threads })
+          .from(comments)
+          .innerJoin(threads, eq(threads.id, comments.threadId))
+          .where(and(eq(comments.orgId, c.get("org").id), eq(comments.id, id)))
+          .limit(1)
+      : [];
+    const resource = found && (await findArtifact(deps, found.thread.orgId, found.thread.artifactId));
+    if (!found || !resource) throw notFound();
+    return { ...resource, ...found };
   }
 
   routes.get("/api/artifacts/:id/threads", { action: "artifact.read", resource: artifact }, async (c) => {
-    const { views } = await listThreads(c.req.param("id") as string, {
+    const { views } = await review.listThreads(c.var.resource.id, {
       status: c.req.query("status"),
       page: c.req.query("page"),
       version: Number(c.req.query("version")),
@@ -215,251 +76,42 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     if (
       body.pageKey.length > MAX_KEY_CHARS ||
       (anchor?.type === "text" &&
-        (anchor.quote.exact.length > MAX_COMMENT_CHARS ||
+        (anchor.quote.exact.length > COMMENT_MAX ||
           anchor.quote.prefix.length > MAX_KEY_CHARS ||
           anchor.quote.suffix.length > MAX_KEY_CHARS))
     ) {
       throw new ApiError("invalid", "That page or quote is too long.");
     }
-    const caller = c.get("caller");
-    const artifactId = c.req.param("id") as string;
-    const orgId = c.get("org").id;
-    limits.hit(`comment:${commenterId(caller)}`, 30, MINUTE);
-
-    const [version] = await db
-      .select({ id: versions.id })
-      .from(versions)
-      .where(
-        and(eq(versions.artifactId, artifactId), eq(versions.n, body.version), isNull(versions.deletedAt)),
-      )
-      .limit(1);
-    if (!version) throw new ApiError("invalid", "That version doesn't exist.");
-
-    let render: string | null = null;
-    if (body.anchor?.type === "frame") {
-      const [frame] = await db
-        .select({ renders: frames.renders })
-        .from(frames)
-        .where(
-          and(
-            eq(frames.versionId, version.id),
-            eq(frames.pageKey, body.pageKey),
-            eq(frames.frameKey, body.anchor.frameKey),
-          ),
-        )
-        .limit(1);
-      if (!frame) throw new ApiError("invalid", "That frame isn't in this version.");
-      render = (frame.renders as { "2x": string })["2x"];
-    } else if (body.anchor) {
-      const [block] = await db
-        .select({ id: blocks.id })
-        .from(blocks)
-        .where(
-          and(
-            eq(blocks.versionId, version.id),
-            eq(blocks.pageKey, body.pageKey),
-            eq(blocks.blockKey, body.anchor.blockKey),
-          ),
-        )
-        .limit(1);
-      if (!block) throw new ApiError("invalid", "That block isn't in this version.");
-    }
-
-    const author = authorOf(caller, artifactId, body.agent);
-    const threadId = Bun.randomUUIDv7();
-    const now = clock.now();
-    const row = await db.transaction(async (tx) => {
-      // Thread numbers are per artifact, and never reused.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifactId}, 1))`);
-      const [counted] = await tx
-        .update(artifacts)
-        .set({ threadCounter: sql`${artifacts.threadCounter} + 1` })
-        .where(eq(artifacts.id, artifactId))
-        .returning({ next: artifacts.threadCounter });
-      const next = counted?.next ?? 1;
-      const [thread] = await tx
-        .insert(threads)
-        .values({
-          id: threadId,
-          orgId,
-          artifactId,
-          n: next,
-          pageKey: body.pageKey,
-          anchor: body.anchor,
-          createdVersion: body.version,
-          authorPersonId: author.authorPersonId,
-          authorGuestId: author.authorGuestId,
-          authorName: author.authorName,
-          createdAt: now,
-        })
-        .returning();
-      await tx.insert(comments).values({
-        id: Bun.randomUUIDv7(),
-        threadId,
-        orgId,
-        ...author,
-        body: body.body,
-        version: body.version,
-        createdAt: now,
-      });
-      return thread as ThreadRow;
-    });
-
-    let final = row;
-    if (render && body.anchor?.type === "frame") {
-      // The comment matters more than its picture: a failed crop is logged, not refused.
-      try {
-        const object = await bucket.get(blobKey(render));
-        if (object) {
-          const key = `crops/${threadId}.webp`;
-          await bucket.put(key, await cropAround(object.body, body.anchor.x, body.anchor.y), {
-            contentType: "image/webp",
-          });
-          const [updated] = await db
-            .update(threads)
-            .set({ cropKey: key })
-            .where(eq(threads.id, threadId))
-            .returning();
-          if (updated) final = updated;
-        }
-      } catch (error) {
-        log.warn("couldn't cut a crop", { thread: threadId, error: String(error) });
-      }
-    }
-    await recordActivity(
-      c as ApiContext,
-      row,
-      "commented",
-      { thread: row.n, version: body.version },
-      author.agent,
-    );
-    void deps.events.emit(row.artifactId, "thread", { thread: row.n });
-    return c.json((await threadViews([final]))[0]);
+    return c.json(await review.startThread(c.var, c.var.resource, body));
   });
-
-  /** A reply, from the API or a connector. `c` only supplies the org and the caller. */
-  async function replyTo(c: ApiContext, thread: ThreadRow, body: z.infer<typeof CreateComment>) {
-    const caller = c.get("caller");
-    limits.hit(`comment:${commenterId(caller)}`, 30, MINUTE);
-    const resource = await findArtifact(deps, thread.orgId, thread.artifactId);
-    if (!resource) throw new ApiError("not_found", "Not found.");
-    const mayFix =
-      caller.kind === "cliToken" || (caller.kind === "person" && caller.person.id === resource.publisherId);
-    if (body.marksFixed && !mayFix)
-      throw new ApiError("forbidden", "Only an agent or the publisher marks a thread fixed.");
-
-    // Leaving "resolved" is for people, with Reopen (03).
-    if (body.marksFixed && thread.status === "resolved") {
-      throw new ApiError("conflict", "That thread is resolved. A person has to reopen it.");
-    }
-    const author = authorOf(caller, thread.artifactId, body.agent);
-    const latest = resource.row.latestVersion;
-    const [fixer] = await db
-      .select()
-      .from(comments)
-      .where(and(eq(comments.threadId, thread.id), eq(comments.marksFixed, true)))
-      .orderBy(desc(comments.createdAt))
-      .limit(1);
-    const byFixer =
-      fixer !== undefined &&
-      fixer.authorPersonId === author.authorPersonId &&
-      fixer.authorGuestId === author.authorGuestId &&
-      fixer.agent === author.agent;
-
-    const reopens = thread.status === "fixed" && !body.marksFixed && !byFixer;
-    const [comment] = await db
-      .insert(comments)
-      .values({
-        id: Bun.randomUUIDv7(),
-        threadId: thread.id,
-        orgId: thread.orgId,
-        ...author,
-        body: body.body,
-        version: latest,
-        marksFixed: body.marksFixed ?? false,
-        createdAt: clock.now(),
-      })
-      .returning();
-    if (body.marksFixed) {
-      await db
-        .update(threads)
-        .set({ status: "fixed", fixedVersion: latest })
-        .where(eq(threads.id, thread.id));
-    } else if (reopens) {
-      await db.update(threads).set({ status: "open", fixedVersion: null }).where(eq(threads.id, thread.id));
-    }
-    await recordActivity(
-      c as ApiContext,
-      thread,
-      body.marksFixed ? "fixed" : reopens ? "reopened" : "replied",
-      { thread: thread.n, version: latest },
-      author.agent,
-    );
-    void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
-    notifyReply(deps, c.get("org").id, thread, {
-      authorName: author.agent
-        ? agentLabel((comment as CommentRow).authorName, author.agent)
-        : (comment as CommentRow).authorName,
-      body: (comment as CommentRow).body,
-      actor: author.agent ? null : (comment as CommentRow).authorPersonId,
-    }).catch((error) => deps.log.warn("couldn't send pushes", { error: String(error) }));
-    return commentView(comment as CommentRow);
-  }
 
   routes.post(
     "/api/threads/:id/comments",
-    { action: "artifact.comment", resource: threadArtifact },
+    { action: "artifact.comment", resource: threadParam },
     async (c) => {
       const body = await parseBody(c, CreateComment);
-      return c.json(await replyTo(c as ApiContext, await threadParam(c as ApiContext), body));
+      return c.json(await review.replyTo(c.var, c.var.resource, c.var.resource.thread, body));
     },
   );
 
-  const setResolved = (resolved: boolean) => async (c: ApiContext) => {
-    const thread = await threadParam(c);
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "Only people resolve threads.");
-    const [row] = await db
-      .update(threads)
-      .set(
-        resolved
-          ? { status: "resolved", resolvedAt: clock.now(), resolvedBy: caller.person.id }
-          : { status: "open", resolvedAt: null, resolvedBy: null, fixedVersion: null },
-      )
-      .where(eq(threads.id, thread.id))
-      .returning();
-    await recordActivity(c, thread, resolved ? "resolved" : "reopened", { thread: thread.n });
-    void deps.events.emit(thread.artifactId, "thread", { thread: thread.n });
-    return c.json((await threadViews([row as ThreadRow]))[0]);
-  };
-  routes.post("/api/threads/:id/resolve", { action: "thread.resolve", resource: threadArtifact }, (c) =>
-    setResolved(true)(c as ApiContext),
+  routes.post("/api/threads/:id/resolve", { action: "thread.resolve", resource: threadParam }, async (c) =>
+    c.json(await review.setResolved(c.var, c.var.resource.thread, true)),
   );
-  routes.post("/api/threads/:id/reopen", { action: "thread.resolve", resource: threadArtifact }, (c) =>
-    setResolved(false)(c as ApiContext),
+  routes.post("/api/threads/:id/reopen", { action: "thread.resolve", resource: threadParam }, async (c) =>
+    c.json(await review.setResolved(c.var, c.var.resource.thread, false)),
   );
 
-  routes.get("/api/threads/:id/crop", { action: "artifact.read", resource: threadArtifact }, async (c) => {
-    const thread = await threadParam(c as ApiContext);
-    if (!thread.cropKey) throw new ApiError("not_found", "Not found.");
+  routes.get("/api/threads/:id/crop", { action: "artifact.read", resource: threadParam }, async (c) => {
+    const { thread } = c.var.resource;
+    if (!thread.cropKey) throw notFound();
     return c.redirect(await bucket.presignGet(thread.cropKey), 302);
   });
 
   /** Your own comment, within 24 hours (03). */
-  async function ownComment(c: ApiContext) {
-    const id = c.req.param("id");
-    const [row] = isUuid(id)
-      ? await db
-          .select()
-          .from(comments)
-          .where(and(eq(comments.orgId, c.get("org").id), eq(comments.id, id)))
-          .limit(1)
-      : [];
-    if (!row) throw new ApiError("not_found", "Not found.");
-    const [thread] = await db.select().from(threads).where(eq(threads.id, row.threadId)).limit(1);
-    const resource = thread && (await findArtifact(deps, thread.orgId, thread.artifactId));
-    const caller = c.get("caller");
-    if (!resource || !can(caller, "artifact.read", resource)) throw new ApiError("not_found", "Not found.");
+  const commentRoute = { action: "artifact.read", resource: commentParam } as const;
+  const ownComment = (c: RouteRequest<Caller, CommentResource>) => {
+    const { caller, resource } = c.var;
+    const { comment } = resource;
     if (!can(caller, "artifact.comment", resource)) {
       if (resource.archivedAt)
         throw new ApiError("read_only", "This artifact is archived, so it's read-only.");
@@ -467,41 +119,37 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     }
     const mine =
       caller.kind === "person" || caller.kind === "cliToken"
-        ? row.authorPersonId === caller.person.id
-        : caller.kind === "guest" && row.authorGuestId === caller.guestId;
+        ? comment.authorPersonId === caller.person.id
+        : caller.kind === "guest" && comment.authorGuestId === caller.guestId;
     if (!mine) throw new ApiError("forbidden", "That's someone else's comment.");
-    if (clock.now().getTime() - row.createdAt.getTime() > DAY) {
+    if (clock.now().getTime() - comment.createdAt.getTime() > DAY_MS) {
       throw new ApiError("forbidden", "Comments can only be changed for 24 hours.");
     }
-    return { row, thread: thread as ThreadRow };
-  }
+    return resource;
+  };
 
-  routes.patch("/api/comments/:id", { action: "artifact.comment", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const { row, thread } = await ownComment(c as ApiContext);
+  routes.patch("/api/comments/:id", commentRoute, async (c) => {
+    const { comment, thread } = ownComment(c);
     const { body } = await parseBody(c, EditComment);
     const [updated] = await db
       .update(comments)
       .set({ body, editedAt: clock.now() })
-      .where(eq(comments.id, row.id))
+      .where(eq(comments.id, comment.id))
       .returning();
     void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
     return c.json(commentView(updated as CommentRow));
   });
 
-  routes.delete("/api/comments/:id", { action: "artifact.comment", inHandler: true }, async (c) => {
-    if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-    const { row, thread } = await ownComment(c as ApiContext);
+  routes.delete("/api/comments/:id", commentRoute, async (c) => {
+    const { comment, thread } = ownComment(c);
     const [{ count } = { count: 0 }] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(comments)
       .where(eq(comments.threadId, thread.id));
+    await db.delete(comments).where(eq(comments.id, comment.id));
     if (count <= 1) {
-      await db.delete(comments).where(eq(comments.id, row.id));
       await db.delete(threads).where(eq(threads.id, thread.id));
       if (thread.cropKey) await bucket.delete(thread.cropKey).catch(() => {});
-    } else {
-      await db.delete(comments).where(eq(comments.id, row.id));
     }
     void deps.events.emit(thread.artifactId, "comment", { thread: thread.n });
     return c.json({ ok: true });
@@ -512,68 +160,13 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     { action: "artifact.decide", resource: artifact },
     async (c) => {
       const body = await parseBody(c, CreateDecision);
-      if ((body.note?.length ?? 0) > MAX_COMMENT_CHARS)
-        throw new ApiError("invalid", "That note is too long.");
-      const caller = c.get("caller");
-      if (caller.kind !== "person") throw new ApiError("forbidden", "Only people decide.");
-      const artifactId = c.req.param("id") as string;
-      const [version] = await db
-        .select({ n: versions.n })
-        .from(versions)
-        .where(
-          and(eq(versions.artifactId, artifactId), eq(versions.n, body.version), isNull(versions.deletedAt)),
-        )
-        .limit(1);
-      if (!version) throw new ApiError("invalid", "That version doesn't exist.");
-      await db.insert(decisions).values({
-        id: Bun.randomUUIDv7(),
-        orgId: c.get("org").id,
-        artifactId,
-        version: body.version,
-        personId: caller.person.id,
-        kind: body.kind,
-        note: body.note ?? null,
-        createdAt: clock.now(),
-      });
-      await recordActivity(c as ApiContext, { artifactId }, body.kind, {
-        version: body.version,
-        note: body.note ?? null,
-      });
-      void deps.events.emit(artifactId, "decision", { version: body.version });
+      if ((body.note?.length ?? 0) > COMMENT_MAX) throw new ApiError("invalid", "That note is too long.");
+      await review.decide(c.var, c.var.resource, body);
       return c.json({ ok: true });
     },
   );
 
-  routes.get("/api/artifacts/:id/status", { action: "artifact.read", resource: artifact }, async (c) => {
-    const resource = await artifact(c as ApiContext);
-    const artifactId = resource.id;
-    const [latest] = await db
-      .select()
-      .from(decisions)
-      .where(eq(decisions.artifactId, artifactId))
-      .orderBy(desc(decisions.createdAt))
-      .limit(1);
-    const rows = await db
-      .select()
-      .from(threads)
-      .where(and(eq(threads.artifactId, artifactId), inArray(threads.status, ["open", "fixed"])))
-      .orderBy(asc(threads.n));
-    const views = await threadViews(rows);
-    const caller = c.get("caller");
-    const [place] = await db.select().from(projects).where(eq(projects.id, resource.projectId)).limit(1);
-    return etagJson(c, {
-      // For whoever answers for the work: anyone else needn't learn who else was let in.
-      ...(can(caller, "artifact.share", resource) || caller.kind === "orgToken"
-        ? { audience: await audienceOf(deps, c.get("org").name, resource, place?.name ?? "") }
-        : {}),
-      version: resource.row.latestVersion,
-      decision: latest?.kind ?? null,
-      decisionVersion: latest?.version ?? null,
-      note: latest?.note ?? null,
-      open: views.filter((thread) => thread.status === "open"),
-      fixedAwaiting: views.filter((thread) => thread.status === "fixed"),
-    });
-  });
-
-  return { listThreads, replyTo };
+  routes.get("/api/artifacts/:id/status", { action: "artifact.read", resource: artifact }, async (c) =>
+    etagJson(c, await review.status(c.var, c.var.resource)),
+  );
 }

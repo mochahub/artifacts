@@ -1,15 +1,17 @@
 import { randomBytes } from "node:crypto";
-import { DEFAULT_ORG_SETTINGS, RecoverRequest, SetupRequest } from "@artifacts/schema";
+import type { RecoverResponse, SetupResponse } from "@artifacts/schema";
+import { DEFAULT_ORG_SETTINGS, RESET_HOURS, RecoverRequest, SetupRequest } from "@artifacts/schema";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { randomSecret, safeEqual, sha256 } from "../auth/secrets.ts";
 import { createCliToken, personView } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
+import { lockSetup } from "../db/locks.ts";
 import { activity, org, passwords, people, resetLinks } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { parseBody, type Routes } from "../http/routes.ts";
+import type { Routes } from "../http/routes.ts";
 
-const SETUP_LOCK = 7_316_002;
 const HOUR = 3600_000;
 
 export function setupRoutes(routes: Routes, deps: Deps) {
@@ -28,8 +30,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
     const now = clock.now();
 
     const result = await db.transaction(async (tx) => {
-      // Two claims at once must not both create an organization.
-      await tx.execute(sql`select pg_advisory_xact_lock(${SETUP_LOCK})`);
+      await lockSetup(tx);
       const [existing] = await tx.select({ id: org.id }).from(org).limit(1);
       if (existing) throw new ApiError("conflict", "This deployment is already set up.");
 
@@ -57,7 +58,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       });
       return { person: personView(person), token };
     });
-    return c.json(result);
+    return c.json(result satisfies SetupResponse);
   });
 
   routes.post("/api/recover", { public: true }, async (c) => {
@@ -90,7 +91,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       tokenHash: sha256(secret),
       createdBy: null,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + HOUR),
+      expiresAt: new Date(now.getTime() + RESET_HOURS * HOUR),
     });
     await db.insert(activity).values({
       id: Bun.randomUUIDv7(),
@@ -98,6 +99,6 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       kind: "recovered",
       actorPersonId: owner.id,
     });
-    return c.json({ resetUrl: `${env.publicUrl}/reset/${secret}` });
+    return c.json({ resetUrl: `${env.publicUrl}/reset/${secret}` } satisfies RecoverResponse);
   });
 }

@@ -94,6 +94,25 @@ export function testPort() {
 }
 
 const hitsFile = process.env.ARTIFACTS_ROUTE_HITS;
+let listed = false;
+
+/**
+ * For scripts/route-coverage.ts: the server's own route list, once per process, and the route each
+ * request's log line names.
+ */
+const recording = (routes: { method: string; path: string }[]) => {
+  if (!hitsFile) return silent;
+  if (!listed) {
+    listed = true;
+    appendFileSync(hitsFile, routes.map((route) => `route ${route.method} ${route.path}\n`).join(""));
+  }
+  return {
+    ...silent,
+    info(message: string, fields: Record<string, unknown> = {}) {
+      if (message === "request") appendFileSync(hitsFile, `${fields.method} ${fields.route}\n`);
+    },
+  };
+};
 
 /** A real server on a fresh database, with helpers for calling it as a browser or a CLI. */
 export async function startTestServer(
@@ -107,8 +126,9 @@ export async function startTestServer(
 ) {
   const database = await createDatabase();
   const clock = testClock();
+  const log = { ...silent };
   const server = await startServer(testEnv(database.url, overrides), {
-    log: silent,
+    log,
     clock,
     viewerDir: viewerFixture(),
     jobs: false,
@@ -116,8 +136,8 @@ export async function startTestServer(
     clientMetadata: options.clientMetadata,
     google: options.google,
     heartbeatMs: options.heartbeatMs,
-    onRoute: hitsFile ? (method, path) => appendFileSync(hitsFile, `${method} ${path}\n`) : undefined,
   });
+  Object.assign(log, recording(server.routes));
   const base = `http://127.0.0.1:${server.ports.viewer}`;
 
   const api = (

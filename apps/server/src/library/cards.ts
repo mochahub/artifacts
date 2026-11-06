@@ -7,6 +7,7 @@ import {
 } from "@artifacts/schema";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
+import type { LoadedArtifact } from "../auth/access.ts";
 import { type Caller, viewerId } from "../auth/caller.ts";
 import {
   blocks,
@@ -21,7 +22,7 @@ import {
   views,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
-import type { Loaded } from "./visible.ts";
+import { changes, frameHashes } from "../versions/diff.ts";
 
 const clip = (text: string) => {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -61,7 +62,7 @@ async function fallbackSummaries(deps: Deps, rows: { id: string; message: string
 export async function libraryCards(
   deps: Deps,
   caller: Caller,
-  list: Loaded[],
+  list: LoadedArtifact[],
   matches: Map<string, z.infer<typeof LibraryMatch>> = new Map(),
 ): Promise<LibraryCard[]> {
   if (list.length === 0) return [];
@@ -96,14 +97,14 @@ export async function libraryCards(
     [...head.values()].filter((version) => !version.summary),
   );
   const byId = new Map(cards.map((card) => [card.id, card]));
-  return list.flatMap(({ row, projectSlug }) => {
+  return list.flatMap(({ row, project }) => {
     const card = byId.get(row.id);
     const version = head.get(row.id);
     if (!card || !version) return [];
     const decision = decisionRows.find((entry) => entry.artifactId === row.id);
     return [
       {
-        project: projectSlug,
+        project: project.slug,
         slug: row.slug,
         title: row.title,
         summary: version.summary ?? fallback.get(version.id) ?? "",
@@ -124,7 +125,11 @@ export async function libraryCards(
 }
 
 /** Status, counts and cover for a set of artifacts, in as few queries as possible (02, "Derived state"). */
-export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Promise<ArtifactCard[]> {
+export async function buildCards(
+  deps: Deps,
+  caller: Caller,
+  list: LoadedArtifact[],
+): Promise<ArtifactCard[]> {
   if (list.length === 0) return [];
   const { db } = deps;
   const ids = list.map(({ row }) => row.id);
@@ -191,8 +196,9 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
     ? await db
         .select({
           versionId: frames.versionId,
-          key: frames.frameKey,
-          hash: frames.contentHash,
+          pageKey: frames.pageKey,
+          frameKey: frames.frameKey,
+          contentHash: frames.contentHash,
           renders: frames.renders,
           y: frames.y,
           x: frames.x,
@@ -240,7 +246,7 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
     }
   }
 
-  return list.flatMap(({ row, projectSlug }) => {
+  return list.flatMap(({ row, project }) => {
     const [latest, previous] = latestByArtifact.get(row.id) ?? [];
     if (!latest) return [];
     const decision = decisionRows.find((entry) => entry.artifactId === row.id);
@@ -258,23 +264,19 @@ export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Pr
     } else if (unseen) status = { kind: "waiting" };
     else status = { kind: "not_reviewed" };
 
-    const own = frameRows.filter((frame) => frame.versionId === latest.id);
-    const old = previous ? frameRows.filter((frame) => frame.versionId === previous.id) : [];
-    const before = new Map(old.map((frame) => [frame.key, frame.hash]));
+    const framesOf = (versionId: string) => frameRows.filter((frame) => frame.versionId === versionId);
+    const own = framesOf(latest.id);
     const changedFrames = previous
-      ? own.filter((frame) => before.get(frame.key) !== undefined && before.get(frame.key) !== frame.hash)
-          .length
+      ? changes(frameHashes(framesOf(previous.id)), frameHashes(own)).changed.length
       : 0;
     const first = [...own].sort((a, b) => a.y - b.y || a.x - b.x)[0];
     return [
       {
         id: row.id,
-        project: projectSlug,
+        project: project.slug,
         slug: row.slug,
         title: row.title,
-        cover: first
-          ? { renderHash: (first.renders as { thumb: string }).thumb, w: first.w, h: first.h }
-          : { title: row.title },
+        cover: first ? { renderHash: first.renders.thumb, w: first.w, h: first.h } : { title: row.title },
         pageCount: pageCounts.find((entry) => entry.versionId === latest.id)?.count ?? 0,
         latestVersion: latest.n,
         status,

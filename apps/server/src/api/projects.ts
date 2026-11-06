@@ -1,8 +1,10 @@
+import type { ProjectAccessList } from "@artifacts/schema";
 import { AddProjectAccess, RestrictProject, SetProjectAccess } from "@artifacts/schema";
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
-import { isUuid, type LoadedProject, projectGrants, projectParam } from "../auth/access.ts";
-import { can, capFor } from "../auth/can.ts";
-import { randomSecret, sha256 } from "../auth/secrets.ts";
+import { type LoadedProject, projectGrants } from "../auth/access.ts";
+import type { Caller } from "../auth/caller.ts";
+import { type CallerFor, can, capFor } from "../auth/can.ts";
+import { createInvite, findPersonByEmail } from "../auth/invites.ts";
 import {
   activity,
   artifacts,
@@ -16,34 +18,34 @@ import {
   tokens,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { isUuid } from "../http/params.ts";
+import { projectParam } from "../http/resources.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
 
-const DAY = 24 * 3600_000;
-const INVITE_DAYS = 7;
 /** Enough names to recognise who a restriction shuts out, without listing the organization. */
 const NAMES_SHOWN = 5;
 
-const actorId = (c: ApiContext) => {
-  const caller = c.get("caller");
-  if (caller.kind === "person") return caller.person.id;
-  throw new ApiError("forbidden", "This needs a signed-in browser.");
-};
-
 export function projectRoutes(routes: Routes, deps: Deps) {
-  const { db, env, clock } = deps;
+  const { db, clock } = deps;
   const project = projectParam(deps);
 
-  const record = (c: ApiContext, place: LoadedProject, payload: Record<string, unknown>) =>
-    db.insert(activity).values({
+  const record = (
+    c: RouteRequest<CallerFor<"project.update">, LoadedProject>,
+    payload: Record<string, unknown>,
+  ) => {
+    const place = c.var.resource;
+    return db.insert(activity).values({
       id: Bun.randomUUIDv7(),
       orgId: place.row.orgId,
       projectId: place.id,
-      actorPersonId: actorId(c),
+      actorPersonId: c.var.caller.person.id,
       kind: "project_access_changed",
       payload: { project: place.row.name, ...payload },
       createdAt: clock.now(),
     });
+  };
 
   const outsideLevel = (person: { role: string }, permission: string) => {
     if (person.role === "outside" && (permission === "publish" || permission === "manage")) {
@@ -117,10 +119,10 @@ export function projectRoutes(routes: Routes, deps: Deps) {
     "/api/projects/:slug/access",
     { action: "project.access.read", resource: project },
     async (c) => {
-      const place = await project(c as ApiContext);
+      const place = c.var.resource;
       const orgId = place.row.orgId;
       // Who's in a team, and everyone's addresses, are the directory: a token gets the outline.
-      const directory = can(c.get("caller"), "people.search", { type: "org" });
+      const directory = can(c.var.caller, "people.search", { type: "org" });
       const [own, granted, grants, staff] = await Promise.all([
         db
           .select({ person: people, permission: projectAccess.permission })
@@ -213,13 +215,13 @@ export function projectRoutes(routes: Routes, deps: Deps) {
                 }),
             ],
         impact: await impactOf(place),
-        canChange: can(c.get("caller"), "project.access.write", place),
-      });
+        canChange: can(c.var.caller, "project.access.write", place),
+      } satisfies ProjectAccessList);
     },
   );
 
   routes.patch("/api/projects/:slug/access", { action: "project.update", resource: project }, async (c) => {
-    const place = await project(c as ApiContext);
+    const place = c.var.resource;
     const { restricted, revokeLinks } = await parseBody(c, RestrictProject);
     const now = clock.now();
     await db.transaction(async (tx) => {
@@ -241,7 +243,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
           ),
         );
     });
-    await record(c as ApiContext, place, { restricted, revokedLinks: revokeLinks === true });
+    await record(c, { restricted, revokedLinks: revokeLinks === true });
     return c.json({ restricted });
   });
 
@@ -250,44 +252,28 @@ export function projectRoutes(routes: Routes, deps: Deps) {
     "/api/projects/:slug/access",
     { action: "project.access.write", resource: project },
     async (c) => {
-      const place = await project(c as ApiContext);
+      const place = c.var.resource;
       const { email, permission } = await parseBody(c, AddProjectAccess);
       const orgId = place.row.orgId;
-      const by = actorId(c as ApiContext);
-      const [person] = await db
-        .select()
-        .from(people)
-        .where(
-          and(
-            eq(people.orgId, orgId),
-            sql`lower(${people.email}) = lower(${email})`,
-            isNull(people.removedAt),
-          ),
-        )
-        .limit(1);
+      const by = c.var.caller.person.id;
+      const person = await findPersonByEmail(db, orgId, email);
       if (person) {
         outsideLevel(person, permission);
         await grantPerson(place, person.id, permission, by);
-        await record(c as ApiContext, place, { person: person.name, permission });
+        await record(c, { person: person.name, permission });
         return c.json({ added: { id: person.id, name: person.name, permission } });
       }
       outsideLevel({ role: "outside" }, permission);
-      const secret = randomSecret();
-      const now = clock.now();
-      await db.insert(invites).values({
-        id: Bun.randomUUIDv7(),
+      const { url } = await createInvite(deps, {
         orgId,
         kind: "project",
         email,
         role: "outside",
         projectId: place.id,
         projectPermission: permission,
-        tokenHash: sha256(secret),
         createdBy: by,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + INVITE_DAYS * DAY),
       });
-      return c.json({ url: `${env.publicUrl}/join/${secret}` });
+      return c.json({ url });
     },
   );
 
@@ -309,7 +295,8 @@ export function projectRoutes(routes: Routes, deps: Deps) {
       });
 
   /** `person:<id>` or `team:<id>`, which can't collide with anything else in the path. */
-  async function subjectOf(c: ApiContext, place: LoadedProject) {
+  async function subjectOf(c: RouteRequest<Caller, LoadedProject>) {
+    const place = c.var.resource;
     const [, kind, id] = /^(person|team):(.+)$/.exec(c.req.param("subject") ?? "") ?? [];
     if (!isUuid(id)) throw new ApiError("not_found", "Not found.");
     if (kind === "person") {
@@ -334,10 +321,10 @@ export function projectRoutes(routes: Routes, deps: Deps) {
     "/api/projects/:slug/access/:subject",
     { action: "project.access.write", resource: project },
     async (c) => {
-      const place = await project(c as ApiContext);
+      const place = c.var.resource;
       const { permission } = await parseBody(c, SetProjectAccess);
-      const subject = await subjectOf(c as ApiContext, place);
-      const by = actorId(c as ApiContext);
+      const subject = await subjectOf(c);
+      const by = c.var.caller.person.id;
       if (subject.person) {
         outsideLevel(subject.person, permission);
         await grantPerson(place, subject.person.id, permission, by);
@@ -358,7 +345,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
             set: { permission, grantedBy: by },
           });
       }
-      await record(c as ApiContext, place, {
+      await record(c, {
         ...(subject.person ? { person: subject.person.name } : { team: subject.team?.name }),
         permission,
       });
@@ -370,8 +357,8 @@ export function projectRoutes(routes: Routes, deps: Deps) {
     "/api/projects/:slug/access/:subject",
     { action: "project.access.write", resource: project },
     async (c) => {
-      const place = await project(c as ApiContext);
-      const subject = await subjectOf(c as ApiContext, place);
+      const place = c.var.resource;
+      const subject = await subjectOf(c);
       const removed = await db
         .delete(projectAccess)
         .where(
@@ -384,7 +371,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
         )
         .returning({ id: projectAccess.id });
       if (removed.length === 0) throw new ApiError("not_found", "Not found.");
-      await record(c as ApiContext, place, {
+      await record(c, {
         ...(subject.person ? { person: subject.person.name } : { team: subject.team?.name }),
         permission: null,
       });

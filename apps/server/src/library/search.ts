@@ -1,7 +1,8 @@
 import { SNIPPET_MAX } from "@artifacts/schema";
 import { sql } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
-import { callerKey } from "../data/store.ts";
+import { limiterKey } from "../auth/caller.ts";
+import { containing } from "../db/index.ts";
 import type { Deps } from "../deps.ts";
 
 export const SEARCHES_PER_MINUTE = 60;
@@ -20,9 +21,7 @@ export type Hit = {
 };
 
 export function rateLimitSearch(deps: Deps, caller: Caller) {
-  // An org token has no person, so its own id keeps one integration from using up everyone's searches.
-  const who = callerKey(caller) ?? ("tokenId" in caller ? caller.tokenId : "none");
-  deps.limits.hit(`search:${who}`, SEARCHES_PER_MINUTE, 60_000);
+  deps.limits.hit(`search:${limiterKey(caller) ?? "none"}`, SEARCHES_PER_MINUTE, 60_000);
 }
 
 /** Words of a query, letters and digits only, so nothing in it reaches the tsquery syntax. */
@@ -43,7 +42,7 @@ export async function searchHits(
   const { ids, q, limit, offset, sources } = options;
   if (ids.length === 0) return [];
   const tokens = tokensOf(q);
-  const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+  const like = containing(q);
   const query = tokens.length > 0 ? tsQuery(tokens) : "";
   const vector = (text: unknown) => sql`to_tsvector('english', ${text})`;
   const matches = (text: unknown) => sql`(${vector(text)} @@ q.query)`;
