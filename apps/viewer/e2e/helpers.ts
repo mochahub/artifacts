@@ -81,7 +81,7 @@ export async function join(page: Page, browser: Browser, email: string, name: st
 
 /** The canvas's page capsule, which names the frame or page on screen and then where it sits. */
 export const here = (page: Page, title: string) =>
-  page.getByRole("button", { name: new RegExp(`^${title} `) });
+  page.getByRole("button", { name: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} `) });
 
 /** The canvas transform, which the engine mirrors onto the world as numbers. */
 export const transform = (page: Page) =>

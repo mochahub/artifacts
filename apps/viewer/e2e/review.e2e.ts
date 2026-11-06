@@ -156,7 +156,7 @@ test("comment on a passage: select text, then the quote travels and highlights",
   test.setTimeout(120_000);
   const errors = watchErrors(page);
   // Its own copy: the other run's highlight on the same words would be the first one here.
-  const slug = `quote-${info.project.name}`;
+  const slug = `quote-${info.project.name}${info.repeatEachIndex}`;
   publishCopy(slug, token());
   await page.goto(`/camerabuddy/${slug}/research-03`);
   const paragraph = page.locator('[data-block="findings/p1"]');

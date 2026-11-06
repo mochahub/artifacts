@@ -31,7 +31,7 @@ test("a guest arrives by link, names themselves and comments; revoking stops the
 }, info) => {
   test.setTimeout(120_000);
   // Its own copy, so revoking its link can't stop the other run's guest.
-  const slug = `shared-${info.project.name}`;
+  const slug = `shared-${info.project.name}${info.repeatEachIndex}`;
   publishCopy(slug, token());
   await page.goto(`/camerabuddy/${slug}`);
   await page.getByRole("button", { name: "More" }).click();

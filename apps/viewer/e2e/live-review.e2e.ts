@@ -24,6 +24,10 @@ test("a comment from elsewhere appears without a reload", async ({ page, request
   expect(posted.ok()).toBe(true);
   // Faster than the 10-second poll, which is off while a stream is open.
   expect(await (await refreshed).text()).toContain("Seen from another device");
+  const phone = info.project.name === "iphone";
+  if (phone) await page.getByRole("button", { name: "Comments" }).click();
+  const comments = page.getByRole(phone ? "dialog" : "complementary", { name: "Comments" });
+  await expect(comments.getByText("Seen from another device")).toBeVisible();
 });
 
 test("after a first comment on iPhone, the install sheet shows once", async ({ page }, info) => {
