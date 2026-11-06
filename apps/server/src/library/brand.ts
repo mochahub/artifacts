@@ -9,6 +9,7 @@ import {
 import { FONT_STACKS } from "@artifacts/schema/theme-css";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { findArtifactBySlug, findArtifacts } from "../auth/access.ts";
+import { agentOf } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { artifacts, brandProposals, org, people, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
@@ -111,7 +112,7 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       brand: body.brand,
       artifactId: sample.id,
       proposedBy: caller.person.id,
-      agent: caller.kind === "cliToken" ? (body.agent ?? null) : null,
+      agent: agentOf(caller, body.agent),
       createdAt: clock.now(),
     });
     return c.json({ id });

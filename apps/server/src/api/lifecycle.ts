@@ -1,16 +1,8 @@
 import type { ActivityKind, ActivityPage, Compare, DeletedList, RestoreResult } from "@artifacts/schema";
-import {
-  AGENT_MAX,
-  agentLabel,
-  DAY_MS,
-  NameVersion,
-  PURGE_DAYS,
-  UNNAMED_AGENT,
-  VERSION_NAME_MAX,
-} from "@artifacts/schema";
+import { AGENT_MAX, agentLabel, DAY_MS, NameVersion, PURGE_DAYS, VERSION_NAME_MAX } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt } from "drizzle-orm";
 import { findArtifacts, type LoadedArtifact } from "../auth/access.ts";
-import { actorOf, type Caller, callerKey } from "../auth/caller.ts";
+import { actorOf, agentOf, type Caller, callerKey } from "../auth/caller.ts";
 import { type CallerFor, seesArtifact } from "../auth/can.ts";
 import { lockArtifact } from "../db/locks.ts";
 import {
@@ -64,10 +56,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       artifactId: row.id,
       projectId: row.projectId,
       actorPersonId: actorOf(caller),
-      agent:
-        caller.kind === "person"
-          ? null
-          : c.req.header("artifacts-agent")?.slice(0, AGENT_MAX) || UNNAMED_AGENT,
+      agent: agentOf(caller, c.req.header("artifacts-agent")?.slice(0, AGENT_MAX)),
       kind,
       payload,
       createdAt: clock.now(),

@@ -7,12 +7,11 @@ import {
   type CreateDecision,
   type CreateThread,
   type Thread,
-  UNNAMED_AGENT,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { LoadedArtifact } from "../auth/access.ts";
-import { type Asker, type Caller, limiterKey } from "../auth/caller.ts";
+import { type Asker, agentOf, type Caller, limiterKey } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { lockArtifact } from "../db/locks.ts";
 import { activity, artifacts, blocks, comments, decisions, frames, threads, versions } from "../db/schema.ts";
@@ -45,8 +44,7 @@ function authorOf(caller: Caller, artifactId: string, agent: string | null | und
       authorPersonId: caller.person.id,
       authorGuestId: null,
       authorName: caller.person.name,
-      // Every token is marked, named or not: what an agent wrote never reads as the person's own words.
-      agent: agent?.trim() || UNNAMED_AGENT,
+      agent: agentOf(caller, agent),
     };
   }
   if (caller.kind === "guest") {

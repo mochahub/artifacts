@@ -1,4 +1,4 @@
-import type { Permission, Role, TokenScope } from "@artifacts/schema";
+import { type Permission, type Role, type TokenScope, UNNAMED_AGENT } from "@artifacts/schema";
 import type { OrgRow } from "../db/index.ts";
 
 export type CallerPerson = { id: string; name: string; email: string; role: Role };
@@ -64,3 +64,10 @@ export const actorOf = (caller: Extract<Caller, { kind: "person" | "cliToken" | 
 /** Whose rate limit a request counts against: a person or a guest, or else the token itself. */
 export const limiterKey = (caller: Caller): string | null =>
   callerKey(caller) ?? (caller.kind === "orgToken" ? caller.tokenId : null);
+
+/**
+ * Anything a token writes is marked as its agent's: the name the client sent, or `agent` if none. Only a
+ * browser session writes as a person (04, "Agents are shown as agents").
+ */
+export const agentOf = (caller: Caller, sent: string | null | undefined) =>
+  caller.kind === "cliToken" || caller.kind === "orgToken" ? sent?.trim() || UNNAMED_AGENT : null;

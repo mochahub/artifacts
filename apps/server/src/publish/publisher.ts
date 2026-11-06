@@ -7,13 +7,12 @@ import {
   type PublishCommit,
   type PublishPrepare,
   type PublishResult,
-  UNNAMED_AGENT,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import { type ArtifactRow, findArtifact, toProject, toResource } from "../auth/access.ts";
-import { type Asker, actorOf } from "../auth/caller.ts";
+import { type Asker, actorOf, agentOf } from "../auth/caller.ts";
 import { type CallerFor, can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
 import { lockArtifact } from "../db/locks.ts";
@@ -240,8 +239,7 @@ export function createPublisher(deps: Deps) {
     });
 
     const publisher = actorOf(caller);
-    // Anything but a signed-in person is an agent, whether or not it said which.
-    const agent = body.agent?.trim() || (caller.kind === "person" ? null : UNNAMED_AGENT);
+    const agent = agentOf(caller, body.agent);
     const now = clock.now();
     const result = await db.transaction(async (tx) => {
       await lockArtifact(tx, ticket.artifactId, "content");

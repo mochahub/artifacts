@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PublishPrepared, PublishResult } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
-import { artifacts, people, projects } from "../../src/db/schema.ts";
-import { claim, startTestServer, type TestServer } from "../helpers.ts";
+import { artifacts, people, projects, versions } from "../../src/db/schema.ts";
+import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { file, hash, makePerson, publish } from "../publish-helper.ts";
 
 const error = async (response: Response) =>
@@ -251,6 +251,28 @@ describe("publishing", () => {
     const version = await t.api(`/api/artifacts/${row?.id}/versions/1`, { bearer: owner.token });
     const { pages } = (await version.json()) as { pages: { meta: { items: unknown[] } }[] };
     expect(pages[0]?.meta.items).toEqual([{ hash: clip.sha256, type: "video/mp4", caption: "Take one" }]);
+  });
+
+  test("a session publishes as its person, whatever agent it names (04)", async () => {
+    const cookie = await signIn(t, OWNER.email, OWNER.password);
+    const prepared = await t.api("/api/publish/prepare", {
+      method: "POST",
+      cookie,
+      json: { project: "camerabuddy", slug: "by-hand", title: "By hand", files: [] },
+    });
+    const { uploadId } = PublishPrepared.parse(await prepared.json());
+    const committed = await t.api("/api/publish/commit", {
+      method: "POST",
+      cookie,
+      json: { uploadId, agent: "Claude Code", files: {}, pages: [], frames: [], blocks: [] },
+    });
+    expect(committed.status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "by-hand"));
+    const [version] = await t.server.db
+      .select()
+      .from(versions)
+      .where(eq(versions.artifactId, row?.id as string));
+    expect(version?.agent).toBeNull();
   });
 
   test("commit takes no more files than prepare does", async () => {
