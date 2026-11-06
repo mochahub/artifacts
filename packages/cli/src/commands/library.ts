@@ -14,7 +14,8 @@ import {
   UNTRUSTED_NOTICE,
   VersionBundle,
 } from "@artifacts/schema";
-import { repoRoot, WORK } from "../bundle/manifest.ts";
+import { isGenerated, LOCAL, MANIFEST, PROJECT_RULES, WORK } from "../bundle/layout.ts";
+import { repoRoot } from "../bundle/manifest.ts";
 import type { Client } from "../client.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { signedIn } from "./account.ts";
@@ -192,15 +193,11 @@ export async function viewCommand(
   out.result({ ...about, path, bytes: image.length }, () => out.say(path));
 }
 
-/** The CLI runs this file on `artifacts lint`, so a published copy must never land in a working folder. */
-const EXECUTES = new Set(["lint.rules.js"]);
-const isGenerated = (path: string) => path.split("/").some((part) => part.startsWith("__"));
-
 /** Where a file from the server may land: it's another person's upload, so its path decides nothing. */
 export function safeTarget(root: string, path: string) {
   if (!isBundlePath(path)) return null;
   const parts = path.split("/");
-  if (EXECUTES.has(parts[parts.length - 1] as string) || parts[0] === ".artifacts") return null;
+  if (parts.at(-1) === PROJECT_RULES || parts[0] === LOCAL) return null;
   const target = resolve(root, path);
   return target.startsWith(`${resolve(root)}${sep}`) ? target : null;
 }
@@ -269,7 +266,7 @@ export async function pullCommand(
   try {
     const { written, skipped } = await writeFiles(building, bundle.files, (path) => !isGenerated(path));
     if (bundle.rebuilt) {
-      writeFileSync(join(building, "artifact.json"), `${JSON.stringify(bundle.manifest, null, 2)}\n`);
+      writeFileSync(join(building, MANIFEST), `${JSON.stringify(bundle.manifest, null, 2)}\n`);
     }
     rmSync(root, { recursive: true, force: true });
     mkdirSync(dirname(root), { recursive: true });
@@ -343,9 +340,9 @@ export async function exportCommand(
         ),
       );
       const dir = join(base, `v${n}`);
-      const done = await writeFiles(dir, bundle.files, (path) => path !== "__renders", cache);
+      const done = await writeFiles(dir, bundle.files, () => true, cache);
       skipped.push(...done.skipped);
-      if (bundle.rebuilt) json(join(dir, "artifact.json"), bundle.manifest);
+      if (bundle.rebuilt) json(join(dir, MANIFEST), bundle.manifest);
       versions += 1;
     }
   }

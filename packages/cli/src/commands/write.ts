@@ -15,7 +15,8 @@ import icons from "../../../kit/src/icons.js" with { type: "text" };
 import tokens from "../../../kit/src/tokens.css" with { type: "text" };
 import { detectAgent } from "../agent.ts";
 import { type LocalBrand, loadBrand } from "../brand/cache.ts";
-import { findRoot, loadManifest, type Problem, repoRoot, WORK } from "../bundle/manifest.ts";
+import { FIXTURES, KIT_DIR, LOCAL, MANIFEST, PROJECT_RULES, renderPath, WORK } from "../bundle/layout.ts";
+import { findRoot, loadManifest, type Problem, repoRoot } from "../bundle/manifest.ts";
 import type { Client } from "../client.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
@@ -34,7 +35,7 @@ const hasErrors = (problems: Problem[]) => problems.some((problem) => problem.se
 
 /** Project-specific rules from lint.rules.js beside the manifest (07). */
 async function projectRules(root: string, manifest: unknown): Promise<Problem[]> {
-  const path = join(root, "lint.rules.js");
+  const path = join(root, PROJECT_RULES);
   if (!existsSync(path)) return [];
   const { default: rules } = (await import(path)) as {
     default: {
@@ -267,7 +268,7 @@ export function publishBody(
     if (sources.has(hash)) continue;
     sources.set(hash, source);
     declared.push({
-      path: `__renders/${hash}.webp`,
+      path: renderPath(hash),
       sha256: hash,
       size: Bun.file(source).size,
       type: "image/webp",
@@ -300,8 +301,8 @@ const STARTERS = {
       id,
       kind: "canvas",
       boards: [{ id: "main", title: "Main", src: "boards/main.html" }],
-      styles: ["vendor/artifacts-kit/tokens.css"],
-      scripts: ["vendor/artifacts-kit/frames.js"],
+      styles: [`${KIT_DIR}/tokens.css`],
+      scripts: [`${KIT_DIR}/frames.js`],
     }),
     file: "boards/main.html",
     body: `<a-phone data-frame="welcome" data-title="Welcome">
@@ -325,22 +326,22 @@ const STARTERS = {
 
 /** The kit, as `init` copies it. */
 export const kitFiles = (): Record<string, string> => ({
-  "vendor/artifacts-kit/frames.js": frames,
-  "vendor/artifacts-kit/data.js": data,
-  "vendor/artifacts-kit/backend.js": backend,
-  "vendor/artifacts-kit/icons.js": icons,
-  "vendor/artifacts-kit/tokens.css": tokens,
-  "vendor/artifacts-kit/components.css": components,
-  "vendor/artifacts-kit/article.css": article,
-  "vendor/artifacts-kit/VERSION": `${VERSION}\n`,
+  [`${KIT_DIR}/frames.js`]: frames,
+  [`${KIT_DIR}/data.js`]: data,
+  [`${KIT_DIR}/backend.js`]: backend,
+  [`${KIT_DIR}/icons.js`]: icons,
+  [`${KIT_DIR}/tokens.css`]: tokens,
+  [`${KIT_DIR}/components.css`]: components,
+  [`${KIT_DIR}/article.css`]: article,
+  [`${KIT_DIR}/VERSION`]: `${VERSION}\n`,
 });
 
 /** `.artifacts/` holds renders and working folders, so it stays out of git. */
 function ignoreArtifacts(root: string) {
   const ignore = join(root, ".gitignore");
   const current = existsSync(ignore) ? readFileSync(ignore, "utf8") : "";
-  if (!current.split("\n").includes(".artifacts/")) {
-    writeFileSync(ignore, `${current}${current && !current.endsWith("\n") ? "\n" : ""}.artifacts/\n`);
+  if (!current.split("\n").includes(`${LOCAL}/`)) {
+    writeFileSync(ignore, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${LOCAL}/\n`);
   }
 }
 
@@ -374,7 +375,7 @@ export function initCommand(
   if (!/^[a-z0-9-]{1,40}$/.test(slug))
     throw new UsageError("--slug uses a-z, 0-9 and -, up to 40 characters.");
   const root = flags.inRepo ? base : join(base, WORK, slug);
-  if (existsSync(join(root, "artifact.json"))) {
+  if (existsSync(join(root, MANIFEST))) {
     throw new CliError(
       flags.inRepo
         ? "There's already an artifact.json here."
@@ -391,7 +392,7 @@ export function initCommand(
       mkdirSync(join(target, ".."), { recursive: true });
       writeFileSync(
         target,
-        path === "artifact.json"
+        path === MANIFEST
           ? body
               .replaceAll("{{project}}", project)
               .replaceAll("{{slug}}", slug)
@@ -401,14 +402,14 @@ export function initCommand(
     }
   } else {
     writeFileSync(
-      join(root, "artifact.json"),
+      join(root, MANIFEST),
       `${JSON.stringify({ project, slug, title: basename(base), pages: [starter.page("main")] }, null, 2)}\n`,
     );
     mkdirSync(join(root, starter.file, ".."), { recursive: true });
     writeFileSync(join(root, starter.file), starter.body);
   }
-  mkdirSync(join(root, "fixtures"), { recursive: true });
-  mkdirSync(join(root, "vendor/artifacts-kit"), { recursive: true });
+  mkdirSync(join(root, FIXTURES), { recursive: true });
+  mkdirSync(join(root, KIT_DIR), { recursive: true });
   for (const [path, body] of Object.entries(kitFiles())) writeFileSync(join(root, path), body);
   ignoreArtifacts(base);
   out.result(

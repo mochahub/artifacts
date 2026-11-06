@@ -57,21 +57,6 @@ const VIEWPORT = { width: 1600, height: 1200 };
 const NOW = new Date("2026-01-01T09:41:00").getTime();
 const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 
-const TYPES = {
-  ".html": "text/html",
-  ".css": "text/css",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2",
-  ".woff": "font/woff",
-  ".json": "application/json",
-};
-
 const realRoot = realpathSync(job.root);
 const inside = (path) => path.startsWith(realRoot + sep);
 
@@ -92,23 +77,14 @@ const server = Bun.serve({
     if (!inside(resolve(realRoot, path)) || !(await file.exists()) || !inside(realpathSync(file.name))) {
       return new Response("missing", { status: 404 });
     }
-    const type = TYPES[path.slice(path.lastIndexOf(".")).toLowerCase()] ?? "application/octet-stream";
+    const type = job.types[path.slice(path.lastIndexOf(".")).toLowerCase()] ?? "application/octet-stream";
     return new Response(file, { headers: { "Content-Type": type } });
   },
 });
 const origin = `http://127.0.0.1:${server.port}`;
 
-const relativeUp = (dir) =>
-  dir === "."
-    ? ""
-    : `${dir
-        .split("/")
-        .map(() => "..")
-        .join("/")}/`;
-
 function boardPage(board) {
-  const dir = dirname(board.src);
-  const up = relativeUp(dir);
+  const { up } = board;
   const body = readFileSync(join(job.root, board.src), "utf8");
   return `<!doctype html><html><head><meta charset="utf-8">
 ${board.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}

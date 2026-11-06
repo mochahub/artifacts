@@ -5,7 +5,21 @@ import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@art
 import { buildArticle, mermaidSources } from "@artifacts/schema/article";
 import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
 import type { LocalBrand } from "../brand/cache.ts";
-import { typeOf } from "../bundle/crawl.ts";
+import {
+  articlePath,
+  BACKEND_BUNDLE,
+  BRAND_FONTS,
+  boardShell,
+  CONTACT_SHEET,
+  FIXTURE_DATA,
+  livePage,
+  MANIFEST,
+  OG_IMAGE,
+  RENDER_DIR,
+  TYPES,
+  typeOf,
+  upTo,
+} from "../bundle/layout.ts";
 import type { Problem } from "../bundle/manifest.ts";
 import { CliError, type Output } from "../output.ts";
 import { asBun, ensureHelper } from "./install.ts";
@@ -74,7 +88,7 @@ export function resolveTheme(
 const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
 
 function fixtures(root: string) {
-  const path = join(root, "fixtures/data.json");
+  const path = join(root, FIXTURE_DATA);
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
 }
 
@@ -82,7 +96,7 @@ const MAX_BACKEND = 1024 * 1024;
 
 /** One ES module with no imports (05). */
 function bundleBackend(root: string, src: string, outDir: string) {
-  const path = join(outDir, "__backend.js");
+  const path = join(outDir, BACKEND_BUNDLE);
   const build = asBun(
     // "./" so a src that starts with a dash is a file, not an option to bun build.
     ["build", `./${src}`, "--target=browser", "--format=esm", "--minify", `--outfile=${path}`],
@@ -140,10 +154,10 @@ export function render(
   options: { lint: boolean; brand?: LocalBrand | null },
   out: Output,
 ): RenderResult {
-  const outDir = join(root, ".artifacts/render");
+  const outDir = join(root, RENDER_DIR);
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
-  const contactSheet = join(root, ".artifacts/contact-sheet.png");
+  const contactSheet = join(root, CONTACT_SHEET);
   rmSync(contactSheet, { force: true }); // With no frames nothing replaces it.
 
   const boards = manifest.pages.flatMap((page) =>
@@ -152,7 +166,8 @@ export function render(
           key: board.id,
           pageKey: page.id,
           src: board.src,
-          shell: `${dirname(board.src) === "." ? "" : `${dirname(board.src)}/`}__board-${board.id}.html`,
+          shell: boardShell(board.src, board.id),
+          up: upTo(dirname(board.src)),
           styles: page.styles,
           scripts: page.scripts,
         }))
@@ -168,7 +183,7 @@ export function render(
   const merged = resolveTheme(manifest, options.brand);
   // Fonts ship in the bundle, so each page finds them by a path that depends on its folder.
   const fonts = (options.brand?.fonts ?? []).filter((font) => options.brand?.fontFiles.has(font.hash));
-  const fontDir = join(root, ".artifacts/brand-fonts");
+  const fontDir = join(root, BRAND_FONTS);
   for (const font of fonts) {
     mkdirSync(fontDir, { recursive: true });
     copyFileSync(options.brand?.fontFiles.get(font.hash) as string, join(root, fontPath(font)));
@@ -188,6 +203,7 @@ export function render(
       out: outDir,
       lint: options.lint,
       fixtures: fixtures(root),
+      types: TYPES,
       theme,
       contactSheet,
       title: manifest.title,
@@ -229,14 +245,14 @@ export function render(
   }
 
   // Stored with each version, so `artifacts pull` can give back what was published (05).
-  addGenerated("artifact.json", readFileSync(join(root, "artifact.json")), "application/json");
+  addGenerated(MANIFEST, readFileSync(join(root, MANIFEST)), "application/json");
 
   let backendHash: string | null = null;
   if (backendPath) {
     const body = readFileSync(backendPath);
     backendHash = sha256(body);
-    files.set("__backend.js", {
-      path: "__backend.js",
+    files.set(BACKEND_BUNDLE, {
+      path: BACKEND_BUNDLE,
       hash: backendHash,
       size: body.length,
       type: "text/javascript",
@@ -280,15 +296,8 @@ export function render(
       frameHashes.set(`${board.pageKey}/${board.key}/${frame.id}`, frame.renders["2x"]);
       let livePath: string | null = null;
       if (frame.live && frame.html) {
-        const dir = dirname(definition.src);
-        const up =
-          dir === "."
-            ? ""
-            : `${dir
-                .split("/")
-                .map(() => "..")
-                .join("/")}/`;
-        livePath = `${dir === "." ? "" : `${dir}/`}__live-${frame.id}.html`;
+        const up = upTo(dirname(definition.src));
+        livePath = livePage(definition.src, frame.id);
         addGenerated(
           livePath,
           `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -340,7 +349,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
         mermaid: new Map(Object.entries(helper.mermaid)),
       });
       problems.push(...built.problems);
-      const htmlPath = `__articles/${page.id}.html`;
+      const htmlPath = articlePath(page.id);
       addGenerated(htmlPath, built.html, "text/html; charset=utf-8");
       blocks.push(...built.blocks.map((block) => ({ ...block, pageKey: page.id })));
       pages.push({
@@ -394,8 +403,8 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
 
   const og = helper.og;
   const ogBody = readFileSync(join(outDir, `${og}.webp`));
-  files.set("__og.webp", {
-    path: "__og.webp",
+  files.set(OG_IMAGE, {
+    path: OG_IMAGE,
     hash: og,
     size: ogBody.length,
     type: "image/webp",

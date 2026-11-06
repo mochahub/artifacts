@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { isDataKey } from "@artifacts/schema";
+import { BACKEND_BUNDLE, DATA_DIR } from "../bundle/layout.ts";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
 import { viewerAssets } from "../dev/assets.ts";
 import { staticLint } from "../lint/static.ts";
@@ -59,7 +60,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
   const contentHosts = hostsOf(flags.port + 1);
   const wrongHost = (request: Request, allowed: Set<string>) =>
     allowed.has(request.headers.get("host") ?? "") ? null : new Response("Wrong host", { status: 403 });
-  const dataDir = join(root, ".artifacts/data");
+  const dataDir = join(root, DATA_DIR);
   let version = 0;
   let built: RenderResult | null = null;
   let title = "";
@@ -335,7 +336,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
   let sandbox: Child | null = null;
   let requests = 0;
   async function backend(request: Request, path: string) {
-    const source = built?.files.get("__backend.js");
+    const source = built?.files.get(BACKEND_BUNDLE);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (!source) return new Response("No backend", { status: 404, headers: CORS });
     const dir = ensureHelper(out);

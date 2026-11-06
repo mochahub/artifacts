@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, extname, join, normalize, relative, sep } from "node:path";
+import { dirname, extname, join, normalize, sep } from "node:path";
 import type { Manifest } from "@artifacts/schema";
 import { cleanUrl } from "@artifacts/schema/article";
 import { init, parse as parseModule } from "es-module-lexer";
@@ -10,40 +10,8 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { FIXTURE_DATA, FIXTURE_FILES, MANIFEST } from "./layout.ts";
 import type { Problem } from "./manifest.ts";
-
-const TYPES: Record<string, string> = {
-  ".html": "text/html",
-  ".htm": "text/html",
-  ".css": "text/css",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".json": "application/json",
-  ".md": "text/markdown",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".gif": "image/gif",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-  ".otf": "font/otf",
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".vtt": "text/vtt",
-  ".pdf": "application/pdf",
-  ".txt": "text/plain",
-};
-
-export { cleanUrl };
-export const typeOf = (path: string) => TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
 
 export type Crawled = { files: Map<string, string>; problems: Problem[] };
 
@@ -232,19 +200,18 @@ export async function crawl(root: string, manifest: Manifest): Promise<Crawled> 
   };
 
   for (const page of manifest.pages) {
-    if (page.kind === "article" || page.kind === "prototype") add(page.src, "artifact.json", "");
+    if (page.kind === "article" || page.kind === "prototype") add(page.src, MANIFEST, "");
     if (page.kind === "canvas") {
-      for (const board of page.boards) add(board.src, "artifact.json", "");
-      for (const path of [...page.styles, ...page.scripts]) add(path, "artifact.json", "");
+      for (const board of page.boards) add(board.src, MANIFEST, "");
+      for (const path of [...page.styles, ...page.scripts]) add(path, MANIFEST, "");
     }
-    if (page.kind === "gallery") for (const item of page.items) add(item.src, "artifact.json", "");
+    if (page.kind === "gallery") for (const item of page.items) add(item.src, MANIFEST, "");
   }
-  if (existsSync(join(root, "fixtures/data.json")))
-    queue.push({ path: "fixtures/data.json", from: "fixtures" });
+  if (existsSync(join(root, FIXTURE_DATA))) queue.push({ path: FIXTURE_DATA, from: "fixtures" });
   // Renders read these, so a pulled working folder needs them to come out the same.
-  if (existsSync(join(root, "fixtures/files"))) {
-    for (const entry of readdirSync(join(root, "fixtures/files"), { recursive: true, encoding: "utf8" })) {
-      const path = `fixtures/files/${entry.split(sep).join("/")}`;
+  if (existsSync(join(root, FIXTURE_FILES))) {
+    for (const entry of readdirSync(join(root, FIXTURE_FILES), { recursive: true, encoding: "utf8" })) {
+      const path = `${FIXTURE_FILES}/${entry.split(sep).join("/")}`;
       if (statSync(join(root, path)).isFile()) queue.push({ path, from: "fixtures" });
     }
   }
@@ -299,5 +266,3 @@ export async function crawl(root: string, manifest: Manifest): Promise<Crawled> 
   }
   return { files, problems };
 }
-
-export const relativeTo = (root: string, path: string) => relative(root, path).split(sep).join("/");

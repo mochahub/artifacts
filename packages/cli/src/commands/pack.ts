@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { PACK_DIR } from "../bundle/layout.ts";
 import { findRoot, repoRoot } from "../bundle/manifest.ts";
 import { requireHttps } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
 import { collectForPublish, gitRepo, publishBody, uploadFiles } from "./write.ts";
-
-const PACK = ".artifacts/pack";
 
 type Pack = {
   project: string;
@@ -29,7 +28,7 @@ export async function packCommand(
 ) {
   const root = findRoot(undefined, want);
   const { manifest, rendered } = await collectForPublish(root, out);
-  const dir = join(root, PACK);
+  const dir = join(root, PACK_DIR);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "files"), { recursive: true });
   const { declared, sources, commit } = publishBody(rendered, manifest, {
@@ -73,7 +72,7 @@ export async function packUpload(want: string | undefined, plan: string, out: Ou
     if (new URL(item.url).origin !== planUrl.origin) throw new CliError("That plan points somewhere else.");
     if (!/^[0-9a-f]{64}$/.test(item.sha256)) throw new CliError("That plan isn't valid.");
   }
-  const dir = join(root, PACK, "files");
+  const dir = join(root, PACK_DIR, "files");
   const sources = new Map(missing.map((item) => [item.sha256, join(dir, item.sha256)]));
   for (const [hash, path] of sources) {
     if (!existsSync(path)) throw new CliError(`This pack has no file ${hash}. Run artifacts pack again.`);
