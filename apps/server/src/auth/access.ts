@@ -26,9 +26,6 @@ export type ProjectRow = typeof projects.$inferSelect;
 export type LoadedArtifact = ArtifactResource & { row: ArtifactRow; project: ProjectRow };
 export type LoadedProject = ProjectResource & { row: ProjectRow };
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export const isUuid = (value: string | undefined): value is string => !!value && UUID.test(value);
-
 /**
  * Who holds what on each project, directly or through a team. Lists pass `personId`, which needs only
  * that person's rows.

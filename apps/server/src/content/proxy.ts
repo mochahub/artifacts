@@ -1,4 +1,4 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -241,8 +241,3 @@ export async function runBackend(
     return refused("The backend gave an answer that can't be sent.");
   }
 }
-
-export const expireLogs = (deps: Deps) =>
-  deps.db
-    .delete(backendLogs)
-    .where(lt(backendLogs.createdAt, new Date(deps.clock.now().getTime() - 24 * 3600_000)));
