@@ -14,6 +14,7 @@ import {
   type Artifact,
   type ArtifactCard,
   type ContentToken,
+  type DataFiles,
   type DataList,
   type DataValue,
   DEFAULT_ORG_SETTINGS,
@@ -24,6 +25,8 @@ import {
   type Person,
   type ProjectArtifacts,
   type ProjectRow,
+  type UrlResponse,
+  type VersionDetail,
   type VersionRow,
 } from "@artifacts/schema";
 import type { z } from "zod";
@@ -191,27 +194,32 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
     permissions: { comment: false, decide: false, manage: false, share: false, delete: false, purge: false },
   });
 
-  const versionBody = () => ({
+  const versionBody = (): Shape<typeof VersionDetail> => ({
     n: version,
+    previous: null,
     notes: {},
-    pages: built?.pages.map((page) => {
-      const base = { key: page.key, kind: page.kind, title: page.title, group: page.group };
+    message: null,
+    pages: (built?.pages ?? []).map((page) => {
+      const base = { key: page.key, title: page.title, group: page.group };
       if (page.kind === "article") {
         return {
           ...base,
+          kind: page.kind,
           htmlHash: page.meta.htmlHash,
           outline: page.meta.outline,
           readingMinutes: page.meta.readingMinutes,
-          blocks: built?.blocks
+          theme: page.meta.theme ?? null,
+          blocks: (built?.blocks ?? [])
             .filter((block) => block.pageKey === page.key)
             .map((block) => ({ key: block.blockKey, contentHash: block.contentHash, changed: false })),
         };
       }
       return {
         ...base,
+        kind: page.kind,
         boards: page.meta.boards ?? [],
         meta: page.meta,
-        frames: built?.frames
+        frames: (built?.frames ?? [])
           .filter((frame) => frame.pageKey === page.key)
           .map((frame) => ({
             key: frame.frameKey,
@@ -259,12 +267,16 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
           updatedAt: new Date().toISOString(),
         }));
       return kind === "files"
-        ? json({ files: entries.map(({ key: name, ...rest }) => ({ name, ...rest })), nextCursor: null })
+        ? answer<typeof DataFiles>({
+            files: entries.map(({ key: name, ...rest }) => ({ name, ...rest })),
+            nextCursor: null,
+          })
         : answer<typeof DataList>({ keys: entries, nextCursor: null });
     }
     if (request.method === "GET") {
       if (!existsSync(path)) return fail(404, "not_found", "Not found.");
-      if (kind === "files") return json({ url: `${viewerOrigin}/__data/${scope}/${key}` });
+      if (kind === "files")
+        return answer<typeof UrlResponse>({ url: `${viewerOrigin}/__data/${scope}/${key}` });
       return answer<typeof DataValue>({
         value: JSON.parse(readFileSync(path, "utf8")),
         etag: etagIfAny(path),
@@ -351,7 +363,7 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
         },
       ]);
     }
-    if (path === `${inArtifact}/versions/${version}`) return json(versionBody());
+    if (path === `${inArtifact}/versions/${version}`) return answer<typeof VersionDetail>(versionBody());
     if (path === `${inArtifact}/content-token`) {
       return answer<typeof ContentToken>({
         base: `${contentOrigin}/${secret}/v${version}/`,

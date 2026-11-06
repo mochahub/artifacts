@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { TEMPLATES } from "@artifacts/kit/templates";
-import { Brand, BrandFont, BrandProposal, FONT_FORMATS, MAX_FONT_BYTES, OrgBrand } from "@artifacts/schema";
+import {
+  Brand,
+  BrandFont,
+  BrandProposal,
+  type BrandProposalCreated,
+  FONT_FORMATS,
+  MAX_FONT_BYTES,
+  OrgBrand,
+} from "@artifacts/schema";
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
@@ -141,7 +149,7 @@ export async function brandCommand(
         brand,
       );
       const { fontFiles: _, ...plain } = brand;
-      const { id } = await client.post<{ id: string }>("/api/brand/proposals", {
+      const { id } = await client.post<BrandProposalCreated>("/api/brand/proposals", {
         brand: plain,
         project: "brand",
         slug,

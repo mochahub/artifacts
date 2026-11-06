@@ -1,12 +1,15 @@
 import {
+  type AccessAdded,
   INVITE_DAYS,
   type InviteCreated,
+  type PeopleList,
   ProjectAccessList,
+  type ResetLinkCreated,
+  type ShareLinkCreated,
   SLUG_PATTERN,
   TeamDetail,
   TeamList,
 } from "@artifacts/schema";
-import type { z } from "zod";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
 import type { Input } from "../command.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
@@ -21,18 +24,16 @@ export async function orgCommand(
   const client = await signedIn(flags.server);
   if (sub === "invite") {
     const role = flags.role ?? "member";
-    const { url } = await client.post<z.infer<typeof InviteCreated>>("/api/invites", { email, role });
+    const { url } = await client.post<InviteCreated>("/api/invites", { email, role });
     return out.result({ url, email, role }, () => {
       out.say(`✓ Invite for ${email} (${role}), works once, expires in ${INVITE_DAYS} days`);
       out.say(`  ${url}   send this yourself; nothing was emailed`);
     });
   }
-  const { people } = await client.get<{ people: { id: string; email: string }[] }>("/api/people");
+  const { people } = await client.get<PeopleList>("/api/people");
   const person = people.find((row) => row.email.toLowerCase() === email.toLowerCase());
   if (!person) throw new CliError(`Nobody here has the email ${email}.`);
-  const { url, expiresAt } = await client.post<{ url: string; expiresAt: string }>(
-    `/api/people/${person.id}/reset-link`,
-  );
+  const { url, expiresAt } = await client.post<ResetLinkCreated>(`/api/people/${person.id}/reset-link`);
   out.result({ url, expiresAt }, () => out.say(`Works once, for one hour:\n  ${url}`));
 }
 
@@ -134,7 +135,7 @@ export async function shareCommand(
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, target);
   if (flags.link) {
-    const { url } = await client.post<{ url: string }>(`/api/artifacts/${artifact.id}/links`, {
+    const { url } = await client.post<ShareLinkCreated>(`/api/artifacts/${artifact.id}/links`, {
       permission: flags.comment ? "comment" : "view",
       expiresIn: flags.expires ?? null,
     });
@@ -151,9 +152,11 @@ export async function shareCommand(
     );
   }
   const permission = flags.publish ? "publish" : flags.comment ? "comment" : "view";
-  const result = await client.post<{ url?: string }>(`/api/artifacts/${artifact.id}/access`, {
+  const result = await client.post<AccessAdded>(`/api/artifacts/${artifact.id}/access`, {
     email: flags.invite,
     permission,
   });
-  out.result(result, () => out.say(result.url ?? `✓ ${flags.invite} can ${permission} ${artifact.title}.`));
+  out.result(result, () =>
+    out.say("url" in result ? result.url : `✓ ${flags.invite} can ${permission} ${artifact.title}.`),
+  );
 }

@@ -1,5 +1,9 @@
 import {
   ArtifactReviewStatus,
+  type Compare,
+  type DeletedList,
+  type DeleteResult,
+  type RestoreResult,
   type Thread,
   Thread as ThreadSchema,
   type VersionRow,
@@ -153,8 +157,7 @@ export async function diffCommand({ args: { a, b }, flags, usage }: Input<"a" | 
   versionNumber(number(b) as string);
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
-  type Change = { added: string[]; removed: string[]; changed: string[] };
-  const result = await client.get<{ frames: Change; blocks: Change }>(
+  const result = await client.get<Compare>(
     `/api/artifacts/${artifact.id}/compare?from=${number(a)}&to=${number(b)}`,
   );
   out.result(result, () => {
@@ -172,7 +175,7 @@ export async function restoreCommand({ args: { n }, flags, usage }: Input<"n", S
   if (!n || !/^\d+$/.test(n)) throw usage();
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
-  const result = await client.post<{ n: number }>(`/api/artifacts/${artifact.id}/versions/${n}/restore`);
+  const result = await client.post<RestoreResult>(`/api/artifacts/${artifact.id}/versions/${n}/restore`);
   out.result(result, () => out.say(`✓ v${n} is now v${result.n}.`));
 }
 
@@ -192,12 +195,6 @@ export async function archiveCommand(
   );
 }
 
-type DeletedRow = {
-  kind: string;
-  artifact: { id: string; project: string; slug: string; title: string };
-  version?: number;
-};
-
 export async function deleteCommand(
   { args: { target }, flags }: Input<"target", Server & { version?: string }>,
   out: Output,
@@ -208,7 +205,7 @@ export async function deleteCommand(
   const path = flags.version
     ? `/api/artifacts/${artifact.id}/versions/${flags.version}/delete`
     : `/api/artifacts/${artifact.id}/delete`;
-  const { purgeAfter } = await client.post<{ purgeAfter: string }>(path);
+  const { purgeAfter } = await client.post<DeleteResult>(path);
   const undo = `artifacts undelete ${artifact.project}/${artifact.slug}${flags.version ? ` --version ${flags.version}` : ""}`;
   out.result({ purgeAfter, undo }, () => {
     out.say(`✓ Moved to Recently deleted, until ${purgeAfter.slice(0, 10)}.`);
@@ -223,12 +220,14 @@ export async function undeleteCommand(
   if (flags.version) versionNumber(flags.version, "--version");
   const client = await signedIn(flags.server);
   const { project, slug } = artifactRef(target);
-  const list = await client.get<DeletedRow[]>("/api/deleted");
+  const list = await client.get<DeletedList>("/api/deleted");
   const entry = list.find(
     (row) =>
       row.artifact.project === project &&
       row.artifact.slug === slug &&
-      (flags.version ? row.version === Number(flags.version) : row.kind === "artifact"),
+      (flags.version
+        ? row.kind === "version" && row.version === Number(flags.version)
+        : row.kind === "artifact"),
   );
   if (!entry) throw new CliError(`Nothing of yours called ${project}/${slug} is in Recently deleted.`);
   const path = flags.version

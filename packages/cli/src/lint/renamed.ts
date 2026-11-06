@@ -1,9 +1,7 @@
-import { Artifact, Thread } from "@artifacts/schema";
+import { Artifact, Thread, type VersionDetail } from "@artifacts/schema";
 import { z } from "zod";
 import type { Client } from "../client.ts";
 import type { Problem } from "./problem.ts";
-
-type Version = { pages: { key: string; frames?: { key: string }[]; blocks?: { key: string }[] }[] };
 
 /** `frames/renamed` (07): frames or blocks that were in the latest version and are gone. */
 export async function renamedProblems(
@@ -18,7 +16,7 @@ export async function renamedProblems(
   } catch {
     return []; // Nothing published yet, or not visible to this caller: prepare reports that.
   }
-  const version = await client.get<Version>(
+  const version = await client.get<VersionDetail>(
     `/api/artifacts/${artifact.id}/versions/${artifact.latestVersion}`,
   );
   const threads = z
@@ -41,8 +39,10 @@ export async function renamedProblems(
     });
   };
   for (const page of version.pages) {
-    for (const frame of page.frames ?? []) if (!current.frames.has(frame.key)) check(frame.key, "Frame");
-    for (const block of page.blocks ?? []) {
+    for (const frame of "frames" in page ? page.frames : []) {
+      if (!current.frames.has(frame.key)) check(frame.key, "Frame");
+    }
+    for (const block of "blocks" in page ? page.blocks : []) {
       const key = `${page.key}/${block.key}`;
       if (!current.blocks.has(key) && commented.has(key)) check(key, "Block");
     }

@@ -1,13 +1,15 @@
-import { type DataList, DataScope, isDataKey } from "@artifacts/schema";
-import type { z } from "zod";
+import {
+  type BackendLog,
+  type BackendLogs,
+  type DataList,
+  DataScope,
+  type DataValue,
+  isDataKey,
+} from "@artifacts/schema";
 import type { Input } from "../command.ts";
 import { type Output, UsageError } from "../output.ts";
 import { signedIn } from "../session.ts";
 import { resolveArtifact, versionNumber } from "../target.ts";
-
-type ListPage = z.infer<typeof DataList>;
-
-type LogLine = { id: string; version: number; level: string; message: string; createdAt: string };
 
 /** `artifacts logs` (07): the last 24 hours, and then whatever arrives. */
 export async function logsCommand(
@@ -20,7 +22,7 @@ export async function logsCommand(
   const query = flags.version ? `version=${flags.version}&` : "";
   let after = "";
   for (;;) {
-    const lines = await client.get<LogLine[]>(`/api/artifacts/${artifact.id}/logs?${query}after=${after}`);
+    const lines = await client.get<BackendLogs>(`/api/artifacts/${artifact.id}/logs?${query}after=${after}`);
     if (!flags.follow) return out.result(lines, () => print(lines, out));
     print(lines, out);
     after = lines.at(-1)?.id ?? after;
@@ -28,7 +30,7 @@ export async function logsCommand(
   }
 }
 
-const print = (lines: LogLine[], out: Output) => {
+const print = (lines: BackendLog[], out: Output) => {
   for (const line of lines)
     out.say(`${line.createdAt.slice(11, 19)} v${line.version} ${line.level}  ${line.message}`);
 };
@@ -46,10 +48,10 @@ export async function dataCommand(
   const base = `/api/artifacts/${artifact.id}`;
   switch (sub) {
     case "ls": {
-      const keys: ListPage["keys"] = [];
+      const keys: DataList["keys"] = [];
       let cursor = "";
       do {
-        const page = await client.get<ListPage>(`${base}/data/${scope}?cursor=${encodeURIComponent(cursor)}`);
+        const page = await client.get<DataList>(`${base}/data/${scope}?cursor=${encodeURIComponent(cursor)}`);
         keys.push(...page.keys);
         cursor = page.nextCursor ?? "";
       } while (cursor);
@@ -60,7 +62,7 @@ export async function dataCommand(
     }
     case "get": {
       if (!key) throw usage(1);
-      const { value } = await client.get<{ value: unknown }>(`${base}/data/${scope}/${key}`);
+      const { value } = await client.get<DataValue>(`${base}/data/${scope}/${key}`);
       return out.result(value, () => out.say(JSON.stringify(value, null, 2)));
     }
     case "export": {
