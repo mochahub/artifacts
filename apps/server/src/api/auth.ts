@@ -1,3 +1,4 @@
+import type { Me, PersonResponse, ResetPreview, SessionList } from "@artifacts/schema";
 import { ChangePassword, PASSWORD_MAX, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
 import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Passkeys } from "../auth/passkeys.ts";
@@ -54,7 +55,7 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
     }
     limits.passwordOk(account);
     await startSession(c, deps, person.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 
   // A CLI token can end itself, so `artifacts logout` leaves nothing valid behind.
@@ -101,7 +102,7 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
       person: caller.person,
       org: { name: c.var.org.name },
       recentAuth: caller.kind === "person" && caller.recentAuth,
-    });
+    } satisfies Me);
   });
 
   routes.get("/api/me/sessions", { action: "account.manage" }, async (c) => {
@@ -149,7 +150,7 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
         lastSeenAt: row.lastUsedAt?.toISOString() ?? null,
         current: false,
       })),
-    ]);
+    ] satisfies SessionList);
   });
 
   routes.delete("/api/me/sessions/:id", { action: "account.manage" }, async (c) => {
@@ -230,7 +231,7 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
     const link = await liveReset(c);
     const [person] = await db.select().from(people).where(eq(people.id, link.personId)).limit(1);
     if (!person || person.removedAt) throw new ApiError("gone", "This reset link no longer works.");
-    return c.json({ email: person.email });
+    return c.json({ email: person.email } satisfies ResetPreview);
   });
 
   routes.post("/api/reset/:token", { public: true }, async (c) => {
@@ -270,6 +271,6 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
       await tx.delete(identities).where(eq(identities.personId, person.id));
     });
     await startSession(c, deps, link.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 }

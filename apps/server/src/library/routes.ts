@@ -1,3 +1,4 @@
+import type { DecisionList } from "@artifacts/schema";
 import { isBundlePath, type VersionBundle } from "@artifacts/schema";
 import { desc, eq } from "drizzle-orm";
 import { decisions, pages, people } from "../db/schema.ts";
@@ -178,7 +179,7 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
         note: row.note,
         by,
         at: row.createdAt.toISOString(),
-      })),
+      })) satisfies DecisionList,
     );
   });
 }

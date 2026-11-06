@@ -1,3 +1,4 @@
+import type { BackendLogs, DataFiles, DataList, DataValue } from "@artifacts/schema";
 import { DataClear, DataPut } from "@artifacts/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
@@ -84,7 +85,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     return c.json({
       keys: page.keys.map((entry) => ({ ...entry, key: `${wanted ?? ""}${entry.key}` })),
       nextCursor: page.nextCursor,
-    });
+    } satisfies DataList);
   });
 
   routes.get(
@@ -94,7 +95,10 @@ export function dataRoutes(routes: Routes, deps: Deps) {
       const key = checkKey(c.req.param("key") as string);
       const object = await bucket.get(`${prefix(c)}${key}`);
       if (!object) throw new ApiError("not_found", "Not found.");
-      return c.json({ value: JSON.parse(new TextDecoder().decode(object.body)), etag: object.etag });
+      return c.json({
+        value: JSON.parse(new TextDecoder().decode(object.body)),
+        etag: object.etag,
+      } satisfies DataValue);
     },
   );
 
@@ -148,7 +152,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     return c.json({
       files: page.keys.map(({ key, ...rest }) => ({ name: key, ...rest })),
       nextCursor: page.nextCursor,
-    });
+    } satisfies DataFiles);
   });
 
   routes.put(
@@ -221,7 +225,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
         message: row.message,
         requestId: row.requestId,
         createdAt: row.createdAt.toISOString(),
-      })),
+      })) satisfies BackendLogs,
     );
   });
 

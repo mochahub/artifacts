@@ -1,3 +1,4 @@
+import type { ArtifactAccess, ShareLinkCreated } from "@artifacts/schema";
 import { AddAccess, CreateShareLink, GuestName, PatchArtifact, ShareWithTeam } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getCookie } from "hono/cookie";
@@ -155,7 +156,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
           expiresAt: link.expiresAt?.toISOString() ?? null,
           createdAt: link.createdAt.toISOString(),
         })),
-    });
+    } satisfies ArtifactAccess);
   });
 
   routes.post(
@@ -372,10 +373,11 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
           expiresAt,
         })
         .returning();
+      if (!link) throw new Error("no share link row");
       return c.json({
-        link: { id: link?.id, permission, expiresAt: expiresAt?.toISOString() ?? null },
+        link: { id: link.id, permission, expiresAt: expiresAt?.toISOString() ?? null },
         url: `${env.publicUrl}/s/${secret}`,
-      });
+      } satisfies ShareLinkCreated);
     },
   );
 

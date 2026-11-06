@@ -15,7 +15,7 @@ import {
   type Thread,
   UNTRUSTED_NOTICE,
 } from "@artifacts/schema";
-import { buildArticle } from "@artifacts/schema/article";
+import { articleHtmlPath, articleRecords, buildArticle } from "@artifacts/schema/article";
 import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
@@ -435,7 +435,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         const types: [string, string, string][] = [
           ["doc.md", markdown, "text/markdown"],
           ["artifact.json", manifest, "application/json"],
-          [`__articles/${ARTICLE_PAGE}.html`, built.html, "text/html; charset=utf-8"],
+          [articleHtmlPath(ARTICLE_PAGE), built.html, "text/html; charset=utf-8"],
         ];
         const stored = await Promise.all(
           types.map(async ([path, body, type]) => {
@@ -452,6 +452,14 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           files: stored,
         });
         const theme = ArticleTheme.safeParse(asker.org.brand?.theme ?? {});
+        const article = articleRecords(built, {
+          id: ARTICLE_PAGE,
+          title,
+          group: null,
+          position: 0,
+          htmlHash: stored[2]?.sha256,
+          theme: theme.success && Object.keys(theme.data).length > 0 ? theme.data : null,
+        });
         return publisher.commit(asker, {
           uploadId: prepared.uploadId,
           message: str(input.message, "message", 2000) ?? null,
@@ -464,23 +472,9 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
             stored.map((file) => [file.path, { hash: file.sha256, size: file.size, type: file.type }]),
           ),
           backendHash: null,
-          pages: [
-            {
-              key: ARTICLE_PAGE,
-              kind: "article",
-              title,
-              group: null,
-              position: 0,
-              meta: {
-                htmlHash: stored[2]?.sha256,
-                outline: built.outline,
-                readingMinutes: built.readingMinutes,
-                ...(theme.success && Object.keys(theme.data).length > 0 ? { theme: theme.data } : {}),
-              },
-            },
-          ],
+          pages: [article.page],
           frames: [],
-          blocks: built.blocks.map((block) => ({ ...block, pageKey: ARTICLE_PAGE })),
+          blocks: article.blocks,
         });
       },
     },

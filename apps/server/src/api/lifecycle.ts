@@ -1,4 +1,4 @@
-import type { ActivityKind } from "@artifacts/schema";
+import type { ActivityKind, ActivityPage, Compare, DeletedList, RestoreResult } from "@artifacts/schema";
 import {
   AGENT_MAX,
   agentLabel,
@@ -204,7 +204,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         deletedAt: version.deletedAt?.toISOString(),
         purgeAfter: version.purgeAfter?.toISOString(),
       })),
-    ]);
+    ] satisfies DeletedList);
   });
 
   /** Version :n, after the guard: who can't act on the artifact never learns which versions it has. */
@@ -386,7 +386,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         return next;
       });
       await record(c, "restored", { version: n, from: version.n });
-      return c.json({ n });
+      return c.json({ n } satisfies RestoreResult);
     },
   );
 
@@ -422,7 +422,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       },
       blocks: changes(blockHashes(from.blockRows), blockHashes(to.blockRows)),
       notes: to.row.notes,
-    });
+    } satisfies Compare);
   });
 
   routes.get("/api/activity", { action: "home.read" }, async (c) => {
@@ -493,8 +493,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       })),
       nextCursor:
         rows.length === 200 || visible.length === 50
-          ? (visible.at(-1) ?? rows.at(-1))?.row.createdAt.toISOString()
+          ? ((visible.at(-1) ?? rows.at(-1))?.row.createdAt.toISOString() ?? null)
           : null,
-    });
+    } satisfies ActivityPage);
   });
 }

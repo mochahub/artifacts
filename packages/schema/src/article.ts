@@ -55,6 +55,42 @@ export type ArticleOutput = {
   problems: { rule: string; severity: "error" | "warning"; message: string }[];
 };
 
+/** Where a built article's HTML goes in the bundle. */
+export const articleHtmlPath = (pageId: string) => `__articles/${pageId}.html`;
+
+/**
+ * A built article as a publish records it: its page, with the hash of its HTML, and its blocks on that
+ * page. The CLI and the hosted MCP both publish articles, so they make the same records.
+ */
+export function articleRecords(
+  built: Pick<ArticleOutput, "blocks" | "outline" | "readingMinutes">,
+  page: {
+    id: string;
+    title: string;
+    group: string | null;
+    position: number;
+    htmlHash: string | undefined;
+    theme: { accent?: string; font?: string; display?: string; radius?: number } | null;
+  },
+) {
+  return {
+    page: {
+      key: page.id,
+      kind: "article" as const,
+      title: page.title,
+      group: page.group,
+      position: page.position,
+      meta: {
+        htmlHash: page.htmlHash,
+        outline: built.outline,
+        readingMinutes: built.readingMinutes,
+        ...(page.theme ? { theme: page.theme } : {}),
+      },
+    },
+    blocks: built.blocks.map((block) => ({ ...block, pageKey: page.id })),
+  };
+}
+
 /** Every ```mermaid block, so the render helper can draw them first. */
 export function mermaidSources(markdown: string): string[] {
   const tree = unified().use(remarkParse).use(remarkGfm).parse(markdown);

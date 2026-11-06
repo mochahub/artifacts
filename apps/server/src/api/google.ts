@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { IdentityList } from "@artifacts/schema";
 import {
   CONSUMER_DOMAINS,
   type GoogleOutcome,
@@ -446,7 +447,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
       passkeys: keys.length,
       password: password.length > 0,
       google: c.var.org.googleEnabled,
-    });
+    } satisfies IdentityList);
   });
 
   routes.delete("/api/me/identities/:id", { action: "account.manage", recentAuth: true }, async (c) => {

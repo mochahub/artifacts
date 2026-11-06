@@ -1,3 +1,4 @@
+import type { PageMeta, VersionDetail, VersionRow } from "@artifacts/schema";
 import { agentLabel } from "@artifacts/schema";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { blocks, decisions, frames, pages, versions } from "../db/schema.ts";
@@ -16,8 +17,8 @@ import {
 } from "../versions/diff.ts";
 import { listVersions } from "../versions/list.ts";
 
-const boardIndex = (meta: Record<string, unknown>, key: string) =>
-  ((meta.boards ?? []) as { key: string }[]).findIndex((board) => board.key === key);
+const boardIndex = (meta: PageMeta, key: string) =>
+  (meta.boards ?? []).findIndex((board) => board.key === key);
 
 export function versionRoutes(routes: Routes, deps: Deps) {
   const { db } = deps;
@@ -61,8 +62,8 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         summary: version.summary,
         tags: version.tags ?? [],
         decision: decided.find((entry) => entry.version === version.n)?.kind,
-        changes: counts[index],
-      })),
+        changes: counts[index] ?? { frames: 0, blocks: 0 },
+      })) satisfies VersionRow[],
     );
   });
 
@@ -101,11 +102,12 @@ export function versionRoutes(routes: Routes, deps: Deps) {
       notes: version.notes,
       message: version.message,
       pages: pageRows.map((page) => {
-        const meta = page.meta as Record<string, unknown>;
-        const base = { key: page.pageKey, kind: page.kind, title: page.title, group: page.group };
+        const { meta } = page;
+        const base = { key: page.pageKey, title: page.title, group: page.group };
         if (page.kind === "article") {
           return {
             ...base,
+            kind: page.kind,
             htmlHash: meta.htmlHash,
             outline: meta.outline,
             readingMinutes: meta.readingMinutes,
@@ -121,6 +123,7 @@ export function versionRoutes(routes: Routes, deps: Deps) {
         }
         return {
           ...base,
+          kind: page.kind,
           boards: meta.boards ?? [],
           meta,
           frames: frameRows
@@ -146,6 +149,6 @@ export function versionRoutes(routes: Routes, deps: Deps) {
             })),
         };
       }),
-    });
+    } satisfies VersionDetail);
   });
 }

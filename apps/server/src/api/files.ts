@@ -1,3 +1,4 @@
+import type { ContentToken } from "@artifacts/schema";
 import { ContentTokenRequest, SHA256_HEX } from "@artifacts/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { can } from "../auth/can.ts";
@@ -137,7 +138,7 @@ export function fileRoutes(routes: Routes, deps: Deps) {
       return c.json({
         base: `${env.contentUrl}/t/${token}/v${version}/`,
         expiresAt: new Date(exp).toISOString(),
-      });
+      } satisfies ContentToken);
     },
   );
 }

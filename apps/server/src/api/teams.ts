@@ -1,4 +1,4 @@
-import type { ActivityKind } from "@artifacts/schema";
+import type { ActivityKind, TeamDetail } from "@artifacts/schema";
 import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type CallerFor, can, type TeamResource } from "../auth/can.ts";
@@ -153,7 +153,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
         manage: can(caller, "team.manage", { type: "org" }),
         members: can(caller, "team.members", team),
       },
-    });
+    } satisfies TeamDetail);
   });
 
   routes.patch("/api/teams/:slug", { action: "team.manage" }, async (c) => {

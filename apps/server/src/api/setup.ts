@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { RecoverResponse, SetupResponse } from "@artifacts/schema";
 import { DEFAULT_ORG_SETTINGS, RecoverRequest, SetupRequest } from "@artifacts/schema";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { randomSecret, safeEqual, sha256 } from "../auth/secrets.ts";
@@ -57,7 +58,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       });
       return { person: personView(person), token };
     });
-    return c.json(result);
+    return c.json(result satisfies SetupResponse);
   });
 
   routes.post("/api/recover", { public: true }, async (c) => {
@@ -98,6 +99,6 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       kind: "recovered",
       actorPersonId: owner.id,
     });
-    return c.json({ resetUrl: `${env.publicUrl}/reset/${secret}` });
+    return c.json({ resetUrl: `${env.publicUrl}/reset/${secret}` } satisfies RecoverResponse);
   });
 }

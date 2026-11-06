@@ -1,3 +1,4 @@
+import type { ProjectAccessList } from "@artifacts/schema";
 import { AddProjectAccess, RestrictProject, SetProjectAccess } from "@artifacts/schema";
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { type LoadedProject, projectGrants } from "../auth/access.ts";
@@ -217,7 +218,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
             ],
         impact: await impactOf(place),
         canChange: can(c.var.caller, "project.access.write", place),
-      });
+      } satisfies ProjectAccessList);
     },
   );
 

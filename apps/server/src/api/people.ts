@@ -1,3 +1,13 @@
+import type {
+  InviteCreated,
+  InvitePreview,
+  OrgInfo,
+  OrgTokenCreated,
+  OrgTokenList,
+  PeopleList,
+  PeopleSearch,
+  PersonResponse,
+} from "@artifacts/schema";
 import {
   AcceptInvite,
   ChangeRole,
@@ -126,7 +136,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         moreUrls: env.viewerOrigins.filter((origin) => origin !== env.publicUrl),
         contentUrl: env.contentUrl,
       },
-    });
+    } satisfies OrgInfo);
   });
 
   routes.patch("/api/org", { action: "org.manage" }, async (c) => {
@@ -161,7 +171,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       )
       .orderBy(asc(people.name))
       .limit(SEARCH_RESULTS);
-    return c.json({ people: rows.map(personView) });
+    return c.json({ people: rows.map(personView) } satisfies PeopleSearch);
   });
 
   routes.get("/api/people", { action: "people.read" }, async (c) => {
@@ -265,7 +275,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         invitedBy: by,
         expiresAt: invite.expiresAt.toISOString(),
       })),
-    });
+    } satisfies PeopleList);
   });
 
   routes.patch("/api/people/:id", { action: "people.manage" }, async (c) => {
@@ -398,15 +408,16 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         expiresAt: new Date(now.getTime() + INVITE_DAYS * 24 * HOUR),
       })
       .returning();
+    if (!invite) throw new Error("no invite row");
     return c.json({
       invite: {
-        id: invite?.id,
+        id: invite.id,
         email: body.email,
         role: body.role,
-        expiresAt: invite?.expiresAt.toISOString(),
+        expiresAt: invite.expiresAt.toISOString(),
       },
       url: inviteUrl(secret),
-    });
+    } satisfies InviteCreated);
   });
 
   async function pendingInvite(c: RouteRequest) {
@@ -482,7 +493,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       ...(artifact ? { artifact } : {}),
       ...(project ? { project } : {}),
       ...(joining.length > 0 ? { teams: joining.map((team) => team.name) } : {}),
-    });
+    } satisfies InvitePreview);
   });
 
   routes.post("/api/invites/:token/accept", { public: true }, async (c) => {
@@ -493,7 +504,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       acceptInvite(tx, invite, { name: body.name, passwordHash: hash, now: clock.now() }),
     );
     await startSession(c, deps, person.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 
   routes.get("/api/tokens", { action: "tokens.manage" }, async (c) => {
@@ -510,7 +521,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         projectIds: row.projectIds,
         lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
         expiresAt: row.expiresAt?.toISOString() ?? null,
-      })),
+      })) satisfies OrgTokenList,
     );
   });
 
@@ -532,7 +543,8 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
       })
       .returning({ id: tokens.id });
-    return c.json({ id: row?.id, token: secret });
+    if (!row) throw new Error("no token row");
+    return c.json({ id: row.id, token: secret } satisfies OrgTokenCreated);
   });
 
   routes.delete("/api/tokens/:id", { action: "tokens.manage" }, async (c) => {

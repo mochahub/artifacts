@@ -1,3 +1,4 @@
+import type { PasskeyList, PersonResponse } from "@artifacts/schema";
 import { AddPasskeyVerify, PasskeyOptions, PasskeyVerify, RenamePasskey } from "@artifacts/schema";
 import {
   type AuthenticatorTransport,
@@ -43,7 +44,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps, keys: Passkeys) {
     const { challengeId, response } = await parseBody(c, PasskeyVerify);
     const person = await assertion(c.var.org, challengeId, response);
     await startSession(c, deps, person.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 
   routes.get("/api/me/passkeys", { action: "account.manage" }, async (c) => {
@@ -65,7 +66,7 @@ export function passkeyRoutes(routes: Routes, deps: Deps, keys: Passkeys) {
         lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       })),
       passwordSetAt: password[0]?.at.toISOString() ?? null,
-    });
+    } satisfies PasskeyList);
   });
 
   routes.post("/api/me/passkeys/options", { action: "account.manage", recentAuth: true }, async (c) => {

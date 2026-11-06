@@ -1,3 +1,4 @@
+import type { DeviceDetails, DeviceStarted } from "@artifacts/schema";
 import { DevicePoll, DeviceStart } from "@artifacts/schema";
 import { and, eq, gt } from "drizzle-orm";
 import type { CallerFor } from "../auth/can.ts";
@@ -45,7 +46,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
       verificationUrl: `${env.publicUrl}/device`,
       interval: INTERVAL,
       expiresIn: EXPIRES_IN,
-    });
+    } satisfies DeviceStarted);
   });
 
   routes.post("/api/device/poll", { public: true }, async (c) => {
@@ -117,7 +118,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
       createdAt: row.createdAt.toISOString(),
       ip: row.ip,
       userAgent: row.userAgent,
-    });
+    } satisfies DeviceDetails);
   });
 
   routes.post("/api/device/:userCode/approve", { action: "account.manage", recentAuth: true }, async (c) => {

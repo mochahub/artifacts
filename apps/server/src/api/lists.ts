@@ -1,4 +1,4 @@
-import type { Artifact, Home } from "@artifacts/schema";
+import type { Artifact, Home, SearchResults } from "@artifacts/schema";
 import { Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import { heldProjects, type LoadedArtifact, toProject } from "../auth/access.ts";
@@ -132,7 +132,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
         ref: hit.ref,
         snippet: snippet(hit.text, q),
       })),
-    });
+    } satisfies SearchResults);
   });
 
   routes.get("/api/home", { action: "home.read" }, async (c) => {
