@@ -64,3 +64,27 @@ describe("server addresses", () => {
     expect(() => normalizeUrl("ftp://example.com")).toThrow("web address");
   });
 });
+
+describe("a picture from the API", () => {
+  test("says which agent asked, as every other request does", async () => {
+    let agent: string | null = null;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        agent = request.headers.get("artifacts-agent");
+        return new Response(new Uint8Array([1, 2, 3]));
+      },
+    });
+    process.env.ARTIFACTS_AGENT = "Test agent";
+    try {
+      expect(await new Client(`http://127.0.0.1:${server.port}`, "t").bytes("/r/x")).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      expect(agent).toBe("Test agent");
+    } finally {
+      delete process.env.ARTIFACTS_AGENT;
+      server.stop(true);
+    }
+  });
+});
