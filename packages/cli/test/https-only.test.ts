@@ -161,6 +161,11 @@ describe("the CLI signs in over HTTPS only, except on this machine", () => {
     ]) {
       expect(() => normalizeUrl(bad)).toThrow("only signs in over HTTPS");
     }
+    // An address is its origin, and https unless it says otherwise; anything but a web address isn't one.
+    expect(normalizeUrl("art.example.com/path")).toBe("https://art.example.com");
+    expect(normalizeUrl("http://localhost:8080/")).toBe("http://localhost:8080");
+    expect(() => normalizeUrl("file:///etc/passwd")).toThrow("web address");
+    expect(() => normalizeUrl("ftp://example.com")).toThrow("web address");
     expect(() => requireHttps("http://example.test")).toThrow("HTTPS section");
   });
 });

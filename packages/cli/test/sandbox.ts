@@ -1,6 +1,8 @@
-import { cpSync, mkdtempSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { Artifact, VersionDetail } from "@artifacts/schema";
+import { claim, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
 
 export const CLI = join(import.meta.dir, "../src/index.ts");
 
@@ -39,6 +41,41 @@ export async function cli(args: string[], env: Record<string, string>, cwd?: str
     child.exited,
   ]);
   return { stdout, stderr, code };
+}
+
+/** Runs a command with --json and returns what it printed, parsed. Throws with its stderr if it fails. */
+export async function cliJson(args: string[], env: Record<string, string>, cwd?: string) {
+  const result = await cli([...args, "--json"], env, cwd);
+  if (result.code !== 0) throw new Error(`${args.join(" ")} exited ${result.code}: ${result.stderr}`);
+  return JSON.parse(result.stdout);
+}
+
+/** A stand-in program: writes `script` as an executable `name` in `bin`, to put first on PATH. */
+export function fakeBin(bin: string, name: string, script: string) {
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, name), `#!/bin/sh\n${script}\n`);
+  chmodSync(join(bin, name), 0o755);
+  return bin;
+}
+
+/** A claimed server at an address the CLI can reach, with the owner's token. */
+export async function hostedServer(overrides: Record<string, string> = {}) {
+  const port = testPort();
+  const url = `http://127.0.0.1:${port}`;
+  const t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port), ...overrides });
+  return { t, url, ...(await claim(t)) };
+}
+
+/** An artifact and one of its versions (the latest unless `n` says), read the way the viewer reads them. */
+export async function versionOf(t: TestServer, bearer: string, path: string, n?: number) {
+  const found = await t.api(`/api/artifacts/by-slug/${path}`, { bearer });
+  if (found.status !== 200) throw new Error(`${path}: ${found.status} ${await found.text()}`);
+  const artifact = Artifact.parse(await found.json());
+  const response = await t.api(`/api/artifacts/${artifact.id}/versions/${n ?? artifact.latestVersion}`, {
+    bearer,
+  });
+  if (response.status !== 200) throw new Error(`${path} v${n}: ${response.status}`);
+  return { artifact, version: VersionDetail.parse(await response.json()) };
 }
 
 /** A private copy of a fixture, so a test can edit it. */

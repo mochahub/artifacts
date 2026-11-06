@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Client } from "../src/client.ts";
-import { normalizeUrl } from "../src/config.ts";
 
 describe("the API client", () => {
   const seen: { host: string; authorization: string | null }[] = [];
@@ -53,15 +52,6 @@ describe("the API client", () => {
     } finally {
       delete process.env.ARTIFACTS_TIMEOUT_MS;
     }
-  });
-});
-
-describe("server addresses", () => {
-  test("only web addresses are servers", () => {
-    expect(normalizeUrl("art.example.com/path")).toBe("https://art.example.com");
-    expect(normalizeUrl("http://localhost:8080/")).toBe("http://localhost:8080");
-    expect(() => normalizeUrl("file:///etc/passwd")).toThrow("web address");
-    expect(() => normalizeUrl("ftp://example.com")).toThrow("web address");
   });
 });
 
