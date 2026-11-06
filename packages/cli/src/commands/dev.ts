@@ -208,7 +208,7 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
           htmlHash: page.meta.htmlHash,
           outline: page.meta.outline,
           readingMinutes: page.meta.readingMinutes,
-          theme: page.meta.theme ?? null,
+          theme: null,
           blocks: (built?.blocks ?? [])
             .filter((block) => block.pageKey === page.key)
             .map((block) => ({ key: block.blockKey, contentHash: block.contentHash, changed: false })),
