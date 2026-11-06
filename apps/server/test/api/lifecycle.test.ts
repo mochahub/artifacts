@@ -377,7 +377,9 @@ describe("lifecycle", () => {
       ),
     );
     const framesOf = (detail: VersionDetail | undefined) =>
-      detail?.pages.find((page) => page.key === "mocks")?.frames?.map((frame) => frame.contentHash);
+      detail?.pages
+        .flatMap((page) => (page.kind === "canvas" ? page.frames : []))
+        .map((frame) => frame.contentHash);
     expect(framesOf(v3)).toEqual(framesOf(v1));
     expect(framesOf(v3)).toHaveLength(1);
     expect((await threadsOf(row.id)).find((entry) => entry.id === thread.id)?.anchorState).toBe("updated");
