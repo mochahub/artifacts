@@ -1,10 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { BrandProposal, OrgBrand } from "@artifacts/schema";
-import { eq } from "drizzle-orm";
+import { BrandProposal, BrandProposalCreated, OrgBrand } from "@artifacts/schema";
 import { z } from "zod";
-import { brandProposals, org } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import { file, makePerson, publish } from "../publish-helper.ts";
 
 describe("setting a brand by hand", () => {
   let t: TestServer;
@@ -23,7 +21,7 @@ describe("setting a brand by hand", () => {
     t = await startTestServer();
     const owner = await claim(t);
     token = owner.token;
-    orgId = (await t.server.db.select().from(org))[0]?.id as string;
+    orgId = owner.orgId;
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
@@ -70,20 +68,25 @@ describe("setting a brand by hand", () => {
   });
 
   test("fonts in use stay when a brand is edited, and go when it stops using them", async () => {
-    const hash = "b".repeat(64);
-    const font = {
-      family: "Acme Sans",
-      weight: "400",
-      style: "normal" as const,
-      format: "woff2" as const,
-      hash,
-    };
-    await t.server.db
-      .update(org)
-      .set({ brand: { name: "Fonts", theme: { font: "Acme Sans" }, fonts: [font] } })
-      .where(eq(org.id, orgId));
+    // A font gets into the brand the one way it can: published in a sample, proposed, and applied.
+    const woff = file("fonts/acme.woff2", "a stand-in for a font file", "font/woff2");
+    expect((await publish(t, token, { slug: "font-sample", extra: [woff] })).status).toBe(200);
+    const font = { family: "Acme Sans", weight: "400", style: "normal", format: "woff2", hash: woff.sha256 };
+    const proposed = await t.api("/api/brand/proposals", {
+      method: "POST",
+      bearer: token,
+      json: {
+        project: "camerabuddy",
+        slug: "font-sample",
+        brand: { name: "Fonts", theme: { font: "Acme Sans" }, fonts: [font] },
+      },
+    });
+    expect(proposed.status).toBe(200);
+    const { id } = BrandProposalCreated.parse(await proposed.json());
+    expect((await t.api(`/api/brand/proposals/${id}/apply`, { method: "POST", cookie })).status).toBe(200);
+
     expect((await put({ name: "Fonts", theme: { font: "Acme Sans", accent: "#111111" } })).status).toBe(200);
-    expect((await current())?.fonts.map((entry) => entry.hash)).toEqual([hash]);
+    expect((await current())?.fonts.map((entry) => entry.hash)).toEqual([woff.sha256]);
     expect((await put({ name: "Fonts", theme: { font: "serif" } })).status).toBe(200);
     expect((await current())?.fonts).toEqual([]);
     expect((await put({ name: "Fonts", theme: { font: "Acme Sans" } })).status).toBe(400);
@@ -104,13 +107,47 @@ describe("setting a brand by hand", () => {
     expect((await row("Unnamed"))?.agent).toBe("agent");
   });
 
-  test("only a signed-in admin can, and no token", async () => {
-    const before = await t.server.db.select().from(brandProposals).where(eq(brandProposals.orgId, orgId));
+  test("only a signed-in admin can save one, and no token", async () => {
+    const before = await list();
     expect((await put(acme, { bearer: token })).status).toBe(403);
     expect((await put(acme, { bearer: (await makePerson(t, orgId, "member")).token })).status).toBe(403);
     expect((await put(acme, {})).status).toBe(401);
-    expect(await t.server.db.select().from(brandProposals).where(eq(brandProposals.orgId, orgId))).toEqual(
-      before,
-    );
+    expect(await list()).toEqual(before);
+  });
+
+  test("a proposal is applied or the brand taken off only by a signed-in admin, never a token", async () => {
+    expect((await publish(t, token, { slug: "apply-sample" })).status).toBe(200);
+    const proposed = await t.api("/api/brand/proposals", {
+      method: "POST",
+      bearer: token,
+      json: { project: "camerabuddy", slug: "apply-sample", brand: { name: "Proposed", theme: {} } },
+    });
+    const { id } = BrandProposalCreated.parse(await proposed.json());
+    const before = await current();
+    const apply = `/api/brand/proposals/${id}/apply`;
+    const member = (await makePerson(t, orgId, "member")).token;
+    const reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    for (const bearer of [token, member, reviewer]) {
+      expect((await t.api(apply, { method: "POST", bearer })).status).toBe(403);
+    }
+    expect((await t.api("/api/brand", { method: "DELETE", bearer: token })).status).toBe(403);
+    expect(await current()).toEqual(before);
+    expect((await t.api("/api/brand/proposals/nonsense/apply", { method: "POST", cookie })).status).toBe(404);
+    expect((await t.api(apply, { method: "POST", cookie })).status).toBe(200);
+    expect((await current())?.name).toBe("Proposed");
+  });
+
+  test("a reviewer can't propose, and a font must be a file in the sample", async () => {
+    const reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    const propose = (bearer: string, fonts: object[]) =>
+      t.api("/api/brand/proposals", {
+        method: "POST",
+        bearer,
+        json: { project: "camerabuddy", slug: "apply-sample", brand: { name: "x", theme: {}, fonts } },
+      });
+    const stranger = { family: "A", weight: "400", format: "woff2", hash: "a".repeat(64) };
+    expect((await propose(reviewer, [])).status).toBe(403);
+    expect((await propose(token, [stranger])).status).toBe(400);
+    expect((await list()).some((entry) => entry.name === "x")).toBe(false);
   });
 });

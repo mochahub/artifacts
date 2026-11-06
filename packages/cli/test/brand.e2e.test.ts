@@ -2,17 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { desc, eq } from "drizzle-orm";
-import { pages, versions } from "../../../apps/server/src/db/schema.ts";
-import {
-  OWNER,
-  signIn,
-  startTestServer,
-  type TestServer,
-  testPort,
-} from "../../../apps/server/test/helpers.ts";
+import { VersionBundle } from "@artifacts/schema";
+import { OWNER, signIn, type TestServer } from "../../../apps/server/test/helpers.ts";
 import { makePerson } from "../../../apps/server/test/publish-helper.ts";
-import { cli, sandbox } from "./sandbox.ts";
+import { cli, cliJson, hostedServer, sandbox, versionOf } from "./sandbox.ts";
 
 const ACCENT = "#00a36c";
 
@@ -22,25 +15,16 @@ describe("brand", () => {
   let token: string;
   let cookie: string;
   let reviewer: string;
-  let member: string;
   let stopped = false;
   const box = sandbox();
   const env = () => ({ ...box.env, ARTIFACTS_URL: url, ARTIFACTS_TOKEN: token });
   const folder = mkdtempSync(join(tmpdir(), "artifacts-brand-guide-"));
-  const json = async (args: string[], cwd = folder) => {
-    const result = await cli([...args, "--json"], env(), cwd);
-    if (result.code !== 0) throw new Error(`${args.join(" ")}: ${result.stderr}`);
-    return JSON.parse(result.stdout);
-  };
-  const articleTheme = async () => {
-    const [row] = await t.server.db
-      .select({ meta: pages.meta })
-      .from(pages)
-      .innerJoin(versions, eq(versions.id, pages.versionId))
-      .where(eq(pages.pageKey, "doc"))
-      .orderBy(desc(versions.id))
-      .limit(1);
-    return (row?.meta as { theme?: { accent?: string } } | undefined)?.theme;
+  const json = (args: string[], cwd = folder) => cliJson(args, env(), cwd);
+  /** The theme the server stored for an artifact's article, in its latest version. */
+  const articleTheme = async (slug: string) => {
+    const { version } = await versionOf(t, token, `use/${slug}`);
+    const page = version.pages.find((entry) => entry.key === "doc");
+    return page?.kind === "article" ? page.theme : undefined;
   };
   const template = async (slug: string, extra: object = {}) => {
     const dir = mkdtempSync(join(tmpdir(), "artifacts-brand-use-"));
@@ -52,18 +36,10 @@ describe("brand", () => {
   };
 
   beforeAll(async () => {
-    const port = testPort();
-    url = `http://127.0.0.1:${port}`;
-    t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
-    const setup = await t.api("/api/setup", {
-      method: "POST",
-      json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "x", ...OWNER },
-    });
-    token = ((await setup.json()) as { token: string }).token;
+    let orgId: string;
+    ({ t, url, token, orgId } = await hostedServer());
     cookie = await signIn(t, OWNER.email, OWNER.password);
-    const [org] = await t.server.db.query.org.findMany();
-    reviewer = (await makePerson(t, (org as { id: string }).id, "reviewer")).token;
-    member = (await makePerson(t, (org as { id: string }).id, "member")).token;
+    reviewer = (await makePerson(t, orgId, "reviewer")).token;
     mkdirSync(join(folder, "fonts"));
     writeFileSync(join(folder, "fonts/acme.woff2"), "a stand-in for a font file");
     writeFileSync(
@@ -120,12 +96,8 @@ describe("brand", () => {
     });
     expect(comment.status).toBe(200);
 
+    // Only a person applies it (who may: api/brand.test.ts).
     const apply = `/api/brand/proposals/${proposed.id}/apply`;
-    for (const bearer of [token, member, reviewer]) {
-      expect((await t.api(apply, { method: "POST", bearer })).status).toBe(403);
-    }
-    expect((await t.api("/api/brand", { method: "DELETE", bearer: token })).status).toBe(403);
-    expect((await json(["brand", "show"])).brand).toBe(null);
     expect((await t.api(apply, { method: "POST", cookie })).status).toBe(200);
     expect((await json(["brand", "show"])).brand.name).toBe("Acme");
     const list = (await json(["brand", "show"])).proposals;
@@ -133,36 +105,19 @@ describe("brand", () => {
     expect(list[0].sample.slug).toBe(slug);
   }, 180_000);
 
-  test("who may propose, and a font that isn't in the sample", async () => {
-    const bad = {
-      brand: {
-        name: "x",
-        theme: {},
-        fonts: [{ family: "A", weight: "400", format: "woff2", hash: "a".repeat(64) }],
-      },
-      project: "brand",
-    };
-    const [, slug] = (await json(["brand", "show"])).proposals[0].sample
-      ? [0, (await json(["brand", "show"])).proposals[0].sample.slug]
-      : [];
-    const post = (bearer: string) =>
-      t.api("/api/brand/proposals", { method: "POST", bearer, json: { ...bad, slug } });
-    expect((await post(token)).status).toBe(400);
-    expect((await post(reviewer)).status).toBe(403);
-    expect((await t.api("/api/brand/proposals/nonsense/apply", { method: "POST", cookie })).status).toBe(404);
-  }, 30_000);
-
   test("precedence: a template gives way to the brand, and the brand to a project's theme", async () => {
     const plain = await template("branded");
     await json(["publish", "-m", "go"], plain);
-    expect((await articleTheme())?.accent).toBe(ACCENT);
+    expect((await articleTheme("branded"))?.accent).toBe(ACCENT);
     const own = await template("own-theme", { theme: { accent: "#123456" } });
     await json(["publish", "-m", "go"], own);
-    expect((await articleTheme())?.accent).toBe("#123456");
+    expect((await articleTheme("own-theme"))?.accent).toBe("#123456");
+    // The brand's fonts go up with the bundle, so the article can use them.
     expect(existsSync(join(plain, ".artifacts/brand-fonts"))).toBe(true);
-    const [version] = await t.server.db.select().from(versions).orderBy(desc(versions.id)).limit(1);
-    const paths = Object.keys(version?.files as object);
-    expect(paths.some((path) => path.startsWith(".artifacts/brand-fonts/"))).toBe(true);
+    const bundle = VersionBundle.parse(
+      await (await t.api("/api/library/projects/use/branded/bundle", { bearer: token })).json(),
+    );
+    expect(bundle.files.some((entry) => entry.path.startsWith(".artifacts/brand-fonts/"))).toBe(true);
   }, 120_000);
 
   test("taking a brand off reaches the next render, and a pull leaves its fonts out", async () => {
@@ -173,9 +128,12 @@ describe("brand", () => {
     expect(existsSync(join(pulled.root, ".artifacts"))).toBe(false);
     expect((await t.api("/api/brand", { method: "DELETE", cookie })).status).toBe(200);
     await json(["publish", "-m", "again"], dir);
-    expect((await articleTheme())?.accent).toBe("#8a1c2b");
+    expect((await articleTheme("pulled"))?.accent).toBe("#8a1c2b");
+    // Back on, for the offline render below.
     const proposals = (await json(["brand", "show"])).proposals;
-    await t.api(`/api/brand/proposals/${proposals[0].id}/apply`, { method: "POST", cookie });
+    expect(
+      (await t.api(`/api/brand/proposals/${proposals[0].id}/apply`, { method: "POST", cookie })).status,
+    ).toBe(200);
     await json(["render"], dir);
   }, 120_000);
 
