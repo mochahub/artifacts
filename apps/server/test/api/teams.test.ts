@@ -4,6 +4,7 @@ import {
   acceptInvite,
   claim,
   code,
+  inviteSecret,
   json,
   OWNER,
   signIn,
@@ -367,7 +368,7 @@ describe("teams", () => {
     expect(
       (await t.api(`/api/invites/${made.invite.id}/link`, { method: "POST", bearer: token })).status,
     ).toBe(403);
-    const secret = made.url.split("/join/")[1] as string;
+    const secret = inviteSecret(made.url);
     expect(await t.api(`/api/invites/${secret}`).then(json)).toMatchObject({
       teams: expect.arrayContaining(["Joining", "Gone by then"]),
     });

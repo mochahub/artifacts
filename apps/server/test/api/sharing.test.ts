@@ -6,6 +6,7 @@ import {
   code,
   contentFor,
   cookieOf,
+  inviteSecret,
   json,
   OWNER,
   signIn,
@@ -120,7 +121,7 @@ describe("sharing", () => {
     const { url } = (await (await access({ email: "out@example.com", permission: "comment" })).json()) as {
       url: string;
     };
-    const secret = url.split("/join/")[1];
+    const secret = inviteSecret(url);
     expect(await (await t.api(`/api/invites/${secret}`)).json()).toMatchObject({
       role: "outside",
       artifact: { title: "Roadmap" },

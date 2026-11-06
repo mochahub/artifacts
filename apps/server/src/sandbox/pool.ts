@@ -2,8 +2,8 @@ import { type Child, type Job, type Ran, startChild } from "@artifacts/sandbox";
 import { ApiError } from "../http/errors.ts";
 import type { Logger } from "../log.ts";
 
-export const WAIT_PER_BACKEND = 4;
-export const WAIT_PER_CHILD = 32;
+const WAIT_PER_BACKEND = 4;
+const WAIT_PER_CHILD = 32;
 const noop = () => {};
 
 /** Which child a backend runs on: fixed by its hash, so its instance stays warm. */

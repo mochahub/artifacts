@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Artifact } from "@artifacts/schema";
+import { RECENT_AUTH_MS } from "../../src/auth/sessions.ts";
 import {
   acceptInvite,
   claim,
@@ -287,7 +288,7 @@ describe("people, invites and tokens", () => {
     expect((await t.api("/api/home", { bearer: made.token })).status).toBe(401);
     expect((await t.api("/api/tokens", { bearer: token })).status).toBe(403);
     expect((await t.api("/api/tokens/nope", { method: "DELETE", cookie: owner })).status).toBe(404);
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 1000);
     expect(await code(await make(owner, { name: "x", scopes: [] }))).toBe("recent_auth_required");
     owner = await signIn(t, OWNER.email, OWNER.password);
   });
