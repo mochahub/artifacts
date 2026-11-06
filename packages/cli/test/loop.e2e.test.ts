@@ -2,16 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Thread } from "@artifacts/schema";
-import { eq } from "drizzle-orm";
-import { artifacts } from "../../../apps/server/src/db/schema.ts";
-import {
-  OWNER,
-  signIn,
-  startTestServer,
-  type TestServer,
-  testPort,
-} from "../../../apps/server/test/helpers.ts";
-import { camerabuddy, cli, copyFixture, sandbox } from "./sandbox.ts";
+import { acceptInvite, OWNER, signIn, type TestServer } from "../../../apps/server/test/helpers.ts";
+import { artifactAt, camerabuddy, cli, cliJson, copyFixture, hostedServer, sandbox } from "./sandbox.ts";
 
 /** The round trip in M5: a person comments, an agent session fixes and replies, the person resolves. */
 describe("the review loop", () => {
@@ -28,14 +20,7 @@ describe("the review loop", () => {
   });
 
   beforeAll(async () => {
-    const port = testPort();
-    url = `http://127.0.0.1:${port}`;
-    t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
-    const setup = await t.api("/api/setup", {
-      method: "POST",
-      json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "x", ...OWNER },
-    });
-    token = ((await setup.json()) as { token: string }).token;
+    ({ t, url, token } = await hostedServer());
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
@@ -43,8 +28,7 @@ describe("the review loop", () => {
   test("comment, status, comments, fix, publish, reply --fixed, resolve", async () => {
     const dir = copyFixture(camerabuddy);
     expect((await cli(["publish", "-m", "First"], agent(), dir)).code).toBe(0);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "roadmap"));
-    const id = row?.id as string;
+    const { id } = await artifactAt(t, token, "camerabuddy/roadmap");
 
     // 1. A person comments, and asks for changes.
     const made = await t.api(`/api/artifacts/${id}/threads`, {
@@ -59,14 +43,15 @@ describe("the review loop", () => {
     });
     expect(made.status).toBe(200);
     const thread = Thread.parse(await made.json());
-    await t.api(`/api/artifacts/${id}/decisions`, {
+    const decided = await t.api(`/api/artifacts/${id}/decisions`, {
       method: "POST",
       cookie,
       json: { version: 1, kind: "changes_requested", note: "Fix the arrows first." },
     });
+    expect(decided.status).toBe(200);
 
     // 2. An agent session starts with status.
-    const status = JSON.parse((await cli(["status", "--json"], agent(), dir)).stdout);
+    const status = await cliJson(["status"], agent(), dir);
     expect(status).toMatchObject({
       version: 1,
       decision: "changes_requested",
@@ -75,7 +60,7 @@ describe("the review loop", () => {
     });
     expect(status.open).toHaveLength(1);
 
-    const comments = JSON.parse((await cli(["comments", "--open", "--json"], agent(), dir)).stdout);
+    const comments = await cliJson(["comments", "--open"], agent(), dir);
     expect(comments[0]).toMatchObject({
       id: 1,
       page: "mocks",
@@ -103,7 +88,7 @@ describe("the review loop", () => {
     const reply = await cli(["reply", "1", "Made the arrows 44 pt.", "--fixed"], agent(), dir);
     expect(reply.code).toBe(0);
     expect(reply.stdout).toContain("marked fixed in v2");
-    const after = JSON.parse((await cli(["status", "--json"], agent(), dir)).stdout);
+    const after = await cliJson(["status"], agent(), dir);
     expect(after.open).toHaveLength(0);
     expect(after.fixedAwaiting[0]).toMatchObject({ id: 1, status: "fixed" });
     expect(after.fixedAwaiting[0].replies[0]).toMatchObject({
@@ -111,19 +96,16 @@ describe("the review loop", () => {
       marksFixed: true,
     });
 
-    // 5. Only the person can resolve.
-    expect((await t.api(`/api/threads/${thread.id}/resolve`, { method: "POST", bearer: token })).status).toBe(
-      403,
-    );
+    // 5. The person resolves (a token can't: review.test.ts).
     expect((await t.api(`/api/threads/${thread.id}/resolve`, { method: "POST", cookie })).status).toBe(200);
-    const done = JSON.parse((await cli(["comments", "--all", "--json"], agent(), dir)).stdout);
+    const done = await cliJson(["comments", "--all"], agent(), dir);
     expect(done[0].status).toBe("resolved");
   }, 180_000);
 
   test("renaming a frame with open comments stops the publish", async () => {
     const dir = copyFixture(camerabuddy);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "roadmap"));
-    await t.api(`/api/artifacts/${row?.id}/threads`, {
+    const { id } = await artifactAt(t, token, "camerabuddy/roadmap");
+    const posted = await t.api(`/api/artifacts/${id}/threads`, {
       method: "POST",
       cookie,
       json: {
@@ -133,6 +115,7 @@ describe("the review loop", () => {
         version: 2,
       },
     });
+    expect(posted.status).toBe(200);
     const board = join(dir, "boards/02-shoot.html");
     writeFileSync(board, readFileSync(board, "utf8").replace('data-frame="timer"', 'data-frame="countdown"'));
     const result = await cli(["publish"], agent(), dir);
@@ -142,30 +125,20 @@ describe("the review loop", () => {
 
   test("org invite, reset-link, visibility and share", async () => {
     const dir = copyFixture(camerabuddy);
-    const invite = JSON.parse(
-      (await cli(["org", "invite", "sam@example.com", "--role", "reviewer", "--json"], agent())).stdout,
-    );
+    const invite = await cliJson(["org", "invite", "sam@example.com", "--role", "reviewer"], agent());
     expect(invite.url).toContain("/join/");
     expect((await cli(["org", "invite", "x@example.com", "--role", "owner"], agent())).code).toBe(1);
-    const joined = await t.api(`/api/invites/${invite.url.split("/join/")[1]}/accept`, {
-      method: "POST",
-      json: { name: "Sam", password: "a perfectly long password" },
-    });
-    expect(joined.status).toBe(200);
-    const reset = JSON.parse((await cli(["org", "reset-link", "sam@example.com", "--json"], agent())).stdout);
+    await acceptInvite(t, invite.url, "Sam");
+    const reset = await cliJson(["org", "reset-link", "sam@example.com"], agent());
     expect(reset.url).toContain("/reset/");
     expect((await cli(["org", "reset-link", OWNER.email], agent())).code).toBe(1);
     expect((await cli(["org", "reset-link", "nobody@example.com"], agent())).code).toBe(1);
 
     expect((await cli(["visibility", "me"], agent(), dir)).code).toBe(0);
     expect((await cli(["visibility", "nonsense"], agent(), dir)).code).toBe(2);
-    const link = JSON.parse(
-      (await cli(["share", "--link", "--comment", "--expires", "7d", "--json"], agent(), dir)).stdout,
-    );
+    const link = await cliJson(["share", "--link", "--comment", "--expires", "7d"], agent(), dir);
     expect(link.url).toContain("/s/");
-    const person = JSON.parse(
-      (await cli(["share", "--invite", "out@example.com", "--comment", "--json"], agent(), dir)).stdout,
-    );
+    const person = await cliJson(["share", "--invite", "out@example.com", "--comment"], agent(), dir);
     expect(person.url).toContain("/join/");
     expect((await cli(["share", "--invite", "out2@example.com", "--publish"], agent(), dir)).code).toBe(1);
     expect((await cli(["share"], agent(), dir)).code).toBe(2);
@@ -174,18 +147,19 @@ describe("the review loop", () => {
   test("versions, name, diff, restore, archive, delete and undelete", async () => {
     const dir = copyFixture(camerabuddy);
     const run = (...args: string[]) => cli(args, agent(), dir);
-    const list = JSON.parse((await run("versions", "--json")).stdout);
+    const json = (...args: string[]) => cliJson(args, agent(), dir);
+    const list = await json("versions");
     expect(list[0].n).toBe(2);
     expect((await run("versions", "name", "1", "First draft")).code).toBe(0);
-    const diff = JSON.parse((await run("diff", "v1", "v2", "--json")).stdout);
+    const diff = await json("diff", "v1", "v2");
     expect(diff.frames.changed).toEqual(["mocks/live-view"]);
-    expect(JSON.parse((await run("restore", "1", "--json")).stdout)).toEqual({ n: 3 });
+    expect(await json("restore", "1")).toEqual({ n: 3 });
 
     expect((await run("archive")).code).toBe(0);
     expect((await run("publish", "-m", "x")).code).toBe(1);
     expect((await run("archive", "--undo")).code).toBe(0);
 
-    const removed = JSON.parse((await run("delete", "--version", "2", "--json")).stdout);
+    const removed = await json("delete", "--version", "2");
     expect(removed.undo).toBe("artifacts undelete camerabuddy/roadmap --version 2");
     expect((await run("undelete", "camerabuddy/roadmap", "--version", "2")).code).toBe(0);
 

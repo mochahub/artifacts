@@ -66,11 +66,16 @@ export async function hostedServer(overrides: Record<string, string> = {}) {
   return { t, url, ...(await claim(t)) };
 }
 
-/** An artifact and one of its versions (the latest unless `n` says), read the way the viewer reads them. */
-export async function versionOf(t: TestServer, bearer: string, path: string, n?: number) {
+/** An artifact found by its project/slug path, the way the viewer finds it. */
+export async function artifactAt(t: TestServer, bearer: string, path: string) {
   const found = await t.api(`/api/artifacts/by-slug/${path}`, { bearer });
   if (found.status !== 200) throw new Error(`${path}: ${found.status} ${await found.text()}`);
-  const artifact = Artifact.parse(await found.json());
+  return Artifact.parse(await found.json());
+}
+
+/** An artifact and one of its versions (the latest unless `n` says), read the way the viewer reads them. */
+export async function versionOf(t: TestServer, bearer: string, path: string, n?: number) {
+  const artifact = await artifactAt(t, bearer, path);
   const response = await t.api(`/api/artifacts/${artifact.id}/versions/${n ?? artifact.latestVersion}`, {
     bearer,
   });
