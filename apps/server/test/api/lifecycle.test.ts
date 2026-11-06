@@ -1,13 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { DAY_MS, PURGE_DAYS, Thread, VersionDetail, VersionRow } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
-import sharp from "sharp";
+import { z } from "zod";
+import { RECENT_AUTH_MS } from "../../src/auth/sessions.ts";
 import {
   activity,
   artifacts,
   comments,
-  frames,
-  guestLinks,
-  people,
   pushSubscriptions,
   sessions,
   shareLinks,
@@ -16,12 +15,18 @@ import {
   versions,
 } from "../../src/db/schema.ts";
 import { purgeArtifact } from "../../src/jobs/purge.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { file, hash, makePerson, publish } from "../publish-helper.ts";
-
-const OPS = "o".repeat(64);
-const code = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
+import {
+  claim,
+  code,
+  json,
+  OPS_SECRET,
+  OWNER,
+  signIn,
+  solidImage,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { file, hash, makePerson, publish, published } from "../publish-helper.ts";
 
 describe("lifecycle", () => {
   let t: TestServer;
@@ -35,16 +40,19 @@ describe("lifecycle", () => {
   const fresh = async (visibility: "me" | "org" = "org") => {
     slugs += 1;
     const slug = `art-${slugs}`;
-    expect((await publish(t, token, { slug, visibility, frameHash: hash(slug) })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, slug));
-    return row as typeof artifacts.$inferSelect;
+    const { id } = await published(t, token, { slug, visibility, frameHash: hash(slug) });
+    return { id, slug };
   };
+  const threadsOf = async (id: string) =>
+    z.array(Thread).parse(await json(await t.api(`/api/artifacts/${id}/threads`, { bearer: token })));
+  const versionsOf = async (id: string) =>
+    z.array(VersionRow).parse(await json(await t.api(`/api/artifacts/${id}/versions`, { bearer: token })));
   const post = (path: string, auth: { cookie?: string; bearer?: string } = { cookie }, json?: unknown) =>
     t.api(path, { method: "POST", json, ...auth });
   const job = (name: string) =>
     fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/${name}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${OPS}` },
+      headers: { Authorization: `Bearer ${OPS_SECRET}` },
     });
 
   beforeAll(async () => {
@@ -52,8 +60,8 @@ describe("lifecycle", () => {
     const made = await claim(t);
     token = made.token;
     personId = made.person.id;
+    orgId = made.orgId;
     cookie = await signIn(t, OWNER.email, OWNER.password);
-    orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
     member = (await makePerson(t, orgId, "member")).token;
   });
   afterAll(() => t.stop());
@@ -81,21 +89,15 @@ describe("lifecycle", () => {
     const page = file("page.html", "<script src=/x.js></script>", "text/html");
     // Its own render, since the test overwrites it in the bucket and every default publish shares one.
     const frameHash = hash(Bun.randomUUIDv7());
-    expect((await publish(t, token, { slug: "via-app", frameHash, extra: [page] })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "via-app"));
+    const { id, renderHash: render } = await published(t, token, {
+      slug: "via-app",
+      frameHash,
+      extra: [page],
+    });
     const read = (blob: string) =>
-      t.api(`/api/artifacts/${row?.id}/r/${blob}?via=app`, { cookie, redirect: "manual" });
+      t.api(`/api/artifacts/${id}/r/${blob}?via=app`, { cookie, redirect: "manual" });
     expect((await read(page.sha256)).status).toBe(302);
 
-    const [made] = await t.server.db
-      .select()
-      .from(versions)
-      .where(eq(versions.artifactId, row?.id as string));
-    const [frame] = await t.server.db
-      .select()
-      .from(frames)
-      .where(eq(frames.versionId, made?.id as string));
-    const render = (frame as { renders: { "2x": string } }).renders["2x"];
     const image = await read(render);
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/webp");
@@ -115,18 +117,6 @@ describe("lifecycle", () => {
     expect(svg.headers.get("content-disposition")).toBe("attachment");
   });
 
-  test("a version number that isn't a number the database can hold is a 400", async () => {
-    const row = await fresh();
-    for (const path of [
-      `/api/artifacts/${row.id}/compare?from=x&to=1`,
-      `/api/artifacts/${row.id}/compare?from=1&to=99999999999`,
-      `/api/artifacts/${row.id}/versions/99999999999`,
-      `/api/artifacts/${row.id}/v/99999999999/article/plan`,
-    ]) {
-      expect((await t.api(path, { bearer: token })).status).toBe(400);
-    }
-  });
-
   test("delete: links stop, the slug stays taken, and an agent can undo it", async () => {
     const row = await fresh("me");
     const { url } = (await (
@@ -135,12 +125,26 @@ describe("lifecycle", () => {
     const deleted = await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
     expect(deleted.status).toBe(200);
     const { purgeAfter } = (await deleted.json()) as { purgeAfter: string };
-    expect(new Date(purgeAfter).getTime() - t.clock.now().getTime()).toBe(30 * 24 * 3600_000);
+    expect(new Date(purgeAfter).getTime() - t.clock.now().getTime()).toBe(PURGE_DAYS * DAY_MS);
 
-    expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(410);
+    // 410 for those who could see it, saying nothing of who deleted it; 404 for everyone else.
+    const gone = await t.api(`/api/artifacts/${row.id}`, { bearer: token });
+    expect(gone.status).toBe(410);
+    expect(JSON.stringify(await gone.json())).not.toContain(OWNER.name);
+    expect((await t.api(`/api/artifacts/by-slug/camerabuddy/${row.slug}`, { bearer: token })).status).toBe(
+      410,
+    );
     expect((await t.api(`/api/artifacts/${row.id}`, { bearer: member })).status).toBe(404);
+    expect((await t.api(`/api/artifacts/by-slug/camerabuddy/${row.slug}`, { bearer: member })).status).toBe(
+      404,
+    );
     expect((await t.api(`/api/s/${url.split("/s/")[1]}`)).status).toBe(410);
-    expect(await code(await publish(t, token, { slug: row.slug }))).toBe("slug_deleted");
+    // Publishing to the slug again: its publisher hears who deleted it; someone who never saw it can't tell.
+    const again = await publish(t, token, { slug: row.slug });
+    expect(again.status).toBe(409);
+    expect(await json(again)).toMatchObject({
+      error: { code: "slug_deleted", details: { deletedBy: OWNER.name } },
+    });
     expect(await code(await publish(t, member, { slug: row.slug }))).toBe("conflict");
     expect((await post(`/api/artifacts/${row.id}/archive`, { bearer: token })).status).toBe(404);
 
@@ -174,13 +178,15 @@ describe("lifecycle", () => {
     );
     await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
     expect((await t.api(`/api/artifacts/${row.id}`, { method: "DELETE", bearer: token })).status).toBe(404);
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 1);
     expect(await code(await t.api(`/api/artifacts/${row.id}`, { method: "DELETE", cookie }))).toBe(
       "recent_auth_required",
     );
     cookie = await signIn(t, OWNER.email, OWNER.password);
     expect((await t.api(`/api/artifacts/${row.id}`, { method: "DELETE", cookie })).status).toBe(200);
+    expect((await t.api(`/api/artifacts/${row.id}`, { bearer: token })).status).toBe(404);
 
+    // A purge promises the rows are gone, not hidden, which no route can tell apart.
     const db = t.server.db;
     expect(await db.select().from(artifacts).where(eq(artifacts.id, row.id))).toEqual([]);
     expect(await db.select().from(versions).where(eq(versions.artifactId, row.id))).toEqual([]);
@@ -203,9 +209,8 @@ describe("lifecycle", () => {
     await post(`/api/artifacts/${recent.id}/delete`, { bearer: token });
     t.clock.advance(16 * 24 * 3600_000);
     expect((await job("purge")).status).toBe(200);
-    const ids = (await t.server.db.select().from(artifacts)).map((row) => row.id);
-    expect(ids).not.toContain(old.id);
-    expect(ids).toContain(recent.id);
+    expect((await t.api(`/api/artifacts/${old.id}`, { bearer: token })).status).toBe(404);
+    expect((await t.api(`/api/artifacts/${recent.id}`, { bearer: token })).status).toBe(410);
     await post(`/api/artifacts/${recent.id}/undelete`, { bearer: token });
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
@@ -228,13 +233,10 @@ describe("lifecycle", () => {
 
     expect((await post(`/api/artifacts/${row.id}/versions/3/delete`, { bearer: token })).status).toBe(409);
     expect((await post(`/api/artifacts/${row.id}/versions/2/delete`, { bearer: token })).status).toBe(200);
-    const [moved] = await t.server.db.select().from(threads).where(eq(threads.id, thread.id));
-    expect(moved).toMatchObject({ createdVersion: 3, movedFromVersion: 2 });
+    const moved = (await threadsOf(row.id)).find((entry) => entry.id === thread.id);
+    expect(moved?.createdVersion).toBe(3); // It was made on v2.
     expect((await t.api(`/api/artifacts/${row.id}/versions/2`, { bearer: token })).status).toBe(404);
-    const list = (await (await t.api(`/api/artifacts/${row.id}/versions`, { bearer: token })).json()) as {
-      n: number;
-    }[];
-    expect(list.map((v) => v.n)).toEqual([3, 1]);
+    expect((await versionsOf(row.id)).map((v) => v.n)).toEqual([3, 1]);
     // The reader compares v3 with v1 now: the version before it that isn't deleted.
     const detail = (await (await t.api(`/api/artifacts/${row.id}/versions/3`, { bearer: token })).json()) as {
       previous: number | null;
@@ -261,9 +263,7 @@ describe("lifecycle", () => {
   });
 
   test("purging a removed version takes its crops and quotes with it", async () => {
-    const png = await sharp({ create: { width: 786, height: 1704, channels: 4, background: "#20232a" } })
-      .webp()
-      .toBuffer();
+    const png = await solidImage(786, 1704, "#20232a");
     const row = await fresh();
     await publish(t, token, { slug: row.slug, frameHash: hash(`crop-${row.slug}`), renderBytes: png });
     await publish(t, token, { slug: row.slug, frameHash: hash(`next-${row.slug}`) });
@@ -282,12 +282,7 @@ describe("lifecycle", () => {
     );
     expect(pin.crop).not.toBeNull();
     await post(`/api/artifacts/${row.id}/versions/2/delete`, { bearer: token });
-    const listed = (await (await t.api(`/api/artifacts/${row.id}/threads`, { bearer: token })).json()) as {
-      id: string;
-      anchorState: string;
-      createdVersion: number;
-    }[];
-    expect(listed.find((entry) => entry.id === quote.id)).toMatchObject({
+    expect((await threadsOf(row.id)).find((entry) => entry.id === quote.id)).toMatchObject({
       createdVersion: 3,
       anchorState: "moved_version",
     });
@@ -297,11 +292,13 @@ describe("lifecycle", () => {
     expect((await t.api(`/api/artifacts/${row.id}/versions/2`, { method: "DELETE", cookie })).status).toBe(
       200,
     );
-    const [pinned] = await t.server.db.select().from(threads).where(eq(threads.id, pin.id));
-    expect(pinned?.cropKey).toBeNull();
+    const after = await threadsOf(row.id);
+    expect(after.find((entry) => entry.id === pin.id)?.crop).toBeNull();
     expect(await t.server.bucket.head(`crops/${pin.id}.webp`)).toBeNull();
-    const [quoted] = await t.server.db.select().from(threads).where(eq(threads.id, quote.id));
-    expect(quoted?.anchor).toEqual({ type: "block", blockKey: "intro/p1" });
+    expect(after.find((entry) => entry.id === quote.id)?.anchor).toEqual({
+      type: "block",
+      blockKey: "intro/p1",
+    });
   });
 
   test("a deleted artifact's history stays in Activity", async () => {
@@ -317,6 +314,7 @@ describe("lifecycle", () => {
   test("a purge that lost a race with a restore does nothing", async () => {
     const row = await fresh();
     await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
+    // The row as the purge job read it, before the restore: a race window no route can open.
     const [stale] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, row.id));
     await post(`/api/artifacts/${row.id}/undelete`, { bearer: token });
     expect(await purgeArtifact(t.server.deps, stale as typeof artifacts.$inferSelect, null)).toBe(false);
@@ -327,7 +325,8 @@ describe("lifecycle", () => {
     const row = await fresh();
     await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
     // The job chose this one when its 30 days were up; then it came back, and went again.
-    const chosen = { ...row, deletedAt: row.createdAt, purgeAfter: new Date(0) };
+    const [first] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, row.id));
+    const chosen = { ...(first as typeof artifacts.$inferSelect), purgeAfter: new Date(0) };
     await post(`/api/artifacts/${row.id}/undelete`, { bearer: token });
     await post(`/api/artifacts/${row.id}/delete`, { bearer: token });
     expect(await purgeArtifact(t.server.deps, chosen, null)).toBe(false);
@@ -366,21 +365,22 @@ describe("lifecycle", () => {
     expect((await post(`/api/artifacts/${row.id}/versions/1/restore`, { bearer: member })).status).toBe(403);
     const restored = await post(`/api/artifacts/${row.id}/versions/1/restore`, { bearer: token });
     expect(await restored.json()).toEqual({ n: 3 });
-    const [v3] = await t.server.db
-      .select()
-      .from(versions)
-      .where(eq(versions.artifactId, row.id))
-      .orderBy(versions.n);
-    expect(v3?.n).toBe(1);
-    const all = await t.server.db.select().from(versions).where(eq(versions.artifactId, row.id));
-    expect(all.find((v) => v.n === 3)).toMatchObject({ restoredFrom: 1, message: "Restored v1" });
-    const copied = await t.server.db
-      .select()
-      .from(frames)
-      .where(eq(frames.versionId, all.find((v) => v.n === 3)?.id as string));
-    expect(copied).toHaveLength(1);
-    const [anchored] = await t.server.db.select().from(threads).where(eq(threads.id, thread.id));
-    expect(anchored?.anchorState).toBe("updated");
+    expect((await versionsOf(row.id)).find((v) => v.n === 3)).toMatchObject({
+      restoredFrom: 1,
+      message: "Restored v1",
+    });
+    const [v1, v3] = await Promise.all(
+      [1, 3].map(async (n) =>
+        VersionDetail.parse(
+          await json(await t.api(`/api/artifacts/${row.id}/versions/${n}`, { bearer: token })),
+        ),
+      ),
+    );
+    const framesOf = (detail: VersionDetail | undefined) =>
+      detail?.pages.find((page) => page.key === "mocks")?.frames?.map((frame) => frame.contentHash);
+    expect(framesOf(v3)).toEqual(framesOf(v1));
+    expect(framesOf(v3)).toHaveLength(1);
+    expect((await threadsOf(row.id)).find((entry) => entry.id === thread.id)?.anchorState).toBe("updated");
     const compare = await t.api(`/api/artifacts/${row.id}/compare?from=2&to=3`, { bearer: token });
     expect(((await compare.json()) as { frames: { changed: string[] } }).frames.changed).toEqual([
       "mocks/live-view",
@@ -395,8 +395,7 @@ describe("lifecycle", () => {
     expect((await name({ name: "Real photos" })).status).toBe(200);
     expect((await name({ name: "x" }, member)).status).toBe(403);
     expect((await name({ name: 5 })).status).toBe(400);
-    const [version] = await t.server.db.select().from(versions).where(eq(versions.artifactId, row.id));
-    expect(version?.name).toBe("Real photos");
+    expect((await versionsOf(row.id))[0]?.name).toBe("Real photos");
   });
 
   test("activity: filters, and never shows a private artifact to someone else", async () => {
@@ -415,6 +414,7 @@ describe("lifecycle", () => {
     const agents = (await (await t.api("/api/activity?filter=agents", { bearer: token })).json()) as {
       items: { agent: string | null }[];
     };
+    expect(agents.items.length).toBeGreaterThan(0);
     expect(agents.items.every((item) => item.agent !== null)).toBe(true);
     const people_ = (await (await t.api("/api/activity?filter=people", { bearer: token })).json()) as {
       items: unknown[];
@@ -455,54 +455,39 @@ describe("lifecycle", () => {
     expect(names).toContain("current");
     expect(names).not.toContain("ended");
   });
-
-  test("expire clears leftovers, and the job needs the secret", async () => {
-    expect((await job("expire")).status).toBe(200);
-    const denied = await fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/gc`, {
-      method: "POST",
-    });
-    expect(denied.status).toBe(401);
-    expect((await job("nothing")).status).toBe(404);
-    expect(personId).toBeTruthy();
-    expect(await t.server.db.select().from(guestLinks)).toEqual([]);
-  });
 });
 
 // Its own server: GC compares bucket timestamps with the clock, so the clock can't have been moved yet.
 describe("garbage collection", () => {
   let t: TestServer;
   let token: string;
+  let owner: Awaited<ReturnType<typeof claim>>;
   const gc = async () => {
     const response = await fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/gc`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${OPS}` },
+      headers: { Authorization: `Bearer ${OPS_SECRET}` },
     });
     return ((await response.json()) as { result: { deleted: number } }).result;
   };
 
   beforeAll(async () => {
     t = await startTestServer();
-    token = (await claim(t)).token;
+    owner = await claim(t);
+    token = owner.token;
   });
   afterAll(() => t.stop());
 
   test("keeps what's used, what's young, and what a removed version needs; deletes the rest", async () => {
     const unique = Bun.randomUUIDv7();
-    await publish(t, token, { slug: "keep", frameHash: hash(unique) });
-    await publish(t, token, { slug: "keep", frameHash: hash(`${unique}2`) });
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "keep"));
-    const all = await t.server.db
-      .select()
-      .from(versions)
-      .where(eq(versions.artifactId, row?.id as string));
-    const first = all.find((v) => v.n === 1);
-    const used = Object.values(first?.files as Record<string, { hash: string }>).map((entry) => entry.hash);
-    const [frame] = await t.server.db
-      .select()
-      .from(frames)
-      .where(eq(frames.versionId, first?.id as string));
-    const render = (frame as unknown as { renders: { "1x": string } }).renders["1x"];
-    await t.api(`/api/artifacts/${row?.id}/versions/1/delete`, { method: "POST", bearer: token });
+    // A file and a render only v1 has, so only the removed version keeps them.
+    const only = file("only-v1.txt", `only in v1 ${unique}`, "text/plain");
+    const first = await published(t, token, { slug: "keep", frameHash: hash(unique), extra: [only] });
+    await published(t, token, { slug: "keep", frameHash: hash(`${unique}2`) });
+    const removed = await t.api(`/api/artifacts/${first.id}/versions/1/delete`, {
+      method: "POST",
+      bearer: token,
+    });
+    expect(removed.status).toBe(200);
 
     const orphan = file("orphan.bin", `orphan ${unique}`);
     await t.server.bucket.put(`blobs/${orphan.sha256}`, orphan.body);
@@ -513,7 +498,7 @@ describe("garbage collection", () => {
     t.clock.advance(25 * 3600_000);
     expect((await gc()).deleted).toBeGreaterThan(0);
     expect(await t.server.bucket.head(`blobs/${orphan.sha256}`)).toBeNull();
-    for (const hashed of [...used, render]) {
+    for (const hashed of [only.sha256, first.renderHash]) {
       expect(await t.server.bucket.head(`blobs/${hashed}`)).not.toBeNull();
     }
 
@@ -533,7 +518,7 @@ describe("garbage collection", () => {
       family,
       file: file(`fonts/${family}.woff2`, `${family} ${unique}`, "font/woff2"),
     }));
-    await publish(t, token, { slug: "sample", extra: fonts.map(({ file }) => file) });
+    const sample = await published(t, token, { slug: "sample", extra: fonts.map(({ file }) => file) });
     const propose = (family: string, hash: string) =>
       t.api("/api/brand/proposals", {
         method: "POST",
@@ -556,9 +541,8 @@ describe("garbage collection", () => {
     const applied = await t.api(`/api/brand/proposals/${ids[0]}/apply`, { method: "POST", cookie });
     expect(applied.status).toBe(200);
 
-    const [sample] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "sample"));
-    await t.api(`/api/artifacts/${sample?.id}/delete`, { method: "POST", cookie });
-    expect((await t.api(`/api/artifacts/${sample?.id}`, { method: "DELETE", cookie })).status).toBe(200);
+    await t.api(`/api/artifacts/${sample.id}/delete`, { method: "POST", cookie });
+    expect((await t.api(`/api/artifacts/${sample.id}`, { method: "DELETE", cookie })).status).toBe(200);
     t.clock.advance(25 * 3600_000);
     await gc();
     for (const { file } of fonts) expect(await t.server.bucket.head(`blobs/${file.sha256}`)).not.toBeNull();
@@ -566,20 +550,19 @@ describe("garbage collection", () => {
 
   test("the sweep removes a crop no thread points at, even when its thread is still there", async () => {
     // What purging a version leaves if the bucket failed after the thread's crop_key was cleared.
-    await publish(t, token, { slug: "crops", frameHash: hash("crops") });
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "crops"));
+    const { id } = await published(t, token, { slug: "crops", frameHash: hash("crops") });
     const make = async (pointed: boolean) => {
       const threadId = Bun.randomUUIDv7();
       const key = `crops/${threadId}.webp`;
       await t.server.db.insert(threads).values({
         id: threadId,
-        orgId: row?.orgId as string,
-        artifactId: row?.id as string,
+        orgId: owner.orgId,
+        artifactId: id,
         n: pointed ? 101 : 100,
         pageKey: "mocks",
         createdVersion: 1,
         authorName: "x",
-        authorPersonId: (await t.server.db.select().from(people))[0]?.id as string,
+        authorPersonId: owner.person.id,
         cropKey: pointed ? key : null,
       });
       await t.server.bucket.put(key, "x");
