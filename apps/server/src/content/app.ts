@@ -4,6 +4,7 @@ import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { guestCaller } from "../auth/resolve.ts";
+import { personView } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
 import { people, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
@@ -119,7 +120,10 @@ export function createContentApp(deps: Deps) {
   }
 
   async function currentCaller(payload: ContentPayload): Promise<Caller | null> {
-    if (payload.c.kind === "guest") return guestCaller(deps, payload.c.id);
+    if (payload.c.kind === "guest") {
+      const org = await findOrg(db);
+      return org ? guestCaller(deps, org, payload.c.id) : null;
+    }
     const [person] = await db
       .select()
       .from(people)
@@ -130,7 +134,7 @@ export function createContentApp(deps: Deps) {
       kind: "person",
       sessionId: "",
       recentAuth: false,
-      person: { id: person.id, name: person.name, email: person.email, role: person.role },
+      person: personView(person),
     };
   }
 

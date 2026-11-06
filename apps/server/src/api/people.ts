@@ -33,7 +33,7 @@ import { isLiveLink } from "../auth/links.ts";
 import { endSignIns } from "../auth/revoke.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
-import type { Db } from "../db/index.ts";
+import { containing, type Db } from "../db/index.ts";
 import { lockOwners } from "../db/locks.ts";
 import {
   artifactAccess,
@@ -164,7 +164,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     const q = (c.req.query("q") ?? "").trim().slice(0, 100);
     if (q.length < 2) return c.json({ people: [] });
     deps.limits.hit(`people-search:${c.var.caller.person.id}`, SEARCHES_PER_MINUTE, 60_000);
-    const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    const like = containing(q);
     const rows = await db
       .select()
       .from(people)

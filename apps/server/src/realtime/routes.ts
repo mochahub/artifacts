@@ -34,7 +34,7 @@ export function eventRoutes(routes: Routes, deps: Deps) {
     const stillAllowed = async () => {
       try {
         const [fresh, current] = await Promise.all([
-          currentCaller(deps, caller),
+          currentCaller(deps, c.var.org, caller),
           findArtifact(deps, c.get("org").id, resource.id),
         ]);
         return fresh !== null && current !== null && can(fresh, "artifact.read", current);

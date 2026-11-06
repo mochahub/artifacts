@@ -4,6 +4,7 @@ import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import { heldProjects, type LoadedArtifact, toProject } from "../auth/access.ts";
 import { type Caller, viewerId } from "../auth/caller.ts";
 import { can, canAfterReauth } from "../auth/can.ts";
+import { containing } from "../db/index.ts";
 import {
   artifacts,
   artifactTeamAccess,
@@ -77,7 +78,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
       slug: entry.row.slug,
       title: entry.row.title,
     });
-    const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    const like = containing(q);
     const [pageRows, commentRows, content] = await Promise.all([
       deps.db
         .select({ artifactId: versions.artifactId, n: versions.n, key: pages.pageKey, title: pages.title })

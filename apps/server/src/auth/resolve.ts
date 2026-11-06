@@ -2,7 +2,7 @@ import { DAY_MS } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
-import { findOrg, type OrgRow } from "../db/index.ts";
+import type { OrgRow } from "../db/index.ts";
 import { guestLinks, guests, oauthGrants, people, sessions, shareLinks, tokens } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
@@ -13,6 +13,7 @@ import { sha256 } from "./secrets.ts";
 import {
   GUEST_COOKIE,
   isSecureRequest,
+  personView,
   RECENT_AUTH_MS,
   SESSION_COOKIE,
   SESSION_DAYS,
@@ -76,7 +77,7 @@ async function byToken(c: Context, deps: Deps, org: OrgRow, secret: string): Pro
     kind: "cliToken",
     tokenId: token.id,
     scopes: token.scopes,
-    person: { id: person.id, name: person.name, email: person.email, role: person.role },
+    person: personView(person),
   };
 }
 
@@ -101,7 +102,7 @@ async function bySession(c: Context, deps: Deps, org: OrgRow, secret: string): P
     kind: "person",
     sessionId: session.id,
     recentAuth: now.getTime() - session.authAt.getTime() < RECENT_AUTH_MS,
-    person: { id: person.id, name: person.name, email: person.email, role: person.role },
+    person: personView(person),
   };
 }
 
@@ -111,13 +112,12 @@ async function byGuest(deps: Deps, org: OrgRow, secret: string): Promise<Caller 
     .from(guests)
     .where(and(eq(guests.orgId, org.id), eq(guests.tokenHash, sha256(secret))))
     .limit(1);
-  return guest ? guestCaller(deps, guest.id) : null;
+  return guest ? guestCaller(deps, org, guest.id) : null;
 }
 
 /** A guest's current links. The content port calls this too, to re-check an open frame (04). */
-export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> {
+export async function guestCaller(deps: Deps, org: OrgRow, guestId: string): Promise<Caller> {
   const now = deps.clock.now();
-  const org = await findOrg(deps.db);
   const rows = await deps.db
     .select({ row: guestLinks, link: shareLinks })
     .from(guestLinks)
@@ -129,7 +129,7 @@ export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> 
     permission: link.permission,
     name: row.name,
     // Checked on every request, so revoking a link ends access at once (02).
-    active: org?.settings.linkSharing === true && isLiveLink(link, now) && row.expiresAt > now,
+    active: org.settings.linkSharing && isLiveLink(link, now) && row.expiresAt > now,
   }));
   return { kind: "guest", guestId, links };
 }
@@ -138,9 +138,9 @@ export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> 
  * The same caller as it is now, or null if it has ended. For something that outlives one request and
  * can't resolve a cookie again, such as an event stream.
  */
-export async function currentCaller(deps: Deps, caller: Caller): Promise<Caller | null> {
+export async function currentCaller(deps: Deps, org: OrgRow, caller: Caller): Promise<Caller | null> {
   const now = deps.clock.now();
-  if (caller.kind === "guest") return guestCaller(deps, caller.guestId);
+  if (caller.kind === "guest") return guestCaller(deps, org, caller.guestId);
   if (caller.kind === "person") {
     const [row] = await deps.db
       .select({ session: sessions, person: people })
@@ -149,8 +149,7 @@ export async function currentCaller(deps: Deps, caller: Caller): Promise<Caller 
       .where(and(eq(sessions.id, caller.sessionId), isNull(people.removedAt)))
       .limit(1);
     if (!row || row.session.expiresAt <= now) return null;
-    const { id, name, email, role } = row.person;
-    return { ...caller, person: { id, name, email, role } };
+    return { ...caller, person: personView(row.person) };
   }
   if (caller.kind === "cliToken" || caller.kind === "orgToken") {
     const [token] = await deps.db.select().from(tokens).where(eq(tokens.id, caller.tokenId)).limit(1);
@@ -162,8 +161,7 @@ export async function currentCaller(deps: Deps, caller: Caller): Promise<Caller 
       .where(and(eq(people.id, caller.person.id), isNull(people.removedAt)))
       .limit(1);
     if (!person) return null;
-    const { id, name, email, role } = person;
-    return { ...caller, scopes: token.scopes, person: { id, name, email, role } };
+    return { ...caller, scopes: token.scopes, person: personView(person) };
   }
   return null;
 }
