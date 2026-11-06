@@ -149,7 +149,6 @@ export async function uploadFiles(
   );
 }
 
-/** `--note <frame>=<text>`, as many as given. */
 function parseNotes(notes: string[]) {
   const parsed: Record<string, string> = {};
   for (const note of notes) {
@@ -162,7 +161,6 @@ function parseNotes(notes: string[]) {
 
 export type PublishFlags = { message?: string; name?: string; notes: string[] };
 
-/** Lint, render, upload and commit one folder. */
 export async function publishRoot(
   root: string,
   flags: PublishFlags,

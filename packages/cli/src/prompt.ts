@@ -25,7 +25,6 @@ const stty = (arg: string) => {
   if (process.stdin.isTTY) Bun.spawnSync(["stty", arg], { stdin: "inherit" });
 };
 
-/** Reads without echoing it. */
 export async function askSecret(question: string): Promise<string> {
   stty("-echo");
   // Ctrl-C at a password prompt would otherwise leave the person's terminal not echoing what they type.

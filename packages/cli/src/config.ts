@@ -33,7 +33,6 @@ export function writePrivateFile(path: string, content: string) {
 export const writeConfig = (config: Config) =>
   writePrivateFile(configPath(), JSON.stringify(config, null, 2));
 
-/** Adds or updates a server and makes it the default. */
 export function saveServer(entry: ServerEntry) {
   const config = readConfig();
   const rest = config.servers.filter((server) => server.url !== entry.url);

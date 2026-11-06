@@ -30,7 +30,6 @@ export function installSkill(targets: { claude?: boolean; codex?: boolean }, out
   return chosen;
 }
 
-/** Installed, and from this CLI? */
 export function skillCurrent(dir: string) {
   const marker = join(dir, ".version");
   return existsSync(marker) && readFileSync(marker, "utf8").trim() === VERSION;

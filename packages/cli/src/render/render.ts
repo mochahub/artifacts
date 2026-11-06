@@ -46,7 +46,6 @@ const PREVIEW_CALLER: Caller = {
 export type BundleFile = { path: string; hash: string; size: number; type: string; source: string };
 
 export type RenderResult = {
-  /** The bundled backend's hash, if there is one. */
   backendHash: string | null;
   files: Map<string, BundleFile>;
   /** Render blobs, by hash, not listed in the version's files. */

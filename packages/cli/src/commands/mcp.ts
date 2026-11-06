@@ -11,7 +11,6 @@ type Flag = (name: string, value: unknown, form: RegExp, label: string) => strin
 type Tool = {
   name: string;
   description: string;
-  /** The command it runs, from the table. */
   command: string;
   properties: Record<string, { type: string; description: string }>;
   required?: string[];

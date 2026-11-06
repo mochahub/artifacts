@@ -24,7 +24,6 @@ export type Command<A extends string = string, O extends Options = Options> = {
   usage: string | readonly string[];
   /** The lines in `artifacts --help`, when they aren't the first form; null for a command listed with another. */
   help?: readonly string[] | null;
-  /** Positionals after the command's name, in order. */
   args?: readonly A[];
   options: O;
   run(input: Input<A, Flags<O> & { json?: boolean }>, out: Output): unknown;
