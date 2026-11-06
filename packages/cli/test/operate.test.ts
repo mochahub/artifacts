@@ -59,6 +59,8 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
 
   test("an answer setup doesn't know is asked again, not taken for Railway", async () => {
     const { env: e, log } = env();
+    const calls = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+    const before = calls().length;
     const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {
       env: e,
       stdin: "pipe",
@@ -71,7 +73,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     const stderr = await new Response(child.stderr).text();
     expect(stderr).toContain("That isn't one of railway, docker, existing.");
     expect(stderr).toContain('Stopped at "Where should your Artifacts server run?');
-    expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain("init");
+    expect(calls().slice(before)).toBe("");
   });
 
   test("a deploy that fails stops the wait, rather than sitting out the timeout", async () => {
