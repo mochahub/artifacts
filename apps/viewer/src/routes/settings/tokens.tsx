@@ -1,4 +1,4 @@
-import type { ProjectRow, TokenScope } from "@artifacts/schema";
+import type { OrgTokenCreated, OrgTokenList, ProjectRow, TokenScope } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Check } from "lucide-preact";
 import { del, post } from "../../api.ts";
@@ -7,12 +7,10 @@ import { ago } from "../../format.ts";
 import { usePoll } from "../../poll.ts";
 import { Frame } from "./frame.tsx";
 
-type TokenRow = { id: string; name: string; scopes: TokenScope[]; lastUsedAt: string | null };
-
 const SCOPES = ["publish", "read", "org"] as const satisfies readonly TokenScope[];
 
 export function Tokens() {
-  const list = usePoll<TokenRow[]>("/api/tokens", 60_000);
+  const list = usePoll<OrgTokenList>("/api/tokens", 60_000);
   const action = useAction();
   const name = useSignal("");
   const made = useSignal<string | null>(null);
@@ -78,7 +76,7 @@ export function Tokens() {
         disabled={!name.value}
         onClick={() =>
           action.run(async () => {
-            const { token } = await post<{ token: string }>("/api/tokens", {
+            const { token } = await post<OrgTokenCreated>("/api/tokens", {
               name: name.value,
               scopes: SCOPES,
               ...(chosen.value.length > 0 ? { projectIds: chosen.value } : {}),

@@ -1055,9 +1055,9 @@ export const ShareLinkPreview = z.object({
 });
 export type ShareLinkPreview = z.infer<typeof ShareLinkPreview>;
 
-/** Someone in the organization is added; anyone else gets an invite link to send. */
+/** Adding to an artifact or a project: someone in the organization is added; anyone else gets an invite link. */
 export const AccessAdded = z.union([
-  z.object({ added: z.object({ id: Id, name: z.string(), permission: Permission }) }),
+  z.object({ added: z.object({ id: Id, name: z.string(), permission: ProjectPermission }) }),
   z.object({ url: z.string() }),
 ]);
 export type AccessAdded = z.infer<typeof AccessAdded>;
@@ -1068,14 +1068,27 @@ export type ResetLinkCreated = z.infer<typeof ResetLinkCreated>;
 export const BrandProposalCreated = z.object({ id: Id });
 export type BrandProposalCreated = z.infer<typeof BrandProposalCreated>;
 
+/** A link to hand on: an invite made again, or where a data file can be read. */
+export const UrlResponse = z.object({ url: z.string() });
+export type UrlResponse = z.infer<typeof UrlResponse>;
+
+export const TeamCreated = z.object({ team: Team });
+export type TeamCreated = z.infer<typeof TeamCreated>;
+
+/** Where the consent page sends the browser next: back to the client, with a code or an error. */
+export const ConsentRedirect = z.object({ redirect: z.string() });
+export type ConsentRedirect = z.infer<typeof ConsentRedirect>;
+
+/** The VAPID public key a browser subscribes with. */
+export const PushKey = z.object({ key: z.string() });
+export type PushKey = z.infer<typeof PushKey>;
+
 export const ActivityItem = z.object({
   id: Id,
   kind: ActivityKind,
   actor: z.string(),
   agent: z.string().nullable(),
-  artifact: z
-    .object({ title: z.string(), slug: z.string().nullable(), project: z.string().nullable() })
-    .nullable(),
+  artifact: z.object({ title: z.string(), slug: z.string(), project: z.string() }).nullable(),
   payload: z.record(z.string(), z.unknown()),
   createdAt: Time,
 });

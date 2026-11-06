@@ -1,4 +1,4 @@
-import type { Person, ResetPreview } from "@artifacts/schema";
+import type { PersonResponse, ResetPreview } from "@artifacts/schema";
 import { PASSWORD_MIN, RESET_HOURS } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
@@ -6,7 +6,6 @@ import { useLocation, useRoute } from "preact-iso";
 import { api, message, post } from "../api.ts";
 import { plural } from "../format.ts";
 import { me } from "../session.ts";
-import type { Infer } from "../types.ts";
 
 export function Reset() {
   const { params } = useRoute();
@@ -18,7 +17,7 @@ export function Reset() {
   const token = encodeURIComponent(params.token ?? "");
 
   useEffect(() => {
-    api<Infer<typeof ResetPreview>>(`/api/reset/${token}`)
+    api<ResetPreview>(`/api/reset/${token}`)
       .then((body) => {
         email.value = body.email;
       })
@@ -30,7 +29,7 @@ export function Reset() {
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     try {
-      const { person } = await post<{ person: Person }>(`/api/reset/${token}`, { password: password.value });
+      const { person } = await post<PersonResponse>(`/api/reset/${token}`, { password: password.value });
       me.value = person;
       route("/", true);
     } catch (failure) {

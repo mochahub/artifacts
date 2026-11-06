@@ -1,8 +1,11 @@
 import type {
+  AccessAdded,
   Artifact,
+  ArtifactAccess,
   PeopleSearch,
   ProjectAccessList,
   ProjectPermission,
+  ShareLinkCreated,
   TeamList,
 } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
@@ -13,7 +16,6 @@ import { copy } from "../clipboard.ts";
 import { capitalize, plural } from "../format.ts";
 import { projectHref, teamHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
-import type { Infer } from "../types.ts";
 import { Avatar } from "./cards.tsx";
 import { useAction } from "./reauth.tsx";
 import { Sheet } from "./sheet.tsx";
@@ -26,18 +28,10 @@ export const LEVELS: Record<Level, string> = {
   manage: "Can manage",
 };
 
-type Inherited = ProjectAccessList["inherited"][number];
-type Access = {
-  people: { id: string; name: string; email: string; role: string; permission: Level }[];
-  teams: { id: string; slug: string; name: string; permission: Level; viaToken: boolean; members: number }[];
-  inherited: Inherited[];
-  links: { id: string; permission: string; expiresAt: string | null }[];
-  project: { slug: string; name: string; restricted: boolean } | null;
-  canShareOutside: boolean;
-};
+type Inherited = ProjectAccessList["inherited"][number] | ArtifactAccess["inherited"][number];
 type Picked =
-  | ({ kind: "person" } & Infer<typeof PeopleSearch>["people"][number])
-  | ({ kind: "team" } & Infer<typeof TeamList>["teams"][number]);
+  | ({ kind: "person" } & PeopleSearch["people"][number])
+  | ({ kind: "team" } & TeamList["teams"][number]);
 const looksLikeEmail = (text: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 
 /** A level, always in the same words. It's a native menu, so it works the same with a thumb. */
@@ -91,7 +85,7 @@ export function Picker({
   const allTeams = useSignal<Picked[]>([]);
   useEffect(() => {
     if (!teams) return;
-    api<Infer<typeof TeamList>>("/api/teams")
+    api<TeamList>("/api/teams")
       .then((body) => {
         allTeams.value = body.teams.map((team) => ({ ...team, kind: "team" }));
       })
@@ -104,7 +98,7 @@ export function Picker({
       return;
     }
     const timer = setTimeout(() => {
-      api<Infer<typeof PeopleSearch>>(`/api/people/search?q=${encodeURIComponent(q)}`)
+      api<PeopleSearch>(`/api/people/search?q=${encodeURIComponent(q)}`)
         .then((body) => {
           people.value = body.people.map((person) => ({ ...person, kind: "person" }));
         })
@@ -200,7 +194,7 @@ function InheritedRows({ rows }: { rows: Inherited[] }) {
             <div class="tt">{row.name}</div>
             <div class="ss">
               {row.role !== "member" ? `${capitalize(row.role)}, ` : ""}
-              {LEVELS[row.level]}
+              {row.level !== "none" && LEVELS[row.level]}
               <Reason row={row} />
             </div>
           </div>
@@ -220,7 +214,7 @@ export function ShareSheet({
   onClose(): void;
   onChanged(): void;
 }) {
-  const access = usePoll<Access>(`/api/artifacts/${artifact.id}/access`, 60_000);
+  const access = usePoll<ArtifactAccess>(`/api/artifacts/${artifact.id}/access`, 60_000);
   const permission = useSignal<"view" | "comment">("comment");
   const expires = useSignal<string>("");
   const url = useSignal<string | null>(null);
@@ -232,7 +226,7 @@ export function ShareSheet({
   const visibility = useSignal(artifact.visibility);
   const createLink = () =>
     run(async () => {
-      const made = await post<{ url: string }>(`/api/artifacts/${artifact.id}/links`, {
+      const made = await post<ShareLinkCreated>(`/api/artifacts/${artifact.id}/links`, {
         permission: permission.value,
         expiresIn: expires.value || null,
       });
@@ -241,11 +235,11 @@ export function ShareSheet({
     });
   const setPerson = (email: string, level: Level) =>
     run(async () => {
-      const made = await post<{ url?: string }>(`/api/artifacts/${artifact.id}/access`, {
+      const made = await post<AccessAdded>(`/api/artifacts/${artifact.id}/access`, {
         email,
         permission: level,
       });
-      if (made.url) {
+      if ("url" in made) {
         url.value = made.url;
         copy(made.url);
       }
@@ -529,8 +523,8 @@ export function ProjectShareSheet({
     run(() => api(`${path}/${subject}`, { method: "PUT", json: { permission: level } }));
   const invite = (email: string) =>
     run(async () => {
-      const made = await post<{ url?: string }>(path, { email, permission: adding.value });
-      if (made.url) {
+      const made = await post<AccessAdded>(path, { email, permission: adding.value });
+      if ("url" in made) {
         url.value = made.url;
         copy(made.url);
       }

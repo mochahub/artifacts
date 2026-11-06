@@ -1,4 +1,4 @@
-import type { Artifact, CanvasFrame, DataScope, Thread } from "@artifacts/schema";
+import type { Artifact, CanvasFrame, DataScope, Thread, VersionPageOf } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Images, List, MessageCircle, Move } from "lucide-preact";
 import { createPortal } from "preact/compat";
@@ -10,10 +10,10 @@ import { frameFromHash, frameHash, renderUrl } from "../paths.ts";
 import type { Remote } from "../poll.ts";
 import type { Draft } from "../review/sheets.tsx";
 import { useReview } from "../review/use-review.tsx";
-import { type Board, CanvasEngine, type Pin } from "./engine.ts";
+import { CanvasEngine, type Pin } from "./engine.ts";
 import { canvasCommand } from "./keys.ts";
 
-export type CanvasPage = { key: string; title: string | null; boards: Board[]; frames: CanvasFrame[] };
+export type CanvasPage = VersionPageOf<"canvas" | "deck">;
 
 type Props = {
   artifact: Artifact;

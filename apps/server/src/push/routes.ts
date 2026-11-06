@@ -1,3 +1,4 @@
+import type { PushKey } from "@artifacts/schema";
 import { PushSubscribe } from "@artifacts/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { pushSubscriptions } from "../db/schema.ts";
@@ -11,7 +12,7 @@ const MAX_SUBSCRIPTIONS_PER_PERSON = 10;
 
 export function pushRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/push/key", { action: "account.manage" }, async (c) => {
-    return c.json({ key: (await vapidKeys(deps)).publicKey });
+    return c.json({ key: (await vapidKeys(deps)).publicKey } satisfies PushKey);
   });
 
   routes.post("/api/push/subscribe", { action: "account.manage" }, async (c) => {

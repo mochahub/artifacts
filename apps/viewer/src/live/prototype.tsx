@@ -1,13 +1,9 @@
-import type { Artifact, DataScope } from "@artifacts/schema";
+import type { Artifact, DataScope, VersionPageOf } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { PageCapsule } from "../components/shell.tsx";
 import { LiveFrame, SavedNotice } from "./frame.tsx";
 
-export type PrototypePage = {
-  key: string;
-  title: string | null;
-  meta: { livePath: string; device?: string };
-};
+export type PrototypePage = VersionPageOf<"prototype">;
 
 type Props = {
   artifact: Artifact;
@@ -33,7 +29,7 @@ export function PrototypeView({ artifact, page, version, onPages, onVersions }: 
         <LiveFrame
           artifact={artifact}
           version={version}
-          path={page.meta.livePath}
+          path={page.meta.livePath ?? ""}
           onUse={(used) => {
             scope.value = used;
           }}

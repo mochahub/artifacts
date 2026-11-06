@@ -8,9 +8,6 @@ import { useAction } from "../components/reauth.tsx";
 import { signInHref } from "../paths.ts";
 import { me } from "../session.ts";
 import { forgetStored, readStored, writeStored } from "../storage.ts";
-import type { Infer } from "../types.ts";
-
-type Details = Infer<typeof DeviceDetails>;
 
 const KEPT_CODE = "artifacts.device-code";
 
@@ -19,7 +16,7 @@ export function Device() {
   const { route, path, query } = useLocation();
   // A Google round trip reloads the page. The person typed this, so it only lasts for this tab.
   const code = useSignal(query.google ? (readStored(KEPT_CODE, "session") ?? "") : "");
-  const details = useSignal<Details | null>(null);
+  const details = useSignal<DeviceDetails | null>(null);
   const error = useSignal<string | null>(null);
   const outcome = useSignal<"approved" | "denied" | null>(null);
   const action = useAction({ beforeReauth: () => writeStored(KEPT_CODE, code.value, "session") });
@@ -31,7 +28,7 @@ export function Device() {
   async function find() {
     error.value = null;
     try {
-      details.value = await api<Details>(`/api/device/${encodeURIComponent(code.value.trim())}`);
+      details.value = await api<DeviceDetails>(`/api/device/${encodeURIComponent(code.value.trim())}`);
     } catch (failure) {
       error.value = message(failure);
     }

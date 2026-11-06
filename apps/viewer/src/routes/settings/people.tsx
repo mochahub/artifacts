@@ -1,5 +1,5 @@
-import type { INVITE_ROLES, ProjectPermission, TeamList } from "@artifacts/schema";
-import { INVITE_DAYS, RESET_HOURS } from "@artifacts/schema/constants";
+import type { InviteCreated, PeopleList, ResetLinkCreated, TeamList, UrlResponse } from "@artifacts/schema";
+import { INVITE_DAYS, type InviteRole, RESET_HOURS } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { Check, Copy, Plus, X } from "lucide-preact";
 import { api, del, post } from "../../api.ts";
@@ -11,25 +11,10 @@ import { capitalize, plural, until } from "../../format.ts";
 import { projectHref, teamHref } from "../../paths.ts";
 import { usePoll } from "../../poll.ts";
 import { me, meta } from "../../session.ts";
-import type { Infer } from "../../types.ts";
 import { Frame } from "./frame.tsx";
 
-type PersonRow = {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  password: boolean;
-  passkeys: number;
-  shares: { title: string; permission: string }[];
-  google: boolean;
-  teams: { slug: string; name: string; role: string }[];
-  projects: { slug: string; name: string; permission: ProjectPermission }[];
-};
-type InviteRow = { id: string; email: string; role: string; expiresAt: string };
-type PeopleList = { people: PersonRow[]; invites: InviteRow[] };
+type PersonRow = PeopleList["people"][number];
 
-type InviteRole = (typeof INVITE_ROLES)[number];
 /** What each role can do, as the invite sheet says it. Every role is here, so a new one needs words. */
 const ROLE_NOTES: Record<InviteRole, string> = {
   member: "Members publish, comment and share their own work.",
@@ -46,7 +31,7 @@ export function People() {
   const email = useSignal("");
   const role = useSignal<InviteRole>("member");
   const link = useSignal<string | null>(null);
-  const teams = usePoll<Infer<typeof TeamList>>("/api/teams", 60_000);
+  const teams = usePoll<TeamList>("/api/teams", 60_000);
   const joining = useSignal<string[]>([]);
   const action = useAction({ after: list.refresh });
   /** Shows a new link and copies it: invites aren't emailed. */
@@ -57,7 +42,7 @@ export function People() {
 
   const invite = () =>
     action.run(async () => {
-      const { url } = await post<{ url: string }>("/api/invites", {
+      const { url } = await post<InviteCreated>("/api/invites", {
         email: email.value,
         role: role.value,
         teamIds: joining.value,
@@ -140,9 +125,7 @@ export function People() {
                 class="icon-btn"
                 aria-label={`Copy a new link for ${row.email}`}
                 onClick={() =>
-                  action.run(async () =>
-                    show((await post<{ url: string }>(`/api/invites/${row.id}/link`)).url),
-                  )
+                  action.run(async () => show((await post<UrlResponse>(`/api/invites/${row.id}/link`)).url))
                 }
               >
                 <Copy />
@@ -334,7 +317,7 @@ export function People() {
             class="btn ink"
             onClick={() =>
               action.run(async () =>
-                show((await post<{ url: string }>(`/api/people/${person.id}/reset-link`)).url),
+                show((await post<ResetLinkCreated>(`/api/people/${person.id}/reset-link`)).url),
               )
             }
           >

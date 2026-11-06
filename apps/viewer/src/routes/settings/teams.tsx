@@ -1,4 +1,4 @@
-import type { Team, TeamList, TeamDetail as TeamPage } from "@artifacts/schema";
+import type { TeamCreated, TeamList, TeamDetail as TeamPage } from "@artifacts/schema";
 import { TEAM_ABOUT_MAX, TEAM_NAME_MAX } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { ChevronRight, Plus, Users, X } from "lucide-preact";
@@ -15,11 +15,10 @@ import { capitalize, plural } from "../../format.ts";
 import { artifactHref, teamHref } from "../../paths.ts";
 import { usePoll } from "../../poll.ts";
 import { me } from "../../session.ts";
-import type { Infer } from "../../types.ts";
 import { Frame, isAdmin } from "./frame.tsx";
 
 export function Teams() {
-  const list = usePoll<Infer<typeof TeamList>>("/api/teams", 60_000);
+  const list = usePoll<TeamList>("/api/teams", 60_000);
   const creating = useSignal(false);
   const name = useSignal("");
   const about = useSignal("");
@@ -27,7 +26,7 @@ export function Teams() {
   const action = useAction();
   const create = () =>
     action.run(async () => {
-      const { team } = await post<{ team: Team }>("/api/teams", {
+      const { team } = await post<TeamCreated>("/api/teams", {
         name: name.value,
         description: about.value || null,
       });

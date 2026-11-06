@@ -1,4 +1,4 @@
-import type { Meta, Person } from "@artifacts/schema";
+import type { Me, Meta, Person } from "@artifacts/schema";
 import { signal } from "@preact/signals";
 import { ApiFailure, api } from "./api.ts";
 
@@ -9,7 +9,7 @@ export const ready = signal(false);
 
 export async function refreshMe() {
   try {
-    const { person } = await api<{ person: Person }>("/api/me");
+    const { person } = await api<Me>("/api/me");
     me.value = person;
   } catch (error) {
     // A guest gets 403 here: not signed in as a person, and not a failure.

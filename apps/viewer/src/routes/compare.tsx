@@ -1,4 +1,4 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, Compare } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ChevronLeft } from "lucide-preact";
 import { useLocation, useRoute } from "preact-iso";
@@ -7,14 +7,6 @@ import { LoadFailed, PlaceholderPage } from "../components/placeholder.tsx";
 import { artifactApi, artifactHref, renderUrl } from "../paths.ts";
 import { usePoll } from "../poll.ts";
 
-type Region = { x: number; y: number; w: number; h: number };
-type Change = { added: string[]; removed: string[]; changed: string[] };
-type FrameChange = { before: string; after: string; regions: Region[] };
-type Compare = {
-  frames: Change & { regions: Record<string, FrameChange> };
-  blocks: Change;
-  notes: Record<string, string>;
-};
 type Mode = "side" | "swipe" | "changes";
 
 const MODES: [Mode, string][] = [
@@ -32,7 +24,7 @@ function FrameDiff({
 }: {
   artifactId: string;
   name: string;
-  frame: FrameChange;
+  frame: Compare["frames"]["regions"][string];
   mode: Mode;
   note?: string;
 }) {
@@ -96,7 +88,7 @@ function FrameDiff({
   );
 }
 
-function Rows({ title, change }: { title: string; change: Change }) {
+function Rows({ title, change }: { title: string; change: Compare["blocks"] }) {
   const rows = [
     ...change.changed.map((key) => [key, "Changed"]),
     ...change.added.map((key) => [key, "Added"]),

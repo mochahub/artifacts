@@ -1,4 +1,4 @@
-import type { ActivityKind } from "@artifacts/schema";
+import type { ActivityItem, ActivityKind, ActivityPage } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { AgentMark, Avatar } from "../components/cards.tsx";
 import { SignedIn } from "../components/guard.tsx";
@@ -10,12 +10,8 @@ import { artifactHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
 import { useTitle } from "../title.ts";
 
-type Item = {
-  id: string;
-  kind: ActivityKind;
-  actor: string;
-  agent: string | null;
-  artifact: { title: string; slug: string; project: string } | null;
+/** The payload fields the feed reads. Each kind writes its own (02). */
+type Item = ActivityItem & {
   payload: {
     version?: number;
     title?: string;
@@ -25,7 +21,6 @@ type Item = {
     person?: string;
     project?: string;
   };
-  createdAt: string;
 };
 
 const VERBS: Record<ActivityKind, string> = {
@@ -62,7 +57,7 @@ const day = (iso: string) =>
 
 function Feed() {
   const filter = useSignal("all");
-  const poll = usePoll<{ items: Item[] }>(`/api/activity?filter=${filter.value}`, 60_000);
+  const poll = usePoll<ActivityPage & { items: Item[] }>(`/api/activity?filter=${filter.value}`, 60_000);
   useTitle("Activity");
 
   return (

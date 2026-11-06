@@ -1,3 +1,4 @@
+import type { ShareLinkPreview } from "@artifacts/schema";
 import { GUEST_NAME_MAX } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
@@ -5,32 +6,19 @@ import { useLocation, useRoute } from "preact-iso";
 import { api, message, post } from "../api.ts";
 import { artifactHref } from "../paths.ts";
 
-type Preview = {
-  artifact: {
-    id: string;
-    project: string;
-    slug: string;
-    title: string;
-    cover: { renderHash: string } | { title: string };
-  };
-  permission: "view" | "comment";
-  needsName: boolean;
-  sharedBy: string;
-};
-
 /** Name entry, then the artifact (05·2). A plain edge under the cover, not the mock's gradient. */
 export function GuestLanding() {
   const { params } = useRoute();
   const { route } = useLocation();
-  const preview = useSignal<Preview | null>(null);
+  const preview = useSignal<ShareLinkPreview | null>(null);
   const gone = useSignal(false);
   const name = useSignal("");
   const error = useSignal<string | null>(null);
   const token = encodeURIComponent(params.token ?? "");
-  const open = (body: Preview) => route(artifactHref(body.artifact), true);
+  const open = (body: ShareLinkPreview) => route(artifactHref(body.artifact), true);
 
   useEffect(() => {
-    api<Preview>(`/api/s/${token}`)
+    api<ShareLinkPreview>(`/api/s/${token}`)
       .then((body) => {
         if (body.needsName) preview.value = body;
         else open(body);

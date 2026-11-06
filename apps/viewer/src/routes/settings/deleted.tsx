@@ -1,3 +1,4 @@
+import type { DeletedList, DeletedRow } from "@artifacts/schema";
 import { DAY_MS, PURGE_DAYS } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { del, post } from "../../api.ts";
@@ -8,22 +9,14 @@ import { plural } from "../../format.ts";
 import { usePoll } from "../../poll.ts";
 import { Frame } from "./frame.tsx";
 
-type Row = {
-  kind: "artifact" | "version";
-  artifact: { id: string; title: string };
-  version?: number;
-  deletedBy: string | null;
-  purgeAfter: string;
-};
-
 const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / DAY_MS));
-const path = (row: Row) =>
+const path = (row: DeletedRow) =>
   row.kind === "artifact"
     ? `/api/artifacts/${row.artifact.id}`
     : `/api/artifacts/${row.artifact.id}/versions/${row.version}`;
 
 function List() {
-  const list = usePoll<Row[]>("/api/deleted", 60_000);
+  const list = usePoll<DeletedList>("/api/deleted", 60_000);
   const action = useAction({ after: list.refresh });
   const confirming = useSignal(false);
   const eraseAll = () =>
@@ -38,13 +31,13 @@ function List() {
       {rows.length > 0 && (
         <div class="group">
           {rows.map((row) => (
-            <div class="li" key={`${row.artifact.id}${row.version ?? ""}`}>
+            <div class="li" key={`${row.artifact.id}${row.kind === "version" ? row.version : ""}`}>
               <div class="grow">
                 <div class="tt">
                   {row.artifact.title}
-                  {row.version ? `, v${row.version}` : ""}
+                  {row.kind === "version" ? `, v${row.version}` : ""}
                 </div>
-                <div class="ss">{plural(daysLeft(row.purgeAfter), "day")} left</div>
+                <div class="ss">{plural(daysLeft(row.purgeAfter ?? ""), "day")} left</div>
               </div>
               <button
                 type="button"
@@ -83,11 +76,11 @@ function List() {
         >
           <div class="group">
             {rows.map((row) => (
-              <div class="li" key={`${row.artifact.id}${row.version ?? ""}`}>
+              <div class="li" key={`${row.artifact.id}${row.kind === "version" ? row.version : ""}`}>
                 <div class="grow">
                   <div class="tt">
                     {row.artifact.title}
-                    {row.version ? `, v${row.version}` : ""}
+                    {row.kind === "version" ? `, v${row.version}` : ""}
                   </div>
                   <div class="ss">{row.deletedBy ? `Deleted by ${row.deletedBy}` : ""}</div>
                 </div>

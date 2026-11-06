@@ -8,6 +8,7 @@ import type {
   PeopleSearch,
   PersonResponse,
   ResetLinkCreated,
+  UrlResponse,
 } from "@artifacts/schema";
 import {
   AcceptInvite,
@@ -444,7 +445,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       .update(invites)
       .set({ tokenHash: sha256(secret), expiresAt: inviteExpiry(clock.now()) })
       .where(eq(invites.id, row.id));
-    return c.json({ url: inviteUrl(env, secret) });
+    return c.json({ url: inviteUrl(env, secret) } satisfies UrlResponse);
   });
 
   const liveInvite = (c: ApiContext) =>

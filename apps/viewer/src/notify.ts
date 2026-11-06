@@ -1,3 +1,4 @@
+import type { PushKey } from "@artifacts/schema";
 import { signal } from "@preact/signals";
 import { api, del, post } from "./api.ts";
 import { safeNext } from "./paths.ts";
@@ -45,7 +46,7 @@ export async function currentSubscription() {
 export async function turnOnNotifications() {
   if ((await Notification.requestPermission()) !== "granted") return false;
   const registration = await navigator.serviceWorker.ready;
-  const { key } = await api<{ key: string }>("/api/push/key");
+  const { key } = await api<PushKey>("/api/push/key");
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: keyBytes(key),

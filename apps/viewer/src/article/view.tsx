@@ -1,5 +1,5 @@
-import type { Artifact, OutlineEntry, Thread } from "@artifacts/schema";
-import { type ArticleThemeValues, articleStyle } from "@artifacts/schema/theme-css";
+import type { Artifact, Thread, VersionPageOf } from "@artifacts/schema";
+import { articleStyle } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
 import { Diff, List, MessageCircle, MessagesSquare } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
@@ -12,19 +12,11 @@ import { articleUrl, renderUrl } from "../paths.ts";
 import type { Remote } from "../poll.ts";
 import { useReview } from "../review/use-review.tsx";
 import { readStored, writeStored } from "../storage.ts";
-import type { Infer } from "../types.ts";
 import { firstChange, markChanges } from "./diff.ts";
 import { useLiquidChrome, usePool } from "./liquid.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
 
-export type ArticlePage = {
-  key: string;
-  title: string | null;
-  readingMinutes: number;
-  theme?: ArticleThemeValues | null;
-  outline: Infer<typeof OutlineEntry>[];
-  blocks: { key: string; contentHash: string; changed: boolean }[];
-};
+export type ArticlePage = VersionPageOf<"article">;
 
 type Props = {
   artifact: Artifact;
@@ -95,7 +87,7 @@ export function ArticleView({
   };
   const canComment = artifact.permissions.comment && latest;
   const where = (key: string) =>
-    `${page.title ?? page.key} / ${page.outline.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
+    `${page.title ?? page.key} / ${page.outline?.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
 
   // Only when the marks change: redrawing them on every poll would disturb a selection in progress.
   const marks = JSON.stringify(all.map((t) => [t.id, t.n, t.status, t.anchorState, t.anchor]));
@@ -386,7 +378,7 @@ export function ArticleView({
           }}
         >
           <div class="group">
-            {page.outline.map((entry) => (
+            {page.outline?.map((entry) => (
               <button
                 type="button"
                 class="li btn-li"

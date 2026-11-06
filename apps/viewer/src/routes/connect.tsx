@@ -1,4 +1,4 @@
-import type { OAuthConsent } from "@artifacts/schema";
+import type { ConsentRedirect, OAuthConsent } from "@artifacts/schema";
 import type { OAuthScope } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { Cable } from "lucide-preact";
@@ -41,7 +41,7 @@ export function Connect() {
   const decide = (approve: boolean) =>
     action.run(async () => {
       const request = Object.fromEntries(new URLSearchParams(search));
-      const { redirect } = await post<{ redirect: string }>("/api/oauth/consent", { approve, request });
+      const { redirect } = await post<ConsentRedirect>("/api/oauth/consent", { approve, request });
       window.location.assign(redirect);
     });
 

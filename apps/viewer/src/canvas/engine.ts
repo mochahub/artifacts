@@ -1,7 +1,5 @@
 import type { BoardRecord, CanvasFrame } from "@artifacts/schema";
-import type { Infer } from "../types.ts";
 
-export type Board = Infer<typeof BoardRecord>;
 export type Pin = {
   id: string;
   n: number;
@@ -54,7 +52,7 @@ export function fitScale(
  * Boards come left to right (06). A tall screen wraps them into two columns, as board 02 draws it,
  * or four boards in a row come out tiny on a phone. Only positions on screen change, never anchors.
  */
-export function arrange(boards: Board[], frames: CanvasFrame[], columns: number) {
+export function arrange(boards: BoardRecord[], frames: CanvasFrame[], columns: number) {
   const GAP_X = 120;
   const GAP_Y = 180;
   const widths = Array.from({ length: columns }, (_, column) =>
@@ -88,7 +86,7 @@ export class CanvasEngine {
   y = 0;
   s = 1;
   private readonly frames: CanvasFrame[];
-  private readonly boards: Board[];
+  private readonly boards: BoardRecord[];
   private readonly imgs = new Map<string, { el: HTMLImageElement; level: string; box: HTMLElement }>();
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pins: Pin[] = [];
@@ -108,7 +106,7 @@ export class CanvasEngine {
     private readonly world: HTMLElement,
     private readonly overlay: HTMLElement,
     allFrames: CanvasFrame[],
-    allBoards: Board[],
+    allBoards: BoardRecord[],
     private readonly options: Options,
   ) {
     const tall = root.clientHeight > root.clientWidth;

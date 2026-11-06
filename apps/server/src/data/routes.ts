@@ -1,4 +1,4 @@
-import type { BackendLogs, DataFiles, DataList, DataValue } from "@artifacts/schema";
+import type { BackendLogs, DataFiles, DataList, DataValue, UrlResponse } from "@artifacts/schema";
 import { DataClear, DataPut } from "@artifacts/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
@@ -181,7 +181,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
       const name = checkKey(c.req.param("name") as string);
       const url = await fileUrl(deps, `${prefix(c, true)}${name}`);
       // A frame can't follow a redirect it can't see, so the bridge asks for the URL.
-      if (c.req.header("accept")?.includes("application/json")) return c.json({ url });
+      if (c.req.header("accept")?.includes("application/json")) return c.json({ url } satisfies UrlResponse);
       return c.redirect(url, 302);
     },
   );

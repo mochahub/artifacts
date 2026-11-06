@@ -1,4 +1,4 @@
-import { BridgeErrorCode, BridgeRequest, type DataScope } from "@artifacts/schema";
+import { BridgeErrorCode, BridgeRequest, type DataScope, type UrlResponse } from "@artifacts/schema";
 import { ApiFailure, api } from "../api.ts";
 import { me } from "../session.ts";
 
@@ -52,7 +52,7 @@ export function startBridge({ iframe, artifactId, canWrite, onUse }: Options) {
           body: op.blob,
         });
       case "file.url": {
-        const { url } = await api<{ url: string }>(`${files}/${path(op.name)}`, {
+        const { url } = await api<UrlResponse>(`${files}/${path(op.name)}`, {
           headers: { Accept: "application/json" },
         });
         return url;

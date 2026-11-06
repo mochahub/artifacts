@@ -1,12 +1,12 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, PageMeta, VersionPageOf } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ChevronLeft, ChevronRight, X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { PageCapsule } from "../components/shell.tsx";
 import { renderUrl } from "../paths.ts";
 
-type Item = { hash: string; caption?: string; type?: string };
-export type GalleryPage = { key: string; title: string | null; meta: { items: Item[] } };
+type Item = NonNullable<PageMeta["items"]>[number];
+export type GalleryPage = VersionPageOf<"gallery">;
 
 const isVideo = (item: Item) => item.type?.startsWith("video/");
 
@@ -36,7 +36,7 @@ export function GalleryView({
   onVersions(): void;
 }) {
   const open = useSignal<number | null>(null);
-  const items = page.meta.items;
+  const items = page.meta.items ?? [];
   const touch = useRef<number | null>(null);
   const step = (by: number) => {
     if (open.value !== null) open.value = (open.value + by + items.length) % items.length;

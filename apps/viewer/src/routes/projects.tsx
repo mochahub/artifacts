@@ -10,7 +10,6 @@ import { ago, plural } from "../format.ts";
 import { projectHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
 import { useTitle } from "../title.ts";
-import type { Infer } from "../types.ts";
 
 function List() {
   const q = useSignal("");
@@ -21,7 +20,7 @@ function List() {
     60_000,
   );
   useTitle("Projects");
-  const teams = usePoll<Infer<typeof TeamList>>("/api/teams", 300_000);
+  const teams = usePoll<TeamList>("/api/teams", 300_000);
   const choices = teams.data.value?.teams ?? [];
   return (
     <Shell>

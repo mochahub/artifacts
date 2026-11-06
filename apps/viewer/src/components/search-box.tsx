@@ -1,3 +1,4 @@
+import type { SearchResults } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Search as SearchIcon } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
@@ -6,15 +7,7 @@ import { usePoll } from "../poll.ts";
 import { Loaded } from "./loaded.tsx";
 import { PlaceholderRows } from "./placeholder.tsx";
 
-type Hit = { id: string; project: string; slug: string; title: string };
-type Results = {
-  artifacts: Hit[];
-  pages: (Hit & { pageKey: string; pageTitle: string | null })[];
-  comments: (Hit & { thread: number; pageKey: string; body: string; author: string })[];
-  content?: (Hit & { source: string; pageKey: string | null; ref: string | null; snippet: string })[];
-};
-
-type ContentHit = NonNullable<Results["content"]>[number];
+type ContentHit = SearchResults["content"][number];
 
 /** A frame opens at that frame; anything else opens its page, or the artifact. */
 const contentLink = (hit: ContentHit) =>
@@ -34,7 +27,7 @@ export function SearchBox({ onPick }: { onPick?(): void }) {
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
   const query = settled.value.trim();
-  const poll = usePoll<Results>(
+  const poll = usePoll<SearchResults>(
     query.length >= 2 ? `/api/search?q=${encodeURIComponent(query)}` : null,
     3_600_000,
   );
@@ -75,11 +68,11 @@ function Hits({
   loading,
   row,
 }: {
-  results: Results;
+  results: SearchResults;
   loading: boolean;
   row(href: string, title: string, sub: string, key: string): preact.JSX.Element;
 }) {
-  const content = results.content ?? [];
+  const content = results.content;
   const none =
     !loading &&
     results.artifacts.length + results.pages.length + results.comments.length + content.length === 0;

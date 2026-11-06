@@ -483,7 +483,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
         kind: row.kind,
         actor: (row.agent && actor ? agentLabel(actor, row.agent) : (row.agent ?? actor)) ?? "A guest",
         agent: row.agent && actor ? agentLabel(actor, row.agent) : row.agent,
-        artifact: title ? { title, slug, project } : null,
+        artifact: title && slug && project ? { title, slug, project } : null,
         payload: row.payload,
         createdAt: row.createdAt.toISOString(),
       })),

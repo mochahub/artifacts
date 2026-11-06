@@ -1,6 +1,4 @@
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
+import { DAY_MS, HOUR_MS, MINUTE_MS } from "@artifacts/schema/constants";
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 
@@ -15,7 +13,7 @@ function day(then: Date, now: number, days: number) {
   });
 }
 
-const calendarDays = (from: Date, to: Date) => Math.round((startOfDay(to) - startOfDay(from)) / DAY);
+const calendarDays = (from: Date, to: Date) => Math.round((startOfDay(to) - startOfDay(from)) / DAY_MS);
 
 /**
  * "2 h ago", "yesterday", "Monday", "Oct 21", "Oct 21, 2025". Past a day, it counts calendar days in
@@ -25,9 +23,9 @@ export function ago(iso: string, now = Date.now()): string {
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return "";
   const diff = now - then.getTime();
-  if (diff < MINUTE) return "just now";
-  if (diff < HOUR) return `${Math.floor(diff / MINUTE)} min ago`;
-  if (diff < DAY) return `${Math.floor(diff / HOUR)} h ago`;
+  if (diff < MINUTE_MS) return "just now";
+  if (diff < HOUR_MS) return `${Math.floor(diff / MINUTE_MS)} min ago`;
+  if (diff < DAY_MS) return `${Math.floor(diff / HOUR_MS)} h ago`;
   const days = calendarDays(then, new Date(now));
   return days <= 1 ? "yesterday" : day(then, now, days);
 }
@@ -37,9 +35,9 @@ export function until(iso: string, now = Date.now()): string {
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return "";
   const diff = then.getTime() - now;
-  if (diff < MINUTE) return "now";
-  if (diff < HOUR) return `in ${Math.floor(diff / MINUTE)} min`;
-  if (diff < DAY) return `in ${Math.floor(diff / HOUR)} h`;
+  if (diff < MINUTE_MS) return "now";
+  if (diff < HOUR_MS) return `in ${Math.floor(diff / MINUTE_MS)} min`;
+  if (diff < DAY_MS) return `in ${Math.floor(diff / HOUR_MS)} h`;
   const days = calendarDays(new Date(now), then);
   return days <= 1 ? "tomorrow" : day(then, now, days);
 }

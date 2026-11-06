@@ -1,4 +1,4 @@
-import type { InvitePreview, Person } from "@artifacts/schema";
+import type { InvitePreview, PersonResponse } from "@artifacts/schema";
 import { INVITE_DAYS, PASSWORD_MIN } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { ScanFace } from "lucide-preact";
@@ -9,15 +9,12 @@ import { plural } from "../format.ts";
 import { addPasskey, passkeyName } from "../passkey.ts";
 import { googleStart } from "../paths.ts";
 import { me, meta } from "../session.ts";
-import type { Infer } from "../types.ts";
-
-type Preview = Infer<typeof InvitePreview>;
 
 /** One screen: a passkey is the default, because it's one tap on a phone (06·6). */
 export function Join() {
   const { params } = useRoute();
   const { route } = useLocation();
-  const preview = useSignal<Preview | null>(null);
+  const preview = useSignal<InvitePreview | null>(null);
   const gone = useSignal(false);
   const name = useSignal("");
   const password = useSignal("");
@@ -26,7 +23,7 @@ export function Join() {
   const token = encodeURIComponent(params.token ?? "");
 
   useEffect(() => {
-    api<Preview>(`/api/invites/${token}`)
+    api<InvitePreview>(`/api/invites/${token}`)
       .then((body) => {
         preview.value = body;
       })
@@ -38,7 +35,7 @@ export function Join() {
   async function accept(withPasskey: boolean) {
     error.value = null;
     try {
-      const { person } = await post<{ person: Person }>(`/api/invites/${token}/accept`, {
+      const { person } = await post<PersonResponse>(`/api/invites/${token}/accept`, {
         name: name.value,
         ...(withPasskey ? {} : { password: password.value }),
       });

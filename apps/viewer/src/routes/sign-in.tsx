@@ -1,4 +1,4 @@
-import type { Person } from "@artifacts/schema";
+import type { PersonResponse } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ScanFace } from "lucide-preact";
 import { useEffect } from "preact/hooks";
@@ -39,7 +39,7 @@ export function SignIn() {
     busy.value = true;
     error.value = null;
     try {
-      const { person } = await post<{ person: Person }>("/api/auth/password", {
+      const { person } = await post<PersonResponse>("/api/auth/password", {
         email: email.value,
         password: password.value,
       });

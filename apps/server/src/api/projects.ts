@@ -1,4 +1,4 @@
-import type { ProjectAccessList } from "@artifacts/schema";
+import type { AccessAdded, ProjectAccessList } from "@artifacts/schema";
 import { AddProjectAccess, RestrictProject, SetProjectAccess } from "@artifacts/schema";
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { type LoadedProject, projectGrants } from "../auth/access.ts";
@@ -261,7 +261,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
         outsideLevel(person, permission);
         await grantPerson(place, person.id, permission, by);
         await record(c, { person: person.name, permission });
-        return c.json({ added: { id: person.id, name: person.name, permission } });
+        return c.json({ added: { id: person.id, name: person.name, permission } } satisfies AccessAdded);
       }
       outsideLevel({ role: "outside" }, permission);
       const { url } = await createInvite(deps, {
@@ -273,7 +273,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
         projectPermission: permission,
         createdBy: by,
       });
-      return c.json({ url });
+      return c.json({ url } satisfies AccessAdded);
     },
   );
 

@@ -2,7 +2,6 @@ import type { Artifact, ContentToken, DataScope } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { message, post } from "../api.ts";
-import type { Infer } from "../types.ts";
 import { startBridge } from "./bridge.ts";
 
 type Props = {
@@ -24,7 +23,7 @@ export function LiveFrame({ artifact, version, path, width, height, onUse }: Pro
   used.current = onUse;
 
   useEffect(() => {
-    post<Infer<typeof ContentToken>>(`/api/artifacts/${artifact.id}/content-token`, { version })
+    post<ContentToken>(`/api/artifacts/${artifact.id}/content-token`, { version })
       .then(({ base }) => {
         src.value = `${base}${path.split("/").map(encodeURIComponent).join("/")}`;
       })

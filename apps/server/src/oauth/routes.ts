@@ -1,3 +1,4 @@
+import type { ConsentRedirect } from "@artifacts/schema";
 import {
   DAY_MS,
   HOUR_MS,
@@ -175,7 +176,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
     if (!body.approve) {
       return c.json({
         redirect: redirectTo(checked.redirectUri, origin, { error: "access_denied", state: checked.state }),
-      });
+      } satisfies ConsentRedirect);
     }
     const code = randomSecret();
     const now = clock.now();
@@ -203,7 +204,9 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         expiresAt: new Date(now.getTime() + CODE_MINUTES * MINUTE_MS),
       });
     });
-    return c.json({ redirect: redirectTo(checked.redirectUri, origin, { code, state: checked.state }) });
+    return c.json({
+      redirect: redirectTo(checked.redirectUri, origin, { code, state: checked.state }),
+    } satisfies ConsentRedirect);
   });
 
   routes.post("/api/oauth/token", { public: true }, async (c) => {

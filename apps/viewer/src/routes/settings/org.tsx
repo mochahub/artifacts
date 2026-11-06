@@ -1,4 +1,4 @@
-import type { OrgSettings as Settings } from "@artifacts/schema";
+import type { OrgInfo } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { api } from "../../api.ts";
 import { Loaded } from "../../components/loaded.tsx";
@@ -7,16 +7,8 @@ import { useAction } from "../../components/reauth.tsx";
 import { usePoll } from "../../poll.ts";
 import { Frame } from "./frame.tsx";
 
-/** `GET /api/org` (03). */
-export type Org = {
-  newVersion: string | null;
-  name: string;
-  settings: Settings;
-  domains: { home: string; publicUrl: string; moreUrls: string[]; contentUrl: string | null };
-};
-
 export function OrgSettings() {
-  const org = usePoll<Org>("/api/org", 60_000);
+  const org = usePoll<OrgInfo>("/api/org", 60_000);
   return (
     <Frame title="Organization">
       <Loaded from={[org]} value={org.data.value} placeholder={<PlaceholderRows rows={3} />}>
@@ -26,7 +18,7 @@ export function OrgSettings() {
   );
 }
 
-function Form({ body, refresh }: { body: Org; refresh(): Promise<void> }) {
+function Form({ body, refresh }: { body: OrgInfo; refresh(): Promise<void> }) {
   const name = useSignal<string | null>(null);
   const action = useAction({ after: refresh });
   const save = (json: unknown) => action.run(() => api("/api/org", { method: "PATCH", json }));

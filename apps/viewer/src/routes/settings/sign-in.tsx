@@ -1,4 +1,4 @@
-import type { IdentityList, SessionRow } from "@artifacts/schema";
+import type { IdentityList, PasskeyList, SessionList } from "@artifacts/schema";
 import { PASSWORD_MIN } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { ChevronRight, KeyRound, Laptop, Plus, Trash2 } from "lucide-preact";
@@ -11,17 +11,11 @@ import { googleAnswer } from "../../google.ts";
 import { addPasskey, passkeyName } from "../../passkey.ts";
 import { usePoll } from "../../poll.ts";
 import { meta } from "../../session.ts";
-import type { Infer } from "../../types.ts";
 import { Frame, isAdmin } from "./frame.tsx";
 
-type Keys = {
-  passkeys: { id: string; name: string | null; createdAt: string; lastUsedAt: string | null }[];
-  passwordSetAt: string | null;
-};
-
 export function SignInSettings() {
-  const keys = usePoll<Keys>("/api/me/passkeys", 60_000);
-  const sessions = usePoll<Infer<typeof SessionRow>[]>("/api/me/sessions", 60_000);
+  const keys = usePoll<PasskeyList>("/api/me/passkeys", 60_000);
+  const sessions = usePoll<SessionList>("/api/me/sessions", 60_000);
   const google = usePoll<IdentityList>("/api/me/identities", 60_000);
   const { query } = useLocation();
   const action = useAction();

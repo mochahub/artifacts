@@ -1,4 +1,4 @@
-import type { ActivityKind, TeamDetail } from "@artifacts/schema";
+import type { ActivityKind, TeamCreated, TeamDetail, TeamList } from "@artifacts/schema";
 import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type CallerFor, can, type TeamResource } from "../auth/can.ts";
@@ -90,7 +90,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
         ...view(row, counts.find((entry) => entry.teamId === row.id)?.count ?? 0),
         role: mine.find((entry) => entry.teamId === row.id)?.role ?? null,
       })),
-    });
+    } satisfies TeamList);
   });
 
   routes.post("/api/teams", { action: "team.manage" }, async (c) => {
@@ -112,7 +112,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
     const [row] = created;
     if (!row) throw new ApiError("conflict", "There's already a team with that name.");
     await record(c, "team_created", { team: row.name });
-    return c.json({ team: view(row, 0) });
+    return c.json({ team: view(row, 0) } satisfies TeamCreated);
   });
 
   routes.get("/api/teams/:slug", { action: "team.read" }, async (c) => {

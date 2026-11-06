@@ -1,12 +1,12 @@
+import type { OrgInfo } from "@artifacts/schema";
 import { Globe, KeyRound, Lock } from "lucide-preact";
 import { Loaded } from "../../components/loaded.tsx";
 import { PlaceholderRows } from "../../components/placeholder.tsx";
 import { usePoll } from "../../poll.ts";
 import { Frame } from "./frame.tsx";
-import type { Org } from "./org.tsx";
 
 export function Domains() {
-  const org = usePoll<Org>("/api/org", 60_000);
+  const org = usePoll<OrgInfo>("/api/org", 60_000);
   return (
     <Frame title="Domains">
       <Loaded from={[org]} value={org.data.value?.domains} placeholder={<PlaceholderRows rows={3} />}>
@@ -16,7 +16,7 @@ export function Domains() {
   );
 }
 
-function List({ domains: d }: { domains: Org["domains"] }) {
+function List({ domains: d }: { domains: OrgInfo["domains"] }) {
   const primary = new URL(d.publicUrl).hostname;
   const others = d.moreUrls.map((url) => new URL(url).hostname).filter((host) => host !== d.home);
   return (
