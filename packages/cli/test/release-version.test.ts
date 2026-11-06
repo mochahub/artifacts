@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { latestTag, nextVersion } from "../src/release-version.ts";
+import { latestTag, nextVersion } from "../../../scripts/release-version.ts";
 
 test("the latest tag compares numbers, and ignores anything that isn't a release", () => {
   expect(latestTag(["v0.9.0", "v0.10.0", "v0.2.0", "nightly", "v1.0.0-rc1", ""])).toBe("0.10.0");

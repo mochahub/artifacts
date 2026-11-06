@@ -59,7 +59,7 @@ skill/            SKILL.md and its references, installed for Claude Code and Cod
 deploy/           railway/ (the template) and compose/ (Docker Compose, dev and test stacks)
 fixtures/         artifacts used by tests and acceptance: camerabuddy-roadmap, micro-app-poll, gallery
 docs/             SPEC.md, ARCHITECTURE.md, implementation/, mocks/, review/
-scripts/          the scripts behind the root commands, the CLI build and the installer
+scripts/          the scripts behind the root commands, the CLI build, the release version and the installer
 ```
 
 Details are in [01 Repo and tooling](docs/implementation/01-repo-and-tooling.md).

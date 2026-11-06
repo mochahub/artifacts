@@ -1,6 +1,6 @@
 import { type Child, type Job, type Ran, startChild } from "@artifacts/sandbox";
-import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import type { Logger } from "../log.ts";
 
 const WAIT_PER_BACKEND = 4;
 const WAIT_PER_CHILD = 32;
@@ -21,7 +21,7 @@ export class SandboxPool {
 
   constructor(
     private readonly size: number,
-    private readonly log: Deps["log"],
+    private readonly log: Logger,
   ) {
     this.children = new Array(size).fill(null);
   }
