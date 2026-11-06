@@ -1,6 +1,7 @@
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import qrcode from "qrcode-terminal";
-import { type ClaimAnswers, setupExisting } from "../admin.ts";
+import { setupExisting } from "../admin.ts";
+import { type Input, portOption } from "../command.ts";
 import { setupDocker } from "../docker/setup.ts";
 import type { Output } from "../output.ts";
 import { ask, choose, confirm } from "../prompt.ts";
@@ -8,16 +9,20 @@ import { setupRailway } from "../railway/setup.ts";
 import { installSkill } from "../skill/install.ts";
 import { offerStageshow } from "../skill/stageshow.ts";
 
-type Flags = ClaimAnswers & {
+type Flags = {
   docker?: boolean;
   dir?: string;
   image?: string;
-  port?: number;
-  skill?: boolean;
+  port?: string;
+  org?: string;
+  name?: string;
+  email?: string;
+  "no-skill"?: boolean;
   stageshow?: boolean;
 };
 
-export async function setup(url: string | undefined, flags: Flags, out: Output) {
+export async function setup({ args: { url }, flags: given }: Input<"url", Flags>, out: Output) {
+  const flags = { ...given, port: portOption(given.port), skill: !given["no-skill"] };
   let person: { name: string; email: string };
   let target: string | null = url ?? null;
   if (flags.docker) {

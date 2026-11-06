@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { Input } from "../command.ts";
 import { home, pickServer } from "../config.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 
@@ -25,17 +26,19 @@ export function codexConfig(current: string, url: string, tokenEnv?: string) {
  * every tool twice. Claude Code owns its config, so its own command writes it.
  */
 export function mcpInstall(
-  flags: { claude?: boolean; codex?: boolean; tokenEnv?: string; server?: string },
+  {
+    flags: { "token-env": tokenEnv, ...flags },
+  }: Input<string, { claude?: boolean; codex?: boolean; "token-env"?: string; server?: string }>,
   out: Output,
 ) {
-  if (flags.tokenEnv && !ENV_NAME.test(flags.tokenEnv)) {
+  if (tokenEnv && !ENV_NAME.test(tokenEnv)) {
     throw new UsageError("--token-env wants the name of an environment variable.");
   }
   const url = `${pickServer(flags.server)}/api/mcp`;
   const both = !flags.claude && !flags.codex;
   const done: string[] = [];
   if (flags.claude || both) {
-    const header = flags.tokenEnv ? ["--header", `Authorization: Bearer \${${flags.tokenEnv}}`] : [];
+    const header = tokenEnv ? ["--header", `Authorization: Bearer \${${tokenEnv}}`] : [];
     // User scope: Claude Code's default ties a server to the folder this happens to run in.
     const args = [
       "claude",
@@ -62,12 +65,12 @@ export function mcpInstall(
     const path = join(process.env.CODEX_HOME ?? join(home(), ".codex"), "config.toml");
     mkdirSync(dirname(path), { recursive: true });
     const current = existsSync(path) ? readFileSync(path, "utf8") : "";
-    writeFileSync(path, codexConfig(current, url, flags.tokenEnv));
+    writeFileSync(path, codexConfig(current, url, tokenEnv));
     done.push("codex");
   }
   out.result({ url, installed: done }, () => {
     out.say(`✓ ${done.join(" and ")} will use ${url}`);
-    if (!flags.tokenEnv) {
+    if (!tokenEnv) {
       if (done.includes("codex")) out.say("  Sign in with: codex mcp login artifacts");
       if (done.includes("claude")) out.say("  In Claude Code, run /mcp and sign in.");
     }

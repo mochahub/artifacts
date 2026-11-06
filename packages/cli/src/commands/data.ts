@@ -1,5 +1,6 @@
 import { type DataList, DataScope, isDataKey } from "@artifacts/schema";
 import type { z } from "zod";
+import type { Input } from "../command.ts";
 import { type Output, UsageError } from "../output.ts";
 import { signedIn } from "../session.ts";
 import { resolveArtifact, versionNumber } from "../target.ts";
@@ -10,7 +11,7 @@ type LogLine = { id: string; version: number; level: string; message: string; cr
 
 /** `artifacts logs` (07): the last 24 hours, and then whatever arrives. */
 export async function logsCommand(
-  flags: { follow?: boolean; version?: string; server?: string },
+  { flags }: Input<never, { follow?: boolean; version?: string; server?: string }>,
   out: Output,
 ) {
   if (flags.version) versionNumber(flags.version, "--version");
@@ -33,9 +34,7 @@ const print = (lines: LogLine[], out: Output) => {
 };
 
 export async function dataCommand(
-  sub: string | undefined,
-  key: string | undefined,
-  flags: { scope?: string; server?: string },
+  { args: { sub, key }, flags, usage }: Input<"sub" | "key", { scope?: string; server?: string }>,
   out: Output,
 ) {
   const scope = flags.scope ?? "shared";
@@ -60,7 +59,7 @@ export async function dataCommand(
       });
     }
     case "get": {
-      if (!key) throw new UsageError("Usage: artifacts data get <key> [--scope shared|me]");
+      if (!key) throw usage(1);
       const { value } = await client.get<{ value: unknown }>(`${base}/data/${scope}/${key}`);
       return out.result(value, () => out.say(JSON.stringify(value, null, 2)));
     }
@@ -74,6 +73,6 @@ export async function dataCommand(
       return out.result({ ok: true }, () => out.say(`✓ Cleared ${flags.scope ?? "all"} data.`));
     }
     default:
-      throw new UsageError("Usage: artifacts data ls | get <key> | export | clear [--scope shared|me]");
+      throw usage();
   }
 }

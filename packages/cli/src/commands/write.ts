@@ -5,16 +5,17 @@ import { SLUG_PATTERN } from "@artifacts/schema";
 import { openBrowser } from "../browser.ts";
 import { FIXTURES, KIT_DIR, LOCAL, MANIFEST, WORK } from "../bundle/layout.ts";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
+import type { Input } from "../command.ts";
 import { pickServer } from "../config.ts";
 import { repoRoot } from "../git.ts";
 import { kitFiles, STARTERS } from "../kit.ts";
 import { hasErrors, printProblems } from "../lint/problem.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { collect, type PublishFlags, publishRoot } from "../publish.ts";
+import { collect, publishRoot } from "../publish.ts";
 import { signedIn } from "../session.ts";
 
-export async function lintCommand(want: string | undefined, out: Output) {
-  const root = findRoot(undefined, want);
+export async function lintCommand({ args: { slug } }: Input<"slug">, out: Output) {
+  const root = findRoot(undefined, slug);
   const { problems, rendered } = await collect(root, out, { lint: true });
   const ok = !hasErrors(problems);
   out.result({ ok, problems }, () => {
@@ -27,8 +28,8 @@ export async function lintCommand(want: string | undefined, out: Output) {
   if (!ok) process.exitCode = 1;
 }
 
-export async function renderCommand(want: string | undefined, out: Output) {
-  const root = findRoot(undefined, want);
+export async function renderCommand({ args: { slug } }: Input<"slug">, out: Output) {
+  const root = findRoot(undefined, slug);
   const { problems, rendered } = await collect(root, out, { lint: false });
   if (!rendered) {
     printProblems(problems, out);
@@ -43,12 +44,15 @@ export async function renderCommand(want: string | undefined, out: Output) {
 }
 
 export async function publishCommand(
-  want: string | undefined,
-  flags: PublishFlags & { server?: string },
+  {
+    args: { slug },
+    flags,
+  }: Input<"slug", { message?: string; name?: string; note?: string[]; server?: string }>,
   out: Output,
 ) {
-  const root = findRoot(undefined, want);
-  const result = await publishRoot(root, flags, await signedIn(flags.server), out);
+  const root = findRoot(undefined, slug);
+  const publish = { message: flags.message, name: flags.name, notes: flags.note ?? [] };
+  const result = await publishRoot(root, publish, await signedIn(flags.server), out);
   out.result(result, () => {
     out.say(
       `✓ upload   ${result.uploaded.files} new files (${Math.round(result.uploaded.bytes / 1024)} KB); ${result.reused} already stored`,
@@ -77,7 +81,9 @@ function ignoreArtifacts(root: string) {
  * gitignored working folder, because the server holds the published copy; `--in-repo` writes them here.
  */
 export function initCommand(
-  flags: { project?: string; slug?: string; kind?: string; template?: string; inRepo?: boolean },
+  {
+    flags: { "in-repo": inRepo, ...flags },
+  }: Input<never, { project?: string; slug?: string; kind?: string; template?: string; "in-repo"?: boolean }>,
   out: Output,
 ) {
   if (flags.template && flags.kind) throw new UsageError("Use --template or --kind, not both.");
@@ -95,15 +101,15 @@ export function initCommand(
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 40);
-  const base = flags.inRepo ? process.cwd() : repoRoot();
+  const base = inRepo ? process.cwd() : repoRoot();
   const project = flags.project ?? (slugify(basename(base)) || "project");
   const slug = flags.slug ?? flags.template ?? "overview";
   // It becomes a folder name, and only the server's own check looks at it otherwise.
   if (!SLUG_PATTERN.test(slug)) throw new UsageError("--slug uses a-z, 0-9 and -, up to 40 characters.");
-  const root = flags.inRepo ? base : join(base, WORK, slug);
+  const root = inRepo ? base : join(base, WORK, slug);
   if (existsSync(join(root, MANIFEST))) {
     throw new CliError(
-      flags.inRepo
+      inRepo
         ? "There's already an artifact.json here."
         : `There's already an artifact called ${slug} here. Pick another --slug.`,
     );
@@ -150,8 +156,7 @@ export function initCommand(
 }
 
 export async function openCommand(
-  target: string | undefined,
-  flags: { version?: string; page?: string; server?: string },
+  { args: { target }, flags }: Input<"target", { version?: string; page?: string; server?: string }>,
   out: Output,
 ) {
   const url = pickServer(flags.server);

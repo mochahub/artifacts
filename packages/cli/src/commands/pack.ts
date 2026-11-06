@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { SHA256_HEX } from "@artifacts/schema";
 import { PACK_DIR } from "../bundle/layout.ts";
 import { findRoot } from "../bundle/manifest.ts";
+import type { Input } from "../command.ts";
 import { requireHttps } from "../config.ts";
 import { gitRepo, repoRoot } from "../git.ts";
 import { sha256 } from "../hash.ts";
@@ -24,11 +25,11 @@ type Pack = {
  * needs to a folder (07). It needs no sign-in: the hosted MCP has that.
  */
 export async function packCommand(
-  want: string | undefined,
-  flags: { message?: string; name?: string },
+  { args: { slug }, flags }: Input<"slug", { message?: string; name?: string; upload?: string }>,
   out: Output,
 ) {
-  const root = findRoot(undefined, want);
+  if (flags.upload) return packUpload(slug, flags.upload, out);
+  const root = findRoot(undefined, slug);
   const { manifest, rendered } = await collectForPublish(root, out);
   const dir = join(root, PACK_DIR);
   rmSync(dir, { recursive: true, force: true });
@@ -60,7 +61,7 @@ export async function packCommand(
 }
 
 /** Uploads what a plan from artifacts_publish_prepare lists, straight to the bucket. */
-export async function packUpload(want: string | undefined, plan: string, out: Output) {
+async function packUpload(want: string | undefined, plan: string, out: Output) {
   const root = findRoot(undefined, want);
   const planUrl = new URL(plan);
   requireHttps(planUrl.toString());

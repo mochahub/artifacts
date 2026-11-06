@@ -1,5 +1,6 @@
 import { meta as serverMeta } from "../admin.ts";
 import { Client } from "../client.ts";
+import type { Input } from "../command.ts";
 import { pickServer } from "../config.ts";
 import { getToken } from "../credentials/index.ts";
 import { CliError, type Output } from "../output.ts";
@@ -10,11 +11,11 @@ import { olderThan, VERSION } from "../version.ts";
 type Check = { name: string; ok: boolean; detail: string };
 
 /** Each check says what's wrong and how to fix it (07). */
-export async function doctor(server: string | undefined, out: Output) {
+export async function doctor({ flags }: Input<never, { server?: string }>, out: Output) {
   const checks: Check[] = [{ name: "cli", ok: true, detail: `Version ${VERSION}` }];
   let url: string | null = null;
   try {
-    url = pickServer(server);
+    url = pickServer(flags.server);
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
     checks.push({ name: "server", ok: false, detail: error.message });

@@ -13,6 +13,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { isDataKey } from "@artifacts/schema";
 import { BACKEND_BUNDLE, DATA_DIR } from "../bundle/layout.ts";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
+import { type Input, portOption } from "../command.ts";
 import { viewerAssets } from "../dev/assets.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output } from "../output.ts";
@@ -44,7 +45,8 @@ const fail = (status: number, code: string, message: string) =>
  * machine, comments are off, and saved data lives in .artifacts/data/. Each change renders again as
  * the next version, so an open viewer picks it up on its next poll.
  */
-export async function devCommand(flags: { port: number }, out: Output) {
+export async function devCommand({ flags: given }: Input<never, { port?: string }>, out: Output) {
+  const flags = { port: portOption(given.port) ?? 4321 };
   const root = findRoot();
   const assets = await viewerAssets();
   if (assets.size === 0) throw new CliError("The viewer isn't built. Run: bun run build");

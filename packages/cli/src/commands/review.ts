@@ -6,7 +6,8 @@ import {
 } from "@artifacts/schema";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
-import { CliError, type Output, UsageError } from "../output.ts";
+import type { Input } from "../command.ts";
+import { CliError, type Output } from "../output.ts";
 import { signedIn } from "../session.ts";
 import { artifactRef, resolveArtifact, versionNumber } from "../target.ts";
 
@@ -39,8 +40,11 @@ function threadJson(thread: Thread) {
   };
 }
 
-export async function statusCommand(target: string | undefined, server: string | undefined, out: Output) {
-  const client = await signedIn(server);
+type Server = { server?: string };
+type Target = Input<"target", Server>;
+
+export async function statusCommand({ args: { target }, flags }: Target, out: Output) {
+  const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, target);
   const status = ArtifactReviewStatus.parse(await client.get(`/api/artifacts/${artifact.id}/status`));
   out.result(
@@ -72,8 +76,10 @@ export async function statusCommand(target: string | undefined, server: string |
 }
 
 export async function commentsCommand(
-  target: string | undefined,
-  flags: { open?: boolean; fixed?: boolean; all?: boolean; page?: string; server?: string },
+  {
+    args: { target },
+    flags,
+  }: Input<"target", Server & { open?: boolean; fixed?: boolean; all?: boolean; page?: string }>,
   out: Output,
 ) {
   const client = await signedIn(flags.server);
@@ -97,12 +103,10 @@ export async function commentsCommand(
 }
 
 export async function replyCommand(
-  n: string | undefined,
-  text: string | undefined,
-  flags: { fixed?: boolean; server?: string },
+  { args: { n, text }, flags, usage }: Input<"n" | "text", Server & { fixed?: boolean }>,
   out: Output,
 ) {
-  if (!n || !text || !/^\d+$/.test(n)) throw new UsageError('Usage: artifacts reply <n> "<text>" [--fixed]');
+  if (!n || !text || !/^\d+$/.test(n)) throw usage();
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
   const threads = z.array(ThreadSchema).parse(await client.get(`/api/artifacts/${artifact.id}/threads`));
@@ -119,16 +123,13 @@ export async function replyCommand(
 }
 
 export async function versionsCommand(
-  sub: string | undefined,
-  args: (string | undefined)[],
-  flags: { server?: string },
+  { args: { sub, n, label }, flags, usage }: Input<"sub" | "n" | "label", Server>,
   out: Output,
 ) {
-  if (sub === "name" && args[0]) versionNumber(args[0]);
+  if (sub === "name" && n) versionNumber(n);
   const client = await signedIn(flags.server);
   if (sub === "name") {
-    const [n, label] = args;
-    if (!n || !label) throw new UsageError('Usage: artifacts versions name <n> "<label>"');
+    if (!n || !label) throw usage(1);
     const artifact = await resolveArtifact(client, undefined);
     await client.request("PATCH", `/api/artifacts/${artifact.id}/versions/${n}`, { name: label });
     return out.result({ n: Number(n), name: label }, () => out.say(`✓ v${n} is "${label}".`));
@@ -145,14 +146,9 @@ export async function versionsCommand(
   });
 }
 
-export async function diffCommand(
-  a: string | undefined,
-  b: string | undefined,
-  flags: { server?: string },
-  out: Output,
-) {
+export async function diffCommand({ args: { a, b }, flags, usage }: Input<"a" | "b", Server>, out: Output) {
   const number = (value: string | undefined) => value?.replace(/^v/, "");
-  if (!number(a) || !number(b)) throw new UsageError("Usage: artifacts diff <a> <b>");
+  if (!number(a) || !number(b)) throw usage();
   versionNumber(number(a) as string);
   versionNumber(number(b) as string);
   const client = await signedIn(flags.server);
@@ -172,8 +168,8 @@ export async function diffCommand(
   });
 }
 
-export async function restoreCommand(n: string | undefined, flags: { server?: string }, out: Output) {
-  if (!n || !/^\d+$/.test(n)) throw new UsageError("Usage: artifacts restore <n>");
+export async function restoreCommand({ args: { n }, flags, usage }: Input<"n", Server>, out: Output) {
+  if (!n || !/^\d+$/.test(n)) throw usage();
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
   const result = await client.post<{ n: number }>(`/api/artifacts/${artifact.id}/versions/${n}/restore`);
@@ -181,8 +177,7 @@ export async function restoreCommand(n: string | undefined, flags: { server?: st
 }
 
 export async function archiveCommand(
-  target: string | undefined,
-  flags: { undo?: boolean; server?: string },
+  { args: { target }, flags }: Input<"target", Server & { undo?: boolean }>,
   out: Output,
 ) {
   const client = await signedIn(flags.server);
@@ -204,8 +199,7 @@ type DeletedRow = {
 };
 
 export async function deleteCommand(
-  target: string | undefined,
-  flags: { version?: string; server?: string },
+  { args: { target }, flags }: Input<"target", Server & { version?: string }>,
   out: Output,
 ) {
   if (flags.version) versionNumber(flags.version, "--version");
@@ -223,8 +217,7 @@ export async function deleteCommand(
 }
 
 export async function undeleteCommand(
-  target: string | undefined,
-  flags: { version?: string; server?: string },
+  { args: { target }, flags }: Input<"target", Server & { version?: string }>,
   out: Output,
 ) {
   if (flags.version) versionNumber(flags.version, "--version");

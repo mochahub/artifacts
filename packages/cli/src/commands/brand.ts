@@ -8,6 +8,7 @@ import { z } from "zod";
 import { detectAgent } from "../agent.ts";
 import type { LocalBrand } from "../brand/cache.ts";
 import { MANIFEST } from "../bundle/layout.ts";
+import type { Input } from "../command.ts";
 import { sha256 } from "../hash.ts";
 import { kitFiles } from "../kit.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
@@ -99,9 +100,7 @@ function buildSample(brand: LocalBrand, slug: string) {
 const sampleSlug = (brand: Brand) => `sample-${sha256(JSON.stringify(brand)).slice(0, 10)}`;
 
 export async function brandCommand(
-  sub: string | undefined,
-  file: string | undefined,
-  flags: { server?: string },
+  { args: { sub, file }, flags, usage }: Input<"sub" | "file", { server?: string }>,
   out: Output,
 ) {
   if (sub === "prompt") return out.result({ prompt: BRAND_PROMPT }, () => out.say(BRAND_PROMPT));
@@ -156,5 +155,5 @@ export async function brandCommand(
       rmSync(root, { recursive: true, force: true });
     }
   }
-  throw new UsageError("Usage: artifacts brand [show] | prompt | preview <file> | propose <file>");
+  throw usage();
 }

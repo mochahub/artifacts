@@ -1,0 +1,395 @@
+import { type Command, command } from "../command.ts";
+
+/** Every command takes these. A command's own option of the same name replaces it, as `--version <n>` does. */
+export const GLOBAL_OPTIONS = {
+  json: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+  version: { type: "boolean", short: "v" },
+} as const;
+
+const server = { server: { type: "string" } } as const;
+const version = { version: { type: "string" } } as const;
+const paging = { limit: { type: "string" }, cursor: { type: "string" } } as const;
+const where = { repo: { type: "string" }, here: { type: "boolean" } } as const;
+
+/** The commands (07), in the order `artifacts --help` lists them. */
+export const COMMANDS: Command[] = [
+  command({
+    name: "setup",
+    usage:
+      "setup [<url>] [--docker [--dir <path>] [--image <ref>] [--port <n>]] [--org <name>] [--name <you>] [--email <you>] [--no-skill] [--stageshow]",
+    help: [
+      "artifacts setup [<url>] [--docker [--dir <path>] [--image <ref>] [--port <n>]]",
+      "                [--org <name>] [--name <you>] [--email <you>] [--no-skill] [--stageshow]",
+    ],
+    args: ["url"],
+    options: {
+      docker: { type: "boolean" },
+      dir: { type: "string" },
+      image: { type: "string" },
+      port: { type: "string" },
+      org: { type: "string" },
+      name: { type: "string" },
+      email: { type: "string" },
+      "no-skill": { type: "boolean" },
+      stageshow: { type: "boolean" },
+    },
+    run: async (input, out) => (await import("./setup.ts")).setup(input, out),
+  }),
+  command({
+    name: "login",
+    usage: "login [<url>]",
+    help: ["artifacts login [<url>] | logout | whoami"],
+    args: ["url"],
+    options: server,
+    run: async (input, out) => (await import("./account.ts")).loginCommand(input, out),
+  }),
+  command({
+    name: "logout",
+    usage: "logout",
+    help: null,
+    options: server,
+    run: async (input, out) => (await import("./account.ts")).logout(input, out),
+  }),
+  command({
+    name: "whoami",
+    usage: "whoami",
+    help: null,
+    options: server,
+    run: async (input, out) => (await import("./account.ts")).whoami(input, out),
+  }),
+  command({
+    name: "recover",
+    usage: "recover <url>",
+    args: ["url"],
+    options: { email: { type: "string" } },
+    run: async (input, out) => (await import("./account.ts")).recover(input, out),
+  }),
+  command({
+    name: "doctor",
+    usage: "doctor",
+    options: server,
+    run: async (input, out) => (await import("./doctor.ts")).doctor(input, out),
+  }),
+  command({
+    name: "upgrade",
+    usage: "upgrade [--server] [--to <version>]",
+    // Here --server means "the server too", so it names no server.
+    options: { server: { type: "boolean" }, to: { type: "string" } },
+    run: async (input, out) => (await import("./operate.ts")).upgradeCommand(input, out),
+  }),
+  command({
+    name: "domain",
+    usage: "domain add <domain> | list",
+    args: ["sub", "domain"],
+    options: server,
+    run: async (input, out) => (await import("./operate.ts")).domainCommand(input, out),
+  }),
+  command({
+    name: "init",
+    usage:
+      "init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype] [--template <name>] [--in-repo]",
+    help: [
+      "artifacts init [--project <slug>] [--slug <slug>] [--kind canvas|article|prototype]",
+      "               [--template <name>] [--in-repo]",
+    ],
+    options: {
+      project: { type: "string" },
+      slug: { type: "string" },
+      kind: { type: "string" },
+      template: { type: "string" },
+      "in-repo": { type: "boolean" },
+    },
+    run: async (input, out) => (await import("./write.ts")).initCommand(input, out),
+  }),
+  command({
+    name: "lint",
+    usage: "lint [<slug>]",
+    help: ["artifacts lint | render [<slug>]"],
+    args: ["slug"],
+    options: {},
+    run: async (input, out) => (await import("./write.ts")).lintCommand(input, out),
+  }),
+  command({
+    name: "render",
+    usage: "render [<slug>]",
+    help: null,
+    args: ["slug"],
+    options: {},
+    run: async (input, out) => (await import("./write.ts")).renderCommand(input, out),
+  }),
+  command({
+    name: "publish",
+    usage: "publish [<slug>] [-m <message>] [--name <label>] [--note <frame>=<text>]",
+    args: ["slug"],
+    options: {
+      message: { type: "string", short: "m" },
+      name: { type: "string" },
+      note: { type: "string", multiple: true },
+      ...server,
+    },
+    run: async (input, out) => (await import("./write.ts")).publishCommand(input, out),
+  }),
+  command({
+    name: "search",
+    usage: "search <words> [--project <slug>] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]",
+    options: { project: { type: "string" }, ...where, ...paging, ...server },
+    run: async (input, out) => (await import("./library.ts")).searchCommand(input, out),
+  }),
+  command({
+    name: "list",
+    usage: "list [<project>[/<slug>[/<page>]]] [--repo <remote>] [--here] [--limit <n>] [--cursor <c>]",
+    args: ["path"],
+    options: { ...where, ...paging, ...server },
+    run: async (input, out) => (await import("./library.ts")).listCommand(input, out),
+  }),
+  command({
+    name: "read",
+    usage: "read <project>/<slug> [--page <key>] [--version <n>] [--cursor <c>] [--chars <n>]",
+    args: ["target"],
+    options: {
+      page: { type: "string" },
+      ...version,
+      cursor: { type: "string" },
+      chars: { type: "string" },
+      ...server,
+    },
+    run: async (input, out) => (await import("./library.ts")).readCommand(input, out),
+  }),
+  command({
+    name: "view",
+    usage: "view <project>/<slug> [--page <key>] [--frame <key>] [--size thumb|1x|2x] [--out <file>]",
+    args: ["target"],
+    options: {
+      page: { type: "string" },
+      frame: { type: "string" },
+      size: { type: "string" },
+      ...version,
+      out: { type: "string" },
+      ...server,
+    },
+    run: async (input, out) => (await import("./library.ts")).viewCommand(input, out),
+  }),
+  command({
+    name: "pull",
+    usage: "pull <project>/<slug> [--version <n>] [--dir <path>] [--force]",
+    args: ["target"],
+    options: { ...version, dir: { type: "string" }, force: { type: "boolean" }, ...server },
+    run: async (input, out) => (await import("./library.ts")).pullCommand(input, out),
+  }),
+  command({
+    name: "export",
+    usage: "export <project> [--dir <path>]",
+    args: ["project"],
+    options: { dir: { type: "string" }, ...server },
+    run: async (input, out) => (await import("./library.ts")).exportCommand(input, out),
+  }),
+  command({
+    name: "brand",
+    usage: "brand [show] | prompt | preview <file> | propose <file>",
+    args: ["sub", "file"],
+    options: server,
+    run: async (input, out) => (await import("./brand.ts")).brandCommand(input, out),
+  }),
+  command({
+    name: "open",
+    usage: "open [<project>/<slug>] [--version <n>] [--page <key>]",
+    args: ["target"],
+    options: { ...version, page: { type: "string" }, ...server },
+    run: async (input, out) => (await import("./write.ts")).openCommand(input, out),
+  }),
+  command({
+    name: "status",
+    usage: "status [<project>/<slug>]",
+    args: ["target"],
+    options: server,
+    run: async (input, out) => (await import("./review.ts")).statusCommand(input, out),
+  }),
+  command({
+    name: "comments",
+    usage: "comments [<project>/<slug>] [--open|--fixed|--all] [--page <key>]",
+    args: ["target"],
+    options: {
+      open: { type: "boolean" },
+      fixed: { type: "boolean" },
+      all: { type: "boolean" },
+      page: { type: "string" },
+      ...server,
+    },
+    run: async (input, out) => (await import("./review.ts")).commentsCommand(input, out),
+  }),
+  command({
+    name: "reply",
+    usage: 'reply <n> "<text>" [--fixed]',
+    args: ["n", "text"],
+    options: { fixed: { type: "boolean" }, ...server },
+    run: async (input, out) => (await import("./review.ts")).replyCommand(input, out),
+  }),
+  command({
+    name: "skill",
+    usage: "skill install [--claude] [--codex] [--stageshow]",
+    args: ["sub"],
+    options: { claude: { type: "boolean" }, codex: { type: "boolean" }, stageshow: { type: "boolean" } },
+    run: async (input, out) => (await import("./skill.ts")).skillCommand(input, out),
+  }),
+  command({
+    name: "org",
+    usage: "org invite <email> [--role member|reviewer|admin] | org reset-link <email>",
+    args: ["sub", "email"],
+    options: { role: { type: "string" }, ...server },
+    run: async (input, out) => (await import("./people.ts")).orgCommand(input, out),
+  }),
+  command({
+    name: "dev",
+    usage: "dev [--port 4321]",
+    options: { port: { type: "string" } },
+    run: async (input, out) => (await import("./dev.ts")).devCommand(input, out),
+  }),
+  command({
+    name: "mcp",
+    usage: "mcp | mcp install [--claude] [--codex] [--token-env <name>]",
+    args: ["sub"],
+    options: {
+      claude: { type: "boolean" },
+      codex: { type: "boolean" },
+      "token-env": { type: "string" },
+      ...server,
+    },
+    run: async (input, out) => {
+      if (input.args.sub === "install") return (await import("./connect.ts")).mcpInstall(input, out);
+      if (input.args.sub) throw input.usage();
+      return (await import("./mcp.ts")).mcpCommand();
+    },
+  }),
+  command({
+    name: "pack",
+    usage: "pack [<slug>] [-m <message>] [--name <label>] | pack [<slug>] --upload <plan>",
+    args: ["slug"],
+    options: {
+      message: { type: "string", short: "m" },
+      name: { type: "string" },
+      upload: { type: "string" },
+    },
+    run: async (input, out) => (await import("./pack.ts")).packCommand(input, out),
+  }),
+  command({
+    name: "data",
+    usage: ["data ls | get <key> | export | clear [--scope shared|me]", "data get <key> [--scope shared|me]"],
+    args: ["sub", "key"],
+    options: { scope: { type: "string" }, ...server },
+    run: async (input, out) => (await import("./data.ts")).dataCommand(input, out),
+  }),
+  command({
+    name: "logs",
+    usage: "logs [--follow] [--version <n>]",
+    options: { follow: { type: "boolean" }, ...version, ...server },
+    run: async (input, out) => (await import("./data.ts")).logsCommand(input, out),
+  }),
+  command({
+    name: "visibility",
+    usage: "visibility org|me",
+    args: ["value", "target"],
+    options: server,
+    run: async (input, out) => (await import("./people.ts")).visibilityCommand(input, out),
+  }),
+  command({
+    name: "versions",
+    usage: ["versions", 'versions name <n> "<label>"'],
+    help: ['artifacts versions | versions name <n> "<label>" | diff <a> <b> | restore <n>'],
+    args: ["sub", "n", "label"],
+    options: server,
+    run: async (input, out) => (await import("./review.ts")).versionsCommand(input, out),
+  }),
+  command({
+    name: "diff",
+    usage: "diff <a> <b>",
+    help: null,
+    args: ["a", "b"],
+    options: server,
+    run: async (input, out) => (await import("./review.ts")).diffCommand(input, out),
+  }),
+  command({
+    name: "restore",
+    usage: "restore <n>",
+    help: null,
+    args: ["n"],
+    options: server,
+    run: async (input, out) => (await import("./review.ts")).restoreCommand(input, out),
+  }),
+  command({
+    name: "archive",
+    usage: "archive [<project>/<slug>] [--undo]",
+    args: ["target"],
+    options: { undo: { type: "boolean" }, ...server },
+    run: async (input, out) => (await import("./review.ts")).archiveCommand(input, out),
+  }),
+  command({
+    name: "delete",
+    usage: "delete [<project>/<slug>] [--version <n>]",
+    help: ["artifacts delete | undelete [<project>/<slug>] [--version <n>]"],
+    args: ["target"],
+    options: { ...version, ...server },
+    run: async (input, out) => (await import("./review.ts")).deleteCommand(input, out),
+  }),
+  command({
+    name: "undelete",
+    usage: "undelete [<project>/<slug>] [--version <n>]",
+    help: null,
+    args: ["target"],
+    options: { ...version, ...server },
+    run: async (input, out) => (await import("./review.ts")).undeleteCommand(input, out),
+  }),
+  command({
+    name: "share",
+    usage:
+      "share --link [--comment] [--expires 1d|7d|30d] | --invite <email> [--comment|--publish] | --team <slug> [--comment]",
+    help: [
+      "artifacts share --link [--comment] [--expires 1d|7d|30d]",
+      "artifacts share --invite <email> [--comment|--publish]",
+      "artifacts share --team <slug> [--comment]",
+    ],
+    args: ["target"],
+    options: {
+      link: { type: "boolean" },
+      invite: { type: "string" },
+      team: { type: "string" },
+      comment: { type: "boolean" },
+      publish: { type: "boolean" },
+      expires: { type: "string" },
+      ...server,
+    },
+    run: async (input, out) => (await import("./people.ts")).shareCommand(input, out),
+  }),
+  command({
+    name: "teams",
+    usage: "teams",
+    options: server,
+    run: async (input, out) => (await import("./people.ts")).teamsCommand(input, out),
+  }),
+  command({
+    name: "project",
+    usage: "project access [<project>]",
+    args: ["sub", "project"],
+    options: server,
+    run: async (input, out) => (await import("./people.ts")).projectCommand(input, out),
+  }),
+];
+
+export const commandNamed = (name: string) => COMMANDS.find((entry) => entry.name === name);
+
+const forms = (entry: Command) => (typeof entry.usage === "string" ? [entry.usage] : entry.usage);
+
+/** `Usage: artifacts <form>`, from the table. */
+export const usageLine = (entry: Command, form = 0) => `Usage: artifacts ${forms(entry)[form]}`;
+
+export const helpText = (version: string) =>
+  [
+    `artifacts ${version}`,
+    "",
+    ...COMMANDS.flatMap((entry) =>
+      entry.help === null ? [] : (entry.help ?? [`artifacts ${forms(entry)[0]}`]).map((line) => `  ${line}`),
+    ),
+    "",
+    "Every command takes --json. Commands that talk to a server take --server <url|name>",
+    '(on upgrade, --server means "the server too", and it can\'t name one).',
+  ].join("\n");

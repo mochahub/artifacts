@@ -18,9 +18,10 @@ import {
 } from "@artifacts/schema";
 import { isGenerated, LOCAL, MANIFEST, PROJECT_RULES, WORK } from "../bundle/layout.ts";
 import type { Client } from "../client.ts";
+import type { Input } from "../command.ts";
 import { gitRepo, repoRoot } from "../git.ts";
 import { sha256 } from "../hash.ts";
-import { CliError, type Output, UsageError } from "../output.ts";
+import { CliError, type Output } from "../output.ts";
 import { signedIn } from "../session.ts";
 import { namedArtifact, versionNumber } from "../target.ts";
 
@@ -57,8 +58,12 @@ const card = (entry: LibraryPage["cards"][number], out: Output) => {
   }
 };
 
-export async function searchCommand(words: string, flags: ListFlags & { project?: string }, out: Output) {
-  if (words.trim().length < 2) throw new UsageError("Usage: artifacts search <words>");
+export async function searchCommand(
+  { rest, flags, usage }: Input<never, ListFlags & { project?: string }>,
+  out: Output,
+) {
+  const words = rest.join(" ");
+  if (words.trim().length < 2) throw usage();
   const client = await signedIn(flags.server);
   const result = LibraryPage.parse(
     await client.get(
@@ -78,11 +83,9 @@ export async function searchCommand(words: string, flags: ListFlags & { project?
   });
 }
 
-export async function listCommand(path: string | undefined, flags: ListFlags, out: Output) {
+export async function listCommand({ args: { path }, flags, usage }: Input<"path", ListFlags>, out: Output) {
   const parts = path ? path.split("/") : [];
-  if (parts.length > 3 || !parts.every((part) => KEY_PATTERN.test(part))) {
-    throw new UsageError("Usage: artifacts list [<project>[/<slug>[/<page>]]]");
-  }
+  if (parts.length > 3 || !parts.every((part) => KEY_PATTERN.test(part))) throw usage();
   const client = await signedIn(flags.server);
   const [project, slug, page] = parts;
   const window = query({ limit: flags.limit, cursor: flags.cursor });
@@ -126,8 +129,10 @@ export async function listCommand(path: string | undefined, flags: ListFlags, ou
 }
 
 export async function readCommand(
-  target: string | undefined,
-  flags: { page?: string; version?: string; cursor?: string; chars?: string; server?: string },
+  {
+    args: { target },
+    flags,
+  }: Input<"target", { page?: string; version?: string; cursor?: string; chars?: string; server?: string }>,
   out: Output,
 ) {
   const { project, slug } = namedArtifact(target);
@@ -154,15 +159,13 @@ export async function readCommand(
 }
 
 export async function viewCommand(
-  target: string | undefined,
-  flags: {
-    page?: string;
-    frame?: string;
-    size?: string;
-    version?: string;
-    out?: string;
-    server?: string;
-  },
+  {
+    args: { target },
+    flags,
+  }: Input<
+    "target",
+    { page?: string; frame?: string; size?: string; version?: string; out?: string; server?: string }
+  >,
   out: Output,
 ) {
   const { project, slug } = namedArtifact(target);
@@ -240,8 +243,10 @@ const isEmpty = (path: string) => !existsSync(path) || readdirSync(path).length 
 
 /** Puts a published version back into a working folder (07). */
 export async function pullCommand(
-  target: string | undefined,
-  flags: { version?: string; dir?: string; force?: boolean; server?: string },
+  {
+    args: { target },
+    flags,
+  }: Input<"target", { version?: string; dir?: string; force?: boolean; server?: string }>,
   out: Output,
 ) {
   const { project, slug } = namedArtifact(target);
@@ -302,11 +307,10 @@ async function allCards(client: Client, project: string) {
 
 /** Every artifact in a project that this person can see, with its history (07). */
 export async function exportCommand(
-  project: string | undefined,
-  flags: { dir?: string; server?: string },
+  { args: { project }, flags, usage }: Input<"project", { dir?: string; server?: string }>,
   out: Output,
 ) {
-  if (!project || !SLUG_PATTERN.test(project)) throw new UsageError("Usage: artifacts export <project>");
+  if (!project || !SLUG_PATTERN.test(project)) throw usage();
   const client = await signedIn(flags.server);
   const root = resolve(flags.dir ?? `${project}-export`);
   if (!isEmpty(root)) throw new CliError(`${root} isn't empty. Use --dir for another folder.`);

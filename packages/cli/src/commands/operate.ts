@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { IMAGE, latestVersion, meta, releasesUrl, VERSION_NUMBER, waitHealthy } from "../admin.ts";
+import type { Input } from "../command.ts";
 import { InsecureServerError, pickServer, readConfig, type ServerEntry } from "../config.ts";
 import { sha256 } from "../hash.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
@@ -77,7 +78,10 @@ function upgradeDocker(server: ServerEntry, version: string, out: Output) {
   out.say(`Moved the server to ${IMAGE}:${version}`);
 }
 
-export async function upgradeCommand(flags: { server?: boolean; to?: string }, out: Output) {
+export async function upgradeCommand(
+  { flags }: Input<never, { server?: boolean; to?: string }>,
+  out: Output,
+) {
   if (flags.to !== undefined && !VERSION_NUMBER.test(flags.to)) {
     throw new UsageError(`--to wants a version like 0.2.0, not "${flags.to}".`);
   }
@@ -126,9 +130,7 @@ export async function upgradeCommand(flags: { server?: boolean; to?: string }, o
 }
 
 export async function domainCommand(
-  sub: string | undefined,
-  domain: string | undefined,
-  flags: { server?: string },
+  { args: { sub, domain }, flags, usage }: Input<"sub" | "domain", { server?: string }>,
   out: Output,
 ) {
   const url = pickServer(flags.server);
@@ -139,7 +141,7 @@ export async function domainCommand(
     const list = railwayJson<unknown>(["domain", "list", "--service", SERVICE], dir);
     return out.result(list, () => out.say(JSON.stringify(list, null, 2)));
   }
-  if (sub !== "add" || !domain) throw new UsageError("Usage: artifacts domain add <domain> | list");
+  if (sub !== "add" || !domain) throw usage();
   // It becomes a railway argument and an entry in MORE_URLS, so "--help" or "a.com,https://evil.test" must not pass.
   if (!/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(domain)) {
     throw new UsageError(`"${domain}" isn't a domain name. Use something like art.example.com.`);

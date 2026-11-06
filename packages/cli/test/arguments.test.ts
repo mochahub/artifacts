@@ -41,6 +41,21 @@ describe("arguments that end up in a URL or a port", () => {
     }
   });
 
+  test("each command takes its own flags, and --version is a number where it names a version", async () => {
+    const box = sandbox();
+    const other = await cli(["status", "--docker"], box.env);
+    expect(other.code).toBe(2);
+    expect(other.stderr).toContain("--docker");
+    expect((await cli(["status", "--version"], box.env)).stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect((await cli(["read", "demo/small", "--version=x"], box.env)).stderr).toContain(
+      '--version must be a number, not "x"',
+    );
+    // Global flags before the command still count.
+    expect((await cli(["--json", "search", "x"], box.env)).stderr).toContain(
+      "Usage: artifacts search <words>",
+    );
+  });
+
   test("init does not take an object's own name for a kind", async () => {
     const box = sandbox();
     const result = await cli(["init", "--kind", "constructor"], box.env, box.home);
