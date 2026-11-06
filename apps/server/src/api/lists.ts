@@ -1,7 +1,7 @@
 import type { Artifact, Home } from "@artifacts/schema";
 import { Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
-import { type ArtifactRow, artifactParam, heldProjects, toProject, toResource } from "../auth/access.ts";
+import { type ArtifactRow, heldProjects, toProject, toResource } from "../auth/access.ts";
 import { type Caller, viewerId } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
 import {
@@ -22,9 +22,11 @@ import {
   views,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { buildCards } from "../library/cards.ts";
 import { rateLimitSearch, searchHits, snippet } from "../library/search.ts";
 import { type Loaded, visibleTo } from "../library/visible.ts";

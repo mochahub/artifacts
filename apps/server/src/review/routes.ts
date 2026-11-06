@@ -9,9 +9,10 @@ import {
 } from "@artifacts/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { artifactParam, findArtifact, isUuid } from "../auth/access.ts";
+import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
+import { lockArtifact } from "../db/locks.ts";
 import {
   activity,
   artifacts,
@@ -24,9 +25,12 @@ import {
   versions,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { isUuid } from "../http/params.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { audienceOf } from "../library/audience.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { notifyReply } from "../push/notify.ts";
@@ -269,8 +273,7 @@ export function reviewRoutes(routes: Routes, deps: Deps) {
     const threadId = Bun.randomUUIDv7();
     const now = clock.now();
     const row = await db.transaction(async (tx) => {
-      // Thread numbers are per artifact, and never reused.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifactId}, 1))`);
+      await lockArtifact(tx, artifactId, "threads");
       const [counted] = await tx
         .update(artifacts)
         .set({ threadCounter: sql`${artifacts.threadCounter} + 1` })

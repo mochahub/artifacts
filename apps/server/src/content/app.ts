@@ -222,7 +222,6 @@ export function createContentApp(deps: Deps) {
     const prefix = `/t/${c.req.param("token")}/${c.req.param("version")}/api/`;
     const { payload, caller } = await authorize(c.req.param("token"), Number(match[1]));
     if (c.req.method === "OPTIONS") return corsPreflight();
-    if (!deps.sandbox) throw new ApiError("not_found", "Not found.");
     return runBackend(c, deps, deps.sandbox, payload, caller, c.req.path.slice(prefix.length));
   });
 

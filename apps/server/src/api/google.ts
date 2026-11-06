@@ -3,12 +3,11 @@ import { CONSUMER_DOMAINS, type GoogleSettings, PatchGoogle, SaveGoogle } from "
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { isUuid } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
-import { type GoogleClaims, googleProvider, readIdToken } from "../auth/google.ts";
+import { type GoogleClaims, readIdToken } from "../auth/google.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
 import { isSecureRequest, startSession } from "../auth/sessions.ts";
-import type { OrgRow } from "../db/index.ts";
+import { isUniqueViolation, type OrgRow } from "../db/index.ts";
 import {
   activity,
   googleStates,
@@ -21,9 +20,11 @@ import {
   sessions,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
-import { requestOrigin } from "../oauth/origin.ts";
+import { requestOrigin } from "../http/origins.ts";
+import { isUuid } from "../http/params.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { acceptInvite, findLiveInvite, joinTeams } from "./join.ts";
 
 export const CALLBACK_PATH = "/api/auth/google/callback";
@@ -45,7 +46,7 @@ type StateRow = typeof googleStates.$inferSelect;
 
 export function googleRoutes(routes: Routes, deps: Deps) {
   const { db, clock, limits } = deps;
-  const provider = deps.google ?? googleProvider;
+  const provider = deps.google;
 
   const back = (c: Context, path: string, code: string) =>
     c.redirect(`${path}${path.includes("?") ? "&" : "?"}google=${code}`, 302);
@@ -417,7 +418,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
     } catch (error) {
       if (error instanceof ApiError) return back(c, home, error.code === "gone" ? "invite-gone" : "in-use");
       // Two people racing for one email or Google account: the unique index settled it.
-      if ((error as { cause?: { code?: string } }).cause?.code === "23505") return back(c, home, "in-use");
+      if (isUniqueViolation(error)) return back(c, home, "in-use");
       throw error;
     }
   });

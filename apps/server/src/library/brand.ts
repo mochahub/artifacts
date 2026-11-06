@@ -11,8 +11,9 @@ import { findArtifacts, toResource } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
 import { artifacts, brandProposals, org, people, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes, requireCan } from "../http/routes.ts";
+import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
 import { blobKey } from "../publish/blobs.ts";
 
 /** The brand everyone renders with. One link per font, so the CLI needs no route of its own for them. */

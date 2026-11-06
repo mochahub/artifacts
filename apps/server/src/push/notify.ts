@@ -1,5 +1,4 @@
-import { PushSubscribe } from "@artifacts/schema";
-import { and, eq, gt, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { findArtifact, findArtifacts } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -18,13 +17,11 @@ import {
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { encryptPayload, generateVapid, vapidHeader } from "./webpush.ts";
 
 const DAY = 24 * 3600_000;
 const DIGEST_GAP = 20 * 3600_000;
 const TIMEOUT_MS = 10_000;
-const MAX_SUBSCRIPTIONS_PER_PERSON = 10;
 
 /**
  * The server POSTs to whatever endpoint a browser hands it, so it only ever calls the real push
@@ -41,8 +38,6 @@ export const isPushEndpoint = (endpoint: string) => {
     return false;
   }
 };
-
-const allowed = (deps: Deps, endpoint: string) => (deps.pushAllow ?? isPushEndpoint)(endpoint);
 
 /** Made when first needed: on first boot there may be no org yet. The WHERE settles a race. */
 export async function vapidKeys(deps: Deps) {
@@ -76,7 +71,7 @@ async function send(
   row: typeof pushSubscriptions.$inferSelect,
   message: Message,
 ) {
-  if (!allowed(deps, row.endpoint)) return;
+  if (!deps.pushAllow(row.endpoint)) return;
   const response = await fetch(row.endpoint, {
     method: "POST",
     redirect: "error",
@@ -250,60 +245,4 @@ export async function sendDigest(deps: Deps) {
         ),
     );
   }
-}
-
-export function pushRoutes(routes: Routes, deps: Deps) {
-  const person = (c: ApiContext) => {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
-    return caller.person;
-  };
-
-  routes.get("/api/push/key", { action: "account.manage" }, async (c) => {
-    return c.json({ key: (await vapidKeys(deps)).publicKey });
-  });
-
-  routes.post("/api/push/subscribe", { action: "account.manage" }, async (c) => {
-    const me = person(c as ApiContext);
-    const session = (c.get("caller") as { sessionId: string }).sessionId;
-    const body = await parseBody(c, PushSubscribe);
-    if (!allowed(deps, body.endpoint)) throw new ApiError("invalid", "That isn't a push service.");
-    // A browser's keys are an uncompressed P-256 point and 16 bytes of secret; anything else can't be sent to.
-    const point = Buffer.from(body.keys.p256dh, "base64url");
-    if (point.length !== 65 || point[0] !== 4 || Buffer.from(body.keys.auth, "base64url").length !== 16) {
-      throw new ApiError("invalid", "Those aren't a browser's push keys.");
-    }
-    const existing = await deps.db
-      .select({ id: pushSubscriptions.id })
-      .from(pushSubscriptions)
-      .where(and(eq(pushSubscriptions.personId, me.id), ne(pushSubscriptions.endpoint, body.endpoint)));
-    if (existing.length >= MAX_SUBSCRIPTIONS_PER_PERSON) {
-      throw new ApiError("conflict", "Too many devices have notifications on. Turn some off first.");
-    }
-    await deps.db
-      .insert(pushSubscriptions)
-      .values({
-        id: Bun.randomUUIDv7(),
-        orgId: c.get("org").id,
-        personId: me.id,
-        sessionId: session,
-        endpoint: body.endpoint,
-        keys: body.keys,
-        createdAt: deps.clock.now(),
-      })
-      .onConflictDoUpdate({
-        target: pushSubscriptions.endpoint,
-        set: { personId: me.id, sessionId: session, keys: body.keys },
-      });
-    return c.json({ ok: true });
-  });
-
-  routes.delete("/api/push/subscribe", { action: "account.manage" }, async (c) => {
-    const me = person(c as ApiContext);
-    const { endpoint } = await parseBody(c, PushSubscribe.pick({ endpoint: true }));
-    await deps.db
-      .delete(pushSubscriptions)
-      .where(and(eq(pushSubscriptions.personId, me.id), eq(pushSubscriptions.endpoint, endpoint)));
-    return c.json({ ok: true });
-  });
 }

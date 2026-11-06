@@ -1,12 +1,13 @@
 import { ContentTokenRequest } from "@artifacts/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { artifactParam } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
 import { signContentToken } from "../content/token.ts";
 import { frames, pages, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { parseBody, type Routes } from "../http/routes.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { Routes } from "../http/routes.ts";
 import { blobKey } from "../publish/blobs.ts";
 
 const CONTENT_TOKEN_MS = 2 * 3600_000;

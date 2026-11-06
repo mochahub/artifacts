@@ -1,12 +1,14 @@
 import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { isUuid } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can, type TeamResource } from "../auth/can.ts";
+import { isUniqueViolation } from "../db/index.ts";
 import { activity, artifactTeamAccess, people, projectAccess, teamMembers, teams } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { isUuid } from "../http/params.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { visibleTo } from "../library/visible.ts";
 
 type TeamRow = typeof teams.$inferSelect;
@@ -164,8 +166,8 @@ export function teamRoutes(routes: Routes, deps: Deps) {
       })
       .where(eq(teams.id, team.id))
       .returning()
-      .catch((error: { code?: string; cause?: { code?: string } }) => {
-        if ((error.cause?.code ?? error.code) === "23505") {
+      .catch((error) => {
+        if (isUniqueViolation(error)) {
           throw new ApiError("conflict", "There's already a team with that name.");
         }
         throw error;

@@ -7,13 +7,13 @@ import {
   PatchOrg,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
-import { isUuid, projectGrants } from "../auth/access.ts";
+import { projectGrants } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
 import type { Db } from "../db/index.ts";
+import { lockOwners } from "../db/locks.ts";
 import {
-  activity,
   artifactAccess,
   artifacts,
   identities,
@@ -33,15 +33,16 @@ import {
   tokens,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { isUuid } from "../http/params.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
 import { acceptInvite, findLiveInvite } from "./join.ts";
 import { latestRelease } from "./updates.ts";
 
 const HOUR = 3600_000;
-const OWNER_LOCK = 7_316_003;
 const INVITE_DAYS = 7;
 const ORG_SCOPES_NEED = ["publish", "comment", "read", "manage", "data", "org"];
 const SEARCH_RESULTS = 20;
@@ -292,7 +293,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       throw new ApiError("invalid", "Outside people get access per artifact, not a role.");
     }
     await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(${OWNER_LOCK})`);
+      await lockOwners(tx);
       if (person.role === "owner" && role !== "owner" && (await ownerCount(tx, person.orgId)) <= 1) {
         throw new ApiError("conflict", "There must always be an owner.");
       }
@@ -309,7 +310,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     guardOwner(c as ApiContext, person.role);
     const now = clock.now();
     await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(${OWNER_LOCK})`);
+      await lockOwners(tx);
       if (person.role === "owner" && (await ownerCount(tx, person.orgId)) <= 1) {
         throw new ApiError("conflict", "There must always be an owner.");
       }

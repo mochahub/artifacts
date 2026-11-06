@@ -1,14 +1,14 @@
 import { DataClear, DataPut } from "@artifacts/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
-import { artifactParam } from "../auth/access.ts";
+import { callerKey } from "../auth/caller.ts";
 import { backendLogs, guestLinks, people, shareLinks } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody, readLimited } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
-import { deletePrefix } from "../jobs/purge.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { PreconditionFailed } from "../s3.ts";
 import {
-  callerKey,
   checkKey,
   dataPrefix,
   deleteValue,
@@ -17,7 +17,6 @@ import {
   pseudonym,
   putFile,
   putValue,
-  readLimited,
   recountUsage,
   type Scope,
   scopePath,
@@ -285,7 +284,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     const id = resource.id;
     const base = dataPrefix(id);
     const prefixes = scope ? [`${base}${scope}/`, `${base}files/${scope}/`] : [base];
-    for (const entry of prefixes) await deletePrefix(deps, entry);
+    for (const entry of prefixes) await bucket.deletePrefix(entry);
     await recountUsage(deps, c.get("org").id, id);
     return c.json({ ok: true, at: clock.now().toISOString() });
   });

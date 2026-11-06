@@ -5,7 +5,7 @@ import { findOrg, type OrgRow } from "../db/index.ts";
 import { guestLinks, guests, oauthGrants, people, sessions, shareLinks, tokens } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import { MCP_PATH, requestOrigin } from "../oauth/origin.ts";
+import { MCP_PATH, requestOrigin } from "../http/origins.ts";
 import type { Caller, GuestLink } from "./caller.ts";
 import { sha256 } from "./secrets.ts";
 import {

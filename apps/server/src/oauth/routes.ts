@@ -1,15 +1,16 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { type OAuthConsent, OAuthConsentDecision } from "@artifacts/schema";
+import { OAUTH_SCOPES, type OAuthConsent, OAuthConsentDecision } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { findOrg } from "../db/index.ts";
 import { oauthClients, oauthCodes, oauthGrants, oauthRefreshTokens, tokens } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { parseBody, type Routes } from "../http/routes.ts";
+import { MCP_PATH, requestOrigin } from "../http/origins.ts";
+import type { Routes } from "../http/routes.ts";
 import { findClient, redirectAllowed, validRedirect } from "./clients.ts";
-import { MCP_PATH, OAUTH_SCOPES, requestOrigin } from "./origin.ts";
 
 const CODE_MINUTES = 5;
 const ACCESS_SECONDS = 3600;

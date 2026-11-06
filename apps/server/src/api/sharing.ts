@@ -1,7 +1,6 @@
 import { AddAccess, CreateShareLink, GuestName, PatchArtifact, ShareWithTeam } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getCookie } from "hono/cookie";
-import { artifactParam, isUuid } from "../auth/access.ts";
 import { can, effective } from "../auth/can.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
 import { GUEST_COOKIE, isSecureRequest, setSessionCookie } from "../auth/sessions.ts";
@@ -22,8 +21,11 @@ import {
   versions,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes, requireCan } from "../http/routes.ts";
+import { isUuid } from "../http/params.ts";
+import { artifactParam } from "../http/resources.ts";
+import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
 
 const DAY = 24 * 3600_000;
 const GUEST_DAYS = 90;

@@ -1,5 +1,4 @@
 import type { Context, Handler } from "hono";
-import type { z } from "zod";
 import type { Caller } from "../auth/caller.ts";
 import { type Action, can, type Resource, seesProject } from "../auth/can.ts";
 import type { OrgRow } from "../db/index.ts";
@@ -96,19 +95,4 @@ export class Routes {
   delete(path: string, guard: Guard, handler: Handler<ApiVars>) {
     this.add("delete", path, guard, handler);
   }
-}
-
-/** Parses a JSON body with the schema from packages/schema (01). */
-export async function parseBody<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> {
-  let raw: unknown;
-  try {
-    raw = await c.req.json();
-  } catch {
-    throw new ApiError("invalid", "The body must be JSON.");
-  }
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ApiError("invalid", "The request isn't valid.", { issues: parsed.error.issues });
-  }
-  return parsed.data;
 }

@@ -7,13 +7,14 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import { and, eq, gt, isNull, lt } from "drizzle-orm";
-import { isUuid } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { personView, startSession } from "../auth/sessions.ts";
 import { identities, passkeys, passwords, people, sessions, webauthnChallenges } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { isUuid } from "../http/params.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 
 const CHALLENGE_MS = 5 * 60_000;
 

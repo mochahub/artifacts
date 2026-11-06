@@ -3,6 +3,7 @@ import {
   ArticleTheme,
   Brand,
   normalizeRepo,
+  OAUTH_SCOPES,
   PublishCommit,
   PublishPrepare,
   Summary,
@@ -20,10 +21,9 @@ import { can } from "../auth/can.ts";
 import { pages, people, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { MCP_PATH, requestOrigin } from "../http/origins.ts";
 import type { ApiContext, ApiVars, Routes } from "../http/routes.ts";
 import { audienceOf } from "../library/audience.ts";
-import { libraryCards } from "../library/cards.ts";
-import { readArtifact, viewArtifact } from "../library/read.ts";
 import {
   libraryArtifacts,
   libraryFrames,
@@ -31,8 +31,9 @@ import {
   libraryProjects,
   librarySearch,
   loadArtifact,
-} from "../library/routes.ts";
-import { MCP_PATH, OAUTH_SCOPES, requestOrigin } from "../oauth/origin.ts";
+} from "../library/browse.ts";
+import { libraryCards } from "../library/cards.ts";
+import { readArtifact, viewArtifact } from "../library/read.ts";
 import { blobKey, putBlob, verifyBlobs } from "../publish/blobs.ts";
 import type { Publisher } from "../publish/routes.ts";
 import type { reviewRoutes } from "../review/routes.ts";

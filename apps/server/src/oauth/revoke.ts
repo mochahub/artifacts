@@ -1,8 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
+import type { Tx } from "../db/index.ts";
 import { oauthGrants, tokens } from "../db/schema.ts";
-import type { Deps } from "../deps.ts";
-
-type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
 
 /** Every connector a person signed in. Their refresh tokens end with the grant (see the token route). */
 export async function revokeGrants(tx: Tx, personId: string, now: Date) {

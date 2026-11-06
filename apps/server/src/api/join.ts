@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
+import type { Tx } from "../db/index.ts";
 import {
   activity,
   artifactAccess,
@@ -13,7 +14,6 @@ import {
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 
-type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
 export type InviteRow = typeof invites.$inferSelect;
 
 /** An invite that can still be used. Secrets are stored hashed, so a link looks it up by hash. */

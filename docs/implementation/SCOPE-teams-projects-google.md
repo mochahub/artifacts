@@ -95,7 +95,7 @@ type ArtifactResource = {
 
 Expanding at load time, not on the caller, is deliberate:
 
-- Only two places build a resource: `toResource` in `api/artifacts-db.ts` and `visibleTo` in `library/visible.ts`. Required fields make the compiler flag both, and the permission test.
+- Only two places build a resource: `toResource` in `auth/access.ts` and `visibleTo` in `library/visible.ts`. Required fields make the compiler flag both, and the permission test.
 - The content-port recheck and push notifications build callers by hand. `push/notify.ts` checks many people against one resource, so a resource that already holds everyone's grants needs no per-person query.
 - `visibleTo` loads only the caller's rows, so lists stay at one query per concern. `toResource` loads everyone's. `/api/activity` calls it for up to 200 rows, so add that case to `load-notes.md`.
 

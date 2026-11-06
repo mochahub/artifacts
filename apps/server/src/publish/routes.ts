@@ -1,8 +1,5 @@
 import {
-  type Anchor,
   agentLabel,
-  type BlockRecord,
-  type FrameRecord,
   isBundlePath,
   normalizeRepo,
   type PageRecord,
@@ -12,32 +9,25 @@ import {
   UNNAMED_AGENT,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
-import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import { type ArtifactRow, findArtifact, toProject, toResource } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
-import {
-  activity,
-  artifacts,
-  blobs,
-  blocks,
-  frames,
-  pages,
-  people,
-  projectAccess,
-  projects,
-  threads,
-  versions,
-} from "../db/schema.ts";
+import { lockArtifact } from "../db/locks.ts";
+import { activity, artifacts, blobs, people, projectAccess, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes, requireCan } from "../http/routes.ts";
+import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
 import { audienceOf } from "../library/audience.ts";
+import { mapLimit } from "../map-limit.ts";
 import { notifyPublished } from "../push/notify.ts";
-import { reanchor } from "../review/reanchor.ts";
-import { blobKey, IMMUTABLE, knownBlobs, mapLimit, putBlob, verifyBlobs } from "./blobs.ts";
+import { reanchorThreads } from "../review/reanchor.ts";
+import { writeContent } from "../versions/content.ts";
+import { hashesOf } from "../versions/diff.ts";
+import { blobKey, IMMUTABLE, knownBlobs, putBlob, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
 const UPLOAD_HOURS = 2;
@@ -89,10 +79,6 @@ const frameKeys = (change: ReturnType<typeof diff>) => ({
   removed: change.removed.map((key) => key.slice(key.indexOf("/") + 1)),
   changed: change.changed.map((key) => key.slice(key.indexOf("/") + 1)),
 });
-
-async function insertChunks<T>(rows: T[], insert: (chunk: T[]) => Promise<unknown>) {
-  for (let i = 0; i < rows.length; i += 500) await insert(rows.slice(i, i + 500));
-}
 
 export type Publisher = ReturnType<typeof createPublisher>;
 
@@ -269,8 +255,7 @@ export function createPublisher(deps: Deps) {
     const agent = body.agent?.trim() || (caller.kind === "person" ? null : UNNAMED_AGENT);
     const now = clock.now();
     const result = await db.transaction(async (tx) => {
-      // One commit at a time per artifact (03).
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ticket.artifactId}, 0))`);
+      await lockArtifact(tx, ticket.artifactId, "content");
 
       let [project] = await tx
         .select()
@@ -463,116 +448,4 @@ export function publishRoutes(routes: Routes, publisher: Publisher) {
     if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
     return c.json(await publisher.commit(c as ApiContext, await parseBody(c, PublishCommit)));
   });
-}
-
-/** 05, "Re-anchoring". Runs inside the commit, and again when a version is restored or removed. */
-export async function reanchorThreads(
-  tx: Tx,
-  artifactId: string,
-  pageRows: { key: string }[],
-  frameRows: { pageKey: string; frameKey: string; contentHash: string }[],
-  blockRows: { pageKey: string; blockKey: string; contentHash: string; text: string }[],
-  onlyCreatedOn?: number,
-) {
-  const open = await tx
-    .select()
-    .from(threads)
-    .where(and(eq(threads.artifactId, artifactId), ne(threads.status, "resolved"), isNotNull(threads.anchor)))
-    .orderBy(threads.n);
-  const pageKeys = new Set(pageRows.map((page) => page.key));
-  const threadsOnChanged: number[] = [];
-  const orphaned: number[] = [];
-  const cache = new Map<number, Awaited<ReturnType<typeof hashesOf>>>();
-
-  for (const thread of open) {
-    if (!pageKeys.has(thread.pageKey)) continue;
-    if (onlyCreatedOn !== undefined && thread.createdVersion !== onlyCreatedOn) continue;
-    let then = cache.get(thread.createdVersion);
-    if (!then) {
-      const [version] = await tx
-        .select({ id: versions.id })
-        .from(versions)
-        .where(and(eq(versions.artifactId, artifactId), eq(versions.n, thread.createdVersion)))
-        .limit(1);
-      then = version ? await hashesOf(tx, version.id) : { frames: new Map(), blocks: new Map() };
-      cache.set(thread.createdVersion, then);
-    }
-    const prefix = `${thread.pageKey}/`;
-    const unprefix = (map: Map<string, string>) =>
-      new Map(
-        [...map]
-          .filter(([key]) => key.startsWith(prefix))
-          .map(([key, hash]) => [key.slice(prefix.length), hash]),
-      );
-    const result = reanchor(
-      thread.anchor as Anchor,
-      { frames: unprefix(then.frames), blocks: unprefix(then.blocks) },
-      {
-        frames: new Map(
-          frameRows.filter((f) => f.pageKey === thread.pageKey).map((f) => [f.frameKey, f.contentHash]),
-        ),
-        blocks: blockRows
-          .filter((b) => b.pageKey === thread.pageKey)
-          .map((b) => ({ key: b.blockKey, hash: b.contentHash, text: b.text })),
-      },
-    );
-    await tx
-      .update(threads)
-      .set({ anchor: result.anchor, anchorState: result.state })
-      .where(eq(threads.id, thread.id));
-    if (result.state === "orphaned") orphaned.push(thread.n);
-    if (result.state === "updated" && thread.status === "open") threadsOnChanged.push(thread.n);
-  }
-  return { threadsOnChanged, orphaned };
-}
-
-type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
-
-/** Copies a version's pages, frames and blocks in. Restoring a version uses this too. */
-export async function writeContent(
-  tx: Tx,
-  orgId: string,
-  versionId: string,
-  pageRows: PageRecord[],
-  frameRows: FrameRecord[],
-  blockRows: BlockRecord[],
-) {
-  await insertChunks(pageRows, (chunk) =>
-    tx.insert(pages).values(
-      chunk.map((page) => ({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        versionId,
-        pageKey: page.key,
-        kind: page.kind,
-        title: page.title,
-        group: page.group,
-        position: page.position,
-        meta: page.meta,
-      })),
-    ),
-  );
-  await insertChunks(frameRows, (chunk) =>
-    tx.insert(frames).values(chunk.map((frame) => ({ ...frame, id: Bun.randomUUIDv7(), orgId, versionId }))),
-  );
-  await insertChunks(blockRows, (chunk) =>
-    tx.insert(blocks).values(chunk.map((block) => ({ ...block, id: Bun.randomUUIDv7(), orgId, versionId }))),
-  );
-}
-
-async function hashesOf(tx: Tx, versionId: string) {
-  const [frameRows, blockRows] = await Promise.all([
-    tx
-      .select({ page: frames.pageKey, key: frames.frameKey, hash: frames.contentHash })
-      .from(frames)
-      .where(eq(frames.versionId, versionId)),
-    tx
-      .select({ page: blocks.pageKey, key: blocks.blockKey, hash: blocks.contentHash })
-      .from(blocks)
-      .where(eq(blocks.versionId, versionId)),
-  ]);
-  return {
-    frames: new Map(frameRows.map((row) => [`${row.page}/${row.key}`, row.hash])),
-    blocks: new Map(blockRows.map((row) => [`${row.page}/${row.key}`, row.hash])),
-  };
 }

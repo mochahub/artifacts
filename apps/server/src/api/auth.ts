@@ -14,8 +14,9 @@ import {
   tokens,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
 
 const MAX_PASSWORD = 256;

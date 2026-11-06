@@ -9,8 +9,6 @@ import {
   teams,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
-import { ApiError } from "../http/errors.ts";
-import type { ApiContext } from "../http/routes.ts";
 import type { Caller } from "./caller.ts";
 import {
   type ArtifactResource,
@@ -196,18 +194,6 @@ export async function toProject(deps: Deps, row: ProjectRow): Promise<LoadedProj
   };
 }
 
-/** The `:slug` project, for a route guard. */
-export const projectParam = (deps: Deps, name = "slug") =>
-  async function load(c: ApiContext): Promise<LoadedProject> {
-    const [row] = await deps.db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.orgId, c.get("org").id), eq(projects.slug, c.req.param(name) as string)))
-      .limit(1);
-    if (!row) throw new ApiError("not_found", "Not found.");
-    return toProject(deps, row);
-  };
-
 /** Projects a person holds a grant on, seen or not through any artifact, as can() allows. */
 export async function heldProjects(deps: Deps, orgId: string, caller: Caller): Promise<ProjectRow[]> {
   if (caller.kind !== "person" && caller.kind !== "cliToken") return [];
@@ -246,12 +232,3 @@ export async function findArtifacts(deps: Deps, orgId: string, ids: string[]) {
     .where(and(eq(artifacts.orgId, orgId), inArray(artifacts.id, ids)));
   return new Map((await toResources(deps, rows)).map((resource) => [resource.id, resource]));
 }
-
-/** The `:id` artifact, for a route guard. Unknown ids are the same 404 as ones you can't see. */
-export const artifactParam = (deps: Deps, name = "id") =>
-  async function load(c: ApiContext): Promise<LoadedArtifact> {
-    const id = c.req.param(name);
-    const found = isUuid(id) ? await findArtifact(deps, c.get("org").id, id) : null;
-    if (!found) throw new ApiError("not_found", "Not found.");
-    return found;
-  };

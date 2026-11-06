@@ -1,6 +1,7 @@
 import { and, gt, inArray, lt, sql } from "drizzle-orm";
-import { expireLogs } from "../content/proxy.ts";
+import { expireLogs } from "../data/logs.ts";
 import { recountUsage } from "../data/store.ts";
+import { tryLockJobs } from "../db/locks.ts";
 import {
   artifacts,
   artifactUsage,
@@ -24,7 +25,6 @@ import { sendDigest } from "../push/notify.ts";
 import { purgeExpired } from "./purge.ts";
 
 const DAY = 24 * 3600_000;
-const JOB_LOCK = 7_316_004;
 const GC_MIN_AGE_MS = DAY;
 const FIRST_RUN_MS = 60_000;
 
@@ -56,32 +56,27 @@ async function referencedHashes(deps: Deps) {
 export async function collectGarbage(deps: Deps) {
   const cutoff = deps.clock.now().getTime() - GC_MIN_AGE_MS;
   const hashOf = (key: string) => key.slice("blobs/".length);
-  let cursor: string | undefined;
   let deleted = 0;
   let bytes = 0;
-  do {
-    const page = await deps.bucket.list("blobs/", { cursor });
-    const old = page.objects.filter((object) => object.updatedAt.getTime() < cutoff);
-    if (old.length > 0) {
-      // Fresh for every page. Rows go first, so a publish reusing one of these can't commit.
-      const referenced = await referencedHashes(deps);
-      const stale = old.filter((object) => !referenced.has(hashOf(object.key)));
-      if (stale.length > 0) {
-        await deps.db.delete(blobs).where(
-          inArray(
-            blobs.hash,
-            stale.map((object) => hashOf(object.key)),
-          ),
-        );
-        const still = await referencedHashes(deps);
-        const gone = stale.filter((object) => !still.has(hashOf(object.key)));
-        await Promise.all(gone.map((object) => deps.bucket.delete(object.key)));
-        deleted += gone.length;
-        bytes += gone.reduce((sum, object) => sum + object.size, 0);
-      }
-    }
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
+  for await (const objects of deps.bucket.listAll("blobs/")) {
+    const old = objects.filter((object) => object.updatedAt.getTime() < cutoff);
+    if (old.length === 0) continue;
+    // Fresh for every page. Rows go first, so a publish reusing one of these can't commit.
+    const referenced = await referencedHashes(deps);
+    const stale = old.filter((object) => !referenced.has(hashOf(object.key)));
+    if (stale.length === 0) continue;
+    await deps.db.delete(blobs).where(
+      inArray(
+        blobs.hash,
+        stale.map((object) => hashOf(object.key)),
+      ),
+    );
+    const still = await referencedHashes(deps);
+    const gone = stale.filter((object) => !still.has(hashOf(object.key)));
+    await Promise.all(gone.map((object) => deps.bucket.delete(object.key)));
+    deleted += gone.length;
+    bytes += gone.reduce((sum, object) => sum + object.size, 0);
+  }
   await sweepOrphans(deps, cutoff);
   deps.log.info("garbage collected", { deleted, bytes });
   return { deleted, bytes };
@@ -92,24 +87,19 @@ const UUID_AT = /^(?:crops|data)\/([0-9a-f-]{36})/;
 /** What a purge's bucket step left behind, if the bucket failed after the rows were gone. */
 async function sweepOrphans(deps: Deps, cutoff: number) {
   // Upload plans are only read during one publish, and their signed links last a day at most.
-  for (let cursor: string | undefined, more = true; more; ) {
-    const page = await deps.bucket.list("plans/", { cursor });
-    for (const object of page.objects) {
+  for await (const objects of deps.bucket.listAll("plans/")) {
+    for (const object of objects) {
       if (object.updatedAt.getTime() < cutoff) await deps.bucket.delete(object.key);
     }
-    cursor = page.nextCursor ?? undefined;
-    more = cursor !== undefined;
   }
   for (const prefix of ["crops/", "data/"]) {
-    let cursor: string | undefined;
-    do {
-      const page = await deps.bucket.list(prefix, { cursor });
-      const ids = [...new Set(page.objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
+    for await (const objects of deps.bucket.listAll(prefix)) {
+      const ids = [...new Set(objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
       // A crop lives while a thread names it as its crop: a purged version clears that, and the thread stays.
       // Data lives while its artifact does.
       const alive = new Set<string>();
       if (ids.length && prefix === "crops/") {
-        const keys = page.objects.map((object) => object.key);
+        const keys = objects.map((object) => object.key);
         const rows = await deps.db
           .select({ key: threads.cropKey })
           .from(threads)
@@ -122,14 +112,13 @@ async function sweepOrphans(deps: Deps, cutoff: number) {
           .where(inArray(artifacts.id, ids));
         for (const row of rows) alive.add(row.id);
       }
-      const dead = page.objects.filter((object) => {
+      const dead = objects.filter((object) => {
         const id = UUID_AT.exec(object.key)?.[1];
         const name = prefix === "crops/" ? object.key : id;
         return id && name && !alive.has(name) && object.updatedAt.getTime() < cutoff;
       });
       await Promise.all(dead.map((object) => deps.bucket.delete(object.key)));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
+    }
   }
 }
 
@@ -184,10 +173,7 @@ export function startJobs(deps: Deps) {
   const { digest, ...jobs } = jobsFor(deps);
   const run = async () => {
     const reserved = await deps.db.transaction(async (tx) => {
-      const [{ locked } = { locked: false }] = (await tx.execute(
-        sql`select pg_try_advisory_xact_lock(${JOB_LOCK}) as locked`,
-      )) as unknown as { locked: boolean }[];
-      if (!locked) return false;
+      if (!(await tryLockJobs(tx))) return false;
       for (const [name, job] of Object.entries(jobs)) {
         try {
           await job();

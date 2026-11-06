@@ -2,14 +2,8 @@ import type { Health, Meta } from "@artifacts/schema";
 import { type Db, findOrg } from "../db/index.ts";
 import type { Env } from "../env.ts";
 import type { createApp } from "../http/app.ts";
+import { viewerOrigins } from "../http/origins.ts";
 import { MIN_CLI_VERSION, VERSION } from "../version.ts";
-
-/** The viewer origins: PUBLIC_URL, MORE_URLS and always the home domain (SPEC §7.3). */
-export function viewerOrigins(env: Env, homeDomain: string | null): string[] {
-  const known = env.viewerOrigins;
-  if (!homeDomain || known.some((origin) => new URL(origin).hostname === homeDomain)) return known;
-  return [...known, `https://${homeDomain}`];
-}
 
 export function metaRoutes(app: ReturnType<typeof createApp>, env: Env, db: Db) {
   app.get("/api/health", async (c) => {

@@ -38,3 +38,11 @@ export const viewerId = (caller: Caller) =>
     : caller.kind === "guest"
       ? { guest: caller.guestId }
       : {};
+
+/** The person or guest behind a caller, for rate limits and pseudonyms; null for organization tokens. */
+export const callerKey = (caller: Caller): string | null => {
+  if (caller.kind === "person" || caller.kind === "cliToken") return caller.person.id;
+  if (caller.kind === "guest") return caller.guestId;
+  if (caller.kind === "content") return caller.caller.id;
+  return null;
+};

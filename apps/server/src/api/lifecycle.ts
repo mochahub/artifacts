@@ -1,9 +1,10 @@
 import { agentLabel, UNNAMED_AGENT } from "@artifacts/schema";
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { artifactParam, findArtifacts } from "../auth/access.ts";
+import { and, asc, desc, eq, gt, isNotNull, isNull, lt } from "drizzle-orm";
+import { findArtifacts } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
+import { callerKey } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
-import { callerKey } from "../data/store.ts";
+import { lockArtifact } from "../db/locks.ts";
 import {
   activity,
   artifacts,
@@ -19,11 +20,12 @@ import {
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
+import { artifactParam } from "../http/resources.ts";
 import type { ApiContext, Routes } from "../http/routes.ts";
 import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
 import { blobKey } from "../publish/blobs.ts";
-import { reanchorThreads } from "../publish/routes.ts";
-import { diffRegions, type Region } from "../review/regions.ts";
+import { reanchorThreads } from "../review/reanchor.ts";
+import { diffRegions, type Region } from "../versions/regions.ts";
 
 const PURGE_MS = 30 * 24 * 3600_000;
 
@@ -32,9 +34,6 @@ const actorId = (caller: Caller) => {
   if (caller.kind === "orgToken") return caller.createdBy;
   return null;
 };
-
-/** The same lock as publish commit, so nothing changes under a publish in progress (03). */
-const LOCK = (id: string) => sql`select pg_advisory_xact_lock(hashtextextended(${id}, 0))`;
 
 /** One render pair never changes its answer, so it's worked out once. */
 const regionCache = new Map<string, Region[]>();
@@ -125,7 +124,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const setArchived = (archived: boolean) => async (c: ApiContext) => {
     const resource = await artifact(c);
     await db.transaction(async (tx) => {
-      await tx.execute(LOCK(resource.id));
+      await lockArtifact(tx, resource.id, "content");
       await tx
         .update(artifacts)
         .set(
@@ -151,7 +150,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
     const now = clock.now();
     const purgeAfter = new Date(now.getTime() + PURGE_MS);
     await db.transaction(async (tx) => {
-      await tx.execute(LOCK(resource.id));
+      await lockArtifact(tx, resource.id, "content");
       await tx
         .update(artifacts)
         .set({ deletedAt: now, deletedBy: actorId(c.get("caller")), purgeAfter })
@@ -165,7 +164,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
     const resource = await artifact(c as ApiContext);
     if (!resource.deletedAt) throw new ApiError("conflict", "It isn't in Recently deleted.");
     await db.transaction(async (tx) => {
-      await tx.execute(LOCK(resource.id));
+      await lockArtifact(tx, resource.id, "content");
       await tx
         .update(artifacts)
         .set({ deletedAt: null, deletedBy: null, purgeAfter: null })
@@ -273,7 +272,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       const now = clock.now();
       const purgeAfter = new Date(now.getTime() + PURGE_MS);
       await db.transaction(async (tx) => {
-        await tx.execute(LOCK(resource.id));
+        await lockArtifact(tx, resource.id, "content");
         await tx
           .update(versions)
           .set({ deletedAt: now, deletedBy: actorId(c.get("caller")), purgeAfter })
@@ -319,7 +318,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       const { resource, version } = await versionParam(c as ApiContext);
       if (!version.deletedAt) throw new ApiError("conflict", "That version isn't removed.");
       await db.transaction(async (tx) => {
-        await tx.execute(LOCK(resource.id));
+        await lockArtifact(tx, resource.id, "content");
         await tx
           .update(versions)
           .set({ deletedAt: null, deletedBy: null, purgeAfter: null })
@@ -375,7 +374,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       const publisher = actorId(caller);
       if (!publisher) throw new ApiError("forbidden", "You can't publish.");
       const n = await db.transaction(async (tx) => {
-        await tx.execute(LOCK(resource.id));
+        await lockArtifact(tx, resource.id, "content");
         const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, resource.id)).limit(1);
         if (!current || current.deletedAt) throw new ApiError("conflict", "That artifact was just deleted.");
         if (current.archivedAt)
