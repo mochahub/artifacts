@@ -1,7 +1,21 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { agentShort, ago, capitalize, initials, plural, until } from "./format.ts";
 
-// Local times, so the answers hold in any time zone the tests run in.
+// The reader's own locale and zone make the words, so these pin both (before any date below is made)
+// and put them back for other files.
+const zone = process.env.TZ;
+const toLocaleDateString = Date.prototype.toLocaleDateString;
+process.env.TZ = "Asia/Tokyo";
+Date.prototype.toLocaleDateString = function (locale, options) {
+  return toLocaleDateString.call(this, locale ?? "en-US", options);
+};
+afterAll(() => {
+  if (zone === undefined) delete process.env.TZ;
+  else process.env.TZ = zone;
+  Date.prototype.toLocaleDateString = toLocaleDateString;
+});
+
+// Local times, in the pinned zone.
 const at = (month: number, day: number, hour = 12, minute = 0, year = 2026) =>
   new Date(year, month - 1, day, hour, minute);
 const iso = (date: Date) => date.toISOString();
@@ -20,8 +34,7 @@ describe("ago", () => {
   });
 
   test("26 hours ago at 1 am is Monday night, not yesterday", () => {
-    const monday = at(10, 26, 23, 0);
-    expect(ago(iso(monday), now)).toBe(monday.toLocaleDateString(undefined, { weekday: "long" }));
+    expect(ago(iso(at(10, 26, 23, 0)), now)).toBe("Monday");
   });
 
   test("the day before is yesterday, however late the hour", () => {
@@ -30,20 +43,12 @@ describe("ago", () => {
   });
 
   test("within the week it names the day; after that the date", () => {
-    expect(ago(iso(at(10, 23, 9)), now)).toBe(at(10, 23).toLocaleDateString(undefined, { weekday: "long" }));
-    expect(ago(iso(at(10, 21, 9)), now)).toBe(
-      at(10, 21).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    );
+    expect(ago(iso(at(10, 23, 9)), now)).toBe("Friday");
+    expect(ago(iso(at(10, 21, 9)), now)).toBe("Oct 21");
   });
 
   test("adds the year when it isn't this one", () => {
-    expect(ago(iso(at(10, 21, 9, 0, 2025)), now)).toBe(
-      at(10, 21, 9, 0, 2025).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-    );
+    expect(ago(iso(at(10, 21, 9, 0, 2025)), now)).toBe("Oct 21, 2025");
   });
 
   test("a date that isn't one gives nothing rather than Invalid Date", () => {
@@ -62,16 +67,12 @@ describe("until", () => {
 
   test("an invite made a minute ago expires a week out, not just now", () => {
     const expires = new Date(now - 60_000 + 7 * 24 * 3600_000);
-    expect(until(iso(expires), now)).toBe(
-      expires.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-    );
+    expect(until(iso(expires), now)).toBe("Nov 4");
   });
 
   test("the next calendar day is tomorrow, then the day's name", () => {
     expect(until(iso(at(10, 29, 9)), now)).toBe("tomorrow");
-    expect(until(iso(at(10, 31, 9)), now)).toBe(
-      at(10, 31).toLocaleDateString(undefined, { weekday: "long" }),
-    );
+    expect(until(iso(at(10, 31, 9)), now)).toBe("Saturday");
   });
 
   test("something already past reads as now, and a date that isn't one as nothing", () => {
