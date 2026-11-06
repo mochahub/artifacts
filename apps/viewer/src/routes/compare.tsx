@@ -2,12 +2,10 @@ import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ChevronLeft } from "lucide-preact";
 import { useLocation, useRoute } from "preact-iso";
-import { isMissing } from "../api.ts";
-import { renderUrl } from "../format.ts";
+import { Gate, Loaded } from "../components/loaded.tsx";
+import { LoadFailed, PlaceholderPage } from "../components/placeholder.tsx";
+import { artifactApi, artifactHref, renderUrl } from "../paths.ts";
 import { usePoll } from "../poll.ts";
-import { artifactPath } from "./artifact.tsx";
-import { useSignInOn401 } from "./guard.tsx";
-import { NotFound } from "./not-found.tsx";
 
 type Region = { x: number; y: number; w: number; h: number };
 type Change = { added: string[]; removed: string[]; changed: string[] };
@@ -127,8 +125,10 @@ export function ComparePage() {
   const { params } = useRoute();
   const { query } = useLocation();
   const mode = useSignal<Mode>("side");
-  const remote = usePoll<Artifact>(artifactPath(params.project ?? "", params.artifact ?? ""), 60_000);
-  useSignInOn401(remote.error.value?.status);
+  const remote = usePoll<Artifact>(
+    artifactApi({ project: params.project ?? "", slug: params.artifact ?? "" }),
+    60_000,
+  );
   const artifact = remote.data.value;
   const compare = usePoll<Compare>(
     artifact
@@ -136,36 +136,69 @@ export function ComparePage() {
       : null,
     3_600_000,
   );
-  if (isMissing(compare.error.value) || isMissing(remote.error.value)) return <NotFound />;
-  if (!artifact) return null;
+  return (
+    <Gate from={[remote, compare]}>
+      <Loaded
+        from={[remote]}
+        value={artifact}
+        placeholder={<PlaceholderPage />}
+        failed={(retry) => (
+          <main class="main">
+            <LoadFailed retry={retry} />
+          </main>
+        )}
+      >
+        {(artifact) => (
+          <Changes
+            artifact={artifact}
+            from={query.from}
+            to={query.to}
+            compare={compare.data.value}
+            mode={mode.value}
+            onMode={(next) => {
+              mode.value = next;
+            }}
+          />
+        )}
+      </Loaded>
+    </Gate>
+  );
+}
+
+function Changes({
+  artifact,
+  from,
+  to,
+  compare,
+  mode,
+  onMode,
+}: {
+  artifact: Artifact;
+  from?: string;
+  to?: string;
+  compare: Compare | null;
+  mode: Mode;
+  onMode(mode: Mode): void;
+}) {
   const nothing =
-    compare.data.value &&
-    [compare.data.value.frames, compare.data.value.blocks].every(
-      (c) => c.added.length + c.removed.length + c.changed.length === 0,
-    );
-  const notes = compare.data.value?.notes ?? {};
-  const changed = Object.entries(compare.data.value?.frames.regions ?? {});
+    compare &&
+    [compare.frames, compare.blocks].every((c) => c.added.length + c.removed.length + c.changed.length === 0);
+  const notes = compare?.notes ?? {};
+  const changed = Object.entries(compare?.frames.regions ?? {});
   return (
     <main class="main">
-      <a class="back" href={`/${artifact.project}/${artifact.slug}`}>
+      <a class="back" href={artifactHref(artifact)}>
         <ChevronLeft />
         {artifact.title}
       </a>
       <h1 class="h1 m">
-        v{query.from} and v{query.to}
+        v{from} and v{to}
       </h1>
       {nothing && <div class="empty">No differences.</div>}
       {changed.length > 0 && (
         <div class="seg">
           {MODES.map(([value, label]) => (
-            <button
-              type="button"
-              key={value}
-              aria-pressed={mode.value === value}
-              onClick={() => {
-                mode.value = value;
-              }}
-            >
+            <button type="button" key={value} aria-pressed={mode === value} onClick={() => onMode(value)}>
               {label}
             </button>
           ))}
@@ -177,12 +210,12 @@ export function ComparePage() {
           artifactId={artifact.id}
           name={name}
           frame={frame}
-          mode={mode.value}
+          mode={mode}
           note={notes[name] ?? notes[name.split("/").at(-1) as string]}
         />
       ))}
-      {compare.data.value && <Rows title="Frames" change={compare.data.value.frames} />}
-      {compare.data.value && <Rows title="Sections" change={compare.data.value.blocks} />}
+      {compare && <Rows title="Frames" change={compare.frames} />}
+      {compare && <Rows title="Sections" change={compare.blocks} />}
     </main>
   );
 }

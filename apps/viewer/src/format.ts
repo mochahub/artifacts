@@ -4,6 +4,19 @@ const DAY = 24 * HOUR;
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 
+/** A date as the reader says it: "Monday", "Oct 21", or "Oct 21, 2025" outside this year. */
+function day(then: Date, now: number, days: number) {
+  if (days < 7) return then.toLocaleDateString(undefined, { weekday: "long" });
+  const sameYear = then.getFullYear() === new Date(now).getFullYear();
+  return then.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
+
+const calendarDays = (from: Date, to: Date) => Math.round((startOfDay(to) - startOfDay(from)) / DAY);
+
 /**
  * "2 h ago", "yesterday", "Monday", "Oct 21", "Oct 21, 2025". Past a day, it counts calendar days in
  * the reader's time zone: 26 hours ago on Wednesday at 1 am is Monday, not yesterday.
@@ -15,15 +28,20 @@ export function ago(iso: string, now = Date.now()): string {
   if (diff < MINUTE) return "just now";
   if (diff < HOUR) return `${Math.floor(diff / MINUTE)} min ago`;
   if (diff < DAY) return `${Math.floor(diff / HOUR)} h ago`;
-  const days = Math.round((startOfDay(new Date(now)) - startOfDay(then)) / DAY);
-  if (days <= 1) return "yesterday";
-  if (days < 7) return then.toLocaleDateString(undefined, { weekday: "long" });
-  const sameYear = then.getFullYear() === new Date(now).getFullYear();
-  return then.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
+  const days = calendarDays(then, new Date(now));
+  return days <= 1 ? "yesterday" : day(then, now, days);
+}
+
+/** The other way: "in 20 min", "in 5 h", "tomorrow", "Monday", "Oct 21". For when something ends. */
+export function until(iso: string, now = Date.now()): string {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  const diff = then.getTime() - now;
+  if (diff < MINUTE) return "now";
+  if (diff < HOUR) return `in ${Math.floor(diff / MINUTE)} min`;
+  if (diff < DAY) return `in ${Math.floor(diff / HOUR)} h`;
+  const days = calendarDays(new Date(now), then);
+  return days <= 1 ? "tomorrow" : day(then, now, days);
 }
 
 export function plural(n: number, one: string, many = `${one}s`) {
@@ -39,18 +57,5 @@ export function initials(name: string): string {
 
 export const agentShort = (agent: string) => agent.replace(/ Code$/, "");
 
-/**
- * The prompt that sends an agent to a review. It names the artifact and leaves the comments out:
- * guests can write them, and pasted text would read as the person's own instructions. The CLI needs
- * `<project>/<slug>`, not a URL, and `artifacts reply` only works next to the source.
- */
-export function agentPrompt(artifact: { project: string; slug: string }, origin: string) {
-  const ref = `${artifact.project}/${artifact.slug}`;
-  return [
-    `Address the open comments on ${ref} using the artifacts skill.`,
-    `If the source isn't in this repo, run \`artifacts pull ${ref}\` first.`,
-    `${origin}/${ref}`,
-  ].join("\n");
-}
-
-export const renderUrl = (artifactId: string, hash: string) => `/api/artifacts/${artifactId}/r/${hash}`;
+/** "Member" for member: a role or a level, as a label. */
+export const capitalize = (word: string) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`;

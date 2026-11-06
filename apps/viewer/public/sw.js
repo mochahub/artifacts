@@ -1,4 +1,6 @@
 // The service worker (06). Versions never change, so what's been opened is kept and works offline.
+// It's served as it is, so cache names, the tapped-note key, the path check and the URL shapes are
+// copies of notify.ts and paths.ts. src/sw.test.ts fails if they drift.
 const SHELL = "shell-v1";
 const CONTENT = "content-v1";
 const API = "api-v1";

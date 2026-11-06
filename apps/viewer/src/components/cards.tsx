@@ -1,12 +1,18 @@
 import type { ArtifactCard } from "@artifacts/schema";
 import { Check, Pencil } from "lucide-preact";
-import { agentShort, ago, plural, renderUrl } from "../format.ts";
+import { agentShort, ago, plural } from "../format.ts";
+import { artifactHref, renderUrl } from "../paths.ts";
 
 /** An agent edits in blue pencil. It isn't a person, so it gets no initial, and no sparkle. */
 export const AgentMark = () => (
   <span class="av agent">
     <Pencil />
   </span>
+);
+
+/** A person's initial, in yellow when it's you. */
+export const Avatar = ({ name, you }: { name: string; you?: boolean }) => (
+  <span class={`av${you ? " you" : ""}`}>{name[0]}</span>
 );
 
 export function Byline({ card }: { card: ArtifactCard }) {
@@ -60,7 +66,7 @@ export function Cover({ card, wide }: { card: ArtifactCard; wide?: boolean }) {
 
 export function ReviewCard({ card }: { card: ArtifactCard }) {
   return (
-    <a class="card pad" href={`/${card.project}/${card.slug}`}>
+    <a class="card pad" href={artifactHref(card)}>
       <Cover card={card} wide />
       <div>
         <div class="t3">{card.title}</div>
@@ -81,7 +87,7 @@ export function ReviewCard({ card }: { card: ArtifactCard }) {
 
 export function ArtifactTile({ card }: { card: ArtifactCard }) {
   return (
-    <a class="card tile" href={`/${card.project}/${card.slug}`}>
+    <a class="card tile" href={artifactHref(card)}>
       <Cover card={card} />
       <div class="body">
         <div class="name">{card.title}</div>

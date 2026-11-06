@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readStored, writeStored } from "./storage.ts";
+import { forgetStored, readStored, writeStored } from "./storage.ts";
 
 const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 afterEach(() => {
@@ -34,5 +34,24 @@ describe("remembered preferences", () => {
     blocked();
     expect(readStored("artifacts.read.font")).toBeNull();
     expect(() => writeStored("artifacts.read.font", "sans")).not.toThrow();
+  });
+});
+
+describe("kept for this tab", () => {
+  test("session storage is its own area, and forgetting clears a key", () => {
+    const data = new Map<string, string>();
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: (k: string) => data.get(k) ?? null,
+        setItem: (k: string, v: string) => data.set(k, v),
+        removeItem: (k: string) => data.delete(k),
+      },
+    });
+    writeStored("artifacts.device-code", "WDJB-MJHT", "session");
+    expect(readStored("artifacts.device-code", "session")).toBe("WDJB-MJHT");
+    forgetStored("artifacts.device-code", "session");
+    expect(readStored("artifacts.device-code", "session")).toBeNull();
+    Reflect.deleteProperty(globalThis, "sessionStorage");
   });
 });

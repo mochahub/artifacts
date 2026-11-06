@@ -1,6 +1,6 @@
 import { type Signal, useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { ApiFailure } from "./api.ts";
+import { ApiFailure, parseJson, readText } from "./api.ts";
 import { live } from "./events.ts";
 
 export type Remote<T> = {
@@ -11,10 +11,9 @@ export type Remote<T> = {
    * so the first paint after a change never shows the last path's answer as this one's.
    */
   loading: boolean;
+  /** Asks again. Never rejects: a failure lands in `error`. */
   refresh(): Promise<void>;
 };
-
-type ErrorBody = { code?: string; message?: string; details?: Record<string, unknown> };
 
 /**
  * Loads a path, then polls it while the tab is visible (06). The browser revalidates with the ETag,
@@ -33,59 +32,37 @@ export function usePoll<T>(path: string | null, everyMs: number): Remote<T> {
 
   async function refresh() {
     if (!path) return;
-    const settle = () => {
-      settled.current = path;
-      answered.value += 1;
-    };
-    let response: Response;
-    let text: string;
     try {
-      response = await fetch(path);
-      text = await response.text();
+      const response = await fetch(path);
+      const text = await readText(response);
+      // A slow answer for an old path (a search that's been retyped) must not replace a newer one.
+      if (current.current !== path) return;
+      if (text !== last.value) {
+        data.value = parseJson<T>(response.status, text);
+        last.value = text;
+      }
+      error.value = null;
     } catch (failure) {
       if (current.current !== path) return;
-      error.value = new ApiFailure(0, "network", "Couldn't reach the server.");
-      last.value = "";
-      settle();
-      throw failure;
-    }
-    // A slow answer for an old path (a search that's been retyped) must not replace a newer one.
-    if (current.current !== path) return;
-    if (!response.ok) {
-      let body: ErrorBody = {};
-      try {
-        body = (text ? JSON.parse(text).error : null) ?? {};
-      } catch {
-        // An error page from a proxy is not JSON; the status is what matters.
-      }
-      error.value = new ApiFailure(
-        response.status,
-        body.code ?? "unknown",
-        body.message ?? "Something went wrong.",
-        body.details,
-      );
+      // Anything but an answer from the API is the network: fetch failing, or the body cut off.
+      error.value =
+        failure instanceof ApiFailure ? failure : new ApiFailure(0, "network", "Couldn't reach the server.");
       // The next good answer must land even if it reads the same as the last one.
       last.value = "";
-      settle();
-      return;
     }
-    error.value = null;
-    if (text !== last.value) {
-      last.value = text;
-      data.value = JSON.parse(text) as T;
-    }
-    settle();
+    settled.current = path;
+    answered.value += 1;
   }
   useEffect(() => {
     last.value = "";
     error.value = null;
-    refresh().catch(() => {});
+    refresh();
     let ticks = 0;
     const timer = setInterval(() => {
       ticks += 1;
       // With a stream open, fast polls drop to one a minute: a safety net for an event that got lost.
       if (live.value && everyMs < 60_000 && (ticks * everyMs) % 60_000 !== 0) return;
-      if (document.visibilityState === "visible") refresh().catch(() => {});
+      if (document.visibilityState === "visible") refresh();
     }, everyMs);
     return () => clearInterval(timer);
   }, [path, everyMs]);

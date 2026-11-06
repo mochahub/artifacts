@@ -3,30 +3,29 @@ import { render } from "preact";
 import { useEffect } from "preact/hooks";
 import { ErrorBoundary, LocationProvider, Route, Router, useLocation } from "preact-iso";
 import { InstallSheet } from "./components/install.tsx";
-import { Sheet } from "./components/sheets.tsx";
+import { NotFound } from "./components/loaded.tsx";
+import { SearchBox } from "./components/search-box.tsx";
+import { Sheet } from "./components/sheet.tsx";
 import { askInstall, followTapped } from "./notify.ts";
 import { Activity } from "./routes/activity.tsx";
 import { AlmostReady } from "./routes/almost-ready.tsx";
 import { ArtifactPage } from "./routes/artifact.tsx";
 import { ComparePage } from "./routes/compare.tsx";
 import { Connect } from "./routes/connect.tsx";
-import { RecentlyDeleted } from "./routes/deleted-list.tsx";
 import { Device } from "./routes/device.tsx";
 import { GuestLanding } from "./routes/guest.tsx";
 import { Home } from "./routes/home.tsx";
 import { Join } from "./routes/join.tsx";
-import { NotFound } from "./routes/not-found.tsx";
 import { PageRoute } from "./routes/page.tsx";
 import { ProjectPage } from "./routes/project.tsx";
 import { Projects } from "./routes/projects.tsx";
 import { Reset } from "./routes/reset.tsx";
-import { SearchBox, SearchPage } from "./routes/search.tsx";
-import { Settings } from "./routes/settings.tsx";
+import { SearchPage } from "./routes/search.tsx";
+import { RecentlyDeleted } from "./routes/settings/deleted.tsx";
+import { Settings } from "./routes/settings/index.tsx";
 import { SignIn } from "./routes/sign-in.tsx";
 import { boot, bootFailed, me, meta, ready } from "./session.ts";
-import "./styles/tokens.css";
-import "./styles/base.css";
-import "./styles/kit.css";
+import "./styles/index.css";
 
 /** ⌘K, anywhere for anyone signed in (board 04). */
 function QuickSearch() {

@@ -46,6 +46,9 @@ test("delete, the deleted link, Recently deleted and restore", async ({ page }, 
   await page.goto(`/camerabuddy/${slug}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("This artifact was deleted");
   await shot(page, info.project.name, "07-6-deleted-link");
+  // Every link to it says so, not only its front page (SPEC §5.5, "Its links").
+  await page.goto(`/camerabuddy/${slug}/compare?from=1&to=1`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("This artifact was deleted");
 
   await page.goto("/settings/deleted");
   const row = page.locator(".li").filter({ hasText: `Roadmap ${slug}` });

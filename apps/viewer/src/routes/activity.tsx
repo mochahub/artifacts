@@ -1,15 +1,18 @@
+import type { ActivityKind } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { AgentMark } from "../components/cards.tsx";
-import { LoadFailed, PlaceholderRows } from "../components/placeholder.tsx";
+import { AgentMark, Avatar } from "../components/cards.tsx";
+import { SignedIn } from "../components/guard.tsx";
+import { Loaded } from "../components/loaded.tsx";
+import { PlaceholderRows } from "../components/placeholder.tsx";
 import { Shell } from "../components/shell.tsx";
 import { agentShort, ago } from "../format.ts";
+import { artifactHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
 import { useTitle } from "../title.ts";
-import { SignedIn } from "./guard.tsx";
 
 type Item = {
   id: string;
-  kind: string;
+  kind: ActivityKind;
   actor: string;
   agent: string | null;
   artifact: { title: string; slug: string; project: string } | null;
@@ -25,7 +28,7 @@ type Item = {
   createdAt: string;
 };
 
-const VERBS: Record<string, string> = {
+const VERBS: Record<ActivityKind, string> = {
   published: "published",
   restored: "restored",
   commented: "commented on",
@@ -59,13 +62,9 @@ const day = (iso: string) =>
 
 function Feed() {
   const filter = useSignal("all");
-  const { data, error, loading, refresh } = usePoll<{ items: Item[] }>(
-    `/api/activity?filter=${filter.value}`,
-    60_000,
-  );
+  const poll = usePoll<{ items: Item[] }>(`/api/activity?filter=${filter.value}`, 60_000);
   useTitle("Activity");
-  const items = data.value?.items ?? [];
-  const days = [...new Set(items.map((item) => day(item.createdAt)))];
+
   return (
     <Shell>
       <h1 class="h1 l">Activity</h1>
@@ -87,13 +86,22 @@ function Feed() {
           </button>
         ))}
       </div>
-      {!data.value &&
-        (error.value && !loading ? (
-          <LoadFailed retry={() => refresh().catch(() => {})} />
-        ) : (
-          <PlaceholderRows rows={4} />
-        ))}
-      {data.value && !loading && items.length === 0 && <div class="empty">Nothing yet.</div>}
+      <Loaded from={[poll]} value={poll.data.value?.items} placeholder={<PlaceholderRows rows={4} />}>
+        {(items) => (
+          <>
+            {!poll.loading && items.length === 0 && <div class="empty">Nothing yet.</div>}
+            <Days items={items} />
+          </>
+        )}
+      </Loaded>
+    </Shell>
+  );
+}
+
+function Days({ items }: { items: Item[] }) {
+  const days = [...new Set(items.map((item) => day(item.createdAt)))];
+  return (
+    <>
       {days.map((label) => (
         <>
           <span class="gh" key={label}>
@@ -111,12 +119,8 @@ function Feed() {
                   "";
                 const version = item.payload.version ? ` v${item.payload.version}` : "";
                 return (
-                  <a
-                    class="li"
-                    key={item.id}
-                    href={item.artifact ? `/${item.artifact.project}/${item.artifact.slug}` : undefined}
-                  >
-                    {item.agent ? <AgentMark /> : <span class="av">{item.actor[0]}</span>}
+                  <a class="li" key={item.id} href={item.artifact ? artifactHref(item.artifact) : undefined}>
+                    {item.agent ? <AgentMark /> : <Avatar name={item.actor} />}
                     <div class="grow">
                       <div class="tt" style="font-weight:400">
                         <b>{item.agent ? agentShort(item.agent) : item.actor}</b> {VERBS[item.kind]} {title}
@@ -130,7 +134,7 @@ function Feed() {
           </div>
         </>
       ))}
-    </Shell>
+    </>
   );
 }
 

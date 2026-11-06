@@ -1,14 +1,7 @@
-import type { CanvasFrame } from "@artifacts/schema";
+import type { BoardRecord, CanvasFrame } from "@artifacts/schema";
+import type { Infer } from "../types.ts";
 
-export type Board = {
-  key: string;
-  title: string;
-  subtitle?: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
+export type Board = Infer<typeof BoardRecord>;
 export type Pin = {
   id: string;
   n: number;
@@ -325,6 +318,8 @@ export class CanvasEngine {
 
   private apply() {
     this.world.style.transform = `translate(${this.x}px, ${this.y}px) scale(${this.s})`;
+    // The transform as numbers, for tests and tools to read without parsing a matrix.
+    Object.assign(this.world.dataset, { x: String(this.x), y: String(this.y), s: String(this.s) });
     this.placePins();
     if (!this.lodTimer) {
       this.lodTimer = setTimeout(() => {

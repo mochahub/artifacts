@@ -1,0 +1,78 @@
+/* Gallery (SPEC §4) */
+.gallery {
+  overflow: auto;
+}
+.grid-g {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 72px 12px calc(24px + env(safe-area-inset-bottom));
+}
+.cell-g {
+  all: unset;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+:where(.cell-g):focus {
+  outline: none;
+}
+.cell-g img,
+.cell-g video {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--soft);
+}
+.cell-g span {
+  font-size: 13px;
+  color: var(--tx2);
+}
+.cell-g:focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}
+.light {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #fff;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+.light img,
+.light video {
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+}
+.light p {
+  margin: 0;
+  padding: 0 16px;
+  text-align: center;
+}
+.light .icon-btn {
+  position: absolute;
+  color: #fff;
+}
+.light .close {
+  top: calc(10px + env(safe-area-inset-top));
+  right: 10px;
+}
+.light .prev {
+  left: 6px;
+  top: 50%;
+}
+.light .next {
+  right: 6px;
+  top: 50%;
+}

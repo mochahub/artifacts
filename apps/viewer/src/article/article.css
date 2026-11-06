@@ -1,0 +1,510 @@
+/* Article */
+
+.article {
+  /* The gutter holds the margin tabs, so they're never past the edge of a phone. */
+  --gutter: 32px;
+  max-width: calc(42rem - 48px + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 82px) calc(env(safe-area-inset-right) + var(--gutter))
+    calc(env(safe-area-inset-bottom) + 108px) calc(env(safe-area-inset-left) + var(--gutter));
+  color: var(--tx);
+  font: var(--read-size, 19px) / 1.55 var(--read-font, var(--theme-font, var(--serif)));
+  /* Margin tabs sit in the gutter; on a phone they must never make the page scroll sideways. */
+  overflow-x: clip;
+}
+@media (min-width: 900px) {
+  .article {
+    --gutter: 56px;
+  }
+}
+.article h1 {
+  font: 700 34px / 1.14 var(--theme-display, var(--serif));
+  letter-spacing: -0.01em;
+  margin: 0 0 12px;
+}
+.article h2 {
+  font: 700 24px / 1.25 var(--theme-display, var(--serif));
+  margin: 28px 0 10px;
+}
+.article h3 {
+  font: 700 20px / 1.3 var(--theme-display, var(--serif));
+  margin: 22px 0 8px;
+}
+.article p,
+.article ul,
+.article ol {
+  margin: 0 0 15px;
+}
+.article .meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  font: 15px / 1.4 var(--ui);
+  color: var(--tx2);
+  margin-bottom: 18px;
+}
+.article a {
+  color: inherit;
+  /* A brand's accent has to read on both page colours, so it's the underline that carries it. */
+  text-decoration-color: var(--theme-accent, currentColor);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.article img,
+.article svg {
+  max-width: 100%;
+  height: auto;
+}
+.article figure {
+  margin: 18px 0;
+}
+.article figcaption {
+  font: 14px / 1.4 var(--ui);
+  color: var(--tx2);
+  margin-top: 6px;
+}
+.article pre {
+  overflow-x: auto;
+  background: var(--card);
+  padding: 12px 14px;
+  border-radius: var(--theme-radius, 12px);
+  font: 14px / 1.5 var(--mono);
+}
+.article code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+.article table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  white-space: nowrap;
+  font: 15px / 1.35 var(--ui);
+  margin: 0 0 15px;
+}
+.article th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--tx2);
+  padding: 7px 16px 7px 0;
+  border-bottom: 0.5px solid var(--sep);
+}
+.article td {
+  padding: 8px 16px 8px 0;
+  border-bottom: 0.5px solid var(--sep);
+}
+.article blockquote {
+  margin: 0 0 15px;
+  color: var(--tx2);
+  font-style: italic;
+}
+.article blockquote[data-callout] {
+  font: 16px / 1.45 var(--ui);
+  font-style: normal;
+  color: var(--tx);
+}
+.article [data-component="stats"] > ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 18px 24px;
+  margin: 22px 0;
+  padding: 0;
+  list-style: none;
+  font: 15px / 1.35 var(--ui);
+  color: var(--tx2);
+}
+.article [data-component="stats"] strong {
+  display: block;
+  font: 700 2.1rem / 1.1 var(--theme-display, var(--serif));
+  color: var(--tx);
+  border-top: 2px solid var(--theme-accent, var(--tx));
+  padding-top: 8px;
+  margin-bottom: 4px;
+}
+.article [data-component="compare"] table {
+  display: table;
+  width: 100%;
+  white-space: normal;
+  table-layout: fixed;
+}
+.article [data-component="compare"] th {
+  color: var(--tx);
+  border-bottom: 2px solid var(--theme-accent, var(--tx));
+}
+.article [data-component="compare"] td {
+  vertical-align: top;
+}
+.article [data-component="steps"] > ol {
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+}
+.article [data-component="steps"] > ol > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 2.2rem;
+  margin-bottom: 12px;
+}
+.article [data-component="steps"] > ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  font: 700 1.3em / 1.2 var(--theme-display, var(--serif));
+}
+.article [data-verdict] {
+  font: 600 0.8em var(--ui);
+}
+.article [data-verdict="verified"] {
+  color: var(--ok-word);
+}
+.article [data-verdict="unverified"] {
+  color: var(--mark-word);
+}
+.article [data-block] {
+  position: relative;
+  scroll-margin-top: 90px;
+}
+/* Changes since the version before (diff.ts): in the page all along, shown only while Changes is on. */
+.article ins.chg {
+  text-decoration: none;
+  color: inherit;
+}
+.article:not(.show-changes) :is(del.chg, .chg-gone) {
+  display: none;
+}
+.article.show-changes ins.chg {
+  background: var(--add-hl);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px var(--add-hl);
+}
+.article del.chg {
+  color: var(--warn-word);
+  background: var(--del-hl);
+  text-decoration: line-through 1.5px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1.5px var(--del-hl);
+}
+.article del.chg.gap-l {
+  margin-inline-start: 0.3em;
+}
+.article del.chg.gap-r {
+  margin-inline-end: 0.3em;
+}
+.article.show-changes .chg-new {
+  background: var(--add-hl);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--add-hl);
+}
+.article.show-changes .chg-gone {
+  background: var(--del-hl);
+  border-radius: 4px;
+  box-shadow: 0 0 0 6px var(--del-hl);
+}
+/* A row or an item is tinted edge to edge: a ring would overlap its neighbours. */
+.article.show-changes :is(tr, li):is(.chg-new, .chg-gone) {
+  box-shadow: none;
+  border-radius: 0;
+}
+.article.show-changes .chg-gone,
+.article.show-changes .chg-gone * {
+  color: var(--warn-word);
+  text-decoration: line-through 1.5px;
+}
+.article.show-changes .chg-gone img {
+  opacity: 0.45;
+}
+.article .chg-key {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: 8px;
+}
+.article mark.hl {
+  background: var(--mark-hl);
+  color: inherit;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--mark-hl);
+  cursor: pointer;
+}
+.mm {
+  position: absolute;
+  right: calc(6px - var(--gutter));
+  top: 2px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  padding: 0;
+  border-radius: 12px 12px 12px 3px;
+  background: var(--mark);
+  color: var(--mark-ink);
+  font: 800 12px var(--ui);
+  cursor: pointer;
+}
+.mm::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.article.picking [data-block] {
+  cursor: pointer;
+}
+.article.picking [data-block]:hover {
+  background: var(--mark-hl);
+}
+.selbtn {
+  position: fixed;
+  z-index: 46;
+  width: auto;
+  min-height: 44px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .selbtn {
+    animation: fade 140ms ease-out;
+  }
+}
+.popover {
+  position: fixed;
+  right: 14px;
+  top: calc(env(safe-area-inset-top) + 72px);
+  width: 280px;
+  padding: 14px;
+  border-radius: 22px;
+  z-index: 44;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--tx);
+}
+/* Liquid Glass, for the reader's chrome. iOS Safari can't bend what's behind a page element: it accepts
+   backdrop-filter: url() and draws nothing, and drops the blur beside it. So this is clarity, a lit rim and
+   movement. The layers are pseudo-elements, siblings under the content: a backdrop-filter on a child of
+   another one sees only its parent. */
+@property --liquid-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+:root {
+  --liquid-spring: linear(0, 0.18 6%, 0.55 13%, 0.9 22%, 1.08 31%, 1.12 38%, 1.07 48%, 1 62%, 0.985 75%, 1);
+  --liquid-time: 0.5s;
+}
+.liquid {
+  --liquid-alpha: 0.2;
+  --liquid-blur: 6px;
+  --liquid-sat: 1.9;
+  --tx2: var(--liquid-ink-2);
+  --agent-word: var(--liquid-agent);
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  box-shadow: none;
+  isolation: isolate;
+}
+/* Words that must stay readable over anything: the settings and the hint. */
+.liquid.thick {
+  --liquid-alpha: 0.82;
+  --liquid-blur: 14px;
+  --liquid-sat: 1.7;
+}
+.liquid::before,
+.liquid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.liquid::before {
+  background: rgb(var(--liquid-tint) / var(--liquid-alpha));
+  backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-sat)) brightness(var(--liquid-bright));
+  -webkit-backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-sat))
+    brightness(var(--liquid-bright));
+  box-shadow: var(--liquid-inner), var(--liquid-drop);
+  transition: background-color 0.25s ease;
+}
+/* The light turns a little as the page moves. On the rim alone, so a frame restyles only the rim. */
+.liquid::after {
+  padding: 1.25px;
+  background: conic-gradient(
+    from calc(295deg + var(--liquid-angle)),
+    var(--liquid-rim-hi),
+    var(--liquid-rim-lo) 22%,
+    var(--liquid-rim-lo) 42%,
+    var(--liquid-rim-hi) 52%,
+    var(--liquid-rim-lo) 66%,
+    var(--liquid-rim-lo) 88%,
+    var(--liquid-rim-hi)
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: liquid-light linear both;
+  animation-timeline: scroll(root);
+}
+@keyframes liquid-light {
+  to {
+    --liquid-angle: 70deg;
+  }
+}
+/* The ink follows the picture behind the glass (article/liquid.ts). */
+.liquid[data-tone="dark"] {
+  --liquid-tint: 16 18 24;
+  --liquid-bright: 0.8;
+  --liquid-ink-2: #e1e4ea;
+  --liquid-agent: #d6ceff;
+  --liquid-rim-hi: rgba(255, 255, 255, 0.7);
+  --tx: #f5f6f8;
+  color: var(--tx);
+}
+.liquid[data-tone="light"] {
+  --liquid-tint: 255 255 255;
+  --liquid-bright: 1.15;
+  --liquid-ink-2: #2c3037;
+  --liquid-agent: #2a1e96;
+  --liquid-rim-hi: rgba(255, 255, 255, 0.95);
+  --tx: #121418;
+  color: var(--tx);
+}
+.liquid.capsule,
+.liquid.vbar {
+  transition:
+    color 0.2s ease,
+    min-height var(--liquid-time) var(--liquid-spring),
+    height var(--liquid-time) var(--liquid-spring);
+}
+.liquid .where span {
+  max-height: 18px;
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease;
+}
+.liquid .round {
+  background: none;
+  transition: transform var(--liquid-time) var(--liquid-spring);
+}
+.liquid .round:active {
+  transform: scale(1.12);
+}
+
+@media (hover: hover) {
+  .liquid .round:hover {
+    background: var(--press);
+  }
+}
+.liquid .vb {
+  transition: width var(--liquid-time) var(--liquid-spring);
+  -webkit-tap-highlight-color: transparent;
+}
+.liquid .vb[aria-pressed="true"] {
+  background: none;
+  color: inherit;
+}
+.liquid .vb svg {
+  transition: transform var(--liquid-time) var(--liquid-spring);
+}
+.liquid .vb:active svg,
+.liquid .icon-btn:active svg {
+  transform: scale(1.14);
+}
+.liquid .vb .l {
+  display: block;
+  max-height: 16px;
+  line-height: 16px;
+  overflow: hidden;
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease;
+}
+/* The bead under the pressed control. */
+.pool {
+  position: absolute;
+  z-index: -1;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: var(--w, 74px);
+  border-radius: 99px;
+  background: var(--liquid-pool);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--x, 0)) scale(0.82);
+  transition:
+    transform var(--liquid-time) var(--liquid-spring),
+    width var(--liquid-time) var(--liquid-spring),
+    opacity 0.18s ease,
+    background-color 0.18s ease;
+}
+.pool.on {
+  opacity: 1;
+  transform: translateX(var(--x, 0)) scale(1);
+}
+.pool.down {
+  transform: translateX(var(--x, 0)) scale(1.06, 1.1);
+}
+.pool.mark {
+  background: rgba(255, 216, 77, 0.5);
+}
+/* Scrolling down draws the chrome back to its essentials. Without labels, the bar can go thinner still. */
+:root.reading .liquid.capsule {
+  min-height: 44px;
+}
+:root.reading .liquid .where span {
+  max-height: 0;
+  opacity: 0;
+}
+:root.reading .liquid .where b {
+  font-size: 15px;
+}
+:root.reading .liquid.vbar {
+  --liquid-alpha: 0.42;
+  --liquid-blur: 4px;
+  height: 52px;
+}
+:root.reading .liquid .vb {
+  width: 52px;
+  gap: 0;
+}
+:root.reading .liquid .vb .l {
+  max-height: 0;
+  opacity: 0;
+}
+:root.reading .liquid .vsep {
+  margin: 12px 2px;
+}
+.popover.liquid {
+  transform-origin: calc(100% - 32px) -18px;
+  animation: liquid-grow var(--liquid-time) var(--liquid-spring);
+}
+.popover.liquid .seg {
+  background: rgb(var(--liquid-tint) / 0.5);
+}
+@keyframes liquid-grow {
+  from {
+    transform: scale(0.28);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --liquid-spring: ease;
+    --liquid-time: 0.01s;
+  }
+  .liquid::after {
+    animation: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .liquid::before {
+    background: var(--card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: 0 0 0 1px var(--tx2);
+  }
+  .liquid::after {
+    display: none;
+  }
+}
