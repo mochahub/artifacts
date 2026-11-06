@@ -6,7 +6,11 @@ import { agentShort, ago, capitalize, initials, plural, until } from "./format.t
 const zone = process.env.TZ;
 const toLocaleDateString = Date.prototype.toLocaleDateString;
 process.env.TZ = "Asia/Tokyo";
-Date.prototype.toLocaleDateString = function (locale, options) {
+Date.prototype.toLocaleDateString = function (
+  this: Date,
+  locale?: Intl.LocalesArgument,
+  options?: Intl.DateTimeFormatOptions,
+) {
   return toLocaleDateString.call(this, locale ?? "en-US", options);
 };
 afterAll(() => {
