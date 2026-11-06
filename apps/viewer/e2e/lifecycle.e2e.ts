@@ -93,3 +93,16 @@ test("activity lists what happened, and filters", async ({ page }) => {
   await page.getByRole("button", { name: "Agents" }).click();
   await expect(page.locator(".av.agent").first()).toBeVisible();
 });
+
+test("compare: side by side, swipe, and changes with numbered regions", async ({ page }, info) => {
+  const slug = `cmp-${info.project.name}`;
+  publishCopy(slug, token(), true);
+  await page.goto(`/camerabuddy/${slug}/compare?from=1&to=2`);
+  await expect(page.getByRole("button", { name: "Side by side" })).toBeVisible();
+  await expect(page.locator(".diff .pair img").first()).toBeVisible();
+  await page.getByRole("button", { name: "Swipe" }).click();
+  await expect(page.locator(".diff .swipe input").first()).toBeVisible();
+  await page.getByRole("button", { name: "Changes" }).click();
+  await expect(page.locator(".diff .region").first()).toBeVisible();
+  await shot(page, "compare-changes", { desktop: true });
+});

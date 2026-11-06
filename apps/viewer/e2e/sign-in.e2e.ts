@@ -1,14 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { OWNER, signIn, watchErrors } from "./helpers.ts";
+import { OWNER, shot, signIn, watchErrors } from "./helpers.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-test("sign in, and stay signed in across a reload", async ({ page }, info) => {
+test("sign in, and stay signed in across a reload", async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
-  if (info.project.name === "iphone")
-    await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-2-sign-in.png" });
+  await shot(page, "06-2-sign-in");
   // The heading paints before the effects that fetch, and WebKit reports a fetch begun while the page
   // unloads as an access control failure. Once the page has its data, those effects have run.
   const loaded = Promise.all(
@@ -42,7 +41,7 @@ test("the router shows Nothing here on an unknown route", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Nothing here");
 });
 
-test("approve the CLI by typing its code", async ({ page, request }, info) => {
+test("approve the CLI by typing its code", async ({ page, request }) => {
   const errors = watchErrors(page);
   const start = await request.post("/api/device/start", {
     data: { clientName: "Sam's MacBook Pro", agent: "Claude Code" },
@@ -61,8 +60,7 @@ test("approve the CLI by typing its code", async ({ page, request }, info) => {
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Approve the CLI?");
   await expect(page.getByText("Sam's MacBook Pro")).toBeVisible();
   await expect(page.getByText(userCode)).toBeVisible();
-  if (info.project.name === "iphone")
-    await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-7-approve-cli.png" });
+  await shot(page, "06-7-approve-cli");
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Approved");
 
