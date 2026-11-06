@@ -1,0 +1,66 @@
+/* Compare (board 02) */
+.diff {
+  margin: 14px 0 0;
+}
+.diff figcaption {
+  font-size: 13px;
+  color: var(--tx2);
+  margin-bottom: 6px;
+}
+.diff .note {
+  margin: 2px 0 0;
+  color: var(--agent-word);
+}
+.diff img {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+}
+.diff .pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.diff .swipe,
+.diff .marked {
+  position: relative;
+}
+.diff .swipe .over {
+  position: absolute;
+  inset: 0;
+}
+.diff .swipe .line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--agent);
+  pointer-events: none;
+}
+.diff .swipe input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+}
+.diff .region {
+  position: absolute;
+  border: 2px solid var(--agent);
+  border-radius: 4px;
+}
+.diff .region b {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--agent);
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}

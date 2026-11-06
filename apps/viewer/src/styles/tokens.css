@@ -1,42 +1,61 @@
 /* Ported from docs/mocks/kit.css, the reference for the look.
-   Colour has two jobs: yellow is a person's highlighter, blue is an agent's editing pencil. */
+   Colour has two jobs: yellow is a person's highlighter, blue is an agent's editing pencil.
+
+   Light and dark are written side by side, once: a token that changes is
+   `var(--no-light, <light>) var(--no-dark, <dark>)`. One toggle is unset, so its fallback shows, and the
+   other is a space, so it shows nothing. Dark follows the system unless the reader picks Light, and the
+   reader's Dark applies whatever the system is. */
 :root {
+  --no-light: initial;
+  --no-dark: ;
   --mark: #ffd84d;
   --mark-ink: #2a2100;
-  --mark-hl: rgba(255, 216, 77, 0.5);
-  --mark-word: #8a6a00;
+  --mark-hl: var(--no-light, rgba(255, 216, 77, 0.5)) var(--no-dark, rgba(255, 216, 77, 0.3));
+  --mark-word: var(--no-light, #8a6a00) var(--no-dark, var(--mark));
   --agent: #2b8cd6;
-  --agent-word: #16689f;
+  --agent-word: var(--no-light, #16689f) var(--no-dark, #7cc4ee);
   --ok: #2fb36b;
-  --ok-word: #1d8a50;
+  --ok-word: var(--no-light, #1d8a50) var(--no-dark, var(--ok));
   --warn: #ff7a59;
-  --warn-word: #c0392b;
-  --add-hl: rgba(47, 179, 107, 0.22);
-  --del-hl: rgba(255, 122, 89, 0.16);
-  --soft: rgba(0, 0, 0, 0.06);
-  --hover: rgba(0, 0, 0, 0.04);
-  --press: rgba(0, 0, 0, 0.11);
-  --sheet: rgba(250, 250, 252, 0.985);
-  --glass: rgba(255, 255, 255, 0.78);
-  --glass-line: rgba(0, 0, 0, 0.08);
-  --liquid-tint: 255 255 255;
-  --liquid-bright: 1.12;
-  --liquid-ink-2: #2c3037;
-  --liquid-agent: #2a1e96;
-  --liquid-rim-hi: rgba(255, 255, 255, 0.95);
-  --liquid-rim-lo: rgba(20, 24, 32, 0.12);
-  --liquid-inner: inset 0 1px 1px rgba(255, 255, 255, 0.55), inset 0 -1px 2px rgba(20, 24, 32, 0.08);
-  --liquid-drop: 0 1px 2px rgba(20, 24, 32, 0.12), 0 10px 26px -8px rgba(20, 24, 32, 0.32);
-  --liquid-pool: rgba(255, 255, 255, 0.5);
+  --warn-word: var(--no-light, #c0392b) var(--no-dark, var(--warn));
+  --add-hl: var(--no-light, rgba(47, 179, 107, 0.22)) var(--no-dark, rgba(47, 179, 107, 0.3));
+  --del-hl: var(--no-light, rgba(255, 122, 89, 0.16)) var(--no-dark, rgba(255, 122, 89, 0.18));
+  --soft: var(--no-light, rgba(0, 0, 0, 0.06)) var(--no-dark, rgba(255, 255, 255, 0.1));
+  --hover: var(--no-light, rgba(0, 0, 0, 0.04)) var(--no-dark, rgba(255, 255, 255, 0.06));
+  --press: var(--no-light, rgba(0, 0, 0, 0.11)) var(--no-dark, rgba(255, 255, 255, 0.18));
+  --sheet: var(--no-light, rgba(250, 250, 252, 0.985)) var(--no-dark, rgba(34, 36, 42, 0.96));
+  --glass: var(--no-light, rgba(255, 255, 255, 0.78)) var(--no-dark, rgba(36, 38, 44, 0.72));
+  --glass-line: var(--no-light, rgba(0, 0, 0, 0.08)) var(--no-dark, rgba(255, 255, 255, 0.16));
+  --liquid-tint: var(--no-light, 255 255 255) var(--no-dark, 28 30 36);
+  --liquid-bright: var(--no-light, 1.12) var(--no-dark, 0.62);
+  --liquid-ink-2: var(--no-light, #2c3037) var(--no-dark, #e1e4ea);
+  --liquid-agent: var(--no-light, #2a1e96) var(--no-dark, #d6ceff);
+  --liquid-rim-hi: var(--no-light, rgba(255, 255, 255, 0.95)) var(--no-dark, rgba(255, 255, 255, 0.5));
+  --liquid-rim-lo: var(--no-light, rgba(20, 24, 32, 0.12)) var(--no-dark, rgba(255, 255, 255, 0.06));
+  --liquid-inner: var(
+      --no-light,
+      inset 0 1px 1px rgba(255, 255, 255, 0.55),
+      inset 0 -1px 2px rgba(20, 24, 32, 0.08)
+    )
+    var(--no-dark, inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.25));
+  --liquid-drop: var(--no-light, 0 1px 2px rgba(20, 24, 32, 0.12), 0 10px 26px -8px rgba(20, 24, 32, 0.32))
+    var(--no-dark, 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 28px -8px rgba(0, 0, 0, 0.7));
+  --liquid-pool: var(--no-light, rgba(255, 255, 255, 0.5)) var(--no-dark, rgba(255, 255, 255, 0.16));
   --canvas: #1b1d22;
 
-  --bg: #f5f6f8;
-  --card: #fff;
-  --tx: #121418;
-  --tx2: #5e6470;
-  --tx3: #9aa0aa;
-  --sep: #e4e6ea;
-  --lift: 0 0 0 0.5px var(--sep), 0 1px 2px rgba(18, 20, 24, 0.05), 0 8px 20px -12px rgba(18, 20, 24, 0.14);
+  --bg: var(--no-light, #f5f6f8) var(--no-dark, #15171c);
+  --card: var(--no-light, #fff) var(--no-dark, #20232a);
+  --tx: var(--no-light, #121418) var(--no-dark, #f2f3f5);
+  --tx2: var(--no-light, #5e6470) var(--no-dark, #a0a6b1);
+  --tx3: var(--no-light, #9aa0aa) var(--no-dark, #6b717c);
+  --sep: var(--no-light, #e4e6ea) var(--no-dark, rgba(255, 255, 255, 0.08));
+  --lift: var(
+      --no-light,
+      0 0 0 0.5px var(--sep),
+      0 1px 2px rgba(18, 20, 24, 0.05),
+      0 8px 20px -12px rgba(18, 20, 24, 0.14)
+    )
+    var(--no-dark, 0 0 0 0.5px var(--sep));
 
   --ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
   --serif: ui-serif, "New York", "Iowan Old Style", Charter, Georgia, serif;
@@ -44,75 +63,15 @@
 
   color-scheme: light dark;
 }
-
-/* The system's dark, unless Settings in the reader says Light. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --mark-hl: rgba(255, 216, 77, 0.3);
-    --mark-word: var(--mark);
-    --agent-word: #7cc4ee;
-    --ok-word: var(--ok);
-    --warn-word: var(--warn);
-    --add-hl: rgba(47, 179, 107, 0.3);
-    --del-hl: rgba(255, 122, 89, 0.18);
-    --soft: rgba(255, 255, 255, 0.1);
-    --hover: rgba(255, 255, 255, 0.06);
-    --press: rgba(255, 255, 255, 0.18);
-    --sheet: rgba(34, 36, 42, 0.96);
-    --glass: rgba(36, 38, 44, 0.72);
-    --glass-line: rgba(255, 255, 255, 0.16);
-    --liquid-tint: 28 30 36;
-    --liquid-bright: 0.62;
-    --liquid-ink-2: #e1e4ea;
-    --liquid-agent: #d6ceff;
-    --liquid-rim-hi: rgba(255, 255, 255, 0.5);
-    --liquid-rim-lo: rgba(255, 255, 255, 0.06);
-    --liquid-inner: inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.25);
-    --liquid-drop: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 28px -8px rgba(0, 0, 0, 0.7);
-    --liquid-pool: rgba(255, 255, 255, 0.16);
-
-    --bg: #15171c;
-    --card: #20232a;
-    --tx: #f2f3f5;
-    --tx2: #a0a6b1;
-    --tx3: #6b717c;
-    --sep: rgba(255, 255, 255, 0.08);
-    --lift: 0 0 0 0.5px var(--sep);
+    --no-light: ;
+    --no-dark: initial;
   }
 }
-
-/* The reader's own choice of Dark, whatever the system is. */
 :root[data-theme="dark"] {
-  --mark-hl: rgba(255, 216, 77, 0.3);
-  --mark-word: var(--mark);
-  --agent-word: #7cc4ee;
-  --ok-word: var(--ok);
-  --warn-word: var(--warn);
-  --add-hl: rgba(47, 179, 107, 0.3);
-  --del-hl: rgba(255, 122, 89, 0.18);
-  --soft: rgba(255, 255, 255, 0.1);
-  --hover: rgba(255, 255, 255, 0.06);
-  --press: rgba(255, 255, 255, 0.18);
-  --sheet: rgba(34, 36, 42, 0.96);
-  --glass: rgba(36, 38, 44, 0.72);
-  --glass-line: rgba(255, 255, 255, 0.16);
-  --liquid-tint: 28 30 36;
-  --liquid-bright: 0.62;
-  --liquid-ink-2: #e1e4ea;
-  --liquid-agent: #d6ceff;
-  --liquid-rim-hi: rgba(255, 255, 255, 0.5);
-  --liquid-rim-lo: rgba(255, 255, 255, 0.06);
-  --liquid-inner: inset 0 1px 1px rgba(255, 255, 255, 0.16), inset 0 -1px 2px rgba(0, 0, 0, 0.25);
-  --liquid-drop: 0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 28px -8px rgba(0, 0, 0, 0.7);
-  --liquid-pool: rgba(255, 255, 255, 0.16);
-
-  --bg: #15171c;
-  --card: #20232a;
-  --tx: #f2f3f5;
-  --tx2: #a0a6b1;
-  --tx3: #6b717c;
-  --sep: rgba(255, 255, 255, 0.08);
-  --lift: 0 0 0 0.5px var(--sep);
+  --no-light: ;
+  --no-dark: initial;
 }
 
 /* The canvas is dark whatever the theme, and so is what floats on it. */

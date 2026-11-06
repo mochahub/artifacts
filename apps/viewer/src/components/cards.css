@@ -1,0 +1,74 @@
+.t3 {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.who {
+  font-size: 15px;
+  color: var(--tx2);
+  margin-top: 3px;
+}
+.card.pad {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 15px;
+  color: inherit;
+  text-decoration: none;
+}
+.tile {
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+}
+.tile .cover {
+  background: #0e0f12;
+}
+.tile .body {
+  padding: 10px 12px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tile .name {
+  font-size: 17px;
+  font-weight: 600;
+}
+.paper {
+  aspect-ratio: var(--cover-ar, 1.6);
+  background: var(--card);
+  padding: 12px 14px;
+  border-bottom: 0.5px solid var(--sep);
+  font: 700 16px / 1.15 var(--serif);
+  overflow: hidden;
+}
+
+:where(.card.pad, .tile) {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    scale 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .card.pad:hover,
+  .tile:hover {
+    box-shadow:
+      0 0 0 0.5px var(--sep),
+      0 6px 18px rgba(0, 0, 0, 0.08);
+  }
+}
+.card.pad:active,
+.tile:active {
+  transform: scale(0.99);
+}
+:where(.card.pad, .tile):focus {
+  outline: none;
+}
+:where(.card.pad, .tile):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}

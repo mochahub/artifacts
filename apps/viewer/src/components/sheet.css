@@ -1,0 +1,123 @@
+.dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  z-index: 45;
+}
+.sheet {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: var(--keyboard, calc(env(safe-area-inset-bottom) + 10px));
+  max-width: 480px;
+  margin: 0 auto;
+  max-height: calc(100dvh - 60px - var(--keyboard, 0px));
+  overflow: auto;
+  z-index: 50;
+  padding: 12px 22px 24px;
+  border-radius: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--sheet);
+  color: var(--tx);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 0.5px solid var(--sep);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.12);
+}
+/* Focus lands on the sheet itself when it opens; the buttons inside keep their own rings. */
+.sheet:focus {
+  outline: none;
+}
+.sheet .group {
+  flex: none;
+}
+
+.sheet .field {
+  flex: none;
+}
+.grabber {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--tx3);
+  opacity: 0.5;
+  align-self: center;
+  flex: none;
+}
+.shead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.shead .t {
+  flex: 1;
+  min-width: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+.shead .fn {
+  display: block;
+  font-weight: 500;
+}
+.x {
+  width: 44px;
+  height: 44px;
+  margin: -6px -8px -6px 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--tx2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.x svg {
+  width: 20px;
+  height: 20px;
+}
+
+:where(.x) {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    scale 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .x:hover {
+    background: var(--hover);
+  }
+}
+.x:active {
+  transform: scale(0.96);
+}
+:where(.x):focus {
+  outline: none;
+}
+:where(.x):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}
+/* A sheet rises because something asked for it. Nothing moves on its own. */
+@media (prefers-reduced-motion: no-preference) {
+  .sheet {
+    animation: rise 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .dim {
+    animation: fade 200ms ease-out;
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}

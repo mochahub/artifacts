@@ -25,9 +25,7 @@ import { RecentlyDeleted } from "./routes/settings/deleted.tsx";
 import { Settings } from "./routes/settings/index.tsx";
 import { SignIn } from "./routes/sign-in.tsx";
 import { boot, bootFailed, me, meta, ready } from "./session.ts";
-import "./styles/tokens.css";
-import "./styles/base.css";
-import "./styles/kit.css";
+import "./styles/index.css";
 
 /** ⌘K, anywhere for anyone signed in (board 04). */
 function QuickSearch() {
