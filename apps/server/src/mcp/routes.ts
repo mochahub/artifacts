@@ -1,3 +1,4 @@
+import { TEMPLATES } from "@artifacts/kit/templates";
 import {
   ArticleTheme,
   Brand,
@@ -10,10 +11,10 @@ import {
   UNTRUSTED_NOTICE,
 } from "@artifacts/schema";
 import { buildArticle } from "@artifacts/schema/article";
-import { GUIDES, TEMPLATES } from "@artifacts/schema/templates";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
+import { GUIDES } from "../../../../skill/index.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { pages, people, projects, versions } from "../db/schema.ts";

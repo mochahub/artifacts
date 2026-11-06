@@ -1,4 +1,4 @@
-// Files embedded in the CLI as text.
+// Files imported as text: templates and guides, embedded in the CLI and served by the MCP.
 declare module "*.css" {
   const text: string;
   export default text;

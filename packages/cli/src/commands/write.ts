@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { TEMPLATE_SUMMARY, TEMPLATES } from "@artifacts/kit/templates";
 import { type Manifest, normalizeRepo, PublishPrepared, PublishResult } from "@artifacts/schema";
-import { TEMPLATE_SUMMARY, TEMPLATES } from "@artifacts/schema/templates";
 import article from "../../../kit/src/article.css" with { type: "text" };
 // @ts-expect-error: embedded as text
 import backend from "../../../kit/src/backend.js" with { type: "text" };

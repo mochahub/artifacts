@@ -70,7 +70,7 @@ jobs:
             if [ -n "$latest" ]; then
               # Also catches CI runs finishing out of order.
               if git merge-base --is-ancestor "$SHA" "$latest"; then stop "$latest already has $SHA."; fi
-              if [ "$EVENT" = workflow_run ] && git diff --quiet "$latest" "$SHA" -- . ':!docs' ':!*.md' ':!.github'; then
+              if [ "$EVENT" = workflow_run ] && git diff --quiet "$latest" "$SHA" -- . ':!docs' ':!.github' ':(exclude,glob)*.md' ':(exclude,glob)deploy/**/*.md' ':(exclude,glob)fixtures/**/*.md'; then
                 stop "nothing that ships has changed since $latest."
               fi
             fi

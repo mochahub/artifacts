@@ -87,7 +87,7 @@ Scopes are `server`, `viewer`, `cli`, `schema`, `sandbox`, `kit`, `deploy` and `
 
 Releases are automatic. After green CI on `main`, [`release.yml`](.github/workflows/release.yml) releases the next patch, with notes generated from the merged pull requests. So:
 
-- A merge that only changes `docs`, Markdown files or `.github` releases nothing. Any other merge releases a patch, whatever its commit type.
+- A merge that only changes `docs`, `.github` or Markdown that doesn't ship (at the root, in `deploy` or in `fixtures`) releases nothing. The skill and the templates are Markdown that ships inside the CLI and the server, so changing them releases. Any other merge releases a patch, whatever its commit type.
 - For a minor or a major, run the Release workflow by hand and pick the bump.
 - CI doesn't check commit messages, so the conventions above are yours to keep.
 
