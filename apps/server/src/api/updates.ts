@@ -1,4 +1,4 @@
-import type { Deps } from "./deps.ts";
+import type { Deps } from "../deps.ts";
 
 const SIX_HOURS = 6 * 3600_000;
 let cached: { at: number; version: string | null } | null = null;

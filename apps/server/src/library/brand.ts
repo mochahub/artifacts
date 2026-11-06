@@ -7,12 +7,12 @@ import {
 } from "@artifacts/schema";
 import { FONT_STACKS } from "@artifacts/schema/theme-css";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { findArtifacts, toResource } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
+import { findArtifacts, toResource } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
 import { artifacts, brandProposals, org, people, projects, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes, requireCan } from "../http/routes.ts";
 import { blobKey } from "../publish/blobs.ts";
 
 /** The brand everyone renders with. One link per font, so the CLI needs no route of its own for them. */

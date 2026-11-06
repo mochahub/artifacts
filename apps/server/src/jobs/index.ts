@@ -1,5 +1,4 @@
 import { and, gt, inArray, lt, sql } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import { expireLogs } from "../content/proxy.ts";
 import { recountUsage } from "../data/store.ts";
 import {
@@ -20,6 +19,7 @@ import {
   versions,
   webauthnChallenges,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { sendDigest } from "../push/notify.ts";
 import { purgeExpired } from "./purge.ts";
 

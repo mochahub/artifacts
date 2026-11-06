@@ -1,5 +1,6 @@
 import { agentLabel, UNNAMED_AGENT } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { artifactParam, findArtifacts } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
 import { callerKey } from "../data/store.ts";
@@ -15,15 +16,14 @@ import {
   threads,
   versions,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { reanchorThreads } from "../publish/routes.ts";
 import { diffRegions, type Region } from "../review/regions.ts";
-import { artifactParam, findArtifacts } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import type { ApiContext, Routes } from "./routes.ts";
 
 const PURGE_MS = 30 * 24 * 3600_000;
 

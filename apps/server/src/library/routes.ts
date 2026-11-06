@@ -10,13 +10,13 @@ import {
   type VersionBundle,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { artifactParam, heldProjects, toResource } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import type { ApiContext, Routes } from "../api/routes.ts";
+import { artifactParam, heldProjects, toResource } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { artifacts, blocks, decisions, frames, pages, people, projects } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 import { blobKey, mapLimit } from "../publish/blobs.ts";
 import { libraryCards } from "./cards.ts";
 import { rebuildManifest } from "./manifest.ts";

@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { Deps } from "../api/deps.ts";
+import type { Deps } from "../deps.ts";
 
 export const MCP_PATH = "/api/mcp";
 export const OAUTH_SCOPES = ["read", "comment", "publish"] as const;

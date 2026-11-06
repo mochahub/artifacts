@@ -1,14 +1,14 @@
 import type { Context } from "hono";
-import type { GoogleProvider } from "../auth/google.ts";
-import type { RateLimits } from "../auth/rate-limit.ts";
-import type { Clock } from "../clock.ts";
-import type { Db } from "../db/index.ts";
-import type { Env } from "../env.ts";
-import type { Logger } from "../log.ts";
-import type { MetadataFetch } from "../oauth/clients.ts";
-import type { Events } from "../realtime/events.ts";
-import type { Bucket } from "../s3.ts";
-import type { SandboxPool } from "../sandbox/pool.ts";
+import type { GoogleProvider } from "./auth/google.ts";
+import type { RateLimits } from "./auth/rate-limit.ts";
+import type { Clock } from "./clock.ts";
+import type { Db } from "./db/index.ts";
+import type { Env } from "./env.ts";
+import type { Logger } from "./log.ts";
+import type { MetadataFetch } from "./oauth/clients.ts";
+import type { Events } from "./realtime/events.ts";
+import type { Bucket } from "./s3.ts";
+import type { SandboxPool } from "./sandbox/pool.ts";
 
 /** What route handlers need from the server. */
 export type Deps = {

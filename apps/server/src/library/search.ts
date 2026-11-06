@@ -1,8 +1,8 @@
 import { SNIPPET_MAX } from "@artifacts/schema";
 import { sql } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import type { Caller } from "../auth/caller.ts";
 import { callerKey } from "../data/store.ts";
+import type { Deps } from "../deps.ts";
 
 export const SEARCHES_PER_MINUTE = 60;
 const MAX_TOKENS = 12;

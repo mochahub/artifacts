@@ -1,9 +1,7 @@
 import { PushSubscribe } from "@artifacts/schema";
 import { and, eq, gt, inArray, isNull, lt, ne, or, type SQL } from "drizzle-orm";
-import type { LoadedArtifact } from "../api/artifacts-db.ts";
-import { findArtifact, findArtifacts } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
+import type { LoadedArtifact } from "../auth/access.ts";
+import { findArtifact, findArtifacts } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
 import { findOrg } from "../db/index.ts";
@@ -18,7 +16,9 @@ import {
   sessions,
   threads,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { encryptPayload, generateVapid, vapidHeader } from "./webpush.ts";
 
 const DAY = 24 * 3600_000;

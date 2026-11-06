@@ -1,7 +1,6 @@
 import { and, eq, lt } from "drizzle-orm";
 import type { Context } from "hono";
-import { findArtifact } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
+import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import {
@@ -16,6 +15,7 @@ import {
 } from "../data/store.ts";
 import { findOrg } from "../db/index.ts";
 import { backendLogs, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey, knownBlobs } from "../publish/blobs.ts";
 import { PreconditionFailed } from "../s3.ts";

@@ -1,10 +1,10 @@
 import { createHmac } from "node:crypto";
 import { isDataKey } from "@artifacts/schema";
 import { and, eq, sql } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import type { Caller } from "../auth/caller.ts";
 import type { OrgRow } from "../db/index.ts";
 import { artifactUsage } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { PreconditionFailed } from "../s3.ts";
 

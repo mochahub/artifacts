@@ -1,12 +1,12 @@
 // Fails if an API route was registered but no test ever reached it ("every route gets a test").
 
-import type { Deps } from "../apps/server/src/api/deps.ts";
 import { mountApi } from "../apps/server/src/api/index.ts";
-import { Routes } from "../apps/server/src/api/routes.ts";
 import { RateLimits } from "../apps/server/src/auth/rate-limit.ts";
 import { systemClock } from "../apps/server/src/clock.ts";
 import { connect } from "../apps/server/src/db/index.ts";
+import type { Deps } from "../apps/server/src/deps.ts";
 import { createApp } from "../apps/server/src/http/app.ts";
+import { Routes } from "../apps/server/src/http/routes.ts";
 
 const file = process.argv[2] as string;
 const log = { debug() {}, info() {}, warn() {}, error() {} };

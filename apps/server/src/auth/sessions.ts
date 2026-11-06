@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
-import type { Deps } from "../api/deps.ts";
 import type { Db } from "../db/index.ts";
 import { type people, sessions, tokens } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { newApiToken, randomSecret, sha256 } from "./secrets.ts";
 
 export const SESSION_COOKIE = "art_session";

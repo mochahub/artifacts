@@ -1,13 +1,13 @@
 import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { isUuid } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can, type TeamResource } from "../auth/can.ts";
 import { activity, artifactTeamAccess, people, projectAccess, teamMembers, teams } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { visibleTo } from "../library/visible.ts";
-import { isUuid } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
 type TeamRow = typeof teams.$inferSelect;
 

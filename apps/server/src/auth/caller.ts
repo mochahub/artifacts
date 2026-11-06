@@ -30,3 +30,11 @@ export type Caller =
       };
     }
   | { kind: "anonymous" };
+
+/** Whose views and replies a list reads: a person (also through their CLI token) or a guest. */
+export const viewerId = (caller: Caller) =>
+  caller.kind === "person" || caller.kind === "cliToken"
+    ? { person: caller.person.id }
+    : caller.kind === "guest"
+      ? { guest: caller.guestId }
+      : {};

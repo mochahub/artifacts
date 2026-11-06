@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
-import type { LoadedArtifact } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
+import type { LoadedArtifact } from "../auth/access.ts";
 import { artifactAccess, artifactTeamAccess, people, projectAccess, teams } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 
 const list = (parts: string[]) =>
   parts.length < 2 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;

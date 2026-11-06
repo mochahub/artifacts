@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import { blobs } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 
 export const blobKey = (hash: string) => `blobs/${hash}`;

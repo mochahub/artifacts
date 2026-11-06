@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { type ArtifactRow, artifactResource, inheritedAccess } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
+import { type ArtifactRow, artifactResource, inheritedAccess } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { type ArtifactResource, can, type Inherited } from "../auth/can.ts";
 import { artifactAccess, artifacts, projects } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 
 export type Loaded = { row: ArtifactRow; resource: ArtifactResource; projectSlug: string };
 

@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import { oauthGrants, tokens } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 
 type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
 

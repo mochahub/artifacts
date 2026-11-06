@@ -1,12 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
-import { findArtifact } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
+import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { guestCaller } from "../auth/resolve.ts";
 import { findOrg } from "../db/index.ts";
 import { people, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { createApp } from "../http/app.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../publish/blobs.ts";

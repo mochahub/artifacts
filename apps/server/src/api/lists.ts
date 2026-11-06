@@ -1,7 +1,8 @@
-import type { Artifact, ArtifactCard, Home } from "@artifacts/schema";
-import { agentLabel, Seen } from "@artifacts/schema";
+import type { Artifact, Home } from "@artifacts/schema";
+import { Seen } from "@artifacts/schema";
 import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
-import type { Caller } from "../auth/caller.ts";
+import { type ArtifactRow, artifactParam, heldProjects, toProject, toResource } from "../auth/access.ts";
+import { type Caller, viewerId } from "../auth/caller.ts";
 import { type ArtifactResource, can } from "../auth/can.ts";
 import {
   artifacts,
@@ -20,195 +21,19 @@ import {
   versions,
   views,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
+import { buildCards } from "../library/cards.ts";
 import { rateLimitSearch, searchHits, snippet } from "../library/search.ts";
 import { type Loaded, visibleTo } from "../library/visible.ts";
-import { type ArtifactRow, artifactParam, heldProjects, toProject, toResource } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
-
-const viewerId = (caller: Caller) =>
-  caller.kind === "person" || caller.kind === "cliToken"
-    ? { person: caller.person.id }
-    : caller.kind === "guest"
-      ? { guest: caller.guestId }
-      : {};
 
 const RESULTS = 20;
 const MAX_POSITION_CHARS = 2000;
 
 const visible = (deps: Deps, c: ApiContext, projectId?: string) =>
   visibleTo(deps, c.get("org").id, c.get("caller"), { projectId });
-
-/** Status, counts and cover for a set of artifacts, in as few queries as possible (02, "Derived state"). */
-export async function buildCards(deps: Deps, caller: Caller, list: Loaded[]): Promise<ArtifactCard[]> {
-  if (list.length === 0) return [];
-  const { db } = deps;
-  const ids = list.map(({ row }) => row.id);
-  const who = viewerId(caller);
-
-  const [versionRows, decisionRows, threadRows, viewRows, pageCounts] = await Promise.all([
-    db
-      .select({
-        id: versions.id,
-        artifactId: versions.artifactId,
-        n: versions.n,
-        agent: versions.agent,
-        publishedAt: versions.publishedAt,
-        publisher: people.name,
-      })
-      .from(versions)
-      .innerJoin(people, eq(people.id, versions.publishedBy))
-      .where(and(inArray(versions.artifactId, ids), isNull(versions.deletedAt)))
-      .orderBy(desc(versions.n)),
-    db.select().from(decisions).where(inArray(decisions.artifactId, ids)).orderBy(desc(decisions.createdAt)),
-    db
-      .select({
-        id: threads.id,
-        artifactId: threads.artifactId,
-        status: threads.status,
-        person: threads.authorPersonId,
-        guest: threads.authorGuestId,
-      })
-      .from(threads)
-      .where(inArray(threads.artifactId, ids)),
-    who.person
-      ? db
-          .select({
-            artifactId: views.artifactId,
-            lastSeenVersion: views.lastSeenVersion,
-            lastSeenAt: views.lastSeenAt,
-          })
-          .from(views)
-          .where(and(eq(views.personId, who.person), inArray(views.artifactId, ids)))
-      : who.guest
-        ? db
-            .select({
-              artifactId: guestViews.artifactId,
-              lastSeenVersion: guestViews.lastSeenVersion,
-              lastSeenAt: guestViews.lastSeenAt,
-            })
-            .from(guestViews)
-            .where(and(eq(guestViews.guestId, who.guest), inArray(guestViews.artifactId, ids)))
-        : Promise.resolve([]),
-    db
-      .select({ versionId: pages.versionId, count: sql<number>`count(*)::int` })
-      .from(pages)
-      .innerJoin(versions, eq(versions.id, pages.versionId))
-      .where(inArray(versions.artifactId, ids))
-      .groupBy(pages.versionId),
-  ]);
-
-  const latestByArtifact = new Map<string, (typeof versionRows)[number][]>();
-  for (const version of versionRows) {
-    latestByArtifact.set(version.artifactId, [...(latestByArtifact.get(version.artifactId) ?? []), version]);
-  }
-  const heads = list.flatMap(({ row }) => latestByArtifact.get(row.id)?.slice(0, 2) ?? []);
-  const frameRows = heads.length
-    ? await db
-        .select({
-          versionId: frames.versionId,
-          key: frames.frameKey,
-          hash: frames.contentHash,
-          renders: frames.renders,
-          y: frames.y,
-          x: frames.x,
-          w: frames.w,
-          h: frames.h,
-        })
-        .from(frames)
-        .where(
-          inArray(
-            frames.versionId,
-            heads.map((version) => version.id),
-          ),
-        )
-    : [];
-
-  const replies = new Map<string, number>();
-  const mine = threadRows.filter(
-    (t) => (who.person && t.person === who.person) || (who.guest && t.guest === who.guest),
-  );
-  if (mine.length > 0) {
-    const replyRows = await db
-      .select({
-        threadId: comments.threadId,
-        createdAt: comments.createdAt,
-        person: comments.authorPersonId,
-        agent: comments.agent,
-        guest: comments.authorGuestId,
-      })
-      .from(comments)
-      .where(
-        inArray(
-          comments.threadId,
-          mine.map((t) => t.id),
-        ),
-      );
-    for (const thread of mine) {
-      const seenAt = viewRows.find((row) => row.artifactId === thread.artifactId)?.lastSeenAt ?? new Date(0);
-      const count = replyRows.filter(
-        (reply) =>
-          reply.threadId === thread.id &&
-          reply.createdAt > seenAt &&
-          (reply.agent !== null || (who.person ? reply.person !== who.person : reply.guest !== who.guest)),
-      ).length;
-      replies.set(thread.artifactId, (replies.get(thread.artifactId) ?? 0) + count);
-    }
-  }
-
-  return list.flatMap(({ row, projectSlug }) => {
-    const [latest, previous] = latestByArtifact.get(row.id) ?? [];
-    if (!latest) return [];
-    const decision = decisionRows.find((entry) => entry.artifactId === row.id);
-    const view = viewRows.find((entry) => entry.artifactId === row.id);
-    const unseen = latest.n > (view?.lastSeenVersion ?? 0) || (replies.get(row.id) ?? 0) > 0;
-
-    let status: ArtifactCard["status"];
-    if (decision?.kind === "approved" && decision.version === latest.n) {
-      status = { kind: "approved", version: latest.n };
-    } else if (decision?.kind === "changes_requested" && decision.createdAt > latest.publishedAt) {
-      status = {
-        kind: "with_agent",
-        agent: latest.agent ? agentLabel(latest.publisher, latest.agent) : latest.publisher,
-      };
-    } else if (unseen) status = { kind: "waiting" };
-    else status = { kind: "not_reviewed" };
-
-    const own = frameRows.filter((frame) => frame.versionId === latest.id);
-    const old = previous ? frameRows.filter((frame) => frame.versionId === previous.id) : [];
-    const before = new Map(old.map((frame) => [frame.key, frame.hash]));
-    const changedFrames = previous
-      ? own.filter((frame) => before.get(frame.key) !== undefined && before.get(frame.key) !== frame.hash)
-          .length
-      : 0;
-    const first = [...own].sort((a, b) => a.y - b.y || a.x - b.x)[0];
-    return [
-      {
-        id: row.id,
-        project: projectSlug,
-        slug: row.slug,
-        title: row.title,
-        cover: first
-          ? { renderHash: (first.renders as { thumb: string }).thumb, w: first.w, h: first.h }
-          : { title: row.title },
-        pageCount: pageCounts.find((entry) => entry.versionId === latest.id)?.count ?? 0,
-        latestVersion: latest.n,
-        status,
-        counts: {
-          open: threadRows.filter((t) => t.artifactId === row.id && t.status === "open").length,
-          repliesToYou: replies.get(row.id) ?? 0,
-          changedFrames,
-        },
-        publishedBy: latest.publisher,
-        agent: latest.agent ? agentLabel(latest.publisher, latest.agent) : null,
-        publishedAt: latest.publishedAt.toISOString(),
-        archivedAt: row.archivedAt?.toISOString() ?? null,
-      },
-    ];
-  });
-}
 
 const CONTENT_SOURCES = ["block", "frame", "summary", "tag", "note"] as const;
 const matches = (text: string, q: string | undefined) => !q || text.toLowerCase().includes(q.toLowerCase());

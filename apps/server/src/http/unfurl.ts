@@ -1,9 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
-import type { Deps } from "../api/deps.ts";
 import { sha256 } from "../auth/secrets.ts";
 import { findOrg } from "../db/index.ts";
 import { artifacts, shareLinks } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 
 const attribute = (text: string) => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 

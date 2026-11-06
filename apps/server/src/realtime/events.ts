@@ -1,11 +1,11 @@
 import postgres from "postgres";
-import { findArtifact, isUuid } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import type { ApiContext, Routes } from "../api/routes.ts";
+import { findArtifact, isUuid } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
 import { currentCaller } from "../auth/resolve.ts";
 import { callerKey } from "../data/store.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import type { ApiContext, Routes } from "../http/routes.ts";
 
 export type EventType = "thread" | "comment" | "version" | "decision" | "data";
 type Message = { artifact: string; type: EventType; data: Record<string, unknown> };

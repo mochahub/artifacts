@@ -13,10 +13,10 @@ import {
   sessions,
   tokens,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
-import type { Deps } from "./deps.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
 const MAX_PASSWORD = 256;
 

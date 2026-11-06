@@ -1,9 +1,9 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
-import type { Deps } from "../api/deps.ts";
 import { findOrg, type OrgRow } from "../db/index.ts";
 import { guestLinks, guests, oauthGrants, people, sessions, shareLinks, tokens } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../oauth/origin.ts";
 import type { Caller, GuestLink } from "./caller.ts";

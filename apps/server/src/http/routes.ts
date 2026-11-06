@@ -3,8 +3,8 @@ import type { z } from "zod";
 import type { Caller } from "../auth/caller.ts";
 import { type Action, can, type Resource, seesProject } from "../auth/can.ts";
 import type { OrgRow } from "../db/index.ts";
-import type { createApp } from "../http/app.ts";
-import { ApiError } from "../http/errors.ts";
+import type { createApp } from "./app.ts";
+import { ApiError } from "./errors.ts";
 
 export type ApiVars = { Variables: { requestId: string; caller: Caller; org: OrgRow } };
 export type ApiContext = Context<ApiVars>;

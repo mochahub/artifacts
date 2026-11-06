@@ -3,9 +3,9 @@ import { and, eq, gt } from "drizzle-orm";
 import { newUserCode, randomSecret, sha256 } from "../auth/secrets.ts";
 import { createCliToken, personView } from "../auth/sessions.ts";
 import { deviceCodes, people } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import type { Deps } from "./deps.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 
 const EXPIRES_IN = 600;
 const INTERVAL = 5;

@@ -1,8 +1,8 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { and, eq } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import { oauthClients } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 
 const METADATA_TIMEOUT_MS = 5000;
 const METADATA_MAX_BYTES = 64 * 1024;

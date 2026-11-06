@@ -1,5 +1,6 @@
 import { AddProjectAccess, RestrictProject, SetProjectAccess } from "@artifacts/schema";
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { isUuid, type LoadedProject, projectGrants, projectParam } from "../auth/access.ts";
 import { can, capFor } from "../auth/can.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
 import {
@@ -14,10 +15,9 @@ import {
   teams,
   tokens,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import { isUuid, type LoadedProject, projectGrants, projectParam } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 
 const DAY = 24 * 3600_000;
 const INVITE_DAYS = 7;

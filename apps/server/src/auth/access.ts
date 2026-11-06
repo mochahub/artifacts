@@ -1,14 +1,4 @@
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import type { Caller } from "../auth/caller.ts";
-import {
-  type ArtifactResource,
-  can,
-  type Grant,
-  type Inherited,
-  inherit,
-  type ProjectResource,
-  projectLevels,
-} from "../auth/can.ts";
 import {
   artifactAccess,
   artifacts,
@@ -18,9 +8,19 @@ import {
   teamMembers,
   teams,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import type { Deps } from "./deps.ts";
-import type { ApiContext } from "./routes.ts";
+import type { ApiContext } from "../http/routes.ts";
+import type { Caller } from "./caller.ts";
+import {
+  type ArtifactResource,
+  can,
+  type Grant,
+  type Inherited,
+  inherit,
+  type ProjectResource,
+  projectLevels,
+} from "./can.ts";
 
 export type ArtifactRow = typeof artifacts.$inferSelect;
 export type LoadedArtifact = ArtifactResource & { row: ArtifactRow };

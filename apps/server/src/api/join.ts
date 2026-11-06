@@ -10,8 +10,8 @@ import {
   teamMembers,
   teams,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import type { Deps } from "./deps.ts";
 
 type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
 export type InviteRow = typeof invites.$inferSelect;

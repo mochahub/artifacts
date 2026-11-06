@@ -1,7 +1,7 @@
 import { type LibraryRead, type LibraryView, READ_CHARS, READ_CHARS_MAX } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import { blocks, frames, pages, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import type { Loaded } from "./visible.ts";
 

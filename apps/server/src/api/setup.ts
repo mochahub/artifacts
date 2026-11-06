@@ -5,9 +5,9 @@ import { randomSecret, safeEqual, sha256 } from "../auth/secrets.ts";
 import { createCliToken, personView } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
 import { activity, org, passwords, people, resetLinks } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import type { Deps } from "./deps.ts";
-import { parseBody, type Routes } from "./routes.ts";
+import { parseBody, type Routes } from "../http/routes.ts";
 
 const SETUP_LOCK = 7_316_002;
 const HOUR = 3600_000;

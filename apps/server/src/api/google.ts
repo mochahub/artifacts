@@ -3,6 +3,7 @@ import { CONSUMER_DOMAINS, type GoogleSettings, PatchGoogle, SaveGoogle } from "
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { isUuid } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
 import { type GoogleClaims, googleProvider, readIdToken } from "../auth/google.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
@@ -19,12 +20,11 @@ import {
   removedIdentities,
   sessions,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { requestOrigin } from "../oauth/origin.ts";
-import { isUuid } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
 import { acceptInvite, findLiveInvite, joinTeams } from "./join.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 
 export const CALLBACK_PATH = "/api/auth/google/callback";
 const COOKIE = "art_google";

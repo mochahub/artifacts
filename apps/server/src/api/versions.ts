@@ -1,11 +1,11 @@
 import { agentLabel } from "@artifacts/schema";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { artifactParam } from "../auth/access.ts";
 import { blocks, decisions, frames, pages, people, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
-import { artifactParam } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import type { Routes } from "./routes.ts";
+import type { Routes } from "../http/routes.ts";
 
 const boardIndex = (meta: Record<string, unknown>, key: string) =>
   ((meta.boards ?? []) as { key: string }[]).findIndex((board) => board.key === key);

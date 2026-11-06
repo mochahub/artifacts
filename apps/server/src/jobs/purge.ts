@@ -1,5 +1,4 @@
 import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
 import {
   activity,
   artifactAccess,
@@ -22,6 +21,7 @@ import {
   versions,
   views,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
 type VersionRow = typeof versions.$inferSelect;

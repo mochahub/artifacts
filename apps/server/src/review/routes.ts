@@ -9,9 +9,7 @@ import {
 } from "@artifacts/schema";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { artifactParam, findArtifact, isUuid } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
+import { artifactParam, findArtifact, isUuid } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import {
@@ -25,8 +23,10 @@ import {
   threads,
   versions,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { audienceOf } from "../library/audience.ts";
 import { blobKey } from "../publish/blobs.ts";
 import { notifyReply } from "../push/notify.ts";

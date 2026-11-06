@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 // @ts-expect-error: plain JavaScript shared with the CLI
 import { startChild } from "@artifacts/sandbox";
-import type { Deps } from "../api/deps.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 
 type Limits = { timeoutMs: number; memoryMb: number; dataOpBytes: number };

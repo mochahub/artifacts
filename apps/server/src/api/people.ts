@@ -7,6 +7,7 @@ import {
   PatchOrg,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { isUuid, projectGrants } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
@@ -31,13 +32,12 @@ import {
   teams,
   tokens,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
-import { isUuid, projectGrants } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
 import { acceptInvite, findLiveInvite } from "./join.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
 import { latestRelease } from "./updates.ts";
 
 const HOUR = 3600_000;

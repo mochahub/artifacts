@@ -14,9 +14,7 @@ import {
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { type ArtifactRow, findArtifact, toProject, toResource } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import { type ApiContext, parseBody, type Routes, requireCan } from "../api/routes.ts";
+import { type ArtifactRow, findArtifact, toProject, toResource } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
@@ -33,7 +31,9 @@ import {
   threads,
   versions,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes, requireCan } from "../http/routes.ts";
 import { audienceOf } from "../library/audience.ts";
 import { notifyPublished } from "../push/notify.ts";
 import { reanchor } from "../review/reanchor.ts";

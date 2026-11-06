@@ -2,12 +2,12 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { type OAuthConsent, OAuthConsentDecision } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
-import type { Deps } from "../api/deps.ts";
-import { parseBody, type Routes } from "../api/routes.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { findOrg } from "../db/index.ts";
 import { oauthClients, oauthCodes, oauthGrants, oauthRefreshTokens, tokens } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { parseBody, type Routes } from "../http/routes.ts";
 import { findClient, redirectAllowed, validRedirect } from "./clients.ts";
 import { MCP_PATH, OAUTH_SCOPES, requestOrigin } from "./origin.ts";
 

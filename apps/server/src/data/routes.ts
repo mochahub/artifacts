@@ -1,10 +1,10 @@
 import { DataClear, DataPut } from "@artifacts/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
-import { artifactParam } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
+import { artifactParam } from "../auth/access.ts";
 import { backendLogs, guestLinks, people, shareLinks } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type ApiContext, parseBody, type Routes } from "../http/routes.ts";
 import { deletePrefix } from "../jobs/purge.ts";
 import { PreconditionFailed } from "../s3.ts";
 import {
