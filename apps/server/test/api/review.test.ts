@@ -1,14 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ArtifactReviewStatus, Comment, PublishResult, Thread } from "@artifacts/schema";
-import { eq } from "drizzle-orm";
 import sharp from "sharp";
 import { z } from "zod";
-import { artifacts, passwords, people } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
-
-const error = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
+import {
+  claim,
+  code as error,
+  OWNER,
+  signIn,
+  solidImage,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount, makePerson, publish, published } from "../publish-helper.ts";
 
 describe("the review API", () => {
   let t: TestServer;
@@ -17,6 +20,7 @@ describe("the review API", () => {
   let id: string;
   let reviewer: string;
   let viewerOnly: string;
+  let orgId: string;
 
   const thread = async (overrides: Record<string, unknown> = {}, bearer = token) =>
     t.api(`/api/artifacts/${id}/threads`, {
@@ -42,14 +46,10 @@ describe("the review API", () => {
     t = await startTestServer();
     const owner = await claim(t);
     token = owner.token;
+    orgId = owner.orgId;
     // A real image, so crops can be cut.
-    const png = await sharp({ create: { width: 786, height: 1704, channels: 4, background: "#20232a" } })
-      .webp()
-      .toBuffer();
-    await publish(t, token, { renderBytes: png });
+    id = (await published(t, token, { renderBytes: await solidImage(786, 1704, "#20232a") })).id;
     cookie = await signIn(t, OWNER.email, OWNER.password);
-    id = (await t.server.db.select().from(artifacts))[0]?.id as string;
-    const orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
     reviewer = (await makePerson(t, orgId, "reviewer")).token;
     viewerOnly = (await makePerson(t, orgId, "outside")).token;
   });
@@ -99,7 +99,15 @@ describe("the review API", () => {
   test("a version number the database can't hold is a 400, not a 500", async () => {
     const huge = 99_999_999_999;
     expect((await thread({ version: huge })).status).toBe(400);
-    expect((await t.api(`/api/artifacts/${id}/threads?version=${huge}`, { bearer: token })).status).toBe(400);
+    for (const path of [
+      `/api/artifacts/${id}/threads?version=${huge}`,
+      `/api/artifacts/${id}/compare?from=x&to=1`,
+      `/api/artifacts/${id}/compare?from=1&to=${huge}`,
+      `/api/artifacts/${id}/versions/${huge}`,
+      `/api/artifacts/${id}/v/${huge}/article/plan`,
+    ]) {
+      expect((await t.api(path, { bearer: token })).status).toBe(400);
+    }
     const decide = await t.api(`/api/artifacts/${id}/decisions`, {
       method: "POST",
       cookie,
@@ -157,13 +165,10 @@ describe("the review API", () => {
     expect((await reply(one.id, { body: "Done", marksFixed: true }, { bearer: reviewer })).status).toBe(200);
     expect((await reply(one.id, { body: "Done", marksFixed: true }, { cookie })).status).toBe(200);
     // A member in a browser, who didn't publish it, can't.
-    const orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    const hash = await Bun.password.hash(OWNER.password, { algorithm: "argon2id" });
-    (await makePerson(t, orgId, "member")).token;
-    const member = (await t.server.db.select().from(people)).filter((row) => row.role === "member").at(-1);
-    await t.server.db.insert(passwords).values({ personId: member?.id as string, orgId, hash });
-    const session = await signIn(t, member?.email as string, OWNER.password);
-    expect((await reply(one.id, { body: "Done", marksFixed: true }, { cookie: session })).status).toBe(403);
+    const member = await makeAccount(t, orgId, "member");
+    expect((await reply(one.id, { body: "Done", marksFixed: true }, { cookie: member.cookie })).status).toBe(
+      403,
+    );
   });
 
   test("only people resolve, never tokens; reopening works", async () => {
@@ -266,7 +271,7 @@ describe("the review API", () => {
   });
 
   test("archived: read-only, and reads still work", async () => {
-    await t.server.db.update(artifacts).set({ archivedAt: t.clock.now() }).where(eq(artifacts.id, id));
+    expect((await t.api(`/api/artifacts/${id}/archive`, { method: "POST", bearer: token })).status).toBe(200);
     expect(await error(await thread())).toBe("read_only");
     const list = z
       .array(Thread)
@@ -282,7 +287,9 @@ describe("the review API", () => {
       json: { version: 1, kind: "approved" },
     });
     expect(await error(decided)).toBe("read_only");
-    await t.server.db.update(artifacts).set({ archivedAt: null }).where(eq(artifacts.id, id));
+    expect((await t.api(`/api/artifacts/${id}/unarchive`, { method: "POST", bearer: token })).status).toBe(
+      200,
+    );
   });
 
   test("publishing re-anchors: a changed frame is reported, and a missing one is orphaned", async () => {
