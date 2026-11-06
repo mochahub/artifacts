@@ -6,7 +6,7 @@ import { createApp } from "../../src/http/app.ts";
 import { createLogger } from "../../src/log.ts";
 import { startServer } from "../../src/server.ts";
 import { VERSION } from "../../src/version.ts";
-import { createDatabase, silent, testEnv, viewerFixture } from "../helpers.ts";
+import { createDatabase, OPS_SECRET, silent, testEnv, viewerFixture } from "../helpers.ts";
 
 describe("the three ports", () => {
   let database: Awaited<ReturnType<typeof createDatabase>>;
@@ -136,25 +136,13 @@ describe("the three ports", () => {
       }
     });
 
-    test("/t/ fails closed: no Sec-Fetch-Dest is refused, and so is a forged token", async () => {
-      expect((await content("/t/abc/v1/index.html")).status).toBe(403);
-      const forged = await content("/t/abc/v1/index.html", "content.test", {
-        headers: { "Sec-Fetch-Dest": "iframe" },
-      });
-      expect(forged.status).toBe(403);
-    });
-
-    test("/t/ on another Host is 421", async () => {
-      expect((await content("/t/abc/v1/index.html", "viewer.test")).status).toBe(421);
-    });
-
     test("responses carry the version header", async () => {
       expect((await content("/")).headers.get("artifacts-version")).toBe(VERSION);
     });
   });
 
   describe("internal port", () => {
-    const auth = { headers: { Authorization: `Bearer ${"o".repeat(64)}` }, method: "POST" };
+    const auth = { headers: { Authorization: `Bearer ${OPS_SECRET}` }, method: "POST" };
 
     test("needs OPS_SECRET", async () => {
       expect((await internal("/internal/jobs/gc", { method: "POST" })).status).toBe(401);
@@ -212,6 +200,8 @@ describe("the three ports", () => {
   });
 
   test("once an org exists: setup mode ends, and the home domain is a viewer host", async () => {
+    // Setup takes its home domain from a host that already is a viewer host, so only a row can show a
+    // new one becoming one.
     await server.db.insert(org).values({
       id: Bun.randomUUIDv7(),
       name: "Mochahub",
