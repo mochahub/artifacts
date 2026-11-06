@@ -37,6 +37,7 @@ export async function publish(
     message?: string;
     notes?: Record<string, string>;
     repo?: string;
+    projectName?: string;
   } = {},
 ) {
   const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame"), visibility } = options;
@@ -64,6 +65,7 @@ export async function publish(
     bearer,
     json: {
       project,
+      projectName: options.projectName,
       slug,
       title: options.title ?? "Roadmap",
       visibility,

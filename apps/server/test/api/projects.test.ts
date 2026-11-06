@@ -834,4 +834,12 @@ describe("project access", () => {
     expect(await status({ cookie: owner })).toMatchObject({ audience: expect.stringContaining("2 people") });
     expect(await status({ cookie: member.cookie })).not.toHaveProperty("audience");
   });
+
+  test("the audience names the project as it is, not as a later publish calls it", async () => {
+    const project = unique("named");
+    await publish(t, token, { project, slug: "first", projectName: "Camera app" });
+    await restrict(project);
+    const again = await publish(t, token, { project, slug: "first", projectName: "Something else" });
+    expect((await json<{ audience: string }>(again)).audience).toBe("Only people added to Camera app");
+  });
 });
