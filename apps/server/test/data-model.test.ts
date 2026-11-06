@@ -10,7 +10,6 @@ import { createDatabase } from "./helpers.ts";
 
 /** Reads 02-data-model.md itself, so the code and the contract can't drift apart unnoticed. */
 const doc = await Bun.file(join(import.meta.dir, "../../../docs/implementation/02-data-model.md")).text();
-const phase2 = new Set<string>();
 
 const ticks = (text: string) => [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1] as string);
 
@@ -202,7 +201,6 @@ describe("the database matches 02-data-model.md", () => {
       from pg_type t join pg_enum e on e.enumtypid = t.oid group by t.typname`;
     const actual = Object.fromEntries(rows.map((row) => [row.typname, row.labels]));
     expect(actual).toEqual(docEnums());
-    expect(Object.keys(actual)).toHaveLength(13);
   });
 
   test("every table", async () => {
@@ -210,7 +208,7 @@ describe("the database matches 02-data-model.md", () => {
       select table_name from information_schema.tables where table_schema = 'public'`;
     const named = [...doc.matchAll(/\*\*`(\w+)`\*\*/g)]
       .map((match) => match[1] as string)
-      .filter((name) => !phase2.has(name) && name !== "releases");
+      .filter((name) => name !== "releases");
     expect(rows.map((row) => row.table_name).sort()).toEqual([...new Set(named)].sort());
   });
 
@@ -258,7 +256,6 @@ describe("the database matches 02-data-model.md", () => {
       where contype = 'f' and confrelid = 'org'::regclass
         and conkey = array[(select attnum from pg_attribute where attrelid = conrelid and attname = 'org_id')]`;
     const names = (rows: postgres.Row[]) => rows.map((row) => row.table_name as string).sort();
-    expect(tables).toHaveLength(42);
     expect(names(columns)).toEqual(names(tables));
     expect(names(references)).toEqual(names(tables));
   });
@@ -283,10 +280,15 @@ describe("the database matches 02-data-model.md", () => {
     has(/UNIQUE INDEX .* ON public\.threads .*\(artifact_id, n\)/);
   });
 
-  test("schema package enums agree with the database", () => {
-    const enums = docEnums();
-    expect([...Permission.options]).toEqual(enums.permission as typeof Permission.options);
-    expect([...Role.options]).toEqual(enums.role as typeof Role.options);
+  test("schema package enums agree with the database", async () => {
+    const labels = async (type: string) =>
+      (
+        await sql`
+          select e.enumlabel from pg_enum e join pg_type t on t.oid = e.enumtypid
+          where t.typname = ${type} order by e.enumsortorder`
+      ).map((row) => row.enumlabel as string);
+    expect(await labels("permission")).toEqual([...Permission.options]);
+    expect(await labels("role")).toEqual([...Role.options]);
   });
 
   describe("awkward types round trip through the driver", () => {

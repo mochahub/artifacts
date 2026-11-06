@@ -16,15 +16,18 @@ describe("migrations", () => {
     await database.drop();
   });
 
-  const tables = () =>
-    sql`select count(*)::int as n from information_schema.tables where table_schema = 'public'`.then(
-      ([row]) => row?.n as number,
+  // Which tables, exactly, is data-model.test.ts's job; here it's that every way of applying gives the same.
+  const tables = (on = sql) =>
+    on`select table_name from information_schema.tables where table_schema = 'public' order by 1`.then(
+      (rows) => rows.map((row) => row.table_name as string),
     );
+  let applied: string[] = [];
 
   test("apply to an empty database", async () => {
-    expect(await tables()).toBe(0);
+    expect(await tables()).toEqual([]);
     await runMigrations(database.url);
-    expect(await tables()).toBe(43);
+    applied = await tables();
+    expect(applied).toEqual(expect.arrayContaining(["org", "people", "artifacts", "versions"]));
   });
 
   test("apply again without error or change", async () => {
@@ -32,7 +35,7 @@ describe("migrations", () => {
     await runMigrations(database.url);
     const after = await sql`select count(*)::int as n from drizzle.__drizzle_migrations`;
     expect(after).toEqual(before);
-    expect(await tables()).toBe(43);
+    expect(await tables()).toEqual(applied);
   });
 
   test("two replicas booting together both succeed", async () => {
@@ -40,10 +43,9 @@ describe("migrations", () => {
     try {
       await Promise.all([runMigrations(fresh.url), runMigrations(fresh.url), runMigrations(fresh.url)]);
       const check = postgres(fresh.url, { max: 1 });
-      const [row] =
-        await check`select count(*)::int as n from information_schema.tables where table_schema = 'public'`;
+      const made = await tables(check);
       await check.end();
-      expect(row?.n).toBe(43);
+      expect(made).toEqual(applied);
     } finally {
       await fresh.drop();
     }
