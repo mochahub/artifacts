@@ -21,6 +21,7 @@ import {
   webauthnChallenges,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { BLOBS, CROPS, DATA, hashOf, PLANS } from "../layout.ts";
 import { sendDigest } from "../push/notify.ts";
 import { purgeExpired } from "./purge.ts";
 
@@ -54,10 +55,9 @@ async function referencedHashes(deps: Deps) {
 /** Deletes blobs nothing uses, once they're a day old, so an upload awaiting commit is safe. */
 export async function collectGarbage(deps: Deps) {
   const cutoff = deps.clock.now().getTime() - GC_MIN_AGE_MS;
-  const hashOf = (key: string) => key.slice("blobs/".length);
   let deleted = 0;
   let bytes = 0;
-  for await (const objects of deps.bucket.listAll("blobs/")) {
+  for await (const objects of deps.bucket.listAll(BLOBS)) {
     const old = objects.filter((object) => object.updatedAt.getTime() < cutoff);
     if (old.length === 0) continue;
     // Fresh for every page. Rows go first, so a publish reusing one of these can't commit.
@@ -86,18 +86,18 @@ const UUID_AT = /^(?:crops|data)\/([0-9a-f-]{36})/;
 /** What a purge's bucket step left behind, if the bucket failed after the rows were gone. */
 async function sweepOrphans(deps: Deps, cutoff: number) {
   // Upload plans are only read during one publish, and their signed links last a day at most.
-  for await (const objects of deps.bucket.listAll("plans/")) {
+  for await (const objects of deps.bucket.listAll(PLANS)) {
     for (const object of objects) {
       if (object.updatedAt.getTime() < cutoff) await deps.bucket.delete(object.key);
     }
   }
-  for (const prefix of ["crops/", "data/"]) {
+  for (const prefix of [CROPS, DATA]) {
     for await (const objects of deps.bucket.listAll(prefix)) {
       const ids = [...new Set(objects.flatMap((object) => UUID_AT.exec(object.key)?.[1] ?? []))];
       // A crop lives while a thread names it as its crop: a purged version clears that, and the thread stays.
       // Data lives while its artifact does.
       const alive = new Set<string>();
-      if (ids.length && prefix === "crops/") {
+      if (ids.length && prefix === CROPS) {
         const keys = objects.map((object) => object.key);
         const rows = await deps.db
           .select({ key: threads.cropKey })
@@ -113,7 +113,7 @@ async function sweepOrphans(deps: Deps, cutoff: number) {
       }
       const dead = objects.filter((object) => {
         const id = UUID_AT.exec(object.key)?.[1];
-        const name = prefix === "crops/" ? object.key : id;
+        const name = prefix === CROPS ? object.key : id;
         return id && name && !alive.has(name) && object.updatedAt.getTime() < cutoff;
       });
       await Promise.all(dead.map((object) => deps.bucket.delete(object.key)));

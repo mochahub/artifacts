@@ -27,7 +27,7 @@ import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
 import type { ApiVars, Routes } from "../http/routes.ts";
-import { blobKey } from "../layout.ts";
+import { blobKey, planKey } from "../layout.ts";
 import {
   libraryArtifacts,
   libraryFrames,
@@ -159,7 +159,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
 
   /** Plans list signed uploads. They go in the bucket, so a long list doesn't fill a model's context. */
   async function plan(missing: unknown) {
-    const key = `plans/${Bun.randomUUIDv7()}.json`;
+    const key = planKey(Bun.randomUUIDv7());
     await deps.bucket.put(key, new TextEncoder().encode(JSON.stringify({ missing })), {
       contentType: "application/json",
     });

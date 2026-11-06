@@ -24,6 +24,7 @@ import {
   views,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { dataPrefix } from "../layout.ts";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
 type VersionRow = typeof versions.$inferSelect;
@@ -118,7 +119,7 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
   // Past this point the rows are gone. A bucket failure is logged, and the daily sweep finishes it.
   try {
     await Promise.all(crops.map((key) => deps.bucket.delete(key)));
-    await deps.bucket.deletePrefix(`data/${artifact.id}/`);
+    await deps.bucket.deletePrefix(dataPrefix(artifact.id));
   } catch (error) {
     deps.log.warn("purge left objects for the sweep", { artifact: artifact.id, error: String(error) });
   }

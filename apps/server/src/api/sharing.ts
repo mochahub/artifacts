@@ -26,6 +26,7 @@ import { ApiError } from "../http/errors.ts";
 import { isUuid } from "../http/params.ts";
 import { artifactParam } from "../http/resources.ts";
 import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
+import { blobKey } from "../layout.ts";
 
 const DAY = 24 * 3600_000;
 const GUEST_DAYS = 90;
@@ -469,7 +470,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/s/:token/cover", { public: true }, async (c) => {
     const { artifact: row } = await liveLink(c);
     const hash = await ogHash(row.id, row.latestVersion);
-    if (hash) return c.redirect(await deps.bucket.presignGet(`blobs/${hash}`), 302);
+    if (hash) return c.redirect(await deps.bucket.presignGet(blobKey(hash)), 302);
     const [first] = await db
       .select({ renders: frames.renders })
       .from(frames)
@@ -478,7 +479,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       .orderBy(asc(frames.y), asc(frames.x))
       .limit(1);
     if (!first) throw new ApiError("not_found", "Not found.");
-    return c.redirect(await deps.bucket.presignGet(`blobs/${first.renders["2x"]}`), 302);
+    return c.redirect(await deps.bucket.presignGet(blobKey(first.renders["2x"])), 302);
   });
 
   routes.post("/api/s/:token/guest", { public: true }, async (c) => {
