@@ -10,7 +10,8 @@
     "./sanitize": "./src/sanitize.ts",
     "./brand-prompt": "./src/brand-prompt.ts",
     "./theme-css": "./src/theme-css.ts",
-    "./article": "./src/article.ts"
+    "./article": "./src/article.ts",
+    "./mcp": "./src/mcp.ts"
   },
   "dependencies": {
     "hast-util-sanitize": "^5.0.2",
