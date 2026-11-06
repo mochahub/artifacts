@@ -6,6 +6,7 @@ import {
   artifacts,
   artifactUsage,
   blobs,
+  brandProposals,
   deviceCodes,
   frames,
   googleStates,
@@ -13,6 +14,7 @@ import {
   oauthClients,
   oauthCodes,
   oauthRefreshTokens,
+  org,
   pages,
   resetLinks,
   sessions,
@@ -29,7 +31,7 @@ const DAY = 24 * 3600_000;
 const GC_MIN_AGE_MS = DAY;
 const FIRST_RUN_MS = 60_000;
 
-/** Every hash a version still needs (05, "Collect garbage"). */
+/** Every hash still in use: a version's files, renders and pages, and a brand's fonts (05, "Collect garbage"). */
 async function referencedHashes(deps: Deps) {
   const referenced = new Set<string>();
   const add = (hash: unknown) => {
@@ -44,6 +46,13 @@ async function referencedHashes(deps: Deps) {
   }
   for (const row of await deps.db.select({ renders: frames.renders }).from(frames)) {
     for (const hash of Object.values(row.renders)) add(hash);
+  }
+  // A brand's fonts outlive the sample that brought them: the brand, and any proposal of it, still use them.
+  for (const row of await deps.db.select({ brand: org.brand }).from(org)) {
+    for (const font of row.brand?.fonts ?? []) add(font.hash);
+  }
+  for (const row of await deps.db.select({ brand: brandProposals.brand }).from(brandProposals)) {
+    for (const font of row.brand.fonts ?? []) add(font.hash);
   }
   for (const row of await deps.db.select({ meta: pages.meta }).from(pages)) {
     add(row.meta.htmlHash);
