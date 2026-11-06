@@ -7,6 +7,7 @@ import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
 import type { Caller, GuestLink } from "./caller.ts";
+import { isLiveLink } from "./links.ts";
 import { sha256 } from "./secrets.ts";
 import {
   GUEST_COOKIE,
@@ -128,11 +129,7 @@ export async function guestCaller(deps: Deps, guestId: string): Promise<Caller> 
     permission: link.permission,
     name: row.name,
     // Checked on every request, so revoking a link ends access at once (02).
-    active:
-      org?.settings.linkSharing === true &&
-      !link.revokedAt &&
-      (!link.expiresAt || link.expiresAt > now) &&
-      row.expiresAt > now,
+    active: org?.settings.linkSharing === true && isLiveLink(link, now) && row.expiresAt > now,
   }));
   return { kind: "guest", guestId, links };
 }

@@ -1,8 +1,7 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { OAUTH_SCOPES, type OAuthConsent, OAuthConsentDecision, type OAuthScope } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
-import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
+import { newApiToken, randomSecret, s256, safeEqual, sha256 } from "../auth/secrets.ts";
 import { findOrg } from "../db/index.ts";
 import { oauthClients, oauthCodes, oauthGrants, oauthRefreshTokens, tokens } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
@@ -30,13 +29,6 @@ const parseScopes = (scope: string | undefined): OAuthScope[] | null => {
   if (!wanted.every(isOAuthScope)) return null;
   return wanted.length > 0 ? [...new Set(wanted)] : [...OAUTH_SCOPES];
 };
-
-const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
-
-function sameText(a: string, b: string) {
-  const [x, y] = [Buffer.from(a), Buffer.from(b)];
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 
 /** What an authorization request must be before anyone is shown a consent screen. */
 async function checkRequest(
@@ -251,7 +243,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         row.clientId === body.client_id &&
         row.redirectUri === body.redirect_uri &&
         grant.audience === audience &&
-        sameText(s256(body.code_verifier ?? ""), row.codeChallenge);
+        safeEqual(s256(body.code_verifier ?? ""), row.codeChallenge);
       if (!good) {
         await revokeGrant(deps, row.grantId);
         return oauthError(c, "invalid_grant", "That code doesn't match this request.");

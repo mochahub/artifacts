@@ -20,6 +20,7 @@ import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, or, sql } from "dri
 import { projectGrants } from "../auth/access.ts";
 import type { Caller, CallerPerson } from "../auth/caller.ts";
 import { mayTouchRole, runsTheOrg, tokenLimits } from "../auth/can.ts";
+import { isLiveLink } from "../auth/links.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
 import type { Db } from "../db/index.ts";
@@ -51,7 +52,7 @@ import type { ApiContext, RouteRequest, Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
 import { acceptInvite, findLiveInvite } from "./join.ts";
-import { latestRelease } from "./updates.ts";
+import { releaseCheck } from "./updates.ts";
 
 const HOUR = 3600_000;
 const INVITE_DAYS = 7;
@@ -62,6 +63,7 @@ type PersonRow = typeof people.$inferSelect;
 
 export function peopleRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock } = deps;
+  const latestRelease = releaseCheck(deps);
   const inviteUrl = (secret: string) => `${env.publicUrl}/join/${secret}`;
 
   async function target(c: RouteRequest) {
@@ -125,7 +127,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
 
   routes.get("/api/org", { action: "org.read" }, async (c) => {
     const row = c.var.org;
-    const latest = await latestRelease(deps);
+    const latest = await latestRelease();
     return c.json({
       name: row.name,
       newVersion: latest && Bun.semver.order(latest, VERSION) > 0 ? latest : null,
@@ -591,7 +593,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     ]);
     return c.json({
       links: links
-        .filter(({ link }) => !link.expiresAt || link.expiresAt > now)
+        .filter(({ link }) => isLiveLink(link, now))
         .map(({ link, title, project, slug }) => ({
           id: link.id,
           artifactId: link.artifactId,

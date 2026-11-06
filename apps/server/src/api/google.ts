@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { IdentityList } from "@artifacts/schema";
 import {
   CONSUMER_DOMAINS,
@@ -12,7 +11,7 @@ import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { type CallerFor, can } from "../auth/can.ts";
 import { type GoogleClaims, readIdToken } from "../auth/google.ts";
-import { randomSecret, sha256 } from "../auth/secrets.ts";
+import { randomSecret, s256, sha256 } from "../auth/secrets.ts";
 import { isSecureRequest, startSession } from "../auth/sessions.ts";
 import { isUniqueViolation, type OrgRow } from "../db/index.ts";
 import {
@@ -46,8 +45,6 @@ const INTENTS = ["signin", "invite", ...SIGNED_IN];
 /** Same checks as the viewer's safeNext: only a path on this site, so a crafted link can't send someone away. */
 const safePath = (value: string | undefined) =>
   value?.startsWith("/") && !value.startsWith("//") && !/[\\\s]/.test(value) ? value : "/";
-
-const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
 type StateRow = typeof googleStates.$inferSelect;
 

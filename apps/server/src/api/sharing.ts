@@ -3,6 +3,7 @@ import { AddAccess, CreateShareLink, GuestName, PatchArtifact, ShareWithTeam } f
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getCookie } from "hono/cookie";
 import { can, effective } from "../auth/can.ts";
+import { findLiveLink, isLiveLink } from "../auth/links.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
 import { GUEST_COOKIE, isSecureRequest, setSessionCookie } from "../auth/sessions.ts";
 import {
@@ -149,7 +150,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       /** Links and outside invites: in a restricted project they'd undo the restriction, so they take `manage`. */
       canShareOutside: can(c.var.caller, "artifact.share_outside", resource),
       links: links
-        .filter((link) => !link.expiresAt || link.expiresAt > now)
+        .filter((link) => isLiveLink(link, now))
         .map((link) => ({
           id: link.id,
           permission: link.permission,
@@ -399,30 +400,9 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     },
   );
 
-  /** A link that can still be used, with what it points at. Deleted artifacts stop links at once (SPEC §5.5). */
   async function liveLink(c: ApiContext) {
-    const [row] = await db
-      .select({ link: shareLinks, artifact: artifacts, project: projects.slug, sharedBy: people.name })
-      .from(shareLinks)
-      .innerJoin(artifacts, eq(artifacts.id, shareLinks.artifactId))
-      .innerJoin(projects, eq(projects.id, artifacts.projectId))
-      .innerJoin(people, eq(people.id, shareLinks.createdBy))
-      .where(
-        and(
-          eq(shareLinks.orgId, c.get("org").id),
-          eq(shareLinks.tokenHash, sha256(c.req.param("token") as string)),
-        ),
-      )
-      .limit(1);
-    if (
-      !row ||
-      row.link.revokedAt ||
-      row.artifact.deletedAt ||
-      !c.get("org").settings.linkSharing ||
-      (row.link.expiresAt && row.link.expiresAt <= clock.now())
-    ) {
-      throw new ApiError("gone", "This link no longer works.");
-    }
+    const row = await findLiveLink(deps, c.var.org, c.req.param("token") as string);
+    if (!row) throw new ApiError("gone", "This link no longer works.");
     return row;
   }
 

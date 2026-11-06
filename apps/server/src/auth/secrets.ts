@@ -5,6 +5,9 @@ const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 
 export const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
+/** A PKCE code challenge for a verifier: S256 (RFC 7636). */
+export const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
+
 /** Sessions, guests, invites, resets, share links and device codes (04). */
 export const randomSecret = () => randomBytes(32).toString("base64url");
 
