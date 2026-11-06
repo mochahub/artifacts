@@ -1,11 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { sha256 } from "../../src/auth/secrets.ts";
-import { artifacts, sessions, tokens } from "../../src/db/schema.ts";
+import { SessionList } from "@artifacts/schema";
 import { isPushEndpoint } from "../../src/push/notify.ts";
 import { Events } from "../../src/realtime/events.ts";
-import { claim, createDatabase, OWNER, signIn, startTestServer } from "../helpers.ts";
-import { makeAccount, publish } from "../publish-helper.ts";
+import { claim, createDatabase, OWNER, orgToken, signIn, startTestServer } from "../helpers.ts";
+import { makeAccount, published } from "../publish-helper.ts";
 
 /** A TCP proxy to Postgres that can be cut, for an outage long enough that the driver gives up. */
 function proxy(target: URL) {
@@ -152,24 +150,23 @@ describe("streams end when access does", () => {
   test("losing a team closes it within a heartbeat, for a session and a token", async () => {
     const t = await startTestServer({}, { heartbeatMs: 40 });
     try {
-      const { token } = await claim(t);
+      const { token, orgId } = await claim(t);
       const owner = await signIn(t, OWNER.email, OWNER.password);
-      await publish(t, token, { slug: "live", visibility: "me" });
-      const [row] = await t.server.db.select().from(artifacts);
-      const member = await makeAccount(t, row?.orgId as string, "member");
+      const row = await published(t, token, { slug: "live", visibility: "me" });
+      const member = await makeAccount(t, orgId, "member");
       const made = await t.api("/api/teams", { method: "POST", cookie: owner, json: { name: "Live" } });
       const { team } = (await made.json()) as { team: { id: string; slug: string } };
       const member_ = `/api/teams/${team.slug}/members/${member.id}`;
       await t.api(member_, { method: "PUT", cookie: owner, json: { role: "member" } });
-      await t.api(`/api/artifacts/${row?.id}/teams/${team.id}`, {
+      await t.api(`/api/artifacts/${row.id}/teams/${team.id}`, {
         method: "PUT",
         cookie: owner,
         json: { permission: "view" },
       });
 
       const streams = await Promise.all([
-        t.api(`/api/events?artifact=${row?.id}`, { cookie: member.cookie }),
-        t.api(`/api/events?artifact=${row?.id}`, { bearer: member.token }),
+        t.api(`/api/events?artifact=${row.id}`, { cookie: member.cookie }),
+        t.api(`/api/events?artifact=${row.id}`, { bearer: member.token }),
       ]);
       expect(streams.map((response) => response.status)).toEqual([200, 200]);
       await t.api(member_, { method: "DELETE", cookie: owner });
@@ -182,14 +179,24 @@ describe("streams end when access does", () => {
   test("a revoked token's stream ends, and an ended session's", async () => {
     const t = await startTestServer({}, { heartbeatMs: 40 });
     try {
-      const { token } = await claim(t);
-      await publish(t, token, { slug: "live" });
-      const [row] = await t.server.db.select().from(artifacts);
-      const member = await makeAccount(t, row?.orgId as string, "member");
-      const open = (auth: object) => t.api(`/api/events?artifact=${row?.id}`, auth);
+      const { token, orgId } = await claim(t);
+      const row = await published(t, token, { slug: "live" });
+      const member = await makeAccount(t, orgId, "member");
+      const open = (auth: object) => t.api(`/api/events?artifact=${row.id}`, auth);
       const streams = await Promise.all([open({ cookie: member.cookie }), open({ bearer: member.token })]);
-      await t.server.db.update(tokens).set({ revokedAt: new Date() }).where(eq(tokens.personId, member.id));
-      await t.server.db.delete(sessions).where(eq(sessions.personId, member.id));
+      // What the person does from their settings: end the CLI token, then this browser.
+      const signedIn = SessionList.parse(
+        await (await t.api("/api/me/sessions", { cookie: member.cookie })).json(),
+      );
+      expect(signedIn.map((row) => row.kind).sort()).toEqual(["cli", "session"]);
+      for (const kind of ["cli", "session"]) {
+        const ended = signedIn.find((row) => row.kind === kind)?.id;
+        const response = await t.api(`/api/me/sessions/${ended}`, {
+          method: "DELETE",
+          cookie: member.cookie,
+        });
+        expect(response.status).toBe(200);
+      }
       expect(await Promise.all(streams.map(closes))).toEqual([true, true]);
     } finally {
       await t.stop();
@@ -200,9 +207,8 @@ describe("streams end when access does", () => {
     const t = await startTestServer({}, { heartbeatMs: 40 });
     try {
       const { token } = await claim(t);
-      await publish(t, token, { slug: "live" });
-      const [row] = await t.server.db.select().from(artifacts);
-      const response = await t.api(`/api/events?artifact=${row?.id}`, { bearer: token });
+      const row = await published(t, token, { slug: "live" });
+      const response = await t.api(`/api/events?artifact=${row.id}`, { bearer: token });
       const reader = response.body?.getReader();
       const beats = [await reader?.read(), await reader?.read(), await reader?.read()];
       expect(beats.every((beat) => beat?.done === false)).toBe(true);
@@ -238,24 +244,12 @@ describe("live streams", () => {
   test("an org token's ten streams are its own, not every org token's", async () => {
     const t = await startTestServer();
     try {
-      const { token, person } = await claim(t);
-      await publish(t, token, { slug: "live" });
-      const [row] = await t.server.db.select().from(artifacts);
-      const orgToken = async (secret: string) => {
-        await t.server.db.insert(tokens).values({
-          id: Bun.randomUUIDv7(),
-          orgId: row?.orgId as string,
-          kind: "org",
-          name: secret,
-          tokenHash: sha256(secret),
-          scopes: ["read"],
-          createdBy: person.id,
-        });
-        return secret;
-      };
-      const first = await orgToken("art_org_first_token");
-      const second = await orgToken("art_org_second_token");
-      const open = (bearer: string) => t.api(`/api/events?artifact=${row?.id}`, { bearer });
+      const { token } = await claim(t);
+      const row = await published(t, token, { slug: "live" });
+      const cookie = await signIn(t, OWNER.email, OWNER.password);
+      const first = (await orgToken(t, cookie, { name: "first" })).token;
+      const second = (await orgToken(t, cookie, { name: "second" })).token;
+      const open = (bearer: string) => t.api(`/api/events?artifact=${row.id}`, { bearer });
       const held = await Promise.all(Array.from({ length: 10 }, () => open(first)));
       expect(held.map((response) => response.status)).toEqual(new Array(10).fill(200));
       expect((await open(first)).status).toBe(429);
