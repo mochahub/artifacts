@@ -1,10 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
-import { UNTRUSTED_NOTICE } from "@artifacts/schema";
+import { ResetLinkCreated, UNTRUSTED_NOTICE } from "@artifacts/schema";
+import { RECENT_AUTH_MS } from "../../src/auth/sessions.ts";
 import { metadataUrl, redirectAllowed, validRedirect } from "../../src/oauth/clients.ts";
 import { isPrivateAddress } from "../../src/oauth/metadata.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import {
+  claim,
+  code as errorCode,
+  joinAsGuest,
+  OWNER,
+  PASSWORD,
+  mcp as rpc,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount, publish } from "../publish-helper.ts";
 
 const REDIRECT = "http://127.0.0.1:7777/callback";
 const RESOURCE = "http://viewer.test/api/mcp";
@@ -22,10 +33,11 @@ describe("OAuth and the hosted MCP", () => {
   let t: TestServer;
   let cookie: string;
   let owner: string;
+  let orgId: string;
   let clientId: string;
 
   /** What a client does: register, send a person to consent, take the code. No browser involved. */
-  const authorize = async (overrides: Record<string, string> = {}, client = clientId) => {
+  const authorize = async (overrides: Record<string, string> = {}, client = clientId, as = cookie) => {
     const { verifier, challenge } = pkce();
     const query = new URLSearchParams({
       response_type: "code",
@@ -40,11 +52,11 @@ describe("OAuth and the hosted MCP", () => {
     const started = await t.api(`/api/oauth/authorize?${query}`, { redirect: "manual" });
     expect(started.status).toBe(302);
     expect(started.headers.get("location")).toStartWith("/device/connect?");
-    const consent = await t.api(`/api/oauth/consent?${query}`, { cookie });
+    const consent = await t.api(`/api/oauth/consent?${query}`, { cookie: as });
     expect(consent.status).toBe(200);
     const decided = await t.api("/api/oauth/consent", {
       method: "POST",
-      cookie,
+      cookie: as,
       json: { approve: true, request: Object.fromEntries(query) },
     });
     expect(decided.status).toBe(200);
@@ -64,8 +76,8 @@ describe("OAuth and the hosted MCP", () => {
         ...overrides,
       }),
     });
-  const signInClient = async () => {
-    const { code, verifier } = await authorize();
+  const signInClient = async (as = cookie) => {
+    const { code, verifier } = await authorize({}, clientId, as);
     const response = await exchange(code, verifier);
     expect(response.status).toBe(200);
     return (await response.json()) as { access_token: string; refresh_token: string; scope: string };
@@ -74,19 +86,12 @@ describe("OAuth and the hosted MCP", () => {
     t.api("/api/oauth/token", {
       ...formBody({ grant_type: "refresh_token", refresh_token: token, client_id: clientId }),
     });
-  let id = 1;
   const mcp = (
     bearer: string | undefined,
     method: string,
     params: object = {},
     headers: Record<string, string> = {},
-  ) =>
-    t.api("/api/mcp", {
-      method: "POST",
-      bearer,
-      headers,
-      json: { jsonrpc: "2.0", id: id++, method, params },
-    });
+  ) => rpc(t, bearer, method, params, headers);
   const call = async (bearer: string, name: string, args: object = {}) => {
     const response = await mcp(bearer, "tools/call", { name, arguments: args });
     expect(response.status).toBe(200);
@@ -109,7 +114,9 @@ describe("OAuth and the hosted MCP", () => {
               },
       },
     );
-    owner = (await claim(t)).token;
+    const claimed = await claim(t);
+    owner = claimed.token;
+    orgId = claimed.orgId;
     cookie = await signIn(t, OWNER.email, OWNER.password);
     await publish(t, owner, {
       project: "game",
@@ -275,14 +282,14 @@ describe("OAuth and the hosted MCP", () => {
     });
     expect(foreign.status).toBe(403);
     const stale = await signIn(t, OWNER.email, OWNER.password);
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 60_000);
     const late = await t.api("/api/oauth/consent", {
       method: "POST",
       cookie: stale,
       json: { approve: true, request },
     });
     expect(late.status).toBe(401);
-    expect(((await late.json()) as { error: { code: string } }).error.code).toBe("recent_auth_required");
+    expect(await errorCode(late)).toBe("recent_auth_required");
     const no = await t.api("/api/oauth/consent", {
       method: "POST",
       cookie: stale,
@@ -429,18 +436,30 @@ describe("OAuth and the hosted MCP", () => {
     expect(response.headers.get("www-authenticate")).toContain('error="insufficient_scope", scope="comment"');
   });
 
-  test("a person's reset or removal ends their connectors", async () => {
-    const tokens = await signInClient();
-    const [org] = await t.server.db.query.org.findMany();
-    const member = (await makePerson(t, (org as { id: string }).id, "member")).token;
-    expect((await call(member, "artifacts_status", { artifact: "game/plan" })).isError).toBeUndefined();
-    const people = (await (await t.api("/api/people", { cookie })).json()) as {
-      people: { id: string; email: string }[];
-    };
-    const person = people.people.find((entry) => entry.email.startsWith("p"));
-    expect((await t.api(`/api/people/${person?.id}`, { method: "DELETE", cookie })).status).toBe(200);
-    expect((await mcp(member, "tools/list")).status).toBe(401);
-    expect((await mcp(tokens.access_token, "tools/list")).status).toBe(200);
+  test("a person's reset or removal ends their connectors, and nobody else's", async () => {
+    const ours = await signInClient();
+    const reset = await makeAccount(t, orgId, "member");
+    const removed = await makeAccount(t, orgId, "member");
+    const theirs = await signInClient(reset.cookie);
+    const gone = await signInClient(removed.cookie);
+    for (const tokens of [ours, theirs, gone])
+      expect((await mcp(tokens.access_token, "tools/list")).status).toBe(200);
+
+    const link = ResetLinkCreated.parse(
+      await (await t.api(`/api/people/${reset.id}/reset-link`, { method: "POST", cookie })).json(),
+    );
+    const used = await t.api(`/api/reset/${link.url.split("/reset/")[1]}`, {
+      method: "POST",
+      json: { password: PASSWORD },
+    });
+    expect(used.status).toBe(200);
+    expect((await t.api(`/api/people/${removed.id}`, { method: "DELETE", cookie })).status).toBe(200);
+
+    for (const tokens of [theirs, gone]) {
+      expect((await mcp(tokens.access_token, "tools/list")).status).toBe(401);
+      expect((await refresh(tokens.refresh_token)).status).toBe(400);
+    }
+    expect((await mcp(ours.access_token, "tools/list")).status).toBe(200);
   });
 
   test("both eras of the protocol work, and a mismatch or unknown version is refused", async () => {
@@ -519,9 +538,7 @@ describe("OAuth and the hosted MCP", () => {
       json: { permission: "comment" },
     });
     const { url } = (await link.json()) as { url: string };
-    const secret = url.split("/s/")[1] as string;
-    const guest = await t.api(`/api/s/${secret}/guest`, { method: "POST", json: { name: "Sam" } });
-    const guestCookie = (guest.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    const guestCookie = await joinAsGuest(t, url, "Sam");
     const thread = await t.api(`/api/artifacts/${artifactId}/threads`, {
       method: "POST",
       cookie: guestCookie,
