@@ -11,16 +11,15 @@ import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { type CallerFor, can } from "../auth/can.ts";
 import { type GoogleClaims, readIdToken } from "../auth/google.ts";
+import { acceptInvite, findLiveInvite, joinTeams } from "../auth/invites.ts";
 import { randomSecret, s256, sha256 } from "../auth/secrets.ts";
-import { isSecureRequest, startSession } from "../auth/sessions.ts";
+import { isSecureRequest, markReauthed, signInMethods, startSession } from "../auth/sessions.ts";
 import { isUniqueViolation, type OrgRow } from "../db/index.ts";
 import {
   activity,
   googleStates,
   identities,
   org as orgTable,
-  passkeys,
-  passwords,
   people,
   removedIdentities,
   sessions,
@@ -31,7 +30,6 @@ import { ApiError } from "../http/errors.ts";
 import { requestOrigin } from "../http/origins.ts";
 import { isUuid } from "../http/params.ts";
 import type { RouteRequest, Routes } from "../http/routes.ts";
-import { acceptInvite, findLiveInvite, joinTeams } from "./join.ts";
 
 export const CALLBACK_PATH = "/api/auth/google/callback";
 const COOKIE = "art_google";
@@ -347,7 +345,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
       .limit(1);
     if (!identity) return back(c, row.next, "mismatch");
     await db.update(identities).set(remember(claims)).where(eq(identities.id, identity.id));
-    await db.update(sessions).set({ authAt: clock.now() }).where(eq(sessions.id, caller.sessionId));
+    await markReauthed(deps, caller.sessionId);
     return back(c, row.next, "confirmed");
   }
 
@@ -429,10 +427,9 @@ export function googleRoutes(routes: Routes, deps: Deps) {
 
   routes.get("/api/me/identities", { action: "account.manage" }, async (c) => {
     const { id } = c.var.caller.person;
-    const [rows, keys, password] = await Promise.all([
+    const [rows, ways] = await Promise.all([
       db.select().from(identities).where(eq(identities.personId, id)),
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, id)),
-      db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, id)).limit(1),
+      signInMethods(deps, id),
     ]);
     return c.json({
       identities: rows.map((row) => ({
@@ -441,8 +438,8 @@ export function googleRoutes(routes: Routes, deps: Deps) {
         email: row.email,
         lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       })),
-      passkeys: keys.length,
-      password: password.length > 0,
+      passkeys: ways.passkeys,
+      password: ways.password,
       google: c.var.org.googleEnabled,
     } satisfies IdentityList);
   });
@@ -458,11 +455,8 @@ export function googleRoutes(routes: Routes, deps: Deps) {
           .limit(1)
       : [];
     if (!row) throw new ApiError("not_found", "Not found.");
-    const [keys, password] = await Promise.all([
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, personId)).limit(1),
-      db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, personId)).limit(1),
-    ]);
-    if (keys.length === 0 && password.length === 0) {
+    const ways = await signInMethods(deps, personId);
+    if (ways.passkeys === 0 && !ways.password) {
       throw new ApiError("conflict", "This is your only way to sign in. Add another first.");
     }
     await db.delete(identities).where(eq(identities.id, row.id));
@@ -471,12 +465,8 @@ export function googleRoutes(routes: Routes, deps: Deps) {
 
   /** Turning Google off with no other way in would leave nobody able to confirm it's them, or to undo it. */
   async function guardLockout(c: RouteRequest<CallerFor<"org.manage">>) {
-    const { id } = c.var.caller.person;
-    const [keys, password] = await Promise.all([
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, id)).limit(1),
-      db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, id)).limit(1),
-    ]);
-    if (keys.length === 0 && password.length === 0) {
+    const ways = await signInMethods(deps, c.var.caller.person.id);
+    if (ways.passkeys === 0 && !ways.password) {
       throw new ApiError("conflict", "Add a password or a passkey first, or you'd lose your way in.");
     }
   }

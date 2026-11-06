@@ -1,3 +1,4 @@
+import { DAY_MS } from "@artifacts/schema";
 import { and, eq, gt, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { findArtifacts } from "../auth/access.ts";
@@ -9,7 +10,6 @@ import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { encryptPayload, generateVapid, vapidHeader } from "./webpush.ts";
 
-const DAY = 24 * 3600_000;
 const DIGEST_GAP = 20 * 3600_000;
 const TIMEOUT_MS = 10_000;
 
@@ -70,7 +70,7 @@ async function send(
       Authorization: vapidHeader(new URL(row.endpoint).origin, deps.env.publicUrl, keys, deps.clock.now()),
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
-      TTL: String(DAY / 1000),
+      TTL: String(DAY_MS / 1000),
       Urgency: "normal",
     },
     body: encryptPayload(JSON.stringify(message), row.keys),
@@ -188,7 +188,7 @@ export const notifyReply = (
 export async function sendDigest(deps: Deps) {
   const current = await findOrg(deps.db);
   if (!current) return;
-  const since = new Date(deps.clock.now().getTime() - DAY);
+  const since = new Date(deps.clock.now().getTime() - DAY_MS);
   // A claim, so a restart or a second replica doesn't send it twice.
   const claimed = await deps.db
     .update(org)

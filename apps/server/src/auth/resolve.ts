@@ -1,3 +1,4 @@
+import { DAY_MS } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
@@ -18,7 +19,6 @@ import {
   setSessionCookie,
 } from "./sessions.ts";
 
-const DAY = 24 * 3600_000;
 const HOUR = 3600_000;
 
 /**
@@ -90,10 +90,10 @@ async function bySession(c: Context, deps: Deps, org: OrgRow, secret: string): P
     .limit(1);
   if (!row || row.session.expiresAt <= now) return null;
   const { session, person } = row;
-  if (now.getTime() - session.lastSeenAt.getTime() > DAY) {
+  if (now.getTime() - session.lastSeenAt.getTime() > DAY_MS) {
     await deps.db
       .update(sessions)
-      .set({ lastSeenAt: now, expiresAt: new Date(now.getTime() + SESSION_DAYS * DAY) })
+      .set({ lastSeenAt: now, expiresAt: new Date(now.getTime() + SESSION_DAYS * DAY_MS) })
       .where(eq(sessions.id, session.id));
     setSessionCookie(c, SESSION_COOKIE, secret, SESSION_DAYS, isSecureRequest(c, await deps.origins()));
   }

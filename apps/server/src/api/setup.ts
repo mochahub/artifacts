@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { RecoverResponse, SetupResponse } from "@artifacts/schema";
-import { DEFAULT_ORG_SETTINGS, RecoverRequest, SetupRequest } from "@artifacts/schema";
+import { DEFAULT_ORG_SETTINGS, RESET_HOURS, RecoverRequest, SetupRequest } from "@artifacts/schema";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { randomSecret, safeEqual, sha256 } from "../auth/secrets.ts";
 import { createCliToken, personView } from "../auth/sessions.ts";
@@ -91,7 +91,7 @@ export function setupRoutes(routes: Routes, deps: Deps) {
       tokenHash: sha256(secret),
       createdBy: null,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + HOUR),
+      expiresAt: new Date(now.getTime() + RESET_HOURS * HOUR),
     });
     await db.insert(activity).values({
       id: Bun.randomUUIDv7(),

@@ -9,8 +9,8 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
 import { bytes, type Passkeys } from "../auth/passkeys.ts";
-import { personView, startSession } from "../auth/sessions.ts";
-import { identities, passkeys, passwords } from "../db/schema.ts";
+import { personView, signInMethods, startSession } from "../auth/sessions.ts";
+import { passkeys, passwords } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
@@ -146,17 +146,9 @@ export function passkeyRoutes(routes: Routes, deps: Deps, keys: Passkeys) {
 
   routes.delete("/api/me/passkeys/:id", { action: "account.manage", recentAuth: true }, async (c) => {
     const row = await ownPasskey(c);
-    const [others, password, linked] = await Promise.all([
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, row.personId)),
-      db
-        .select({ id: passwords.personId })
-        .from(passwords)
-        .where(eq(passwords.personId, row.personId))
-        .limit(1),
-      db.select({ id: identities.id }).from(identities).where(eq(identities.personId, row.personId)),
-    ]);
-    const google = c.var.org.googleEnabled && linked.length > 0;
-    if (others.length <= 1 && password.length === 0 && !google) {
+    const ways = await signInMethods(deps, row.personId);
+    const google = c.var.org.googleEnabled && ways.google > 0;
+    if (ways.passkeys <= 1 && !ways.password && !google) {
       throw new ApiError("conflict", "This is your only way to sign in. Add another first.");
     }
     await db.delete(passkeys).where(eq(passkeys.id, row.id));

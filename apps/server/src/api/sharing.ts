@@ -1,5 +1,12 @@
 import type { ArtifactAccess, ShareLinkCreated } from "@artifacts/schema";
-import { AddAccess, CreateShareLink, GuestName, PatchArtifact, ShareWithTeam } from "@artifacts/schema";
+import {
+  AddAccess,
+  CreateShareLink,
+  DAY_MS,
+  GuestName,
+  PatchArtifact,
+  ShareWithTeam,
+} from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getCookie } from "hono/cookie";
 import { can, effective } from "../auth/can.ts";
@@ -30,9 +37,8 @@ import { artifactParam } from "../http/resources.ts";
 import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
 import { blobKey } from "../layout.ts";
 
-const DAY = 24 * 3600_000;
 const GUEST_DAYS = 90;
-const EXPIRES = { "1d": DAY, "7d": 7 * DAY, "30d": 30 * DAY };
+const EXPIRES = { "1d": DAY_MS, "7d": 7 * DAY_MS, "30d": 30 * DAY_MS };
 
 export function sharingRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock, limits } = deps;
@@ -235,7 +241,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
         tokenHash: sha256(secret),
         createdBy: me.id,
         createdAt: now,
-        expiresAt: new Date(now.getTime() + 7 * DAY),
+        expiresAt: new Date(now.getTime() + 7 * DAY_MS),
       });
       return c.json({ url: `${env.publicUrl}/join/${secret}` });
     },
@@ -488,7 +494,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     }
     if (!guest || !secret) throw new Error("no guest row");
     // 90 days from first use, and never past the link's own expiry (02).
-    const limit = now.getTime() + GUEST_DAYS * DAY;
+    const limit = now.getTime() + GUEST_DAYS * DAY_MS;
     const expiresAt = new Date(link.expiresAt ? Math.min(limit, link.expiresAt.getTime()) : limit);
     await db
       .insert(guestLinks)

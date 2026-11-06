@@ -4,7 +4,7 @@ import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { type LoadedProject, projectGrants } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { type CallerFor, can, capFor } from "../auth/can.ts";
-import { randomSecret, sha256 } from "../auth/secrets.ts";
+import { createInvite, findPersonByEmail } from "../auth/invites.ts";
 import {
   activity,
   artifacts,
@@ -24,13 +24,11 @@ import { isUuid } from "../http/params.ts";
 import { projectParam } from "../http/resources.ts";
 import type { RouteRequest, Routes } from "../http/routes.ts";
 
-const DAY = 24 * 3600_000;
-const INVITE_DAYS = 7;
 /** Enough names to recognise who a restriction shuts out, without listing the organization. */
 const NAMES_SHOWN = 5;
 
 export function projectRoutes(routes: Routes, deps: Deps) {
-  const { db, env, clock } = deps;
+  const { db, clock } = deps;
   const project = projectParam(deps);
 
   const record = (
@@ -258,17 +256,7 @@ export function projectRoutes(routes: Routes, deps: Deps) {
       const { email, permission } = await parseBody(c, AddProjectAccess);
       const orgId = place.row.orgId;
       const by = c.var.caller.person.id;
-      const [person] = await db
-        .select()
-        .from(people)
-        .where(
-          and(
-            eq(people.orgId, orgId),
-            sql`lower(${people.email}) = lower(${email})`,
-            isNull(people.removedAt),
-          ),
-        )
-        .limit(1);
+      const person = await findPersonByEmail(db, orgId, email);
       if (person) {
         outsideLevel(person, permission);
         await grantPerson(place, person.id, permission, by);
@@ -276,22 +264,16 @@ export function projectRoutes(routes: Routes, deps: Deps) {
         return c.json({ added: { id: person.id, name: person.name, permission } });
       }
       outsideLevel({ role: "outside" }, permission);
-      const secret = randomSecret();
-      const now = clock.now();
-      await db.insert(invites).values({
-        id: Bun.randomUUIDv7(),
+      const { url } = await createInvite(deps, {
         orgId,
         kind: "project",
         email,
         role: "outside",
         projectId: place.id,
         projectPermission: permission,
-        tokenHash: sha256(secret),
         createdBy: by,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + INVITE_DAYS * DAY),
       });
-      return c.json({ url: `${env.publicUrl}/join/${secret}` });
+      return c.json({ url });
     },
   );
 

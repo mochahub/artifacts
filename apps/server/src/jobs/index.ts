@@ -1,3 +1,4 @@
+import { DAY_MS } from "@artifacts/schema";
 import { and, gt, inArray, lt, sql } from "drizzle-orm";
 import { expireLogs } from "../data/logs.ts";
 import { recountUsage } from "../data/store.ts";
@@ -27,8 +28,7 @@ import { BLOBS, CROPS, DATA, hashOf, PLANS } from "../layout.ts";
 import { sendDigest } from "../push/notify.ts";
 import { purgeExpired } from "./purge.ts";
 
-const DAY = 24 * 3600_000;
-const GC_MIN_AGE_MS = DAY;
+const GC_MIN_AGE_MS = DAY_MS;
 const FIRST_RUN_MS = 60_000;
 
 /** Every hash still in use: a version's files, renders and pages, and a brand's fonts (05, "Collect garbage"). */
@@ -133,7 +133,7 @@ async function sweepOrphans(deps: Deps, cutoff: number) {
 /** Leftovers (05). */
 export async function expireLeftovers(deps: Deps) {
   const now = deps.clock.now();
-  const old = new Date(now.getTime() - 30 * DAY);
+  const old = new Date(now.getTime() - 30 * DAY_MS);
   await deps.db.delete(webauthnChallenges).where(lt(webauthnChallenges.expiresAt, now));
   await deps.db.delete(deviceCodes).where(lt(deviceCodes.expiresAt, now));
   await deps.db.delete(oauthCodes).where(lt(oauthCodes.expiresAt, now));
@@ -158,7 +158,7 @@ export async function expireLeftovers(deps: Deps) {
 
 /** Recounts usage for artifacts written since yesterday (08). */
 export async function recountRecent(deps: Deps) {
-  const since = new Date(deps.clock.now().getTime() - 2 * DAY);
+  const since = new Date(deps.clock.now().getTime() - 2 * DAY_MS);
   const rows = await deps.db
     .selectDistinct({ artifactId: artifactUsage.artifactId, orgId: artifactUsage.orgId })
     .from(artifactUsage)
@@ -197,7 +197,7 @@ export function startJobs(deps: Deps) {
   const tick = () => run().catch((error) => deps.log.error("jobs failed", { error: String(error) }));
   // Soon after boot too: a server redeployed daily would otherwise never reach its first run.
   const first = setTimeout(tick, FIRST_RUN_MS);
-  const timer = setInterval(tick, DAY);
+  const timer = setInterval(tick, DAY_MS);
   return () => {
     clearTimeout(first);
     clearInterval(timer);

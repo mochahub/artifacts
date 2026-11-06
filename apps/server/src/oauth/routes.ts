@@ -1,6 +1,7 @@
 import { OAUTH_SCOPES, type OAuthConsent, OAuthConsentDecision, type OAuthScope } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
+import { revokeGrant } from "../auth/revoke.ts";
 import { newApiToken, randomSecret, s256, safeEqual, sha256 } from "../auth/secrets.ts";
 import { findOrg } from "../db/index.ts";
 import { oauthClients, oauthCodes, oauthGrants, oauthRefreshTokens, tokens } from "../db/schema.ts";
@@ -66,16 +67,6 @@ function redirectTo(uri: string, origin: string, params: Record<string, string |
   for (const [key, value] of Object.entries(params)) if (value) url.searchParams.set(key, value);
   url.searchParams.set("iss", origin);
   return url.toString();
-}
-
-/** Ends a grant and everything issued from it. Replaying a used code or refresh token does this too. */
-export async function revokeGrant(deps: Pick<Deps, "db" | "clock">, grantId: string) {
-  const now = deps.clock.now();
-  await deps.db.update(oauthGrants).set({ revokedAt: now }).where(eq(oauthGrants.id, grantId));
-  await deps.db
-    .update(tokens)
-    .set({ revokedAt: now })
-    .where(and(eq(tokens.grantId, grantId), isNull(tokens.revokedAt)));
 }
 
 async function issueTokens(deps: Deps, grant: typeof oauthGrants.$inferSelect) {
@@ -232,7 +223,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         .where(and(eq(oauthCodes.id, row.id), isNull(oauthCodes.usedAt)))
         .returning({ id: oauthCodes.id });
       if (claimed.length === 0) {
-        await revokeGrant(deps, row.grantId);
+        await revokeGrant(db, row.grantId, clock.now());
         return oauthError(c, "invalid_grant", "That code was already used.");
       }
       const [grant] = await db.select().from(oauthGrants).where(eq(oauthGrants.id, row.grantId)).limit(1);
@@ -245,7 +236,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         grant.audience === audience &&
         safeEqual(s256(body.code_verifier ?? ""), row.codeChallenge);
       if (!good) {
-        await revokeGrant(deps, row.grantId);
+        await revokeGrant(db, row.grantId, clock.now());
         return oauthError(c, "invalid_grant", "That code doesn't match this request.");
       }
       return c.json(await issueTokens(deps, grant), 200, { "Cache-Control": "no-store" });
@@ -274,7 +265,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         .returning({ id: oauthRefreshTokens.id });
       if (claimed.length === 0) {
         // A rotated token came back: either side may hold a stolen copy, so neither keeps access.
-        await revokeGrant(deps, grant.id);
+        await revokeGrant(db, grant.id, clock.now());
         return oauthError(c, "invalid_grant", "That refresh token was already used.");
       }
       if (grant.revokedAt || token.expiresAt <= clock.now()) {
@@ -297,7 +288,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
       .from(oauthRefreshTokens)
       .where(and(eq(oauthRefreshTokens.orgId, orgId), eq(oauthRefreshTokens.tokenHash, hash)))
       .limit(1);
-    if (refresh) await revokeGrant(deps, refresh.grantId);
+    if (refresh) await revokeGrant(db, refresh.grantId, clock.now());
     await db
       .update(tokens)
       .set({ revokedAt: clock.now() })

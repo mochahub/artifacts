@@ -15,12 +15,22 @@ import {
   CreateOrgToken,
   OrgSettings,
   PatchOrg,
+  RESET_HOURS,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { projectGrants } from "../auth/access.ts";
 import type { Caller, CallerPerson } from "../auth/caller.ts";
 import { mayTouchRole, runsTheOrg, tokenLimits } from "../auth/can.ts";
+import {
+  acceptInvite,
+  createInvite,
+  findLiveInvite,
+  findPersonByEmail,
+  inviteExpiry,
+  inviteUrl,
+} from "../auth/invites.ts";
 import { isLiveLink } from "../auth/links.ts";
+import { endSignIns } from "../auth/revoke.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
 import type { Db } from "../db/index.ts";
@@ -38,7 +48,6 @@ import {
   projects,
   removedIdentities,
   resetLinks,
-  sessions,
   shareLinks,
   teamMembers,
   teams,
@@ -49,13 +58,9 @@ import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { isUuid } from "../http/params.ts";
 import type { ApiContext, RouteRequest, Routes } from "../http/routes.ts";
-import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
-import { acceptInvite, findLiveInvite } from "./join.ts";
 import { releaseCheck } from "./updates.ts";
 
-const HOUR = 3600_000;
-const INVITE_DAYS = 7;
 const SEARCH_RESULTS = 20;
 const SEARCHES_PER_MINUTE = 60;
 
@@ -64,7 +69,6 @@ type PersonRow = typeof people.$inferSelect;
 export function peopleRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock } = deps;
   const latestRelease = releaseCheck(deps);
-  const inviteUrl = (secret: string) => `${env.publicUrl}/join/${secret}`;
 
   async function target(c: RouteRequest) {
     const id = c.req.param("id");
@@ -311,7 +315,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         throw new ApiError("conflict", "There must always be an owner.");
       }
       await tx.update(people).set({ removedAt: now }).where(eq(people.id, person.id));
-      await tx.delete(sessions).where(eq(sessions.personId, person.id));
+      await endSignIns(tx, person.id, now);
       await tx.delete(teamMembers).where(eq(teamMembers.personId, person.id));
       await tx.delete(projectAccess).where(eq(projectAccess.personId, person.id));
       const linked = await tx.delete(identities).where(eq(identities.personId, person.id)).returning();
@@ -329,11 +333,6 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           .onConflictDoNothing();
       }
 
-      await tx
-        .update(tokens)
-        .set({ revokedAt: now })
-        .where(and(eq(tokens.personId, person.id), isNull(tokens.revokedAt)));
-      await revokeGrants(tx, person.id, now);
       await revokeIssued(tx, person.id, now);
       // What they created for others outlives their account unless it ends with it: an organization
       // token keeps acting as the organization, and a share link keeps admitting guests (04).
@@ -356,7 +355,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     await guardTokenReset(c.var.caller, person);
     const secret = randomSecret();
     const now = clock.now();
-    const expiresAt = new Date(now.getTime() + HOUR);
+    const expiresAt = new Date(now.getTime() + RESET_HOURS * 3600_000);
     await db.insert(resetLinks).values({
       id: Bun.randomUUIDv7(),
       orgId: person.orgId,
@@ -381,36 +380,17 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       if (known.length < new Set(body.teamIds).size)
         throw new ApiError("invalid", "That team doesn't exist.");
     }
-    const [taken] = await db
-      .select({ id: people.id })
-      .from(people)
-      .where(
-        and(
-          eq(people.orgId, orgId),
-          sql`lower(${people.email}) = lower(${body.email})`,
-          isNull(people.removedAt),
-        ),
-      )
-      .limit(1);
-    if (taken) throw new ApiError("conflict", "That person is already here.");
-    const secret = randomSecret();
-    const now = clock.now();
-    const [invite] = await db
-      .insert(invites)
-      .values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        kind: "org",
-        email: body.email,
-        role: body.role,
-        teamIds: body.teamIds?.length ? body.teamIds : null,
-        tokenHash: sha256(secret),
-        createdBy: c.var.caller.person.id,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + INVITE_DAYS * 24 * HOUR),
-      })
-      .returning();
-    if (!invite) throw new Error("no invite row");
+    if (await findPersonByEmail(db, orgId, body.email)) {
+      throw new ApiError("conflict", "That person is already here.");
+    }
+    const { invite, url } = await createInvite(deps, {
+      orgId,
+      kind: "org",
+      email: body.email,
+      role: body.role,
+      teamIds: body.teamIds?.length ? body.teamIds : null,
+      createdBy: c.var.caller.person.id,
+    });
     return c.json({
       invite: {
         id: invite.id,
@@ -418,7 +398,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         role: body.role,
         expiresAt: invite.expiresAt.toISOString(),
       },
-      url: inviteUrl(secret),
+      url,
     } satisfies InviteCreated);
   });
 
@@ -456,12 +436,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     const secret = randomSecret();
     await db
       .update(invites)
-      .set({
-        tokenHash: sha256(secret),
-        expiresAt: new Date(clock.now().getTime() + INVITE_DAYS * 24 * HOUR),
-      })
+      .set({ tokenHash: sha256(secret), expiresAt: inviteExpiry(clock.now()) })
       .where(eq(invites.id, row.id));
-    return c.json({ url: inviteUrl(secret) });
+    return c.json({ url: inviteUrl(env, secret) });
   });
 
   const liveInvite = (c: ApiContext) =>

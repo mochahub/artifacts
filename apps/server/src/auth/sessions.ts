@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import type { Db } from "../db/index.ts";
-import { type people, sessions, tokens } from "../db/schema.ts";
+import { identities, passkeys, passwords, type people, sessions, tokens } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { newApiToken, randomSecret, sha256 } from "./secrets.ts";
 
@@ -80,3 +80,17 @@ export const personView = (row: typeof people.$inferSelect) => ({
 /** A sign-in proved again just now: what "recent" means for the actions that ask for it (04). */
 export const markReauthed = (deps: Pick<Deps, "db" | "clock">, sessionId: string) =>
   deps.db.update(sessions).set({ authAt: deps.clock.now() }).where(eq(sessions.id, sessionId));
+
+/** The ways a person can prove it's them: passkeys, a password, and linked Google accounts. */
+export async function signInMethods(deps: Pick<Deps, "db">, personId: string) {
+  const [keys, password, google] = await Promise.all([
+    deps.db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, personId)),
+    deps.db
+      .select({ id: passwords.personId })
+      .from(passwords)
+      .where(eq(passwords.personId, personId))
+      .limit(1),
+    deps.db.select({ id: identities.id }).from(identities).where(eq(identities.personId, personId)),
+  ]);
+  return { passkeys: keys.length, password: password.length > 0, google: google.length };
+}

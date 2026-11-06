@@ -1,7 +1,8 @@
 import type { Me, PersonResponse, ResetPreview, SessionList } from "@artifacts/schema";
 import { ChangePassword, PASSWORD_MAX, PasswordSignIn, Reauth, ResetPassword } from "@artifacts/schema";
-import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import type { Passkeys } from "../auth/passkeys.ts";
+import { endSignIns, revokeGrant } from "../auth/revoke.ts";
 import { sha256 } from "../auth/secrets.ts";
 import { clearCookie, markReauthed, personView, SESSION_COOKIE, startSession } from "../auth/sessions.ts";
 import {
@@ -18,7 +19,6 @@ import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import type { ApiContext, Routes } from "../http/routes.ts";
-import { revokeGrants } from "../oauth/revoke.ts";
 
 /** Verifying against this when the email is unknown keeps both answers the same speed. */
 const dummyHash = Bun.password.hash("not a real password", { algorithm: "argon2id" });
@@ -163,8 +163,8 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
       .returning({ id: sessions.id });
     if (ended.length > 0) return c.json({ ok: true });
     const [grant] = await db
-      .update(oauthGrants)
-      .set({ revokedAt: clock.now() })
+      .select({ id: oauthGrants.id })
+      .from(oauthGrants)
       .where(
         and(
           eq(oauthGrants.id, id),
@@ -172,8 +172,11 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
           isNull(oauthGrants.revokedAt),
         ),
       )
-      .returning({ id: oauthGrants.id });
-    if (grant) return c.json({ ok: true });
+      .limit(1);
+    if (grant) {
+      await revokeGrant(db, grant.id, clock.now());
+      return c.json({ ok: true });
+    }
     const revoked = await db
       .update(tokens)
       .set({ revokedAt: clock.now() })
@@ -255,18 +258,7 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
     // Org tokens aren't personal, so they stay.
     const now = clock.now();
     await db.transaction(async (tx) => {
-      await tx.delete(sessions).where(eq(sessions.personId, person.id));
-      await tx
-        .update(tokens)
-        .set({ revokedAt: now })
-        .where(
-          and(
-            eq(tokens.personId, person.id),
-            inArray(tokens.kind, ["cli", "oauth"]),
-            isNull(tokens.revokedAt),
-          ),
-        );
-      await revokeGrants(tx, person.id, now);
+      await endSignIns(tx, person.id, now);
       await tx.delete(passkeyRows).where(eq(passkeyRows.personId, person.id));
       await tx.delete(identities).where(eq(identities.personId, person.id));
     });
