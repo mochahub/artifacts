@@ -564,7 +564,9 @@ export const PageRecord = z.object({
     boards: z.array(BoardRecord).optional(),
     device: z.string().optional(),
     livePath: z.string().optional(),
-    items: z.array(z.object({ hash: Sha256, caption: z.string().optional() })).optional(),
+    items: z
+      .array(z.object({ hash: Sha256, caption: z.string().optional(), type: z.string().optional() }))
+      .optional(),
   }),
 });
 export type PageRecord = z.infer<typeof PageRecord>;

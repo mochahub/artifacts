@@ -210,6 +210,49 @@ describe("publishing", () => {
     expect(await error(commit)).toBe("invalid");
   });
 
+  test("a gallery keeps each item's type, so a video plays as one (SPEC §2: images or video)", async () => {
+    const clip = file("clip.mp4", "not really a video", "video/mp4");
+    const prepared = await t.api("/api/publish/prepare", {
+      method: "POST",
+      bearer: owner.token,
+      json: {
+        project: "camerabuddy",
+        slug: "reel",
+        title: "Reel",
+        files: [{ path: clip.path, sha256: clip.sha256, size: clip.size, type: clip.type }],
+      },
+    });
+    const ready = PublishPrepared.parse(await prepared.json());
+    for (const missing of ready.missing) {
+      await fetch(missing.url, { method: "PUT", headers: missing.headers, body: clip.body });
+    }
+    const committed = await t.api("/api/publish/commit", {
+      method: "POST",
+      bearer: owner.token,
+      json: {
+        uploadId: ready.uploadId,
+        files: { [clip.path]: { hash: clip.sha256, size: clip.size, type: clip.type } },
+        pages: [
+          {
+            key: "reel",
+            kind: "gallery",
+            title: "Reel",
+            group: null,
+            position: 0,
+            meta: { items: [{ hash: clip.sha256, type: "video/mp4", caption: "Take one" }] },
+          },
+        ],
+        frames: [],
+        blocks: [],
+      },
+    });
+    expect(committed.status).toBe(200);
+    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "reel"));
+    const version = await t.api(`/api/artifacts/${row?.id}/versions/1`, { bearer: owner.token });
+    const { pages } = (await version.json()) as { pages: { meta: { items: unknown[] } }[] };
+    expect(pages[0]?.meta.items).toEqual([{ hash: clip.sha256, type: "video/mp4", caption: "Take one" }]);
+  });
+
   test("commit takes no more files than prepare does", async () => {
     const prepared = await t.api("/api/publish/prepare", {
       method: "POST",
