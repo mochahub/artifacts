@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { capOutput } from "../src/commands/mcp.ts";
-import { artifactRef } from "../src/commands/review.ts";
 import { saveServer } from "../src/config.ts";
 import { UsageError } from "../src/output.ts";
+import { artifactRef } from "../src/target.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
 // Every one of these stops before a request is made, so none needs a server.
@@ -39,6 +39,21 @@ describe("arguments that end up in a URL or a port", () => {
       const result = await cli(args, box.env);
       expect(result.code).toBe(2);
     }
+  });
+
+  test("each command takes its own flags, and --version is a number where it names a version", async () => {
+    const box = sandbox();
+    const other = await cli(["status", "--docker"], box.env);
+    expect(other.code).toBe(2);
+    expect(other.stderr).toContain("--docker");
+    expect((await cli(["status", "--version"], box.env)).stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect((await cli(["read", "demo/small", "--version=x"], box.env)).stderr).toContain(
+      '--version must be a number, not "x"',
+    );
+    // Global flags before the command still count.
+    expect((await cli(["--json", "search", "x"], box.env)).stderr).toContain(
+      "Usage: artifacts search <words>",
+    );
   });
 
   test("init does not take an object's own name for a kind", async () => {

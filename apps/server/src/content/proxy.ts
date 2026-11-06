@@ -1,3 +1,4 @@
+import { type DataOp, preflight, runBackend as runInSandbox } from "@artifacts/sandbox";
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { findArtifact } from "../auth/access.ts";
@@ -16,28 +17,10 @@ import { PreconditionFailed } from "../s3.ts";
 import type { SandboxPool } from "../sandbox/pool.ts";
 import type { ContentPayload } from "./token.ts";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "content-type",
-  "Access-Control-Max-Age": "600",
-};
 const MINUTE = 60_000;
 const LOG_BYTES_PER_MINUTE = 1024 * 1024;
-const MAX_LOG_LINE = 8192;
-/** Only these reach the browser: a backend can't set cookies, or anything else on the content origin. */
-const SAFE_HEADERS = new Set(["content-type", "etag", "last-modified"]);
 
-export const corsPreflight = () => new Response(null, { status: 204, headers: CORS });
-
-type Op = {
-  op: "get" | "put" | "delete" | "list";
-  key?: string;
-  prefix?: string;
-  cursor?: string;
-  value?: unknown;
-  ifMatch?: string;
-};
+export const corsPreflight = preflight;
 
 /** `votes` means shared/votes; a backend may also name `shared/…`, `me/<id>/…` or `files/…` (08). */
 const objectPath = (artifactId: string, key: string) => {
@@ -59,9 +42,8 @@ async function applyData(
     readOnly: boolean;
     limits: Awaited<ReturnType<typeof orgOf>>["settings"]["limits"];
   },
-  raw: string,
+  op: DataOp,
 ) {
-  const op = JSON.parse(raw) as Op;
   if (op.op === "get") {
     const object = await deps.bucket.get(objectPath(scope.artifactId, op.key ?? "").key);
     if (!object) return { value: null };
@@ -112,10 +94,6 @@ const orgOf = async (deps: Deps) => {
   if (!org) throw new ApiError("not_found", "Not found.");
   return org;
 };
-
-/** One line for backend_logs: no NUL, which Postgres refuses, and capped in bytes. */
-const logLine = (message: string) =>
-  Buffer.from(message.replaceAll("\0", "")).subarray(0, MAX_LOG_LINE).toString();
 
 /** Runs a version's backend (08, "Request flow"). The content port has already checked the token. */
 export async function runBackend(
@@ -169,29 +147,23 @@ export async function runBackend(
     canComment,
     isPublisher: payload.c.isPublisher,
   };
-  const url = new URL(c.req.url);
-  const { response, logs } = await pool.run({
-    artifactId: payload.a,
+  const { response, logs } = await runInSandbox({
+    run: (job) => pool.run(payload.a, job),
     hash,
     code: () => code,
-    limits: {
-      timeoutMs: limits.backendTimeoutMs,
-      memoryMb: limits.backendMemoryMb,
-      dataOpBytes: limits.dataValueBytes + 1024,
-    },
+    limits,
+    // The backend's X-Caller is this, never the client's own (08).
+    caller: identity,
     request: {
-      url: `https://backend.invalid/api/${path}${url.search}`,
       method: c.req.method,
-      headers: {
-        ...(c.req.header("content-type") ? { "content-type": c.req.header("content-type") as string } : {}),
-        // Set here, so a client's own X-Caller never reaches the backend (08).
-        "x-caller": JSON.stringify(identity),
-      },
+      path,
+      search: new URL(c.req.url).search,
+      contentType: c.req.header("content-type") ?? null,
       body,
     },
-    onData: async (raw: unknown) => {
+    onData: async (op) => {
       try {
-        return await applyData(deps, scope, raw as string);
+        return await applyData(deps, scope, op);
       } catch (error) {
         if (error instanceof PreconditionFailed)
           return { error: { code: "precondition_failed", message: error.message } };
@@ -201,14 +173,13 @@ export async function runBackend(
     },
   });
 
-  const lines = logs.slice(0, 100).map((line) => ({ level: line.level, message: logLine(line.message) }));
-  const bytes = lines.reduce((sum, line) => sum + Buffer.byteLength(line.message), 0);
-  if (lines.length > 0 && deps.limits.spend(`logs:${payload.a}`, bytes, LOG_BYTES_PER_MINUTE, MINUTE)) {
+  const bytes = logs.reduce((sum, line) => sum + Buffer.byteLength(line.message), 0);
+  if (logs.length > 0 && deps.limits.spend(`logs:${payload.a}`, bytes, LOG_BYTES_PER_MINUTE, MINUTE)) {
     // A log that can't be saved isn't this request's failure.
     await deps.db
       .insert(backendLogs)
       .values(
-        lines.map((line) => ({
+        logs.map((line) => ({
           ...line,
           id: Bun.randomUUIDv7(),
           orgId: org.id,
@@ -221,23 +192,5 @@ export async function runBackend(
       .catch((error) => deps.log.warn(`couldn't save backend logs: ${error}`));
   }
 
-  const refused = (message: string) =>
-    new Response(JSON.stringify({ error: message }), {
-      status: 502,
-      headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  // The answer is whatever the backend's own code made of it, so no part of it can be assumed valid.
-  try {
-    if (typeof response.body !== "string") throw new TypeError("The body isn't text.");
-    if (Buffer.byteLength(response.body) > limits.backendResponseBytes) {
-      return refused("The response is too big.");
-    }
-    // A caller's own answer, so nothing between here and them may keep it.
-    const headers = new Headers({ ...CORS, "Cache-Control": "no-store" });
-    for (const [name, value] of response.headers)
-      if (SAFE_HEADERS.has(name.toLowerCase())) headers.set(name, value);
-    return new Response(response.body, { status: response.status, headers });
-  } catch {
-    return refused("The backend gave an answer that can't be sent.");
-  }
+  return response;
 }

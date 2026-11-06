@@ -1,26 +1,29 @@
-import { ProjectAccessList, TeamDetail, TeamList } from "@artifacts/schema";
+import {
+  INVITE_DAYS,
+  type InviteCreated,
+  ProjectAccessList,
+  SLUG_PATTERN,
+  TeamDetail,
+  TeamList,
+} from "@artifacts/schema";
+import type { z } from "zod";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
+import type { Input } from "../command.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-import { resolveArtifact } from "./review.ts";
+import { signedIn } from "../session.ts";
+import { resolveArtifact } from "../target.ts";
 
 export async function orgCommand(
-  sub: string | undefined,
-  email: string | undefined,
-  flags: { role?: string; server?: string },
+  { args: { sub, email }, flags, usage }: Input<"sub" | "email", { role?: string; server?: string }>,
   out: Output,
 ) {
-  if (!email || (sub !== "invite" && sub !== "reset-link")) {
-    throw new UsageError(
-      "Usage: artifacts org invite <email> [--role member|reviewer|admin] | org reset-link <email>",
-    );
-  }
+  if (!email || (sub !== "invite" && sub !== "reset-link")) throw usage();
   const client = await signedIn(flags.server);
   if (sub === "invite") {
     const role = flags.role ?? "member";
-    const { url } = await client.post<{ url: string }>("/api/invites", { email, role });
+    const { url } = await client.post<z.infer<typeof InviteCreated>>("/api/invites", { email, role });
     return out.result({ url, email, role }, () => {
-      out.say(`✓ Invite for ${email} (${role}), works once, expires in 7 days`);
+      out.say(`✓ Invite for ${email} (${role}), works once, expires in ${INVITE_DAYS} days`);
       out.say(`  ${url}   send this yourself; nothing was emailed`);
     });
   }
@@ -33,8 +36,8 @@ export async function orgCommand(
   out.result({ url, expiresAt }, () => out.say(`Works once, for one hour:\n  ${url}`));
 }
 
-export async function teamsCommand(server: string | undefined, out: Output) {
-  const client = await signedIn(server);
+export async function teamsCommand({ flags }: Input<never, { server?: string }>, out: Output) {
+  const client = await signedIn(flags.server);
   const { teams } = TeamList.parse(await client.get("/api/teams"));
   out.result({ teams }, () => {
     if (teams.length === 0) out.say("No teams yet. Admins make them in Settings, Teams.");
@@ -56,17 +59,15 @@ const LEVEL_WORDS = {
 
 /** Who has a project. Read-only: tokens can't change it (04). */
 export async function projectCommand(
-  sub: string | undefined,
-  target: string | undefined,
-  server: string | undefined,
+  { args: { sub, project: named }, flags, usage }: Input<"sub" | "project", { server?: string }>,
   out: Output,
 ) {
-  if (sub !== "access") throw new UsageError("Usage: artifacts project access [<project>]");
-  const project = target ?? loadManifest(findRoot()).manifest?.project;
-  if (!project || !/^[a-z0-9-]{1,40}$/.test(project)) {
+  if (sub !== "access") throw usage();
+  const project = named ?? loadManifest(findRoot()).manifest?.project;
+  if (!project || !SLUG_PATTERN.test(project)) {
     throw new UsageError("Name a project: artifacts project access <project>");
   }
-  const client = await signedIn(server);
+  const client = await signedIn(flags.server);
   const access = ProjectAccessList.parse(await client.get(`/api/projects/${project}/access`));
   out.result(access, () => {
     out.say(
@@ -89,13 +90,11 @@ export async function projectCommand(
 }
 
 export async function visibilityCommand(
-  value: string | undefined,
-  target: string | undefined,
-  server: string | undefined,
+  { args: { value, target }, flags, usage }: Input<"value" | "target", { server?: string }>,
   out: Output,
 ) {
-  if (value !== "org" && value !== "me") throw new UsageError("Usage: artifacts visibility org|me");
-  const client = await signedIn(server);
+  if (value !== "org" && value !== "me") throw usage();
+  const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, target);
   await client.request("PATCH", `/api/artifacts/${artifact.id}`, { visibility: value });
   out.result({ visibility: value }, () =>
@@ -106,28 +105,30 @@ export async function visibilityCommand(
 }
 
 export async function shareCommand(
-  target: string | undefined,
-  flags: {
-    link?: boolean;
-    invite?: string;
-    team?: string;
-    comment?: boolean;
-    publish?: boolean;
-    expires?: string;
-    server?: string;
-  },
+  {
+    args: { target },
+    flags,
+    usage,
+  }: Input<
+    "target",
+    {
+      link?: boolean;
+      invite?: string;
+      team?: string;
+      comment?: boolean;
+      publish?: boolean;
+      expires?: string;
+      server?: string;
+    }
+  >,
   out: Output,
 ) {
-  if (!flags.link && !flags.invite && !flags.team) {
-    throw new UsageError(
-      "Usage: artifacts share --link [--comment] [--expires 1d|7d|30d] | --invite <email> [--comment|--publish] | --team <slug> [--comment]",
-    );
-  }
+  if (!flags.link && !flags.invite && !flags.team) throw usage();
   if (flags.team && flags.publish) {
     throw new UsageError("Only a person can let a team publish. Use the Share sheet.");
   }
   // It lands in a URL, so only a slug passes.
-  if (flags.team && !/^[a-z0-9-]{1,40}$/.test(flags.team)) {
+  if (flags.team && !SLUG_PATTERN.test(flags.team)) {
     throw new UsageError(`--team wants a team's slug, not "${flags.team}". See artifacts teams.`);
   }
   const client = await signedIn(flags.server);

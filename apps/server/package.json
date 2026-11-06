@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
-    "build": "bun build src/index.ts --target=bun --external sharp --outfile=dist/server.js && cp ../../packages/sandbox/src/child.js dist/sandbox-child.js && cp ../../packages/sandbox/src/prelude.js dist/sandbox-prelude.js",
+    "build": "bun build src/index.ts --target=bun --external sharp --outfile=dist/server.js && cp ../../packages/sandbox/src/child.js ../../packages/sandbox/src/prelude.js dist/",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

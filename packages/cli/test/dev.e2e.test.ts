@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { testPort } from "../../../apps/server/test/helpers.ts";
+import { coalesced } from "../src/commands/dev.ts";
 import { copyFixture, sandbox, start } from "./sandbox.ts";
 
 describe("artifacts dev", () => {
@@ -26,7 +27,8 @@ describe("artifacts dev", () => {
       backend,
       readFileSync(backend, "utf8").replace(
         "const who = caller(request);",
-        `if (request.url.endsWith("/escape")) {
+        `if (request.url.includes("/echo")) return Response.json({ url: request.url });
+    if (request.url.endsWith("/escape")) {
       const code = await env.DATA.put("../../escaped.json", 1).catch((error) => error.code);
       return Response.json({ code });
     }
@@ -95,6 +97,11 @@ describe("artifacts dev", () => {
     expect(stored.by.local).toBe("b");
   });
 
+  test("a backend sees the query string, as it does on the server", async () => {
+    const echo = await fetch(`${content}/v1/api/echo?x=1&y=two`);
+    expect(((await echo.json()) as { url: string }).url).toBe("https://backend.invalid/api/echo?x=1&y=two");
+  });
+
   test("a backend's keys and the local store can't leave the data folder", async () => {
     const up = await fetch(`${content}/v1/api/escape`, { method: "POST", body: "{}" });
     expect(await up.json()).toEqual({ code: "invalid" });
@@ -131,4 +138,21 @@ describe("artifacts dev", () => {
     }
     throw new Error("no new version");
   }, 40_000);
+});
+
+describe("rebuilding on change", () => {
+  test("a change made while a rebuild runs is built once that one ends, not dropped", async () => {
+    const runs: number[] = [];
+    let release = () => {};
+    const build = coalesced(async () => {
+      runs.push(runs.length);
+      if (runs.length === 1) await new Promise<void>((done) => (release = done));
+    });
+    const first = build();
+    await build();
+    await build();
+    release();
+    await first;
+    expect(runs).toEqual([0, 1]);
+  });
 });

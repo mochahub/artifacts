@@ -63,7 +63,7 @@ export async function offerStageshow(yes: boolean | undefined, out: Output) {
     out.say("It's third party: Benji Taylor makes it, and it isn't part of Artifacts or maintained by us.");
     out.say("It would run with your agent's permissions, and it needs React and a bundler to build scenes.");
     out.say(`Source: ${SOURCE}`);
-    if (!(await confirm("Install Stageshow?", false).catch(() => false))) return;
+    if (!(await confirm("Install Stageshow?", { enter: false, unattended: false }))) return;
   }
   await run(out);
 }

@@ -4,73 +4,56 @@
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { webkit } from "playwright-core";
 import sharp from "sharp";
+import { localData, localSandbox, runBackend } from "./host.js";
 
 const job = JSON.parse(readFileSync(process.argv[2], "utf8"));
 
-/** A backend, run the same way as on the server, against the fixtures and read-only (05). */
-let sandbox = null;
-let sandboxId = 0;
-async function runBackend(request, path) {
-  if (!job.backend) return new Response("no backend", { status: 404 });
-  const { startChild } = await import("./sandbox-host.js");
-  const dir = dirname(process.argv[1]);
-  sandbox ??= startChild({
-    childPath: join(dir, "sandbox-child.js"),
-    prelude: readFileSync(join(dir, "sandbox-prelude.js"), "utf8"),
-  });
-  await sandbox.up;
-  const code = readFileSync(job.backend, "utf8");
-  const { response } = await sandbox.run({
-    id: ++sandboxId,
+/**
+ * The fixtures as env.DATA sees them: `shared` under shared/, and `me` under this caller's own me/<id>/.
+ * Writes change nothing, so a render can't depend on what an earlier one did (05).
+ */
+function fixtureStore(fixtures, callerId) {
+  const stored = new Map([
+    ...Object.entries(fixtures.shared ?? {}).map(([key, value]) => [`shared/${key}`, value]),
+    ...Object.entries(fixtures.me ?? {}).map(([key, value]) => [`me/${callerId}/${key}`, value]),
+  ]);
+  return {
+    keys: () => [...stored.keys()],
+    get: (key) => (stored.has(key) ? { value: stored.get(key), etag: "fixture" } : undefined),
+    etag: (key) => (stored.has(key) ? "fixture" : null),
+    put: () => "fixture",
+    delete: () => {},
+  };
+}
+
+/** A backend, run the same way as on the server, against the fixtures (05). */
+const sandbox = localSandbox();
+async function backend(request, path, search) {
+  const code = readFileSync(job.backend.path, "utf8");
+  const { response } = await runBackend({
+    run: sandbox.run,
     hash: sha256(code),
     code: () => code,
-    limits: { timeoutMs: 10_000, memoryMb: 64 },
+    limits: job.backend.limits,
+    caller: job.backend.caller,
     request: {
-      url: `https://backend.invalid/${path}`,
       method: request.method,
-      headers: {
-        "content-type": request.headers.get("content-type") ?? "",
-        "x-caller": JSON.stringify({
-          id: "preview",
-          name: "Preview",
-          kind: "member",
-          canComment: false,
-          isPublisher: false,
-        }),
-      },
+      path,
+      search,
+      contentType: request.headers.get("content-type"),
       body: await request.text(),
     },
-    onData: async (raw) => {
-      const op = JSON.parse(raw);
-      if (op.op === "get") return { value: job.fixtures.shared?.[op.key] ?? null };
-      if (op.op === "list") return { value: Object.keys(job.fixtures.shared ?? {}) };
-      return { value: true };
-    },
+    onData: localData(fixtureStore(job.fixtures, job.backend.caller.id)),
   });
-  return new Response(response.body, { status: response.status, headers: new Headers(response.headers) });
+  return response;
 }
 const SCALES = [1, 2, 3];
 const VIEWPORT = { width: 1600, height: 1200 };
 const NOW = new Date("2026-01-01T09:41:00").getTime();
 const sha256 = (data) => createHash("sha256").update(data).digest("hex");
-
-const TYPES = {
-  ".html": "text/html",
-  ".css": "text/css",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2",
-  ".woff": "font/woff",
-  ".json": "application/json",
-};
 
 const realRoot = realpathSync(job.root);
 const inside = (path) => path.startsWith(realRoot + sep);
@@ -81,10 +64,11 @@ const server = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
   async fetch(request) {
-    const path = decodeURIComponent(new URL(request.url).pathname).slice(1);
+    const url = new URL(request.url);
+    const path = decodeURIComponent(url.pathname).slice(1);
     const generated = pagesByPath.get(path);
-    const api = /(?:^|\/)(api\/.*)$/.exec(path);
-    if (api && job.backend) return runBackend(request, api[1]);
+    const api = /(?:^|\/)api\/(.*)$/.exec(path);
+    if (api && job.backend) return backend(request, api[1], url.search);
     if (generated) return new Response(generated, { headers: { "Content-Type": "text/html" } });
     // Only files that really live under the bundle: "/..%2Froot-x/secret" is a sibling folder whose
     // name starts the same, and a link in the bundle may lead anywhere. The page's own script asks here.
@@ -92,23 +76,14 @@ const server = Bun.serve({
     if (!inside(resolve(realRoot, path)) || !(await file.exists()) || !inside(realpathSync(file.name))) {
       return new Response("missing", { status: 404 });
     }
-    const type = TYPES[path.slice(path.lastIndexOf(".")).toLowerCase()] ?? "application/octet-stream";
+    const type = job.types[path.slice(path.lastIndexOf(".")).toLowerCase()] ?? "application/octet-stream";
     return new Response(file, { headers: { "Content-Type": type } });
   },
 });
 const origin = `http://127.0.0.1:${server.port}`;
 
-const relativeUp = (dir) =>
-  dir === "."
-    ? ""
-    : `${dir
-        .split("/")
-        .map(() => "..")
-        .join("/")}/`;
-
 function boardPage(board) {
-  const dir = dirname(board.src);
-  const up = relativeUp(dir);
+  const { up } = board;
   const body = readFileSync(join(job.root, board.src), "utf8");
   return `<!doctype html><html><head><meta charset="utf-8">
 ${board.styles.map((path) => `<link rel="stylesheet" href="${up}${path}">`).join("\n")}
@@ -128,14 +103,14 @@ const determinism = (fixtures, seed, now) => `
   { let state = ${[...seed].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) | 0, 7)} >>> 0;
     Math.random = () => { state = (state * 1664525 + 1013904223) >>> 0; return state / 4294967296; }; }`;
 
-async function openBoard(browser, board, scale, failures, fixtures = job.fixtures) {
+async function openBoard(browser, board, scale, failures) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: scale,
     reducedMotion: "reduce",
   });
   const page = await context.newPage();
-  await page.addInitScript(determinism(fixtures, board.key, NOW));
+  await page.addInitScript(determinism(job.fixtures, board.key, NOW));
   await page.route("**", (route) => {
     if (route.request().url().startsWith(origin)) return route.continue();
     failures.add(route.request().url());
@@ -352,16 +327,6 @@ async function renderBoard(browser, board, problems) {
       }
     }
     await context.close();
-    if (Object.keys(job.fixtures.shared ?? {}).length + Object.keys(job.fixtures.me ?? {}).length > 0) {
-      const empty = await openBoard(browser, board, 1, new Set(), {});
-      for (const frame of frames) {
-        const png = await empty.page
-          .locator(`[data-frame="${frame.id}"]`)
-          .screenshot({ animations: "disabled" });
-        frame.readsData = (await rawHash(png)) !== frame.contentHash;
-      }
-      await empty.context.close();
-    }
   }
   return frames;
 }
@@ -504,6 +469,6 @@ try {
   writeFileSync(join(job.out, "result.json"), JSON.stringify(result));
 } finally {
   await browser.close();
-  sandbox?.kill();
+  sandbox.kill();
   server.stop(true);
 }

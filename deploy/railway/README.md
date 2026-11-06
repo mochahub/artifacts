@@ -1,6 +1,6 @@
 # The Railway template
 
-`artifacts setup` deploys this with `railway deploy --template <code>`, using `TEMPLATE` in `packages/cli/src/railway/setup.ts`. A template doesn't need to be published for that. `ARTIFACTS_RAILWAY_TEMPLATE` overrides it.
+`artifacts setup` deploys this with `railway deploy --template <code>`, using `TEMPLATE` in `packages/cli/src/railway/cli.ts`. A template doesn't need to be published for that. `ARTIFACTS_RAILWAY_TEMPLATE` overrides it.
 
 ## What it holds
 
@@ -34,6 +34,6 @@ Railway drops plain values when it makes a template, so `S3_FORCE_PATH_STYLE` an
 2. `railway templates create --project <project> --json` makes an unpublished draft.
 3. Check in the template editor that the bucket, both domains and `${{secret()}}` survived.
 4. Test it: `railway init --name test`, then `railway deploy --template <code>`.
-5. `railway templates publish`, then set the template's code as the default in `packages/cli/src/railway/setup.ts`.
+5. `railway templates publish`, then set the template's code as the default in `packages/cli/src/railway/cli.ts`.
 
 A template stays on the image it was made from. `artifacts setup` moves a new server to the CLI's own version straight after deploying, so the template doesn't need remaking for each release. The Deploy button gives you the pinned image, and `artifacts upgrade --server` moves it on.

@@ -9,8 +9,6 @@ import {
 
 const MAX_INSTANCES = 16;
 const IDLE_MS = 10 * 60_000;
-const MAX_LOG_LINES = 100;
-const MAX_LOG_BYTES = 8192;
 const MB = 1024 * 1024;
 const PAGE = 65536;
 const MAX_DATA_AT_ONCE = 8;
@@ -52,8 +50,11 @@ async function load(hash, code, prelude, limits) {
   const host = ctx.newObject();
   const log = ctx.newFunction("log", (level, text) => {
     const run = instance.current;
-    if (run && run.logs.length < MAX_LOG_LINES) {
-      run.logs.push({ level: ctx.getString(level), message: ctx.getString(text).slice(0, MAX_LOG_BYTES) });
+    if (run && run.logs.length < run.limits.logLines) {
+      run.logs.push({
+        level: ctx.getString(level),
+        message: ctx.getString(text).slice(0, run.limits.logBytes),
+      });
     }
   });
   const data = ctx.newFunction("data", (json) => {
@@ -149,6 +150,7 @@ async function run(message) {
   instance.lastUsed = started;
   const current = {
     id,
+    limits,
     logs,
     dataCalls: 0,
     dataActive: 0,

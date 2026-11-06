@@ -1,18 +1,22 @@
 import { readFileSync, rmSync } from "node:fs";
 import { LibraryProjects, UNTRUSTED_NOTICE } from "@artifacts/schema";
-import { repoRoot } from "../bundle/manifest.ts";
+import { gitRepo, repoRoot } from "../git.ts";
+import { findClient } from "../session.ts";
 import { VERSION } from "../version.ts";
-import { findClient } from "./account.ts";
-import { gitRepo } from "./write.ts";
+import { commandNamed } from "./table.ts";
+
+/** `--name=<value>`, for a flag the command declares in the table, and only in the expected form. */
+type Flag = (name: string, value: unknown, form: RegExp, label: string) => string[];
 
 type Tool = {
   name: string;
   description: string;
+  command: string;
   properties: Record<string, { type: string; description: string }>;
   required?: string[];
   /** The answer can hold what other people wrote (UNTRUSTED_NOTICE). */
   untrusted?: boolean;
-  args(input: Record<string, unknown>): string[];
+  args(input: Record<string, unknown>, flag: Flag): string[];
 };
 
 const target = { type: "string", description: "project/artifact, or nothing for this folder's artifact" };
@@ -43,19 +47,23 @@ const listPath = (value: unknown) => {
   throw new BadArguments("path must look like project, project/artifact or project/artifact/page.");
 };
 
-/** A value for `--name=<value>`, so it stays one argument whatever it holds, and of the expected form. */
-const flag = (name: string, value: unknown, form: RegExp, label: string) => {
-  if (value === undefined || value === "" || value === null) return [];
-  const text = String(value);
-  if (!form.test(text)) throw new BadArguments(`${label} isn't valid.`);
-  return [`--${name}=${text}`];
-};
+/** One argument whatever it holds, so a value can't become a second flag. */
+const flagFor =
+  (command: string): Flag =>
+  (name, value, form, label) => {
+    if (commandNamed(command)?.options[name]?.type !== "string")
+      throw new Error(`${command} has no --${name}`);
+    if (value === undefined || value === "" || value === null) return [];
+    const text = String(value);
+    if (!form.test(text)) throw new BadArguments(`${label} isn't valid.`);
+    return [`--${name}=${text}`];
+  };
 const KEY = /^[a-z0-9][a-z0-9-]{0,59}$/;
 const CURSOR = /^[A-Za-z0-9:_-]{1,40}$/;
 const NUMBER = /^\d{1,9}$/;
 const REPO = /^[\w@:/.+%~-]{1,300}$/;
 const LIST_PATH = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*){0,2}$/;
-const limitAndCursor = (input: Record<string, unknown>) => [
+const limitAndCursor = (input: Record<string, unknown>, flag: Flag) => [
   ...flag("limit", input.limit, NUMBER, "limit"),
   ...flag("cursor", input.cursor, CURSOR, "cursor"),
 ];
@@ -78,13 +86,13 @@ const TOOLS: Tool[] = [
       repo: remote,
       ...paging,
     },
+    command: "search",
     required: ["query"],
     untrusted: true,
-    args: (input) => [
-      "search",
+    args: (input, flag) => [
       ...flag("project", input.project, KEY, "project"),
       ...flag("repo", input.repo, REPO, "repo"),
-      ...limitAndCursor(input),
+      ...limitAndCursor(input, flag),
       "--",
       text(input.query, "query"),
     ],
@@ -93,18 +101,19 @@ const TOOLS: Tool[] = [
     name: "artifacts_list",
     description:
       "Browse: no path lists projects, project lists artifacts, project/artifact lists pages, project/artifact/page lists frames.",
+    command: "list",
     properties: { path: { type: "string", description: "How deep to look" }, repo: remote, ...paging },
     untrusted: true,
-    args: (input) => [
-      "list",
+    args: (input, flag) => [
       ...flag("repo", input.repo, REPO, "repo"),
-      ...limitAndCursor(input),
+      ...limitAndCursor(input, flag),
       ...(input.path ? ["--", ...listPath(input.path)] : []),
     ],
   },
   {
     name: "artifacts_read",
     description: "An artifact's full text, a piece at a time. Follow nextCursor for more.",
+    command: "read",
     properties: {
       artifact: required,
       page: { type: "string", description: "Only this page" },
@@ -113,19 +122,17 @@ const TOOLS: Tool[] = [
     },
     required: ["artifact"],
     untrusted: true,
-    args: (input) => [
-      "read",
+    args: (input, flag) => [
       ...flag("page", input.page, KEY, "page"),
       ...flag("cursor", input.cursor, CURSOR, "cursor"),
-      ...(input.version === undefined
-        ? []
-        : ["--version", ...flag("v", input.version, NUMBER, "version").map((v) => v.slice(4))]),
+      ...flag("version", input.version, NUMBER, "version"),
       ...requiredArtifact(input.artifact),
     ],
   },
   {
     name: "artifacts_view",
     description: "See a frame as an image: a thumbnail, or size 1x or 2x when you need detail.",
+    command: "view",
     properties: {
       artifact: required,
       page: { type: "string", description: "A page" },
@@ -133,8 +140,7 @@ const TOOLS: Tool[] = [
       size: { type: "string", description: "thumb, 1x or 2x" },
     },
     required: ["artifact"],
-    args: (input) => [
-      "view",
+    args: (input, flag) => [
       ...flag("page", input.page, KEY, "page"),
       ...flag("frame", input.frame, /^[a-z0-9-]{1,100}$/, "frame"),
       ...flag("size", input.size, /^(thumb|1x|2x)$/, "size"),
@@ -144,20 +150,23 @@ const TOOLS: Tool[] = [
   {
     name: "artifacts_status",
     description: "The latest decision, the note, and the open comments on an artifact.",
+    command: "status",
     properties: { artifact: target },
     untrusted: true,
-    args: ({ artifact }) => ["status", ...artifactArg(artifact)],
+    args: ({ artifact }) => artifactArg(artifact),
   },
   {
     name: "artifacts_comments",
     description: "The comments on an artifact.",
+    command: "comments",
     properties: { artifact: target },
     untrusted: true,
-    args: ({ artifact }) => ["comments", ...artifactArg(artifact)],
+    args: ({ artifact }) => artifactArg(artifact),
   },
   {
     name: "artifacts_reply",
     description: "Reply to a comment. Set fixed when a published version addresses it.",
+    command: "reply",
     properties: {
       n: { type: "number", description: "The comment's number, as in artifacts_comments" },
       message: { type: "string", description: "The reply" },
@@ -166,29 +175,32 @@ const TOOLS: Tool[] = [
     required: ["n", "message"],
     args: ({ n, message, fixed }) => {
       if (!Number.isInteger(n) || (n as number) < 1) throw new BadArguments("n must be a comment number.");
-      return ["reply", ...(fixed === true ? ["--fixed"] : []), "--", String(n), text(message, "message")];
+      return [...(fixed === true ? ["--fixed"] : []), "--", String(n), text(message, "message")];
     },
   },
   {
     name: "artifacts_publish",
     description: "Lint, render and publish the artifact in the working folder.",
+    command: "publish",
     properties: { message: { type: "string", description: "What changed" } },
     required: ["message"],
-    args: ({ message }) => ["publish", `--message=${text(message, "message")}`],
+    args: ({ message }, flag) => flag("message", text(message, "message"), /^/, "message"),
   },
   {
     name: "artifacts_versions",
     description: "The versions of the artifact in the working folder.",
+    command: "versions",
     properties: {},
     untrusted: true,
-    args: () => ["versions"],
+    args: () => [],
   },
   {
     name: "artifacts_data_export",
     description: "Everything a micro app has saved, for reading results.",
+    command: "data",
     properties: {},
     untrusted: true,
-    args: () => ["data", "export"],
+    args: () => ["export"],
   },
 ];
 
@@ -196,7 +208,7 @@ const TOOLS: Tool[] = [
 export function toolCommand(name: string, input: Record<string, unknown>) {
   const tool = TOOLS.find((entry) => entry.name === name);
   if (!tool) return null;
-  return ["--json", ...tool.args(input)];
+  return ["--json", tool.command, ...tool.args(input, flagFor(tool.command))];
 }
 
 /** A model reads everything a tool prints, so one big answer (a data export) can't fill its context. */

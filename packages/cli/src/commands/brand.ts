@@ -1,16 +1,19 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { TEMPLATES } from "@artifacts/kit/templates";
-import { Brand, BrandFont, BrandProposal, MAX_FONT_BYTES, OrgBrand } from "@artifacts/schema";
+import { Brand, BrandFont, BrandProposal, FONT_FORMATS, MAX_FONT_BYTES, OrgBrand } from "@artifacts/schema";
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
 import type { LocalBrand } from "../brand/cache.ts";
+import { MANIFEST } from "../bundle/layout.ts";
+import type { Input } from "../command.ts";
+import { sha256 } from "../hash.ts";
+import { kitFiles } from "../kit.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-import { kitFiles, previewRoot, publishRoot } from "./write.ts";
+import { previewRoot, publishRoot } from "../publish.ts";
+import { signedIn } from "../session.ts";
 
 const FontFile = BrandFont.omit({ hash: true, format: true }).extend({ src: z.string().min(1) });
 const BrandFile = Brand.omit({ fonts: true }).extend({ fonts: z.array(FontFile).default([]) });
@@ -34,8 +37,8 @@ function readBrandFile(path: string | undefined): LocalBrand {
     }
     if (statSync(absolute).size > MAX_FONT_BYTES) throw new CliError(`${src} is over 4 MB.`);
     const format = extname(absolute).slice(1).toLowerCase();
-    if (!["woff2", "woff", "otf", "ttf"].includes(format)) throw new CliError(`${src} isn't a font file.`);
-    const hash = createHash("sha256").update(readFileSync(absolute)).digest("hex");
+    if (!Object.hasOwn(FONT_FORMATS, format)) throw new CliError(`${src} isn't a font file.`);
+    const hash = sha256(readFileSync(absolute));
     fontFiles.set(hash, absolute);
     return { ...font, format, hash };
   });
@@ -48,12 +51,12 @@ function buildSample(brand: LocalBrand, slug: string) {
   const pages: Record<string, unknown>[] = [];
   for (const [name, files] of Object.entries(TEMPLATES)) {
     for (const [path, body] of Object.entries(files)) {
-      if (path === "artifact.json") continue;
+      if (path === MANIFEST) continue;
       const target = join(root, name, path);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, body.replaceAll('ref="cover/main/cover"', `ref="${name}-cover/main/cover"`));
     }
-    const manifest = JSON.parse(files["artifact.json"] as string) as { pages: Record<string, unknown>[] };
+    const manifest = JSON.parse(files[MANIFEST] as string) as { pages: Record<string, unknown>[] };
     const local = (path: string) => (path.startsWith("vendor/") ? path : `${name}/${path}`);
     for (const page of manifest.pages) {
       pages.push({
@@ -79,7 +82,7 @@ function buildSample(brand: LocalBrand, slug: string) {
     writeFileSync(join(root, path), body);
   }
   writeFileSync(
-    join(root, "artifact.json"),
+    join(root, MANIFEST),
     JSON.stringify({
       project: "brand",
       slug,
@@ -94,13 +97,10 @@ function buildSample(brand: LocalBrand, slug: string) {
   return root;
 }
 
-const sampleSlug = (brand: Brand) =>
-  `sample-${createHash("sha256").update(JSON.stringify(brand)).digest("hex").slice(0, 10)}`;
+const sampleSlug = (brand: Brand) => `sample-${sha256(JSON.stringify(brand)).slice(0, 10)}`;
 
 export async function brandCommand(
-  sub: string | undefined,
-  file: string | undefined,
-  flags: { server?: string },
+  { args: { sub, file }, flags, usage }: Input<"sub" | "file", { server?: string }>,
   out: Output,
 ) {
   if (sub === "prompt") return out.result({ prompt: BRAND_PROMPT }, () => out.say(BRAND_PROMPT));
@@ -155,5 +155,5 @@ export async function brandCommand(
       rmSync(root, { recursive: true, force: true });
     }
   }
-  throw new UsageError("Usage: artifacts brand [show] | prompt | preview <file> | propose <file>");
+  throw usage();
 }

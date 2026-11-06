@@ -1,2 +1,2 @@
-// Filled in by scripts/build-cli.ts for the compiled binary, then put back.
+// The compiled binary gets the built viewer here (scripts/build-cli.ts). From source it stays empty.
 export const VIEWER: Record<string, string> = {};

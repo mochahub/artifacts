@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { OrgSettings } from "@artifacts/schema";
+import { startChild } from "@artifacts/sandbox";
 import { eq } from "drizzle-orm";
 import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
@@ -430,10 +431,16 @@ describe("the backend sandbox", () => {
   });
 
   test("a child's environment holds nothing", async () => {
-    const pool = t.server.deps.sandbox as NonNullable<typeof t.server.deps.sandbox>;
-    const keys = await pool.childEnv();
-    expect(keys.filter((key) => /DATABASE|S3|SECRET|TOKEN/.test(key))).toEqual([]);
-    expect(keys.length).toBeLessThanOrEqual(1);
+    // Started the one way the pool starts every child.
+    const child = startChild();
+    try {
+      await child.up;
+      const keys = await child.env();
+      expect(keys.filter((key) => /DATABASE|S3|SECRET|TOKEN/.test(key))).toEqual([]);
+      expect(keys.length).toBeLessThanOrEqual(1);
+    } finally {
+      child.kill();
+    }
   });
 
   test("read-only: a viewer's env.DATA writes are refused, whatever the backend says", async () => {
