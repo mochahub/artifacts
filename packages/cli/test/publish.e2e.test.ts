@@ -1,16 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { artifacts, blocks, frames, pages, versions } from "../../../apps/server/src/db/schema.ts";
+import { contentFor, OWNER, signIn, type TestServer } from "../../../apps/server/test/helpers.ts";
 import {
-  OWNER,
-  signIn,
-  startTestServer,
-  type TestServer,
-  testPort,
-} from "../../../apps/server/test/helpers.ts";
-import { camerabuddy, cli, copyFixture, fixture, sandbox } from "./sandbox.ts";
+  artifactAt,
+  camerabuddy,
+  cli,
+  cliJson,
+  copyFixture,
+  fixture,
+  hostedServer,
+  sandbox,
+  versionOf,
+} from "./sandbox.ts";
 
 const lint = async (name: string, env: Record<string, string>) => {
   const result = await cli(["lint", "--json"], env, fixture(name));
@@ -121,14 +123,7 @@ describe("publishing with the real CLI", () => {
   let token: string;
 
   beforeAll(async () => {
-    const port = testPort();
-    url = `http://127.0.0.1:${port}`;
-    t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
-    const setup = await t.api("/api/setup", {
-      method: "POST",
-      json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "x", ...OWNER },
-    });
-    token = ((await setup.json()) as { token: string }).token;
+    ({ t, url, token } = await hostedServer());
   });
   afterAll(() => t.stop());
 
@@ -145,6 +140,8 @@ describe("publishing with the real CLI", () => {
     expect(first.version).toBe(1);
     expect(first.changes.frames.added.sort()).toEqual(["one", "two"]);
 
+    // A second render gives the same bytes, so nothing goes up. (That the server reuses what it has
+    // is api/publish.test.ts's; this is the CLI's renders staying the same.)
     const second = await publish();
     expect(second.version).toBe(2);
     expect(second.uploaded.files).toBe(0);
@@ -173,19 +170,14 @@ describe("publishing with the real CLI", () => {
     expect(body.changes.frames.added).toHaveLength(26);
     expect(existsSync(join(dir, ".artifacts/contact-sheet.png"))).toBe(true);
 
-    const [artifact] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "roadmap"));
-    const [version] = await t.server.db
-      .select()
-      .from(versions)
-      .where(eq(versions.artifactId, artifact?.id as string));
-    const id = version?.id as string;
-    expect(await t.server.db.select().from(pages).where(eq(pages.versionId, id))).toHaveLength(9);
-    expect(await t.server.db.select().from(frames).where(eq(frames.versionId, id))).toHaveLength(26);
-    expect((await t.server.db.select().from(blocks).where(eq(blocks.versionId, id))).length).toBeGreaterThan(
-      30,
-    );
+    const { artifact, version } = await versionOf(t, token, "camerabuddy/roadmap", 1);
+    expect(version.pages).toHaveLength(9);
+    const frames = version.pages.flatMap((page) => (page.kind === "article" ? [] : page.frames));
+    expect(frames).toHaveLength(26);
+    const blocks = version.pages.flatMap((page) => (page.kind === "article" ? page.blocks : []));
+    expect(blocks.length).toBeGreaterThan(30);
 
-    const article = await t.api(`/api/artifacts/${artifact?.id}/v/1/article/plan`, { bearer: token });
+    const article = await t.api(`/api/artifacts/${artifact.id}/v/1/article/plan`, { bearer: token });
     const html = await article.text();
     expect(html).toContain('data-block="phase-1"');
     expect(html).toContain('data-verdict="verified"');
@@ -201,47 +193,26 @@ describe("publishing with the real CLI", () => {
     const published = await cli(["publish", "--json"], signedIn(), dir);
     expect(published.stderr).not.toContain("✗");
     expect(published.code).toBe(0);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "poll-backend"));
-    expect(row?.hasBackend).toBe(true);
-    const [version] = await t.server.db
-      .select()
-      .from(versions)
-      .where(eq(versions.artifactId, row?.id as string));
-    expect(version?.backendHash).toMatch(/^[0-9a-f]{64}$/);
+    const { id } = await artifactAt(t, token, "demo/poll-backend");
 
+    // The backend answers through the content host, as the person who voted.
     const cookie = await signIn(t, OWNER.email, OWNER.password);
-    const headers = { Host: new URL(url).host, Origin: url };
-    const mint = await t.api(`/api/artifacts/${row?.id}/content-token`, {
+    const content = await contentFor(t, id, { cookie });
+    const response = await content.fetch("api/votes", {
       method: "POST",
-      cookie,
-      json: { version: 1 },
-      headers,
+      headers: { "Sec-Fetch-Dest": "empty", "Content-Type": "application/json" },
+      body: '{"choice":"a"}',
     });
-    const { base } = (await mint.json()) as { base: string };
-    const response = await fetch(
-      `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}api/votes`,
-      {
-        method: "POST",
-        headers: {
-          Host: new URL(t.server.deps.env.contentUrl as string).host,
-          "Sec-Fetch-Dest": "empty",
-          "Content-Type": "application/json",
-        },
-        body: '{"choice":"a"}',
-      },
-    );
     expect(await response.json()).toMatchObject({ totals: { a: 1, b: 0 }, mine: "a", name: "Zahin" });
 
-    const logs = JSON.parse((await cli(["logs", "--json"], signedIn(), dir)).stdout);
-    expect(logs[0].message).toBe("vote from Zahin");
+    const json = (...args: string[]) => cliJson(args, signedIn(), dir);
+    expect((await json("logs"))[0].message).toBe("vote from Zahin");
     const exported = JSON.parse((await cli(["data", "export"], signedIn(), dir)).stdout);
     expect(Object.keys(exported.shared.votes.by)).toHaveLength(1);
-    const listed = JSON.parse((await cli(["data", "ls", "--json"], signedIn(), dir)).stdout);
-    expect(listed[0].key).toBe("votes");
-    const got = JSON.parse((await cli(["data", "get", "votes", "--json"], signedIn(), dir)).stdout);
-    expect(got.schema).toBe(1);
-    expect((await cli(["data", "clear", "--json"], signedIn(), dir)).code).toBe(0);
-    expect(JSON.parse((await cli(["data", "ls", "--json"], signedIn(), dir)).stdout)).toEqual([]);
+    expect((await json("data", "ls"))[0].key).toBe("votes");
+    expect((await json("data", "get", "votes")).schema).toBe(1);
+    await json("data", "clear");
+    expect(await json("data", "ls")).toEqual([]);
   }, 120_000);
 
   test("backend lint: network calls and anything unbundled are refused", async () => {
