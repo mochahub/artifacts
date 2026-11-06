@@ -329,7 +329,7 @@ test("a pinned version shows that version", async ({ page }) => {
 test("signed-out visitors are sent to sign in and back", async ({ browser }) => {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   const page = await context.newPage();
-  await page.goto("http://localhost:18080/camerabuddy/roadmap/plan");
+  await page.goto("/camerabuddy/roadmap/plan");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   await context.close();
 });

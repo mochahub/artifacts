@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
+import { SECRET } from "./stack.ts";
 
 export const OWNER = { name: "Zahin", email: "zahin@example.com", password: "correct horse battery" };
-export const SETUP_TOKEN = "e2e-secret-e2e-secret-e2e-secret-e2e";
+export const SETUP_TOKEN = SECRET;
 
 /** Fails on anything the browser refused, such as a CSP violation from the server's headers. */
 export function watchErrors(page: Page) {

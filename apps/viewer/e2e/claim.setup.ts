@@ -5,14 +5,14 @@ import { seedFixture } from "./seed.ts";
 
 test.describe.configure({ mode: "serial" });
 
-test("setup mode: every route shows Almost ready, under the real CSP", async ({ page }) => {
+test("setup mode: every route shows Almost ready, under the real CSP", async ({ page, baseURL }) => {
   const errors = watchErrors(page);
   for (const path of ["/", "/some/deep/link", "/sign-in"]) {
     const response = await page.goto(path);
     expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Almost ready");
   }
-  await expect(page.getByText("artifacts setup http://localhost:18080")).toBeVisible();
+  await expect(page.getByText(`artifacts setup ${baseURL}`)).toBeVisible();
   await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-1-almost-ready.png" });
   expect(errors).toEqual([]);
 });

@@ -1,12 +1,13 @@
 import { defineConfig } from "@playwright/test";
-
-const secret = "e2e-secret-e2e-secret-e2e-secret-e2e";
-const iphone = {
-  viewport: { width: 393, height: 852 },
-  deviceScaleFactor: 3,
-  isMobile: true,
-  hasTouch: true,
-};
+import {
+  BASE_URL,
+  CONTENT_URL,
+  DATABASE_URL,
+  IPHONE as iphone,
+  PORTS,
+  S3_ENDPOINT,
+  SECRET,
+} from "./e2e/stack.ts";
 
 export default defineConfig({
   testDir: "e2e",
@@ -15,7 +16,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: "line",
   use: {
-    baseURL: "http://localhost:18080",
+    baseURL: BASE_URL,
     browserName: "webkit",
     trace: "retain-on-failure",
     // A document that gets no answer has hung CI until the test's own limit. Say so sooner.
@@ -39,29 +40,29 @@ export default defineConfig({
       dependencies: ["claim"],
     },
   ],
-  // Runs the real server against docker-compose.test.yml, serving the built viewer. `bun run e2e` sets both up.
+  // Runs the real server against docker-compose.test.yml (or the stack e2e/stack.ts is pointed at), serving the built viewer. `bun run e2e` sets both up.
   webServer: {
     command: "bun ../server/src/index.ts",
-    url: "http://localhost:18080/api/health",
+    url: `${BASE_URL}/api/health`,
     reuseExistingServer: false,
     // The server's warnings belong next to a test that failed because of them.
     stdout: "pipe",
     stderr: "pipe",
     env: {
-      DATABASE_URL: "postgres://artifacts:artifacts@127.0.0.1:55432/artifacts_test",
-      S3_ENDPOINT: "http://127.0.0.1:18333",
+      DATABASE_URL,
+      S3_ENDPOINT,
       S3_REGION: "auto",
       S3_BUCKET: "artifacts-e2e",
       S3_ACCESS_KEY_ID: "devaccesskey",
       S3_SECRET_ACCESS_KEY: "devsecretkey",
-      PUBLIC_URL: "http://localhost:18080",
-      CONTENT_URL: "http://127.0.0.1:18081",
-      SETUP_TOKEN: secret,
-      SESSION_SECRET: secret,
-      OPS_SECRET: secret,
-      PORT: "18080",
-      CONTENT_PORT: "18081",
-      INTERNAL_PORT: "18082",
+      PUBLIC_URL: BASE_URL,
+      CONTENT_URL,
+      SETUP_TOKEN: SECRET,
+      SESSION_SECRET: SECRET,
+      OPS_SECRET: SECRET,
+      PORT: String(PORTS.app),
+      CONTENT_PORT: String(PORTS.content),
+      INTERNAL_PORT: String(PORTS.internal),
       LOG_LEVEL: "warn",
     },
   },

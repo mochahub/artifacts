@@ -38,14 +38,14 @@ test("add a passkey, sign in with it alone, and re-authenticate with it", async 
   await expect(browser.isConnected()).toBeTruthy();
 });
 
-test("join by invite with a passkey as the only credential", async ({ page, context, request }) => {
+test("join by invite with a passkey as the only credential", async ({ page, context, request, baseURL }) => {
   await authenticator(context, page);
   const setupCookie = await request.post("/api/auth/password", {
     data: { email: OWNER.email, password: OWNER.password },
   });
   expect(setupCookie.status()).toBe(200);
   const made = await request.post("/api/invites", {
-    headers: { Origin: "http://localhost:18080" },
+    headers: { Origin: baseURL as string },
     data: { email: `pk${Date.now()}@example.com`, role: "reviewer" },
   });
   const { url } = await made.json();

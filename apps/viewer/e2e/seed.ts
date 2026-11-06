@@ -2,15 +2,15 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { BASE_URL } from "./stack.ts";
 
 const cli = join(import.meta.dirname, "../../../packages/cli/src/index.ts");
 const fixture = join(import.meta.dirname, "../../../fixtures/camerabuddy-roadmap");
-const URL_ = "http://localhost:18080";
 
 const envFor = (dir: string, token: string) => ({
   PATH: process.env.PATH ?? "",
   HOME: dir,
-  ARTIFACTS_URL: URL_,
+  ARTIFACTS_URL: BASE_URL,
   ARTIFACTS_TOKEN: token,
   ARTIFACTS_HELPER_DIR: join(tmpdir(), "artifacts-test-helper"),
   ARTIFACTS_AGENT: "Claude Code",
