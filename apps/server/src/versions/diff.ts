@@ -40,5 +40,6 @@ export const changes = (before: Keyed, after: Keyed): Changes => ({
   changed: [...after.keys()].filter((key) => before.has(key) && before.get(key) !== after.get(key)),
 });
 
-/** Added or changed: what a reader sees as new in `after`. */
-export const isNew = (before: Keyed, after: Keyed, key: string) => before.get(key) !== after.get(key);
+/** New or different since `before`: what a reader is shown as changed. With no version before, nothing is. */
+export const changedSince = (before: Keyed | null | undefined, key: string, hash: string) =>
+  before != null && before.get(key) !== hash;

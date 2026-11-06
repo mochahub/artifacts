@@ -27,7 +27,7 @@ import { mapLimit } from "../map-limit.ts";
 import { notifyPublished } from "../push/notify.ts";
 import { reanchorThreads } from "../review/reanchor.ts";
 import { writeContent } from "../versions/content.ts";
-import { hashesOf } from "../versions/diff.ts";
+import { blockHashes, type Changes, changes, frameHashes, hashesOf, NOTHING } from "../versions/diff.ts";
 import { IMMUTABLE, knownBlobs, putBlob, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
@@ -61,14 +61,8 @@ type UploadTicket = {
 /** The whole answer for someone outside a restricted project: no more than any taken name tells them. */
 const nameTaken = () => new ApiError("conflict", "That project name is taken.");
 
-const diff = (before: Map<string, string>, after: Map<string, string>) => ({
-  added: [...after.keys()].filter((key) => !before.has(key)),
-  removed: [...before.keys()].filter((key) => !after.has(key)),
-  changed: [...after.keys()].filter((key) => before.has(key) && before.get(key) !== after.get(key)),
-});
-
 /** Frame keys are per page in the database; the change summary names them as authors wrote them. */
-const frameKeys = (change: ReturnType<typeof diff>) => ({
+const withoutPage = (change: Changes): Changes => ({
   added: change.added.map((key) => key.slice(key.indexOf("/") + 1)),
   removed: change.removed.map((key) => key.slice(key.indexOf("/") + 1)),
   changed: change.changed.map((key) => key.slice(key.indexOf("/") + 1)),
@@ -374,13 +368,8 @@ export function createPublisher(deps: Deps) {
 
       const reanchored = await reanchorThreads(tx, ticket.artifactId, safePages, body.frames, body.blocks);
 
-      const before = previous
-        ? await hashesOf(tx, previous.id)
-        : { frames: new Map<string, string>(), blocks: new Map<string, string>() };
-      const after = {
-        frames: new Map(body.frames.map((f) => [`${f.pageKey}/${f.frameKey}`, f.contentHash])),
-        blocks: new Map(body.blocks.map((b) => [`${b.pageKey}/${b.blockKey}`, b.contentHash])),
-      };
+      const before = previous ? await hashesOf(tx, previous.id) : NOTHING;
+      const after = { frames: frameHashes(body.frames), blocks: blockHashes(body.blocks) };
 
       await tx
         .update(artifacts)
@@ -400,8 +389,8 @@ export function createPublisher(deps: Deps) {
       });
       return {
         version: n,
-        frames: frameKeys(diff(before.frames, after.frames)),
-        blocks: diff(before.blocks, after.blocks),
+        frames: withoutPage(changes(before.frames, after.frames)),
+        blocks: changes(before.blocks, after.blocks),
         ...reanchored,
       };
     });

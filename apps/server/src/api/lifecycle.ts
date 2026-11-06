@@ -31,57 +31,10 @@ import { etagJson } from "../http/etag.ts";
 import { artifactParam } from "../http/resources.ts";
 import type { RouteRequest, Routes } from "../http/routes.ts";
 import { purgeArtifact, purgeVersion } from "../jobs/purge.ts";
-import { blobKey } from "../layout.ts";
 import { reanchorThreads } from "../review/reanchor.ts";
-import { diffRegions, type Region } from "../versions/regions.ts";
-
-/** One render pair never changes its answer, so it's worked out once. */
-const regionCache = new Map<string, Region[]>();
-const MAX_CACHED_REGIONS = 2000;
-const MAX_FRAMES_DIFFED = 40;
-const COMPARES_PER_MINUTE = 30;
-/** Each diff holds two renders in memory, so only a couple run at once, whoever's asking. */
-let diffing: Promise<unknown> = Promise.resolve();
-const oneAtATime = <T>(work: () => Promise<T>) => {
-  const run = diffing.then(work, work);
-  diffing = run.catch(() => {});
-  return run;
-};
-
-/** Per changed frame: the two @2x renders, and where they differ (03). */
-async function changedRegions(
-  deps: Deps,
-  keys: string[],
-  before: (typeof frames.$inferSelect)[],
-  after: (typeof frames.$inferSelect)[],
-  who: string,
-) {
-  const rendersOf = (rows: typeof before, key: string) =>
-    rows.find((row) => `${row.pageKey}/${row.frameKey}` === key)?.renders;
-  const result: Record<string, { before: string; after: string; regions: Region[] }> = {};
-  let counted = false;
-  for (const key of keys.slice(0, MAX_FRAMES_DIFFED)) {
-    const a = rendersOf(before, key)?.["2x"];
-    const b = rendersOf(after, key)?.["2x"];
-    if (!a || !b) continue;
-    let regions = regionCache.get(`${a}:${b}`);
-    if (!regions) {
-      if (!counted) deps.limits.hit(`compare:${who}`, COMPARES_PER_MINUTE, 60_000);
-      counted = true;
-      regions = await oneAtATime(async () => {
-        const [first, second] = await Promise.all([deps.bucket.get(blobKey(a)), deps.bucket.get(blobKey(b))]);
-        if (!first || !second) return null;
-        // A render the image library can't read still counts as changed: it just has no boxes.
-        return diffRegions(first.body, second.body).catch(() => [] as Region[]);
-      }).then((value) => value ?? undefined);
-      if (!regions) continue;
-      if (regionCache.size >= MAX_CACHED_REGIONS) regionCache.clear();
-      regionCache.set(`${a}:${b}`, regions);
-    }
-    result[key] = { before: a, after: b, regions };
-  }
-  return result;
-}
+import { createComparer } from "../versions/compare.ts";
+import { writeContent } from "../versions/content.ts";
+import { blockHashes, changes, frameHashes } from "../versions/diff.ts";
 
 /** Rows about no artifact, so nothing to check them against: they're for the people who run the place. */
 const ADMIN_ACTIVITY = [
@@ -97,6 +50,7 @@ const ADMIN_ACTIVITY = [
 export function lifecycleRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
   const artifact = artifactParam(deps);
+  const changedRegions = createComparer(deps);
 
   const record = async (
     c: RouteRequest<CallerFor<"artifact.publish">, LoadedArtifact>,
@@ -403,25 +357,21 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           // By id: that's the order they were written in, and `read` and search's fallback depend on it.
           tx.select().from(blocks).where(eq(blocks.versionId, version.id)).orderBy(blocks.id),
         ]);
-        if (pageRows.length > 0) {
-          await tx
-            .insert(pages)
-            .values(pageRows.map((row) => ({ ...row, id: Bun.randomUUIDv7(), versionId: id })));
-        }
-        for (let i = 0; i < frameRows.length; i += 500) {
-          await tx
-            .insert(frames)
-            .values(
-              frameRows.slice(i, i + 500).map((row) => ({ ...row, id: Bun.randomUUIDv7(), versionId: id })),
-            );
-        }
-        for (let i = 0; i < blockRows.length; i += 500) {
-          await tx
-            .insert(blocks)
-            .values(
-              blockRows.slice(i, i + 500).map((row) => ({ ...row, id: Bun.randomUUIDv7(), versionId: id })),
-            );
-        }
+        await writeContent(
+          tx,
+          version.orgId,
+          id,
+          pageRows.map(({ pageKey, kind, title, group, position, meta }) => ({
+            key: pageKey,
+            kind,
+            title,
+            group,
+            position,
+            meta,
+          })),
+          frameRows,
+          blockRows,
+        );
         await reanchorThreads(
           tx,
           resource.id,
@@ -441,7 +391,7 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
   );
 
   routes.get("/api/artifacts/:id/compare", { action: "artifact.read", resource: artifact }, async (c) => {
-    const id = c.req.param("id") as string;
+    const { id } = c.var.resource;
     const load = async (n: number) => {
       const [row] = await db
         .select()
@@ -459,28 +409,18 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       load(Number(c.req.query("from"))),
       load(Number(c.req.query("to"))),
     ]);
-    const changes = (before: Map<string, string>, after: Map<string, string>) => ({
-      added: [...after.keys()].filter((key) => !before.has(key)),
-      removed: [...before.keys()].filter((key) => !after.has(key)),
-      changed: [...after.keys()].filter((key) => before.has(key) && before.get(key) !== after.get(key)),
-    });
-    const frameMap = (rows: typeof from.frameRows) =>
-      new Map(rows.map((row) => [`${row.pageKey}/${row.frameKey}`, row.contentHash]));
-    const blockMap = (rows: typeof from.blockRows) =>
-      new Map(rows.map((row) => [`${row.pageKey}/${row.blockKey}`, row.contentHash]));
-    const frameChanges = changes(frameMap(from.frameRows), frameMap(to.frameRows));
+    const frameChanges = changes(frameHashes(from.frameRows), frameHashes(to.frameRows));
     return etagJson(c, {
       frames: {
         ...frameChanges,
         regions: await changedRegions(
-          deps,
           frameChanges.changed,
           from.frameRows,
           to.frameRows,
           callerKey(c.var.caller) ?? deps.clientIp(c),
         ),
       },
-      blocks: changes(blockMap(from.blockRows), blockMap(to.blockRows)),
+      blocks: changes(blockHashes(from.blockRows), blockHashes(to.blockRows)),
       notes: to.row.notes,
     });
   });

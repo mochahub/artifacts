@@ -6,7 +6,7 @@ async function insertChunks<T>(rows: T[], insert: (chunk: T[]) => Promise<unknow
   for (let i = 0; i < rows.length; i += 500) await insert(rows.slice(i, i + 500));
 }
 
-/** Copies a version's pages, frames and blocks in. Restoring a version uses this too. */
+/** Writes a version's pages, frames and blocks: a publish's, or the copy a restore makes. */
 export async function writeContent(
   tx: Tx,
   orgId: string,

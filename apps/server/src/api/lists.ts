@@ -7,10 +7,8 @@ import { can, canAfterReauth } from "../auth/can.ts";
 import {
   artifacts,
   artifactTeamAccess,
-  blocks,
   comments,
   decisions,
-  frames,
   guestViews,
   pages,
   people,
@@ -30,6 +28,7 @@ import type { RouteRequest, Routes } from "../http/routes.ts";
 import { buildCards } from "../library/cards.ts";
 import { rateLimitSearch, searchHits, snippet } from "../library/search.ts";
 import { visibleTo } from "../library/visible.ts";
+import { changedSince, hashesOf } from "../versions/diff.ts";
 
 const RESULTS = 20;
 const MAX_POSITION_CHARS = 2000;
@@ -258,26 +257,14 @@ export function listRoutes(routes: Routes, deps: Deps) {
       .select({ pageKey: threads.pageKey })
       .from(threads)
       .where(and(eq(threads.artifactId, row.id), eq(threads.status, "open")));
+    // A page has changed if anything on it is new or different since the version before.
     const changed = new Set<string>();
     if (latest && previous) {
-      const hashes = async (versionId: string) => {
-        const [frameRows, blockRows] = await Promise.all([
-          db
-            .select({ page: frames.pageKey, key: frames.frameKey, hash: frames.contentHash })
-            .from(frames)
-            .where(eq(frames.versionId, versionId)),
-          db
-            .select({ page: blocks.pageKey, key: blocks.blockKey, hash: blocks.contentHash })
-            .from(blocks)
-            .where(eq(blocks.versionId, versionId)),
-        ]);
-        return [...frameRows, ...blockRows];
-      };
-      const before = new Map(
-        (await hashes(previous.id)).map((entry) => [`${entry.page}/${entry.key}`, entry.hash]),
-      );
-      for (const entry of await hashes(latest.id)) {
-        if (before.get(`${entry.page}/${entry.key}`) !== entry.hash) changed.add(entry.page);
+      const [before, after] = await Promise.all([hashesOf(db, previous.id), hashesOf(db, latest.id)]);
+      for (const kind of ["frames", "blocks"] as const) {
+        for (const [key, hash] of after[kind]) {
+          if (changedSince(before[kind], key, hash)) changed.add(key.slice(0, key.indexOf("/")));
+        }
       }
     }
     const [decision] = await db
