@@ -3,8 +3,7 @@
  * Every value passes one of these checks on the way out, so nothing a manifest says can become CSS
  * of its own, whatever got past the schema.
  */
-const HEX = /^#[0-9a-fA-F]{6}$/;
-const FONT_NAME = /^[A-Za-z0-9][A-Za-z0-9 -]{0,39}$/;
+import { FONT_FORMATS, FONT_NAME, FONT_WEIGHT, HEX_COLOR, RADIUS, SCALE, SHA256_HEX } from "./constants.ts";
 
 export type Neutrals = { bg?: string; card?: string; text?: string; muted?: string; line?: string };
 export type ThemeValues = {
@@ -35,7 +34,7 @@ export function fontStack(name: unknown): string | null {
     : `"${name}", ${FONT_STACKS.system}`;
 }
 
-const hex = (value: unknown) => (typeof value === "string" && HEX.test(value) ? value : null);
+const hex = (value: unknown) => (typeof value === "string" && HEX_COLOR.test(value) ? value : null);
 const within = (value: unknown, low: number, high: number) =>
   typeof value === "number" && Number.isFinite(value) && value >= low && value <= high ? value : null;
 
@@ -75,8 +74,8 @@ const block = (selector: string, tokens: readonly (readonly [string, string])[])
 
 function baseTokens(theme: ThemeValues) {
   const accent = hex(theme.accent);
-  const radius = within(theme.radius, 0, 32);
-  const scale = within(theme.scale, 0.85, 1.25);
+  const radius = within(theme.radius, RADIUS.min, RADIUS.max);
+  const scale = within(theme.scale, SCALE.min, SCALE.max);
   const font = fontStack(theme.font);
   const display = fontStack(theme.display);
   return [
@@ -116,16 +115,13 @@ export function articleStyle(theme: ArticleThemeValues | null | undefined): Reco
   const accent = hex(theme?.accent);
   const font = fontStack(theme?.font);
   const display = fontStack(theme?.display);
-  const radius = within(theme?.radius, 0, 32);
+  const radius = within(theme?.radius, RADIUS.min, RADIUS.max);
   if (accent) style["--theme-accent"] = accent;
   if (font) style["--theme-font"] = font;
   if (display) style["--theme-display"] = display;
   if (radius !== null) style["--theme-radius"] = `${radius}px`;
   return style;
 }
-
-const EXTENSION = /^(woff2|woff|otf|ttf)$/;
-const FORMATS: Record<string, string> = { woff2: "woff2", woff: "woff", otf: "opentype", ttf: "truetype" };
 
 export const fontPath = (font: { hash: string; format: string }) =>
   `.artifacts/brand-fonts/${font.hash}.${font.format}`;
@@ -139,13 +135,13 @@ export function fontFaceCss(
     .filter(
       (font) =>
         FONT_NAME.test(font.family) &&
-        /^[1-9]00$/.test(font.weight) &&
-        /^[0-9a-f]{64}$/.test(font.hash) &&
-        EXTENSION.test(font.format),
+        FONT_WEIGHT.test(font.weight) &&
+        SHA256_HEX.test(font.hash) &&
+        Object.hasOwn(FONT_FORMATS, font.format),
     )
     .map(
       (font) =>
-        `@font-face{font-family:"${font.family}";font-weight:${font.weight};font-style:${font.style === "italic" ? "italic" : "normal"};src:url("${up}${fontPath(font)}") format("${FORMATS[font.format]}")}`,
+        `@font-face{font-family:"${font.family}";font-weight:${font.weight};font-style:${font.style === "italic" ? "italic" : "normal"};src:url("${up}${fontPath(font)}") format("${FONT_FORMATS[font.format as keyof typeof FONT_FORMATS]}")}`,
     )
     .join("\n");
 }

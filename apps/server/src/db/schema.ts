@@ -1,3 +1,16 @@
+import {
+  ACTIVITY_KINDS,
+  ANCHOR_STATES,
+  COMMENT_MAX,
+  DECISION_KINDS,
+  PAGE_KINDS,
+  PERMISSIONS,
+  PROJECT_PERMISSIONS,
+  ROLES,
+  TEAM_ROLES,
+  THREAD_STATUSES,
+  VISIBILITIES,
+} from "@artifacts/schema";
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
@@ -32,46 +45,19 @@ const id = () => uuid("id").primaryKey();
 const time = (name: string) => timestamp(name, { withTimezone: true });
 const createdAt = () => time("created_at").notNull().defaultNow();
 
-export const role = pgEnum("role", ["owner", "admin", "member", "reviewer", "outside"]);
-export const visibility = pgEnum("visibility", ["me", "org"]);
-export const permission = pgEnum("permission", ["view", "comment", "publish"]);
-export const projectPermission = pgEnum("project_permission", ["view", "comment", "publish", "manage"]);
+export const role = pgEnum("role", ROLES);
+export const visibility = pgEnum("visibility", VISIBILITIES);
+export const permission = pgEnum("permission", PERMISSIONS);
+export const projectPermission = pgEnum("project_permission", PROJECT_PERMISSIONS);
 export const tokenKind = pgEnum("token_kind", ["cli", "org", "oauth"]);
 export const inviteKind = pgEnum("invite_kind", ["org", "artifact", "project"]);
-export const pageKind = pgEnum("page_kind", ["canvas", "article", "prototype", "gallery", "deck"]);
-export const threadStatus = pgEnum("thread_status", ["open", "fixed", "resolved"]);
-export const anchorState = pgEnum("anchor_state", ["ok", "updated", "orphaned", "moved_version"]);
-export const decisionKind = pgEnum("decision_kind", ["approved", "changes_requested"]);
+export const pageKind = pgEnum("page_kind", PAGE_KINDS);
+export const threadStatus = pgEnum("thread_status", THREAD_STATUSES);
+export const anchorState = pgEnum("anchor_state", ANCHOR_STATES);
+export const decisionKind = pgEnum("decision_kind", DECISION_KINDS);
 export const deviceStatus = pgEnum("device_status", ["pending", "approved", "denied", "used"]);
-export const teamRole = pgEnum("team_role", ["lead", "member"]);
-export const activityKind = pgEnum("activity_kind", [
-  "published",
-  "restored",
-  "commented",
-  "replied",
-  "fixed",
-  "resolved",
-  "reopened",
-  "approved",
-  "changes_requested",
-  "archived",
-  "unarchived",
-  "deleted",
-  "undeleted",
-  "purged",
-  "version_deleted",
-  "version_undeleted",
-  "version_named",
-  "shared",
-  "joined",
-  "recovered",
-  "team_created",
-  "team_deleted",
-  "team_member_added",
-  "team_member_removed",
-  "project_access_changed",
-  "identity_linked",
-]);
+export const teamRole = pgEnum("team_role", TEAM_ROLES);
+export const activityKind = pgEnum("activity_kind", ACTIVITY_KINDS);
 
 // Organization and people
 
@@ -791,7 +777,7 @@ export const comments = pgTable(
   },
   (t) => [
     check("comments_one_author", oneAuthor(t.authorPersonId, t.authorGuestId)),
-    check("comments_body_length", sql`char_length(${t.body}) <= 10000`),
+    check("comments_body_length", sql`char_length(${t.body}) <= ${sql.raw(String(COMMENT_MAX))}`),
     index("comments_search_idx").using("gin", sql`to_tsvector('english', ${t.body})`),
   ],
 );

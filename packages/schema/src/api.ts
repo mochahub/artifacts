@@ -1,27 +1,56 @@
 import { z } from "zod";
+import {
+  ACTIVITY_KINDS,
+  AGENT_MAX,
+  ANCHOR_STATES,
+  COMMENT_MAX,
+  DATA_SCOPES,
+  DECISION_KINDS,
+  FILES_MAX,
+  GUEST_NAME_MAX,
+  PAGE_KINDS,
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  PERMISSIONS,
+  PROJECT_PERMISSIONS,
+  ROLES,
+  SHA256_HEX,
+  TEAM_ABOUT_MAX,
+  TEAM_NAME_MAX,
+  TEAM_ROLES,
+  THREAD_STATUSES,
+  TOKEN_SCOPES,
+  VERSION_NAME_MAX,
+} from "./constants.ts";
 import { ArticleTheme, Brand, Key, Slug, Summary, Tags, Visibility } from "./manifest.ts";
 
 /** Request and response shapes for the HTTP API. 03-api.md owns the names; 02 owns the enums. */
 
 const Id = z.uuid();
 const Time = z.iso.datetime({ offset: true });
-const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const Sha256 = z.string().regex(SHA256_HEX);
 const Email = z.string().email();
-const Password = z.string().min(12).max(256);
+const Password = z.string().min(PASSWORD_MIN).max(PASSWORD_MAX);
+const AgentName = z.string().max(AGENT_MAX);
 
 // Enums (02)
-export const Role = z.enum(["owner", "admin", "member", "reviewer", "outside"]);
+export const Role = z.enum(ROLES);
 export type Role = z.infer<typeof Role>;
-export const Permission = z.enum(["view", "comment", "publish"]);
+export const Permission = z.enum(PERMISSIONS);
 export type Permission = z.infer<typeof Permission>;
-export const TeamRole = z.enum(["lead", "member"]);
-export const ProjectPermission = z.enum(["view", "comment", "publish", "manage"]);
+export const TeamRole = z.enum(TEAM_ROLES);
+export const ProjectPermission = z.enum(PROJECT_PERMISSIONS);
 export type ProjectPermission = z.infer<typeof ProjectPermission>;
-export const PageKind = z.enum(["canvas", "article", "prototype", "gallery", "deck"]);
-export const ThreadStatus = z.enum(["open", "fixed", "resolved"]);
-export const AnchorState = z.enum(["ok", "updated", "orphaned", "moved_version"]);
-export const DecisionKind = z.enum(["approved", "changes_requested"]);
-export const DataScope = z.enum(["shared", "me"]);
+export const PageKind = z.enum(PAGE_KINDS);
+export const ThreadStatus = z.enum(THREAD_STATUSES);
+export const AnchorState = z.enum(ANCHOR_STATES);
+export const DecisionKind = z.enum(DECISION_KINDS);
+export const ActivityKind = z.enum(ACTIVITY_KINDS);
+export type ActivityKind = z.infer<typeof ActivityKind>;
+export const TokenScope = z.enum(TOKEN_SCOPES);
+export type TokenScope = z.infer<typeof TokenScope>;
+export const DataScope = z.enum(DATA_SCOPES);
+export type DataScope = z.infer<typeof DataScope>;
 
 // Errors
 export const ERROR_STATUS = {
@@ -160,7 +189,7 @@ export const DeviceDetails = z.object({
 
 // Guests
 // Trimmed, so a name of spaces is no name: it would show as a blank author on every comment.
-export const GuestName = z.object({ name: z.string().trim().min(1).max(60) });
+export const GuestName = z.object({ name: z.string().trim().min(1).max(GUEST_NAME_MAX) });
 
 // Organization and people
 export const INVITE_ROLES = ["admin", "member", "reviewer"] as const;
@@ -173,7 +202,7 @@ export const InviteCreated = z.object({ invite: z.object({ id: Id }).loose(), ur
 export const ChangeRole = z.object({ role: Role });
 export const CreateOrgToken = z.object({
   name: z.string().min(1),
-  scopes: z.array(z.enum(["publish", "comment", "read", "manage", "data", "org"])),
+  scopes: z.array(TokenScope),
   projectIds: z.array(Id).optional(),
   expiresAt: Time.optional(),
 });
@@ -371,8 +400,8 @@ export const PatchArtifact = z.object({ visibility: Visibility.optional() });
 
 // Teams
 const TeamSlug = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/);
-const TeamName = z.string().trim().min(1).max(60);
-const TeamAbout = z.string().trim().max(280).nullable();
+const TeamName = z.string().trim().min(1).max(TEAM_NAME_MAX);
+const TeamAbout = z.string().trim().max(TEAM_ABOUT_MAX).nullable();
 export const CreateTeam = z.object({
   name: TeamName,
   slug: TeamSlug.optional(),
@@ -469,7 +498,7 @@ export const VersionRow = z.object({
   changes: z.object({ frames: z.number().int(), blocks: z.number().int() }),
 });
 export type VersionRow = z.infer<typeof VersionRow>;
-export const NameVersion = z.object({ name: z.string().nullable() });
+export const NameVersion = z.object({ name: z.string().max(VERSION_NAME_MAX).nullable() });
 
 export const CanvasFrame = z.object({
   key: z.string(),
@@ -502,7 +531,7 @@ export const PublishPrepare = z.object({
     .array(
       z.object({ path: z.string(), sha256: Sha256, size: z.number().int().nonnegative(), type: z.string() }),
     )
-    .max(20_000),
+    .max(FILES_MAX),
 });
 export const PublishPrepared = z.object({
   uploadId: z.string(),
@@ -614,7 +643,7 @@ export type Anchor = z.infer<typeof Anchor>;
 
 const Body = z
   .string()
-  .max(10_000)
+  .max(COMMENT_MAX)
   .refine((value) => value.trim().length > 0, "write something");
 const CommentAuthor = z.object({ name: z.string(), kind: z.enum(["person", "guest", "agent"]) });
 
@@ -651,12 +680,12 @@ export const CreateThread = z.object({
   anchor: Anchor.nullable(),
   body: Body,
   version: z.number().int(),
-  agent: z.string().max(60).nullable().optional(),
+  agent: AgentName.nullable().optional(),
 });
 export const CreateComment = z.object({
   body: Body,
   marksFixed: z.boolean().optional(),
-  agent: z.string().max(60).nullable().optional(),
+  agent: AgentName.nullable().optional(),
 });
 export const EditComment = z.object({ body: Body });
 export const CreateDecision = z.object({
@@ -848,7 +877,7 @@ export const ProposeBrand = z.object({
   brand: Brand,
   project: Slug,
   slug: Slug,
-  agent: z.string().max(60).nullable().optional(),
+  agent: AgentName.nullable().optional(),
 });
 /** A brand a person sets in Settings. Its fonts come from the one already applied, never from here. */
 export const SaveBrand = Brand.omit({ fonts: true }).strict();

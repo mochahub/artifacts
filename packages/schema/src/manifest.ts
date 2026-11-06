@@ -1,4 +1,21 @@
 import { z } from "zod";
+import {
+  BRAND_NAME_MAX,
+  FONT_FORMATS,
+  FONT_NAME,
+  FONT_WEIGHT,
+  HEX_COLOR,
+  KEY_PATTERN,
+  MAX_BRAND_FONTS,
+  RADIUS,
+  SCALE,
+  SHA256_HEX,
+  SLUG_PATTERN,
+  SUMMARY_MAX,
+  TAG_MAX,
+  TAGS_MAX,
+  VISIBILITIES,
+} from "./constants.ts";
 
 /** Project slugs that would collide with viewer routes (06, "Routes"). */
 export const RESERVED_SLUGS = new Set([
@@ -22,14 +39,12 @@ export const RESERVED_SLUGS = new Set([
   "sw.js",
 ]);
 
-const SLUG_PATTERN = /^[a-z0-9-]{1,40}$/;
-
 export const Slug = z
   .string()
   .regex(SLUG_PATTERN, "use 1–40 characters of a-z, 0-9 and -")
   .refine((value) => !RESERVED_SLUGS.has(value), "this word is reserved");
 
-export const Key = z.string().regex(/^[a-z0-9-]{1,60}$/, "use 1–60 characters of a-z, 0-9 and -");
+export const Key = z.string().regex(KEY_PATTERN, "use 1–60 characters of a-z, 0-9 and -");
 
 /** Page ids that would collide with `/:project/:artifact/<word>` routes (06, "Routes"). */
 export const RESERVED_PAGE_IDS = new Set(["compare"]);
@@ -58,18 +73,14 @@ export const isBundlePath = (path: string) =>
     .split("/")
     .every((part) => part !== "" && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
 
-export const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "use a colour like #ff9f0a");
+export const Hex = z.string().regex(HEX_COLOR, "use a colour like #ff9f0a");
 
-/** The frontmatter an agent reads instead of the whole artifact, so these caps are what keep search small. */
-export const SUMMARY_MAX = 280;
-export const TAGS_MAX = 8;
-export const TAG_MAX = 32;
 export const Summary = z.string().trim().min(1).max(SUMMARY_MAX);
 export const Tags = z.array(z.string().trim().min(1).max(TAG_MAX)).max(TAGS_MAX);
 
 /** A font this repo knows by name, or a family the bundle ships. See `FONT_STACKS` in theme-css.ts. */
-export const FontName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{0,39}$/, "use a font's name");
-export const Radius = z.number().min(0).max(32);
+export const FontName = z.string().regex(FONT_NAME, "use a font's name");
+export const Radius = z.number().min(RADIUS.min).max(RADIUS.max);
 const Neutrals = z.object({ bg: Hex, card: Hex, text: Hex, muted: Hex, line: Hex }).partial().strict();
 export const Theme = z.object({
   accent: Hex.optional(),
@@ -80,25 +91,21 @@ export const Theme = z.object({
   mode: z.enum(["light", "dark", "auto"]).optional(),
   radius: Radius.optional(),
   /** Multiplies type size in templates. */
-  scale: z.number().min(0.85).max(1.25).optional(),
+  scale: z.number().min(SCALE.min).max(SCALE.max).optional(),
   neutrals: Neutrals.optional(),
   neutralsDark: Neutrals.optional(),
 });
 export type Theme = z.infer<typeof Theme>;
-/** Fonts ship in the bundle, because lint bans external ones. */
-export const FONT_FORMATS = { woff2: "woff2", woff: "woff", otf: "opentype", ttf: "truetype" } as const;
-export const MAX_BRAND_FONTS = 8;
-export const MAX_FONT_BYTES = 4 * 1024 * 1024;
 export const BrandFont = z.object({
   family: FontName,
-  weight: z.string().regex(/^[1-9]00$/, "use a weight like 400"),
+  weight: z.string().regex(FONT_WEIGHT, "use a weight like 400"),
   style: z.enum(["normal", "italic"]).default("normal"),
-  format: z.enum(["woff2", "woff", "otf", "ttf"]),
-  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  format: z.enum(Object.keys(FONT_FORMATS) as [keyof typeof FONT_FORMATS]),
+  hash: z.string().regex(SHA256_HEX),
 });
 export type BrandFont = z.infer<typeof BrandFont>;
 export const Brand = z.object({
-  name: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(BRAND_NAME_MAX),
   theme: Theme.omit({ mode: true }),
   fonts: z.array(BrandFont).max(MAX_BRAND_FONTS).default([]),
 });
@@ -112,7 +119,7 @@ export const ArticleTheme = z.object({
   radius: Radius.optional(),
 });
 
-export const Visibility = z.enum(["me", "org"]);
+export const Visibility = z.enum(VISIBILITIES);
 export type Visibility = z.infer<typeof Visibility>;
 
 export const Device = z.enum(["iphone", "ipad", "watch", "mac", "browser", "none"]);
