@@ -2,19 +2,22 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   createDecipheriv,
   createECDH,
-  createHash,
   createPublicKey,
   createVerify,
   hkdfSync,
   randomBytes,
 } from "node:crypto";
-import { eq } from "drizzle-orm";
-import sharp from "sharp";
-import { sha256 } from "../../src/auth/secrets.ts";
-import { artifacts, comments, people, pushSubscriptions, sessions } from "../../src/db/schema.ts";
-import { sendDigest } from "../../src/push/notify.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { hash, makePerson, publish } from "../publish-helper.ts";
+import {
+  claim,
+  OPS_SECRET,
+  OWNER,
+  readEvents,
+  signIn,
+  solidImage,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { hash, makeAccount, makePerson, publish, published } from "../publish-helper.ts";
 
 /** A browser's half of RFC 8291, written apart from the server's. */
 function browser() {
@@ -49,29 +52,50 @@ describe("live review", () => {
   let cookie: string;
   let id: string;
   let orgId: string;
+  /** A member with a device, who has a say in the owner's first thread. */
+  let member: Awaited<ReturnType<typeof makeAccount>>;
+  const owner = browser();
   const received: { path: string; headers: Headers; body: Uint8Array }[] = [];
-  let answer = 201;
+  /**
+   * Every endpoint the server was about to send to, in order. A delivery checks each of its devices here
+   * in one pass before it sends to any, so once one device of a delivery is listed, all of them are.
+   */
+  const attempted: string[] = [];
+  const gone = new Set<string>();
   const service = Bun.serve({
     port: 0,
     async fetch(request) {
-      received.push({
-        path: new URL(request.url).pathname,
-        headers: request.headers,
-        body: new Uint8Array(await request.arrayBuffer()),
-      });
-      return new Response(null, { status: answer });
+      const path = new URL(request.url).pathname;
+      received.push({ path, headers: request.headers, body: new Uint8Array(await request.arrayBuffer()) });
+      return new Response(null, { status: gone.has(path) ? 410 : 201 });
     },
   });
   const endpoint = (name: string) => `http://127.0.0.1:${service.port}/${name}`;
+  const at = (name: string) => received.filter((entry) => entry.path === `/${name}`);
+  const tried = (name: string) => attempted.filter((url) => url === endpoint(name)).length;
+  const until = async (done: () => boolean) => {
+    for (let i = 0; i < 80 && !done(); i++) await Bun.sleep(25);
+    expect(done()).toBe(true);
+  };
+  const clear = () => {
+    received.length = 0;
+    attempted.length = 0;
+  };
 
   beforeAll(async () => {
-    t = await startTestServer({}, { pushAllow: (url: string) => url.startsWith("http://127.0.0.1") });
-    token = (await claim(t)).token;
+    t = await startTestServer(
+      {},
+      {
+        pushAllow: (url: string) => {
+          attempted.push(url);
+          return url.startsWith("http://127.0.0.1");
+        },
+      },
+    );
+    ({ token, orgId } = await claim(t));
     cookie = await signIn(t, OWNER.email, OWNER.password);
-    expect((await publish(t, token, { slug: "live" })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "live"));
-    id = row?.id as string;
-    orgId = row?.orgId as string;
+    ({ id } = await published(t, token, { slug: "live" }));
+    member = await makeAccount(t, orgId, "member");
   });
   afterAll(async () => {
     service.stop(true);
@@ -84,59 +108,41 @@ describe("live review", () => {
       ...by,
       json: { pageKey: "plan", version: 1, anchor: null, body },
     });
-
-  /** A device for someone with only a token, as if they'd subscribed from a browser session. */
-  async function addDevice(personId: string, path: string, keys = browser().keys) {
-    const sessionId = Bun.randomUUIDv7();
-    const now = t.clock.now();
-    await t.server.db.insert(sessions).values({
-      id: sessionId,
-      orgId,
-      personId,
-      tokenHash: sha256(sessionId),
-      domain: "viewer.test",
-      authAt: now,
-      lastSeenAt: now,
-      expiresAt: new Date(now.getTime() + 30 * 24 * 3600_000),
+  const reply = (threadId: string, body: string, by: { cookie?: string; bearer?: string; agent?: string }) =>
+    t.api(`/api/threads/${threadId}/comments`, {
+      method: "POST",
+      cookie: by.cookie,
+      bearer: by.bearer,
+      json: { body, agent: by.agent },
     });
-    await t.server.db.insert(pushSubscriptions).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      personId,
-      sessionId,
-      endpoint: endpoint(path),
-      keys,
+  const subscribe = async (as: string, name: string, keys = browser().keys) => {
+    const response = await t.api("/api/push/subscribe", {
+      method: "POST",
+      cookie: as,
+      json: { endpoint: endpoint(name), keys },
     });
-    return sessionId;
-  }
+    expect(response.status).toBe(200);
+  };
+  /** The daily job, the way an operator's cron runs it. It returns once every push it sent is answered. */
+  const digest = async () => {
+    const response = await fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/digest`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPS_SECRET}` },
+    });
+    expect(response.status).toBe(200);
+  };
   const quietDay = () => t.clock.advance(21 * 3600_000);
-
-  async function nextEvents(response: Response, count: number) {
-    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
-    let text = "";
-    while ((text.match(/^event:/gm) ?? []).length < count) {
-      const { value, done } = await Promise.race([
-        reader.read(),
-        Bun.sleep(3000).then(() => ({ value: undefined, done: true })),
-      ]);
-      if (done) break;
-      text += new TextDecoder().decode(value);
-    }
-    await reader.cancel();
-    return text;
-  }
 
   test("a stream hears comments, versions and shared data, and no content", async () => {
     const stream = await t.api(`/api/events?artifact=${id}`, { cookie });
     expect(stream.status).toBe(200);
     expect(stream.headers.get("content-type")).toBe("text/event-stream");
-    await Bun.sleep(50);
     const posted = await comment("secret words");
     expect(posted.status).toBe(200);
     await t.api(`/api/artifacts/${id}/data/shared/votes`, { method: "PUT", cookie, json: { value: 1 } });
     await t.api(`/api/artifacts/${id}/data/me/mine`, { method: "PUT", cookie, json: { value: 1 } });
     expect((await publish(t, token, { slug: "live" })).status).toBe(200);
-    const text = await nextEvents(stream, 3);
+    const text = await readEvents(stream, 3);
     expect(text).toContain("event: thread");
     expect(text).toContain("event: data");
     expect(text).toContain('"key":"votes"');
@@ -165,37 +171,27 @@ describe("live review", () => {
     expect(refused.status).toBe(400);
   });
 
-  test("push: a reply reaches the thread's author, encrypted and signed, and not the replier", async () => {
-    const device = browser();
-    const subscribed = await t.api("/api/push/subscribe", {
-      method: "POST",
-      cookie,
-      json: { endpoint: endpoint("owner"), keys: device.keys },
-    });
-    expect(subscribed.status).toBe(200);
+  test("push: a reply reaches the others in the thread, encrypted and signed, and not the replier", async () => {
+    await subscribe(cookie, "owner", owner.keys);
+    await subscribe(member.cookie, "member");
     const thread = (await (await comment("A question")).json()) as { id: string; n: number };
-    received.length = 0;
+    expect((await reply(thread.id, "Me too", { cookie: member.cookie })).status).toBe(200);
+    await until(() => at("owner").length === 1);
+    clear();
 
-    await t.api(`/api/threads/${thread.id}/comments`, {
-      method: "POST",
-      cookie,
-      json: { body: "Talking to myself" },
-    });
-    await Bun.sleep(100);
-    expect(received).toHaveLength(0);
+    // The member hears the owner's own reply; the owner, in the same delivery, isn't even tried.
+    expect((await reply(thread.id, "Talking to myself", { cookie })).status).toBe(200);
+    await until(() => tried("member") === 1);
+    expect(tried("owner")).toBe(0);
 
-    const agent = await t.api(`/api/threads/${thread.id}/comments`, {
-      method: "POST",
-      bearer: token,
-      json: { body: "Fixed it", agent: "Claude" },
-    });
-    expect(agent.status).toBe(200);
-    for (let i = 0; i < 40 && received.length === 0; i++) await Bun.sleep(25);
-    expect(received).toHaveLength(1);
-    const [message] = received;
+    // An agent writes with its person's token, and still has news for them.
+    clear();
+    expect((await reply(thread.id, "Fixed it", { bearer: token, agent: "Claude" })).status).toBe(200);
+    await until(() => at("owner").length === 1);
+    const [message] = at("owner");
     expect(message?.headers.get("content-encoding")).toBe("aes128gcm");
     expect(message?.headers.get("authorization")).toMatch(/^vapid t=.+\..+\..+, k=/);
-    const opened = device.decrypt(message?.body as Uint8Array);
+    const opened = owner.decrypt(message?.body as Uint8Array);
     expect(opened.title).toBe("Zahin's Claude replied");
     expect(opened.body).toBe("Fixed it");
     expect(opened.url).toBe(`/camerabuddy/live/plan?c=${thread.n}`);
@@ -225,97 +221,87 @@ describe("live review", () => {
   });
 
   test("push: an agent's publish tells its person, and a person's own doesn't", async () => {
-    received.length = 0;
-    expect((await publish(t, token, { slug: "live" })).status).toBe(200);
-    await Bun.sleep(100);
-    expect(received).toHaveLength(0);
-    expect((await publish(t, token, { slug: "live", agent: "Claude" })).status).toBe(200);
-    for (let i = 0; i < 40 && received.length === 0; i++) await Bun.sleep(25);
-    expect(received).toHaveLength(1);
+    clear();
+    const own = await published(t, token, { slug: "live" });
+    const agent = await published(t, token, { slug: "live", agent: "Claude" });
+    // The person's own publish came first; had it sent anything, it would be here before the agent's.
+    await until(() => at("owner").length === 1);
+    expect(tried("owner")).toBe(1);
+    expect(owner.decrypt(at("owner")[0]?.body as Uint8Array).title).toBe(
+      `Zahin's Claude published v${agent.version}`,
+    );
+    expect(agent.version).toBe(own.version + 1);
   });
 
   test("push: someone who can't see the artifact isn't told", async () => {
-    received.length = 0;
-    (await makePerson(t, orgId, "outside")).token;
-    const [row] = await t.server.db.select().from(people).where(eq(people.role, "outside"));
-    await addDevice(row?.id as string, "outsider");
+    const outsider = await makeAccount(t, orgId, "outside");
+    await subscribe(outsider.cookie, "outsider");
     quietDay();
-    await sendDigest(t.server.deps);
-    expect(received.filter((entry) => entry.path === "/outsider")).toHaveLength(0);
+    expect((await comment("News for the member", { cookie: member.cookie })).status).toBe(200);
+    clear();
+    await digest();
+    // The digest went out (the owner has news), and passed the outsider by.
+    expect(at("owner")).toHaveLength(1);
+    expect(tried("outsider")).toBe(0);
   });
 
   test("push: a gone device is forgotten, and the digest counts what others did", async () => {
-    received.length = 0;
-    (await makePerson(t, orgId, "member")).token;
-    const [other] = await t.server.db.select().from(people).where(eq(people.role, "member"));
+    const other = await makeAccount(t, orgId, "member");
     const device = browser();
-    await addDevice(other?.id as string, "gone", device.keys);
+    await subscribe(other.cookie, "gone", device.keys);
+    await subscribe(other.cookie, "kept");
     quietDay();
     await comment("Something new");
-    await sendDigest(t.server.deps);
-    const digest = received.find((entry) => entry.path === "/gone");
-    expect(device.decrypt(digest?.body as Uint8Array).title).toBe("Today in Artifacts");
+    clear();
+    await digest();
+    expect(device.decrypt(at("gone")[0]?.body as Uint8Array).title).toBe("Today in Artifacts");
 
     // Once a day, however often the job runs.
-    received.length = 0;
-    await sendDigest(t.server.deps);
+    clear();
+    await digest();
     expect(received).toHaveLength(0);
 
-    answer = 410;
+    gone.add("/gone");
     quietDay();
     await comment("And again");
-    await sendDigest(t.server.deps);
-    answer = 201;
-    const left = await t.server.db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.endpoint, endpoint("gone")));
-    expect(left).toHaveLength(0);
+    await digest();
+    gone.clear();
+
+    quietDay();
+    await comment("And once more");
+    clear();
+    await digest();
+    expect(at("kept")).toHaveLength(1);
+    expect(tried("gone")).toBe(0);
   });
 
   test("push: someone who lost the artifact, or whose session ended, hears nothing more", async () => {
-    (await makePerson(t, orgId, "member")).token;
-    const [member] = await t.server.db.select().from(people).where(eq(people.role, "member"));
+    const lost = await makeAccount(t, orgId, "member");
     const thread = (await (await comment("Private soon")).json()) as { id: string };
-    const session = await addDevice(member?.id as string, "lost");
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
-    const reply = (body: string) =>
-      t.api(`/api/threads/${thread.id}/comments`, {
-        method: "POST",
-        bearer: token,
-        json: { body, agent: "Claude" },
-      });
-    await t.server.db.insert(comments).values({
-      id: Bun.randomUUIDv7(),
-      threadId: thread.id,
-      orgId,
-      authorPersonId: member?.id,
-      authorName: "Member",
-      body: "Me too",
-      version: 1,
-    });
-    received.length = 0;
-    await reply("Heard");
-    for (let i = 0; i < 40 && !received.some((entry) => entry.path === "/lost"); i++) await Bun.sleep(25);
-    expect(received.some((entry) => entry.path === "/lost")).toBe(true);
+    await subscribe(lost.cookie, "lost");
+    clear();
+    expect((await reply(thread.id, "Me too", { cookie: lost.cookie })).status).toBe(200);
+    await until(() => tried("owner") === 1);
+    const agentReply = (body: string) => reply(thread.id, body, { bearer: token, agent: "Claude" });
+    clear();
+    await agentReply("Heard");
+    await until(() => at("lost").length === 1);
 
-    await t.server.db.update(artifacts).set({ visibility: "me" }).where(eq(artifacts.id, id));
-    received.length = 0;
-    await reply("Not for you");
-    await Bun.sleep(150);
-    expect(received.some((entry) => entry.path === "/lost")).toBe(false);
-    await t.server.db
-      .update(artifacts)
-      .set({ visibility: row?.visibility as "org" })
-      .where(eq(artifacts.id, id));
+    const visibility = (value: "me" | "org") =>
+      t.api(`/api/artifacts/${id}`, { method: "PATCH", cookie, json: { visibility: value } });
+    expect((await visibility("me")).status).toBe(200);
+    clear();
+    await agentReply("Not for you");
+    // The owner is in the same delivery, so once they're tried, everyone the delivery chose was.
+    await until(() => tried("owner") === 1);
+    expect(tried("lost")).toBe(0);
+    expect((await visibility("org")).status).toBe(200);
 
-    await t.server.db.delete(sessions).where(eq(sessions.id, session));
-    expect(
-      await t.server.db
-        .select()
-        .from(pushSubscriptions)
-        .where(eq(pushSubscriptions.endpoint, endpoint("lost"))),
-    ).toHaveLength(0);
+    expect((await t.api("/api/auth/logout", { method: "POST", cookie: lost.cookie })).status).toBe(200);
+    clear();
+    await agentReply("Gone now");
+    await until(() => tried("owner") === 1);
+    expect(tried("lost")).toBe(0);
   });
 
   test("streams: ten per caller, and closing one frees its place", async () => {
@@ -335,28 +321,11 @@ describe("live review", () => {
   });
 
   test("a render can be fetched through the app, for the service worker", async () => {
-    const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#123456" } })
-      .png()
-      .toBuffer();
-    expect((await publish(t, token, { slug: "bytes", renderBytes: png })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bytes"));
-    const hash = createHash("sha256").update(png).digest("hex");
-    const through = await t.api(`/api/artifacts/${row?.id}/r/${hash}?via=app`, { cookie });
+    const png = await solidImage(8, 8, "#123456", "png");
+    const { id: bytes, renderHash } = await published(t, token, { slug: "bytes", renderBytes: png });
+    const through = await t.api(`/api/artifacts/${bytes}/r/${renderHash}?via=app`, { cookie });
     expect(through.status).toBe(200);
     expect(new Uint8Array(await through.arrayBuffer())).toEqual(new Uint8Array(png));
-  });
-
-  test("push: unsubscribing stops it", async () => {
-    await t.api("/api/push/subscribe", {
-      method: "DELETE",
-      cookie,
-      json: { endpoint: endpoint("owner") },
-    });
-    const left = await t.server.db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.endpoint, endpoint("owner")));
-    expect(left).toHaveLength(0);
   });
 
   test("search finds titles, pages and comments the caller can see, and treats % as a character", async () => {
@@ -378,16 +347,15 @@ describe("live review", () => {
   });
 
   test("compare reports the renders and regions of a changed frame", async () => {
-    const picture = (background: string) =>
-      sharp({ create: { width: 400, height: 800, channels: 3, background } })
-        .png()
-        .toBuffer();
-    const version = (frameHash: string, renderBytes: Buffer) =>
-      publish(t, token, { slug: "pixels", frameHash, renderBytes });
-    expect((await version(hash("x"), await picture("#ffffff"))).status).toBe(200);
-    expect((await version(hash("y"), await picture("#000000"))).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "pixels"));
-    const compare = await t.api(`/api/artifacts/${row?.id}/compare?from=1&to=2`, { cookie });
+    const version = async (frameHash: string, background: string) =>
+      published(t, token, {
+        slug: "pixels",
+        frameHash,
+        renderBytes: await solidImage(400, 800, background, "png"),
+      });
+    await version(hash("x"), "#ffffff");
+    const { id: pixels } = await version(hash("y"), "#000000");
+    const compare = await t.api(`/api/artifacts/${pixels}/compare?from=1&to=2`, { cookie });
     expect(compare.status).toBe(200);
     const body = (await compare.json()) as {
       frames: { regions: Record<string, { before: string; after: string; regions: unknown[] }> };
@@ -405,10 +373,13 @@ describe("live review", () => {
       String(input).startsWith("https://api.github.com/")
         ? Response.json({ tag_name: "v99.0.0" })
         : real(input, init)) as typeof fetch;
-    const body = (await (await t.api("/api/org", { cookie })).json()) as { newVersion: string | null };
-    globalThis.fetch = real;
-    env.githubReleasesRepo = null;
-    expect(body.newVersion).toBe("99.0.0");
+    try {
+      const body = (await (await t.api("/api/org", { cookie })).json()) as { newVersion: string | null };
+      expect(body.newVersion).toBe("99.0.0");
+    } finally {
+      globalThis.fetch = real;
+      env.githubReleasesRepo = null;
+    }
   });
 
   test("a share link unfurls with its title and cover; other addresses say nothing", async () => {
@@ -422,11 +393,27 @@ describe("live review", () => {
     const shared = await (await page(new URL(url).pathname)).text();
     expect(shared).toContain('property="og:image"');
     expect(shared).toContain('property="og:title"');
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
-    expect(shared).toContain(row?.title.replaceAll("&", "&#38;") as string);
+    expect(shared).toContain('content="Roadmap"');
     const plain = await (await page("/demo/live")).text();
     expect(plain).not.toContain("og:image");
-    expect(plain).not.toContain(row?.title as string);
+    expect(plain).not.toContain("Roadmap");
     expect(await (await page("/s/not-a-token")).text()).not.toContain("og:image");
+  });
+
+  test("push: unsubscribing stops it", async () => {
+    const thread = (await (await comment("Last one")).json()) as { id: string };
+    clear();
+    expect((await reply(thread.id, "Watching", { cookie: member.cookie })).status).toBe(200);
+    await until(() => tried("owner") === 1);
+    const unsubscribed = await t.api("/api/push/subscribe", {
+      method: "DELETE",
+      cookie,
+      json: { endpoint: endpoint("owner") },
+    });
+    expect(unsubscribed.status).toBe(200);
+    clear();
+    await reply(thread.id, "For both of you", { bearer: token, agent: "Claude" });
+    await until(() => tried("member") === 1);
+    expect(tried("owner")).toBe(0);
   });
 });
