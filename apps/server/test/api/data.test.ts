@@ -1,17 +1,36 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { OrgSettings } from "@artifacts/schema";
-import { eq } from "drizzle-orm";
-import { artifacts, people } from "../../src/db/schema.ts";
-import { claim, startTestServer, type TestServer } from "../helpers.ts";
-import { hash, makePerson, publish } from "../publish-helper.ts";
+import type { OrgLimits } from "@artifacts/schema";
+import type { z } from "zod";
+import {
+  claim,
+  code,
+  joinAsGuest,
+  OPS_SECRET,
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { hash, makePerson, published } from "../publish-helper.ts";
 
-const code = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
+/** Lowers (or raises) some of the org's limits, the way an admin does in settings. */
+async function setLimits(t: TestServer, cookie: string, limits: Partial<z.infer<typeof OrgLimits>>) {
+  const current = (await (await t.api("/api/org", { cookie })).json()) as {
+    settings: { limits: z.infer<typeof OrgLimits> };
+  };
+  const response = await t.api("/api/org", {
+    method: "PATCH",
+    cookie,
+    json: { settings: { limits: { ...current.settings.limits, ...limits } } },
+  });
+  expect(response.status).toBe(200);
+}
 
 describe("the data store", () => {
   let t: TestServer;
   let token: string;
   let sam: string;
+  let samName: string;
   let jo: string;
   let id: string;
   let n = 0;
@@ -28,19 +47,15 @@ describe("the data store", () => {
     t.api(`/api/artifacts/${id}/data/${scope}/${key}`, { bearer });
   const fresh = async () => {
     n += 1;
-    await publish(t, token, { slug: `data-${n}`, frameHash: hash(`d${n}`) });
-    const [row] = await t.server.db
-      .select()
-      .from(artifacts)
-      .where(eq(artifacts.slug, `data-${n}`));
-    id = row?.id as string;
+    ({ id } = await published(t, token, { slug: `data-${n}`, frameHash: hash(`d${n}`) }));
   };
 
   beforeAll(async () => {
     t = await startTestServer();
-    token = (await claim(t)).token;
-    const orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    sam = (await makePerson(t, orgId, "member")).token;
+    const owner = await claim(t);
+    token = owner.token;
+    const orgId = owner.orgId;
+    ({ token: sam, name: samName } = await makePerson(t, orgId, "member"));
     jo = (await makePerson(t, orgId, "member")).token;
     await fresh();
   });
@@ -85,6 +100,7 @@ describe("the data store", () => {
     expect(list.keys.map((entry) => entry.key)).toEqual(["todo"]);
   });
 
+  // Pseudonyms are only ever in the bucket's keys: nothing the API returns shows one.
   test("a pseudonym differs per artifact", async () => {
     const before = id;
     await put("me", "x", 1, sam);
@@ -238,7 +254,7 @@ describe("the data store", () => {
     };
     expect(exported.shared).toEqual({ s: 1 });
     expect(Object.values(exported.me)[0]).toMatchObject({ data: { m: 2 } });
-    expect(Object.values(exported.me)[0]?.name).toStartWith("P");
+    expect(Object.values(exported.me)[0]?.name).toBe(samName);
     expect((await t.api(`/api/artifacts/${id}/data-export`, { bearer: sam })).status).toBe(403);
     expect(
       (await t.api(`/api/artifacts/${id}/data-clear`, { method: "POST", bearer: sam, json: {} })).status,
@@ -279,9 +295,7 @@ describe("the data store", () => {
         json: { permission: "view" },
       })
     ).json()) as { url: string };
-    const secret = url.split("/s/")[1];
-    const joined = await t.api(`/api/s/${secret}/guest`, { method: "POST", json: { name: "G" } });
-    const cookie = (joined.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    const cookie = await joinAsGuest(t, url, "G");
     expect((await t.api(`/api/artifacts/${id}/data/shared/k`, { cookie })).status).toBe(200);
     const write = await t.api(`/api/artifacts/${id}/data/shared/k`, {
       method: "PUT",
@@ -290,25 +304,12 @@ describe("the data store", () => {
     });
     expect(write.status).toBe(403);
   });
-
-  test("the usage job recounts what's really there", async () => {
-    await fresh();
-    await put("shared", "a", 1);
-    await t.server.bucket.put(`data/${id}/shared/stray`, "12345");
-    const response = await fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/usage`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${"o".repeat(64)}` },
-    });
-    expect(response.status).toBe(200);
-    const { artifactUsage } = await import("../../src/db/schema.ts");
-    const rows = await t.server.db.select().from(artifactUsage).where(eq(artifactUsage.artifactId, id));
-    expect(rows.find((row) => row.scope === "shared")?.keys).toBe(2);
-  });
 });
 
 describe("limits, with an org that's lowered them", () => {
   let t: TestServer;
   let token: string;
+  let owner: string;
   let id: string;
   const put = (key: string, value: unknown) =>
     t.api(`/api/artifacts/${id}/data/shared/${key}`, { method: "PUT", bearer: token, json: { value } });
@@ -316,16 +317,14 @@ describe("limits, with an org that's lowered them", () => {
   beforeAll(async () => {
     t = await startTestServer();
     token = (await claim(t)).token;
-    await publish(t, token, { slug: "limits" });
-    id = (await t.server.db.select().from(artifacts))[0]?.id as string;
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: Record<string, number> };
-    settings.limits.dataKeysPerScope = 2;
-    settings.limits.dataBytesPerScope = 100;
-    settings.limits.fileBytes = 10;
-    settings.limits.writesPerSecond = 100;
-    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
+    ({ id } = await published(t, token, { slug: "limits" }));
+    owner = await signIn(t, OWNER.email, OWNER.password);
+    await setLimits(t, owner, {
+      dataKeysPerScope: 2,
+      dataBytesPerScope: 100,
+      fileBytes: 10,
+      writesPerSecond: 100,
+    });
   });
   afterAll(() => t.stop());
 
@@ -391,20 +390,38 @@ describe("limits, with an org that's lowered them", () => {
   });
 
   test("deleting files counts against the write limit like every other write", async () => {
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: Record<string, number> };
-    settings.limits.writesPerSecond = 2;
-    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
-    const statuses: number[] = [];
-    for (let i = 0; i < 4; i++) {
-      statuses.push(
-        (await t.api(`/api/artifacts/${id}/files/shared/nothing`, { method: "DELETE", bearer: token }))
-          .status,
-      );
+    await setLimits(t, owner, { writesPerSecond: 2 });
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        statuses.push(
+          (await t.api(`/api/artifacts/${id}/files/shared/nothing`, { method: "DELETE", bearer: token }))
+            .status,
+        );
+      }
+      expect(statuses).toContain(429);
+    } finally {
+      await setLimits(t, owner, { writesPerSecond: 100 });
     }
-    expect(statuses).toContain(429);
-    settings.limits.writesPerSecond = 100;
-    await t.server.db.update(org).set({ settings: settings as Partial<OrgSettings> });
+  });
+
+  test("the usage job recounts what's really there, so a key added behind its back counts", async () => {
+    const { id: usage } = await published(t, token, { slug: "usage" });
+    const write = (key: string) =>
+      t.api(`/api/artifacts/${usage}/data/shared/${key}`, {
+        method: "PUT",
+        bearer: token,
+        json: { value: 1 },
+      });
+    expect((await write("a")).status).toBe(200);
+    // A key no write counted, as a crash between the upload and the count would leave.
+    await t.server.bucket.put(`data/${usage}/shared/stray`, "12345");
+    const response = await fetch(`http://127.0.0.1:${t.server.ports.internal}/internal/jobs/usage`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPS_SECRET}` },
+    });
+    expect(response.status).toBe(200);
+    // Two keys of two: the stray one now counts.
+    expect((await write("b")).status).toBe(413);
   });
 });
