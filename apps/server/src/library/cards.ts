@@ -22,6 +22,7 @@ import {
   views,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { changes, frameHashes } from "../versions/diff.ts";
 
 const clip = (text: string) => {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -195,8 +196,9 @@ export async function buildCards(
     ? await db
         .select({
           versionId: frames.versionId,
-          key: frames.frameKey,
-          hash: frames.contentHash,
+          pageKey: frames.pageKey,
+          frameKey: frames.frameKey,
+          contentHash: frames.contentHash,
           renders: frames.renders,
           y: frames.y,
           x: frames.x,
@@ -262,12 +264,10 @@ export async function buildCards(
     } else if (unseen) status = { kind: "waiting" };
     else status = { kind: "not_reviewed" };
 
-    const own = frameRows.filter((frame) => frame.versionId === latest.id);
-    const old = previous ? frameRows.filter((frame) => frame.versionId === previous.id) : [];
-    const before = new Map(old.map((frame) => [frame.key, frame.hash]));
+    const framesOf = (versionId: string) => frameRows.filter((frame) => frame.versionId === versionId);
+    const own = framesOf(latest.id);
     const changedFrames = previous
-      ? own.filter((frame) => before.get(frame.key) !== undefined && before.get(frame.key) !== frame.hash)
-          .length
+      ? changes(frameHashes(framesOf(previous.id)), frameHashes(own)).changed.length
       : 0;
     const first = [...own].sort((a, b) => a.y - b.y || a.x - b.x)[0];
     return [
