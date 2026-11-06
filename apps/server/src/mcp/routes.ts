@@ -16,18 +16,18 @@ import {
   UNTRUSTED_NOTICE,
 } from "@artifacts/schema";
 import { buildArticle } from "@artifacts/schema/article";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { GUIDES } from "../../../../skill/index.ts";
-import type { Caller } from "../auth/caller.ts";
+import type { Asker, Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { pages, people, projects, versions } from "../db/schema.ts";
+import { pages, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
-import type { ApiContext, ApiVars, Routes } from "../http/routes.ts";
-import { audienceOf } from "../library/audience.ts";
+import type { ApiVars, Routes } from "../http/routes.ts";
+import { blobKey } from "../layout.ts";
 import {
   libraryArtifacts,
   libraryFrames,
@@ -38,10 +38,11 @@ import {
 } from "../library/browse.ts";
 import { libraryCards } from "../library/cards.ts";
 import { readArtifact, viewArtifact } from "../library/read.ts";
-import { blobKey, putBlob, verifyBlobs } from "../publish/blobs.ts";
-import type { Publisher } from "../publish/routes.ts";
-import type { reviewRoutes } from "../review/routes.ts";
+import { putBlob, verifyBlobs } from "../publish/blobs.ts";
+import type { Publisher } from "../publish/publisher.ts";
+import type { Review } from "../review/service.ts";
 import { VERSION } from "../version.ts";
+import { listVersions } from "../versions/list.ts";
 
 const MODERN = "2026-07-28";
 const LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26"];
@@ -75,10 +76,11 @@ class InsufficientScope extends Error {
   }
 }
 
-type Services = { publisher: Publisher; review: ReturnType<typeof reviewRoutes> };
+type Services = { publisher: Publisher; review: Review };
 type Input = Record<string, unknown>;
 type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
-type Context = { c: ApiContext; caller: Caller; orgId: string; input: Input };
+type McpCaller = Extract<Caller, { kind: "cliToken" | "orgToken" }>;
+type Context = { asker: Asker<McpCaller>; caller: McpCaller; orgId: string; input: Input };
 type Tool = {
   name: string;
   description: string;
@@ -287,29 +289,12 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
       async run(context) {
         const loaded = await load(context, deps);
         const [card] = await libraryCards(deps, context.caller, [loaded]);
-        const { views } = await review.listThreads(loaded.row.id, { status: "open" });
-        const [place] = await deps.db
-          .select({ name: projects.name })
-          .from(projects)
-          .where(eq(projects.id, loaded.row.projectId))
-          .limit(1);
-        // For whoever answers for the work, as in GET /api/artifacts/:id/status.
-        const answers =
-          context.caller.kind === "orgToken" || can(context.caller, "artifact.share", loaded.resource);
+        const status = await review.status(context.asker, loaded);
         return {
-          version: loaded.row.latestVersion,
+          version: status.version,
           outcome: card?.outcome,
-          open: views.map(threadJson),
-          ...(answers
-            ? {
-                audience: await audienceOf(
-                  deps,
-                  context.c.get("org").name,
-                  { ...loaded.resource, row: loaded.row },
-                  place?.name ?? "",
-                ),
-              }
-            : {}),
+          open: status.open.map(threadJson),
+          ...(status.audience === undefined ? {} : { audience: status.audience }),
         };
       },
     },
@@ -338,15 +323,15 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
       },
       required: ["artifact", "n", "message"],
       async run(context) {
-        const { c, caller, input } = context;
+        const { asker, caller, input } = context;
         const loaded = await load(context, deps);
-        if (!can(caller, "artifact.comment", loaded.resource)) throw new ToolError("You can't comment here.");
+        if (!can(caller, "artifact.comment", loaded)) throw new ToolError("You can't comment here.");
         const { rows } = await review.listThreads(loaded.row.id);
         const thread = rows.find((row) => row.n === input.n);
         if (!thread) throw new ToolError("There's no such comment.");
         const body = str(input.message, "message", COMMENT_MAX);
         if (!body?.trim()) throw new ToolError("message is required.");
-        const comment = await review.replyTo(c, thread, {
+        const comment = await review.replyTo(asker, loaded, thread, {
           body,
           marksFixed: input.fixed === true,
           agent: "Connector",
@@ -363,13 +348,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
       required: ["artifact"],
       async run(context) {
         const loaded = await load(context, deps);
-        const rows = await deps.db
-          .select({ version: versions, by: people.name })
-          .from(versions)
-          .innerJoin(people, eq(people.id, versions.publishedBy))
-          .where(and(eq(versions.artifactId, loaded.row.id), isNull(versions.deletedAt)))
-          .orderBy(desc(versions.n))
-          .limit(100);
+        const rows = await listVersions(deps, loaded.id, 100);
         return rows.map(({ version, by }) => ({
           n: version.n,
           name: version.name,
@@ -397,7 +376,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         repo,
       },
       required: ["project", "slug", "title", "summary", "markdown"],
-      async run({ c, caller, orgId, input }) {
+      async run({ asker, caller, orgId, input }) {
         const fields = PublishPrepare.pick({ project: true, slug: true, title: true }).safeParse(input);
         if (!fields.success) throw new ToolError("project, slug or title isn't valid.");
         const summary = Summary.safeParse(input.summary);
@@ -411,7 +390,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         }
         const { project, slug, title } = fields.data;
         // Before anything is stored: the permission check, and the same one prepare and commit run.
-        const existing = await publisher.target(c, project, slug);
+        const { row: existing } = await publisher.target(asker, project, slug);
         if (existing) {
           const rows = await deps.db
             .select({ key: pages.pageKey, kind: pages.kind })
@@ -465,9 +444,15 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           }),
         );
         const repoName = normalizeRepo(str(input.repo, "repo"));
-        const prepared = await publisher.prepare(c, { project, slug, title, repo: repoName, files: stored });
-        const theme = ArticleTheme.safeParse(c.get("org").brand?.theme ?? {});
-        return publisher.commit(c, {
+        const prepared = await publisher.prepare(asker, {
+          project,
+          slug,
+          title,
+          repo: repoName,
+          files: stored,
+        });
+        const theme = ArticleTheme.safeParse(asker.org.brand?.theme ?? {});
+        return publisher.commit(asker, {
           uploadId: prepared.uploadId,
           message: str(input.message, "message", 2000) ?? null,
           name: null,
@@ -514,7 +499,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         payload: { type: "object", description: "{ sha256, size } from artifacts pack" },
       },
       required: ["project", "slug", "title", "payload"],
-      async run({ c, input, orgId }) {
+      async run({ asker, input, orgId }) {
         const payload = z
           .object({ sha256: z.string().regex(SHA256_HEX), size: z.number().int().positive() })
           .safeParse(input.payload);
@@ -528,7 +513,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         });
         if (!meta.success) throw new ToolError("project, slug or title isn't valid.");
         // Before anything is signed: a caller who can't publish here gets no upload URL at all.
-        await publisher.target(c, meta.data.project, meta.data.slug);
+        await publisher.target(asker, meta.data.project, meta.data.slug);
         const { sha256, size } = payload.data;
         if (!(await deps.bucket.head(blobKey(sha256)))) {
           const signed = await deps.bucket.presignPut(blobKey(sha256), {
@@ -543,7 +528,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           };
         }
         const body = await readPayload(orgId, sha256, size);
-        const prepared = await publisher.prepare(c, { ...meta.data, files: body.declared }, sha256);
+        const prepared = await publisher.prepare(asker, { ...meta.data, files: body.declared }, sha256);
         return {
           step: "upload_files",
           uploadId: prepared.uploadId,
@@ -562,12 +547,12 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         payload: { type: "string", description: "The payload's sha256" },
       },
       required: ["uploadId", "payload"],
-      async run({ c, input, orgId }) {
+      async run({ asker, input, orgId }) {
         const hash = str(input.payload, "payload", 64) ?? "";
         if (!SHA256_HEX.test(hash)) throw new ToolError("payload wants the payload's sha256.");
         const { declared: _, ...body } = await readPayload(orgId, hash, null);
         const commit = PublishCommit.parse({ ...body, uploadId: str(input.uploadId, "uploadId", 8000) });
-        return publisher.commit(c, commit, hash);
+        return publisher.commit(asker, commit, hash);
       },
     },
   ];
@@ -637,11 +622,8 @@ export function mcpRoutes(routes: Routes, deps: Deps, services: Services) {
   const serverInfo = { name: "artifacts", version: VERSION };
 
   routes.post(MCP_PATH, { action: "home.read", inHandler: true }, async (c) => {
-    const caller = c.get("caller");
+    const caller = c.var.caller;
     // Only a token: a browser's cookie has no business here, whatever it could do on the API.
-    if (!c.req.header("authorization")?.startsWith("Bearer ") || caller.kind === "anonymous") {
-      throw new ApiError("unauthenticated", "Sign in first.");
-    }
     if (!(caller.kind === "cliToken" || caller.kind === "orgToken")) {
       throw new ApiError("unauthenticated", "Sign in first.");
     }
@@ -735,7 +717,12 @@ export function mcpRoutes(routes: Routes, deps: Deps, services: Services) {
         const input = (params.arguments ?? {}) as Input;
         try {
           if (!caller.scopes.includes(tool.scope)) throw new InsufficientScope(tool.scope);
-          const result = await tool.run({ c: c as ApiContext, caller, orgId: c.get("org").id, input });
+          const result = await tool.run({
+            asker: { org: c.var.org, caller },
+            caller,
+            orgId: c.var.org.id,
+            input,
+          });
           const content =
             typeof result === "object" && result !== null && "content" in result
               ? (result as { content: Content[] }).content

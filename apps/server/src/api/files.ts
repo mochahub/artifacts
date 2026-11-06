@@ -8,7 +8,7 @@ import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { artifactParam } from "../http/resources.ts";
 import type { Routes } from "../http/routes.ts";
-import { blobKey } from "../publish/blobs.ts";
+import { blobKey } from "../layout.ts";
 
 const CONTENT_TOKEN_MS = 2 * 3600_000;
 const IMAGE = /^image\//;
@@ -106,9 +106,8 @@ export function fileRoutes(routes: Routes, deps: Deps) {
     async (c) => {
       if (!env.contentUrl) throw new ApiError("conflict", "Live previews aren't set up on this deployment.");
       const { version } = await parseBody(c, ContentTokenRequest);
-      const id = c.req.param("id") as string;
-      const caller = c.get("caller");
-      const resource = await artifact(c);
+      const { caller, resource } = c.var;
+      const { id } = resource;
       const [row] = await db
         .select({ n: versions.n })
         .from(versions)

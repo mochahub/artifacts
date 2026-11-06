@@ -7,7 +7,7 @@ const list = (parts: string[]) =>
   parts.length < 2 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
 /** Who can see an artifact, in words: "Everyone in Acme", or "Design team and 2 people". */
-export async function audienceOf(deps: Deps, orgName: string, resource: LoadedArtifact, projectName: string) {
+export async function audienceOf(deps: Deps, orgName: string, resource: LoadedArtifact) {
   if (resource.visibility === "org" && !resource.restricted) return `Everyone in ${orgName}`;
   const onProject = resource.visibility === "org";
   const [teamRows, added, granted] = await Promise.all([
@@ -43,5 +43,5 @@ export async function audienceOf(deps: Deps, orgName: string, resource: LoadedAr
     ...(others.length ? [`${others.length} ${others.length === 1 ? "person" : "people"}`] : []),
   ];
   if (parts.length > 0) return list(parts);
-  return onProject ? `Only people added to ${projectName}` : "Only the publisher";
+  return onProject ? `Only people added to ${resource.project.name}` : "Only the publisher";
 }

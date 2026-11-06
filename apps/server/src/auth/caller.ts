@@ -1,4 +1,5 @@
 import type { Permission, Role, TokenScope } from "@artifacts/schema";
+import type { OrgRow } from "../db/index.ts";
 
 export type CallerPerson = { id: string; name: string; email: string; role: Role };
 
@@ -37,6 +38,9 @@ export type Caller =
     }
   | { kind: "anonymous" };
 
+/** Who is asking, and in which organization: what a service needs from a request, API or MCP alike. */
+export type Asker<C extends Caller = Caller> = { org: OrgRow; caller: C };
+
 /** Whose views and replies a list reads: a person (also through their CLI token) or a guest. */
 export const viewerId = (caller: Caller) =>
   caller.kind === "person" || caller.kind === "cliToken"
@@ -52,3 +56,11 @@ export const callerKey = (caller: Caller): string | null => {
   if (caller.kind === "content") return caller.caller.id;
   return null;
 };
+
+/** The person an action is recorded against. An organization token acts for whoever made it (04). */
+export const actorOf = (caller: Extract<Caller, { kind: "person" | "cliToken" | "orgToken" }>) =>
+  caller.kind === "orgToken" ? caller.createdBy : caller.person.id;
+
+/** Whose rate limit a request counts against: a person or a guest, or else the token itself. */
+export const limiterKey = (caller: Caller): string | null =>
+  callerKey(caller) ?? (caller.kind === "orgToken" ? caller.tokenId : null);

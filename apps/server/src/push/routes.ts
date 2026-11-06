@@ -4,25 +4,18 @@ import { pushSubscriptions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import type { ApiContext, Routes } from "../http/routes.ts";
+import type { Routes } from "../http/routes.ts";
 import { vapidKeys } from "./notify.ts";
 
 const MAX_SUBSCRIPTIONS_PER_PERSON = 10;
 
 export function pushRoutes(routes: Routes, deps: Deps) {
-  const person = (c: ApiContext) => {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
-    return caller.person;
-  };
-
   routes.get("/api/push/key", { action: "account.manage" }, async (c) => {
     return c.json({ key: (await vapidKeys(deps)).publicKey });
   });
 
   routes.post("/api/push/subscribe", { action: "account.manage" }, async (c) => {
-    const me = person(c as ApiContext);
-    const session = (c.get("caller") as { sessionId: string }).sessionId;
+    const { person: me, sessionId: session } = c.var.caller;
     const body = await parseBody(c, PushSubscribe);
     if (!deps.pushAllow(body.endpoint)) throw new ApiError("invalid", "That isn't a push service.");
     // A browser's keys are an uncompressed P-256 point and 16 bytes of secret; anything else can't be sent to.
@@ -56,7 +49,7 @@ export function pushRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.delete("/api/push/subscribe", { action: "account.manage" }, async (c) => {
-    const me = person(c as ApiContext);
+    const me = c.var.caller.person;
     const { endpoint } = await parseBody(c, PushSubscribe.pick({ endpoint: true }));
     await deps.db
       .delete(pushSubscriptions)

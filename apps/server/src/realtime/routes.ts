@@ -1,5 +1,5 @@
 import { findArtifact } from "../auth/access.ts";
-import { callerKey } from "../auth/caller.ts";
+import { limiterKey } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { currentCaller } from "../auth/resolve.ts";
 import type { Deps } from "../deps.ts";
@@ -21,10 +21,8 @@ export function eventRoutes(routes: Routes, deps: Deps) {
   const streams = new Map<string, number>();
 
   routes.get("/api/events", { action: "artifact.read", resource: artifact }, async (c) => {
-    const resource = await artifact(c as ApiContext);
-    const caller = c.get("caller");
-    // An org token has no person, so it counts by itself rather than with every other one.
-    const who = callerKey(caller) ?? ("tokenId" in caller ? caller.tokenId : c.get("org").id);
+    const { resource, caller } = c.var;
+    const who = limiterKey(caller) ?? c.var.org.id;
     const open = streams.get(who) ?? 0;
     if (open >= MAX_STREAMS_PER_CALLER) throw new ApiError("rate_limited", "Too many live connections.");
     streams.set(who, open + 1);

@@ -8,14 +8,14 @@ import {
 } from "@artifacts/schema";
 import { FONT_STACKS } from "@artifacts/schema/theme-css";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { findArtifacts, toResource } from "../auth/access.ts";
+import { findArtifactBySlug, findArtifacts } from "../auth/access.ts";
 import { can } from "../auth/can.ts";
 import { artifacts, brandProposals, org, people, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { type ApiContext, type Routes, requireCan } from "../http/routes.ts";
-import { blobKey } from "../publish/blobs.ts";
+import { type Routes, requireCan } from "../http/routes.ts";
+import { blobKey } from "../layout.ts";
 
 /** The brand everyone renders with. One link per font, so the CLI needs no route of its own for them. */
 export async function orgBrand(deps: Deps, brand: Brand | null): Promise<OrgBrand> {
@@ -83,28 +83,19 @@ export function brandRoutes(routes: Routes, deps: Deps) {
 
   routes.post("/api/brand/proposals", { action: "brand.propose" }, async (c) => {
     const body = await parseBody(c, ProposeBrand);
-    const orgId = c.get("org").id;
-    const caller = c.get("caller");
-    if (caller.kind !== "person" && caller.kind !== "cliToken") {
-      throw new ApiError("forbidden", "You can't propose a brand.");
-    }
-    const [sample] = await db
-      .select({ row: artifacts })
-      .from(artifacts)
-      .innerJoin(projects, eq(projects.id, artifacts.projectId))
-      .where(and(eq(artifacts.orgId, orgId), eq(projects.slug, body.project), eq(artifacts.slug, body.slug)))
-      .limit(1);
-    const resource = sample ? await toResource(deps, sample.row) : null;
+    const orgId = c.var.org.id;
+    const caller = c.var.caller;
+    const sample = await findArtifactBySlug(deps, orgId, body.project, body.slug);
     // The same answer for a hidden artifact as for none, or this would say what's in a restricted project.
-    if (!sample || !resource || !can(caller, "artifact.read", resource)) {
+    if (!sample || !can(caller, "artifact.read", sample)) {
       throw new ApiError("not_found", "Publish the sample first.");
     }
-    requireCan(c as ApiContext, "artifact.publish", resource);
+    requireCan(caller, "artifact.publish", sample);
     // Fonts are named by hash, so each must be a file the proposer really published, not any blob here.
     const [version] = await db
       .select({ files: versions.files })
       .from(versions)
-      .where(and(eq(versions.artifactId, sample.row.id), eq(versions.n, sample.row.latestVersion)))
+      .where(and(eq(versions.artifactId, sample.id), eq(versions.n, sample.row.latestVersion)))
       .limit(1);
     const hashes = new Set(
       Object.values((version?.files ?? {}) as Record<string, { hash: string }>).map((file) => file.hash),
@@ -118,7 +109,7 @@ export function brandRoutes(routes: Routes, deps: Deps) {
       orgId,
       name: body.brand.name,
       brand: body.brand,
-      artifactId: sample.row.id,
+      artifactId: sample.id,
       proposedBy: caller.person.id,
       agent: caller.kind === "cliToken" ? (body.agent ?? null) : null,
       createdAt: clock.now(),
@@ -132,9 +123,8 @@ export function brandRoutes(routes: Routes, deps: Deps) {
    */
   routes.put("/api/brand", { action: "brand.apply" }, async (c) => {
     const body = await parseBody(c, SaveBrand);
-    const orgId = c.get("org").id;
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
+    const orgId = c.var.org.id;
+    const caller = c.var.caller;
     // Only fonts someone already published can stay: a hash sent here would presign any blob.
     const kept = c.get("org").brand?.fonts ?? [];
     const named = [body.theme.font, body.theme.display].filter((name) => name !== undefined);
@@ -173,9 +163,8 @@ export function brandRoutes(routes: Routes, deps: Deps) {
 
   /** A person's decision, in Settings. No token can reach this (04). */
   routes.post("/api/brand/proposals/:id/apply", { action: "brand.apply" }, async (c) => {
-    const orgId = c.get("org").id;
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
+    const orgId = c.var.org.id;
+    const caller = c.var.caller;
     const id = c.req.param("id") as string;
     const [row] = /^[0-9a-f-]{36}$/.test(id)
       ? await db

@@ -77,5 +77,6 @@ export const personView = (row: typeof people.$inferSelect) => ({
   role: row.role,
 });
 
-export const endSessions = (db: Db, personId: string) =>
-  db.delete(sessions).where(eq(sessions.personId, personId));
+/** A sign-in proved again just now: what "recent" means for the actions that ask for it (04). */
+export const markReauthed = (deps: Pick<Deps, "db" | "clock">, sessionId: string) =>
+  deps.db.update(sessions).set({ authAt: deps.clock.now() }).where(eq(sessions.id, sessionId));

@@ -1,13 +1,13 @@
 import { type LibraryRead, type LibraryView, READ_CHARS, READ_CHARS_MAX } from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
+import type { LoadedArtifact } from "../auth/access.ts";
 import { blocks, frames, pages, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import type { Loaded } from "./visible.ts";
 
 type VersionRow = typeof versions.$inferSelect;
 
-export async function liveVersion(deps: Deps, loaded: Loaded, n?: number): Promise<VersionRow> {
+export async function liveVersion(deps: Deps, loaded: LoadedArtifact, n?: number): Promise<VersionRow> {
   const number = n ?? loaded.row.latestVersion;
   const [version] = Number.isSafeInteger(number)
     ? await deps.db
@@ -72,7 +72,7 @@ const parseCursor = (cursor: string | undefined) => {
  */
 export async function readArtifact(
   deps: Deps,
-  loaded: Loaded,
+  loaded: LoadedArtifact,
   options: { page?: string; version?: number; cursor?: string; chars?: number },
 ): Promise<LibraryRead> {
   const budget = Math.min(Math.max(options.chars ?? READ_CHARS, 200), READ_CHARS_MAX);
@@ -104,7 +104,7 @@ export async function readArtifact(
     offset = 0;
   }
   return {
-    project: loaded.projectSlug,
+    project: loaded.project.slug,
     slug: loaded.row.slug,
     title: loaded.row.title,
     version: version.n,
@@ -116,7 +116,7 @@ export async function readArtifact(
 /** Which picture to show. A thumbnail by default; the frame's @1x or @2x when asked. */
 export async function viewArtifact(
   deps: Deps,
-  loaded: Loaded,
+  loaded: LoadedArtifact,
   options: { page?: string; frame?: string; size?: string; version?: number },
 ): Promise<LibraryView> {
   const size = options.size === "1x" || options.size === "2x" ? options.size : "thumb";

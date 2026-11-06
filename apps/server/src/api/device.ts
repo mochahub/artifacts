@@ -1,12 +1,13 @@
 import { DevicePoll, DeviceStart } from "@artifacts/schema";
 import { and, eq, gt } from "drizzle-orm";
+import type { CallerFor } from "../auth/can.ts";
 import { newUserCode, randomSecret, sha256 } from "../auth/secrets.ts";
 import { createCliToken, personView } from "../auth/sessions.ts";
 import { deviceCodes, people } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import type { ApiContext, Routes } from "../http/routes.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
 
 const EXPIRES_IN = 600;
 const INTERVAL = 5;
@@ -85,16 +86,15 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
     return c.json({ status: "approved", token, person: personView(person) });
   });
 
-  async function pending(c: ApiContext) {
+  async function pending(c: RouteRequest<CallerFor<"account.manage">>) {
     // Codes are short enough to type, so a signed-in person can't be left to try them all.
-    const caller = c.get("caller");
-    if (caller.kind === "person") limits.hit(`device-code:${caller.person.id}`, 30, 15 * 60_000);
+    limits.hit(`device-code:${c.var.caller.person.id}`, 30, 15 * 60_000);
     const [row] = await db
       .select()
       .from(deviceCodes)
       .where(
         and(
-          eq(deviceCodes.orgId, c.get("org").id),
+          eq(deviceCodes.orgId, c.var.org.id),
           eq(deviceCodes.userCode, normalize(c.req.param("userCode") as string)),
           eq(deviceCodes.status, "pending"),
           gt(deviceCodes.expiresAt, clock.now()),
@@ -110,7 +110,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
   }
 
   routes.get("/api/device/:userCode", { action: "account.manage" }, async (c) => {
-    const row = await pending(c as ApiContext);
+    const row = await pending(c);
     return c.json({
       clientName: row.clientName,
       agent: row.agent,
@@ -121,18 +121,16 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.post("/api/device/:userCode/approve", { action: "account.manage", recentAuth: true }, async (c) => {
-    const row = await pending(c as ApiContext);
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
+    const row = await pending(c);
     await db
       .update(deviceCodes)
-      .set({ status: "approved", personId: caller.person.id })
+      .set({ status: "approved", personId: c.var.caller.person.id })
       .where(eq(deviceCodes.id, row.id));
     return c.json({ ok: true });
   });
 
   routes.post("/api/device/:userCode/deny", { action: "account.manage" }, async (c) => {
-    const row = await pending(c as ApiContext);
+    const row = await pending(c);
     await db.update(deviceCodes).set({ status: "denied" }).where(eq(deviceCodes.id, row.id));
     return c.json({ ok: true });
   });

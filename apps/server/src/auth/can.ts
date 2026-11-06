@@ -1,47 +1,61 @@
 import type { TokenScope } from "@artifacts/schema";
 import type { Caller, CallerPerson } from "./caller.ts";
 
-export const ACTIONS = [
-  "account.read",
-  "account.manage",
-  "home.read",
-  "project.list",
-  "project.read",
-  "project.create",
-  "artifact.read",
-  "artifact.comment",
-  "thread.resolve",
-  "artifact.decide",
-  "artifact.publish",
-  "artifact.manage",
-  "artifact.share",
-  "artifact.archive",
-  "artifact.delete",
-  "artifact.purge",
-  "deleted.read",
-  "data.read",
-  "data.write",
-  "data.export",
-  "org.read",
-  "org.manage",
-  "people.read",
-  "people.manage",
-  "people.invite",
-  "tokens.manage",
-  "brand.read",
-  "brand.propose",
-  "brand.apply",
-  "people.search",
-  "team.read",
-  "team.manage",
-  "team.members",
-  "project.publish",
-  "project.update",
-  "project.access.read",
-  "project.access.write",
-  "artifact.share_outside",
-] as const;
-export type Action = (typeof ACTIONS)[number];
+const SESSION = ["person"] as const;
+const PEOPLE = ["person", "cliToken"] as const;
+const MEMBERS = ["person", "cliToken", "orgToken"] as const;
+const COMMENTERS = ["person", "cliToken", "guest", "content"] as const;
+const READERS = ["person", "cliToken", "orgToken", "guest", "content"] as const;
+
+/**
+ * Every action, and the only kinds of caller that can ever be allowed it (04). can() refuses everyone
+ * else before anything else, and a route's handler sees its caller narrowed to these.
+ */
+const CALLER_KINDS = {
+  "account.read": PEOPLE,
+  "account.manage": SESSION,
+  "home.read": MEMBERS,
+  "project.list": MEMBERS,
+  "project.read": MEMBERS,
+  "project.create": MEMBERS,
+  "artifact.read": READERS,
+  "artifact.comment": COMMENTERS,
+  "thread.resolve": SESSION,
+  "artifact.decide": SESSION,
+  "artifact.publish": MEMBERS,
+  "artifact.manage": PEOPLE,
+  "artifact.share": PEOPLE,
+  "artifact.archive": PEOPLE,
+  "artifact.delete": PEOPLE,
+  "artifact.purge": SESSION,
+  "deleted.read": PEOPLE,
+  "data.read": READERS,
+  "data.write": COMMENTERS,
+  "data.export": PEOPLE,
+  "org.read": PEOPLE,
+  "org.manage": SESSION,
+  "people.read": PEOPLE,
+  "people.manage": SESSION,
+  "people.invite": PEOPLE,
+  "tokens.manage": SESSION,
+  "brand.read": MEMBERS,
+  "brand.propose": PEOPLE,
+  "brand.apply": SESSION,
+  "people.search": SESSION,
+  "team.read": PEOPLE,
+  "team.manage": SESSION,
+  "team.members": SESSION,
+  "project.publish": MEMBERS,
+  "project.update": SESSION,
+  "project.access.read": PEOPLE,
+  "project.access.write": SESSION,
+  "artifact.share_outside": PEOPLE,
+} as const satisfies Record<string, readonly Caller["kind"][]>;
+
+export type Action = keyof typeof CALLER_KINDS;
+export const ACTIONS = Object.keys(CALLER_KINDS) as Action[];
+/** The callers an action can ever allow. */
+export type CallerFor<A extends Action> = Extract<Caller, { kind: (typeof CALLER_KINDS)[A][number] }>;
 
 /** What a person can do, from least to most. `manage` only ever comes from a project. */
 export type Level = "view" | "comment" | "publish" | "manage";
@@ -151,7 +165,8 @@ export type ProjectResource = {
 };
 export type Resource = ArtifactResource | TeamResource | ProjectResource | { type: "org" };
 
-const isAdmin = (person: CallerPerson) => person.role === "owner" || person.role === "admin";
+const isAdmin = (person: { role: CallerPerson["role"] }) =>
+  person.role === "owner" || person.role === "admin";
 const isMemberOrUp = (person: CallerPerson) => isAdmin(person) || person.role === "member";
 
 /** The person a session or CLI token acts as. */
@@ -440,8 +455,45 @@ function canOnOrg(caller: Caller, action: Action): boolean {
 
 /** The one permission check (04). Pure and total: every route uses it, and it never throws. */
 export function can(caller: Caller, action: Action, resource: Resource): boolean {
+  if (!(CALLER_KINDS[action] as readonly Caller["kind"][]).includes(caller.kind)) return false;
   if (resource.type === "artifact") return canOnArtifact(caller, action, resource);
   if (resource.type === "team") return canOnTeam(caller, action, resource);
   if (resource.type === "project") return canOnProject(caller, action, resource);
   return canOnOrg(caller, action);
 }
+
+/** What a person could do after signing in again: the actions that want a recent sign-in ask this (04). */
+export const canAfterReauth = (caller: Caller, action: Action, resource: Resource) =>
+  can(caller.kind === "person" ? { ...caller, recentAuth: true } : caller, action, resource);
+
+/** Admins and owners: who runs the deployment, and who loses what they issued on leaving that role. */
+export const runsTheOrg = (person: { role: CallerPerson["role"] }) =>
+  person.role === "owner" || person.role === "admin";
+
+/** Only an owner touches an owner, or an admin could take the deployment over (03, "People"). */
+export const mayTouchRole = (actor: CallerPerson, role: CallerPerson["role"]) =>
+  role !== "owner" || actor.role === "owner";
+
+/**
+ * What a token mustn't do with `people.invite`, because it would mint itself a browser session (04, "What
+ * no token can do"): invite above member or reviewer, put anyone in a team, or reset the password of an
+ * admin, an owner, itself, or anyone leading a team or managing a project.
+ */
+export const tokenLimits = {
+  invites: (caller: Caller, role: string) =>
+    caller.kind === "person" || role === "member" || role === "reviewer",
+  joinsTeams: (caller: Caller, teamIds: string[] | null | undefined) =>
+    caller.kind === "person" || !teamIds?.length,
+  resets: (
+    caller: Caller,
+    target: { id: string; role: CallerPerson["role"]; leadsTeam: boolean; managesProject: boolean },
+  ) =>
+    caller.kind === "person" ||
+    !(
+      target.role === "owner" ||
+      target.role === "admin" ||
+      target.leadsTeam ||
+      target.managesProject ||
+      (caller.kind === "cliToken" && target.id === caller.person.id)
+    ),
+};

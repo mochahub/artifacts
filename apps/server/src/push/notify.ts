@@ -1,20 +1,10 @@
 import { and, eq, gt, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
-import { findArtifact, findArtifacts } from "../auth/access.ts";
+import { findArtifacts } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { seesArtifact } from "../auth/can.ts";
 import { findOrg } from "../db/index.ts";
-import {
-  activity,
-  artifacts,
-  comments,
-  org,
-  people,
-  projects,
-  pushSubscriptions,
-  sessions,
-  threads,
-} from "../db/schema.ts";
+import { activity, comments, org, people, pushSubscriptions, sessions, threads } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { encryptPayload, generateVapid, vapidHeader } from "./webpush.ts";
@@ -126,73 +116,73 @@ async function deliver(deps: Deps, resource: LoadedArtifact, personIds: string[]
   }
 }
 
+/** Pushes are a courtesy: a failure here is logged, and never fails the write that sent them. */
+const quietly = async (deps: Deps, work: () => Promise<void>) => {
+  try {
+    await work();
+  } catch (error) {
+    deps.log.warn("couldn't send pushes", { error: String(error) });
+  }
+};
+
 /** An agent's new version goes to the publisher and everyone who has commented (SPEC §7.6). */
-export async function notifyPublished(
+export const notifyPublished = (
   deps: Deps,
-  orgId: string,
-  artifactId: string,
-  options: { project: string; slug: string; title: string; version: number; agent: string | null },
-) {
-  if (!options.agent) return;
-  const resource = await findArtifact(deps, orgId, artifactId);
-  if (!resource) return;
-  const commenters = await deps.db
-    .selectDistinct({ id: comments.authorPersonId })
-    .from(comments)
-    .innerJoin(threads, eq(threads.id, comments.threadId))
-    .where(eq(threads.artifactId, artifactId));
-  // Including the person whose token the agent uses: they weren't watching it happen.
-  const ids = new Set([resource.publisherId, ...commenters.map((row) => row.id)]);
-  await deliver(
-    deps,
-    resource,
-    [...ids].filter((id): id is string => Boolean(id)),
-    {
-      title: `${options.agent} published v${options.version}`,
-      body: options.title,
-      // A path, so an app installed on any of the server's domains stays on that domain.
-      url: `/${options.project}/${options.slug}`,
-      tag: `artifact-${artifactId}`,
-    },
-  );
-}
+  resource: LoadedArtifact,
+  options: { version: number; agent: string | null },
+) =>
+  quietly(deps, async () => {
+    if (!options.agent) return;
+    const commenters = await deps.db
+      .selectDistinct({ id: comments.authorPersonId })
+      .from(comments)
+      .innerJoin(threads, eq(threads.id, comments.threadId))
+      .where(eq(threads.artifactId, resource.id));
+    // Including the person whose token the agent uses: they weren't watching it happen.
+    const ids = new Set([resource.publisherId, ...commenters.map((row) => row.id)]);
+    await deliver(
+      deps,
+      resource,
+      [...ids].filter((id): id is string => Boolean(id)),
+      {
+        title: `${options.agent} published v${options.version}`,
+        body: resource.row.title,
+        // A path, so an app installed on any of the server's domains stays on that domain.
+        url: `/${resource.project.slug}/${resource.row.slug}`,
+        tag: `artifact-${resource.id}`,
+      },
+    );
+  });
 
 /**
  * A reply goes to everyone else in the thread, and tapping it opens that comment. `actor` is null for
  * an agent, which writes with its person's token and still has news for them.
  */
-export async function notifyReply(
+export const notifyReply = (
   deps: Deps,
-  orgId: string,
-  thread: { id: string; n: number; pageKey: string; artifactId: string; authorPersonId: string | null },
+  resource: LoadedArtifact,
+  thread: { id: string; n: number; pageKey: string; authorPersonId: string | null },
   reply: { authorName: string; body: string; actor: string | null },
-) {
-  const resource = await findArtifact(deps, orgId, thread.artifactId);
-  if (!resource) return;
-  const rows = await deps.db
-    .selectDistinct({ id: comments.authorPersonId })
-    .from(comments)
-    .where(eq(comments.threadId, thread.id));
-  const ids = new Set([thread.authorPersonId, ...rows.map((row) => row.id)]);
-  ids.delete(reply.actor);
-  const [path] = await deps.db
-    .select({ project: projects.slug, slug: artifacts.slug })
-    .from(artifacts)
-    .innerJoin(projects, eq(projects.id, artifacts.projectId))
-    .where(eq(artifacts.id, thread.artifactId));
-  if (!path) return;
-  await deliver(
-    deps,
-    resource,
-    [...ids].filter((id): id is string => Boolean(id)),
-    {
-      title: `${reply.authorName} replied`,
-      body: reply.body.slice(0, 160),
-      url: `/${path.project}/${path.slug}/${thread.pageKey}?c=${thread.n}`,
-      tag: `thread-${thread.id}`,
-    },
-  );
-}
+) =>
+  quietly(deps, async () => {
+    const rows = await deps.db
+      .selectDistinct({ id: comments.authorPersonId })
+      .from(comments)
+      .where(eq(comments.threadId, thread.id));
+    const ids = new Set([thread.authorPersonId, ...rows.map((row) => row.id)]);
+    ids.delete(reply.actor);
+    await deliver(
+      deps,
+      resource,
+      [...ids].filter((id): id is string => Boolean(id)),
+      {
+        title: `${reply.authorName} replied`,
+        body: reply.body.slice(0, 160),
+        url: `/${resource.project.slug}/${resource.row.slug}/${thread.pageKey}?c=${thread.n}`,
+        tag: `thread-${thread.id}`,
+      },
+    );
+  });
 
 /** The daily digest: what happened on artifacts each person can see, if anything did and not by them. */
 export async function sendDigest(deps: Deps) {

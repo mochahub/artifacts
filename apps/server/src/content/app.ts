@@ -9,7 +9,7 @@ import { people, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { createApp } from "../http/app.ts";
 import { ApiError } from "../http/errors.ts";
-import { blobKey } from "../publish/blobs.ts";
+import { blobKey } from "../layout.ts";
 import { bucketOrigin } from "../s3.ts";
 import { corsPreflight, runBackend } from "./proxy.ts";
 import { type ContentPayload, verifyContentToken } from "./token.ts";

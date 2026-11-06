@@ -35,30 +35,22 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock, limits } = deps;
   const artifact = artifactParam(deps);
 
-  /** Sharing writes on an archived artifact answer read_only, like every other write (03). */
-  const writable = async (c: ApiContext) => {
-    const resource = await artifact(c);
-    if (resource.archivedAt) throw new ApiError("read_only", "This artifact is archived, so it's read-only.");
-    return resource;
-  };
-  const actor = (c: ApiContext) => {
-    const caller = c.get("caller");
-    if (caller.kind === "person" || caller.kind === "cliToken") return caller.person;
-    throw new ApiError("forbidden", "You can't do that.");
-  };
-
-  routes.patch("/api/artifacts/:id", { action: "artifact.manage", resource: artifact }, async (c) => {
-    const resource = await writable(c as ApiContext);
-    const { visibility } = await parseBody(c, PatchArtifact);
-    if (visibility) await db.update(artifacts).set({ visibility }).where(eq(artifacts.id, resource.id));
-    return c.json({ visibility: visibility ?? resource.visibility });
-  });
+  routes.patch(
+    "/api/artifacts/:id",
+    { action: "artifact.manage", resource: artifact, writes: true },
+    async (c) => {
+      const resource = c.var.resource;
+      const { visibility } = await parseBody(c, PatchArtifact);
+      if (visibility) await db.update(artifacts).set({ visibility }).where(eq(artifacts.id, resource.id));
+      return c.json({ visibility: visibility ?? resource.visibility });
+    },
+  );
 
   routes.get("/api/artifacts/:id/access", { action: "artifact.share", resource: artifact }, async (c) => {
-    const id = c.req.param("id") as string;
-    const orgId = c.get("org").id;
+    const resource = c.var.resource;
+    const { id } = resource;
+    const orgId = c.var.org.id;
     const now = clock.now();
-    const resource = await artifact(c as ApiContext);
     const [added, links, granted] = await Promise.all([
       db
         .select({ person: people, permission: artifactAccess.permission })
@@ -92,7 +84,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     const direct = new Set(added.map(({ person }) => person.id));
     const inheritedIds = resource.inherited.map((row) => row.personId).filter((who) => !direct.has(who));
     // This is the directory by another route, so it stays where search is: in a browser, for members.
-    const directory = can(c.get("caller"), "people.search", { type: "org" });
+    const directory = can(c.var.caller, "people.search", { type: "org" });
     const others = !directory
       ? []
       : await db
@@ -153,7 +145,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
         }),
       project: place ? { slug: place.slug, name: place.name, restricted: place.restricted } : null,
       /** Links and outside invites: in a restricted project they'd undo the restriction, so they take `manage`. */
-      canShareOutside: can(c.get("caller"), "artifact.share_outside", resource),
+      canShareOutside: can(c.var.caller, "artifact.share_outside", resource),
       links: links
         .filter((link) => !link.expiresAt || link.expiresAt > now)
         .map((link) => ({
@@ -165,85 +157,92 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     });
   });
 
-  routes.post("/api/artifacts/:id/access", { action: "artifact.share", resource: artifact }, async (c) => {
-    const resource = await writable(c as ApiContext);
-    const { email, permission } = await parseBody(c, AddAccess);
-    const orgId = c.get("org").id;
-    const me = actor(c as ApiContext);
-    const [person] = await db
-      .select()
-      .from(people)
-      .where(
-        and(eq(people.orgId, orgId), sql`lower(${people.email}) = lower(${email})`, isNull(people.removedAt)),
-      )
-      .limit(1);
-    const isMember = person && ["owner", "admin", "member"].includes(person.role);
-    if (permission === "publish" && !isMember) {
-      throw new ApiError("invalid", "Only members of the organization can publish.");
-    }
-    if (!person || person.role === "outside") {
-      requireCan(c as ApiContext, "artifact.share_outside", resource);
-    }
-    const now = clock.now();
-    await db.insert(activity).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      artifactId: resource.id,
-      actorPersonId: me.id,
-      kind: "shared",
-      payload: { permission },
-      createdAt: now,
-    });
-    // Access a token hands out can comment but not decide or resolve, until a person grants it
-    // again (04). A person's grant, new or a change in the Share sheet, is that confirmation.
-    const viaToken = c.get("caller").kind !== "person";
-    if (person) {
-      await db
-        .insert(artifactAccess)
-        .values({
-          artifactId: resource.id,
-          orgId,
-          personId: person.id,
-          permission,
-          grantedBy: me.id,
-          viaToken,
-        })
-        .onConflictDoUpdate({
-          target: [artifactAccess.artifactId, artifactAccess.personId],
-          set: {
+  routes.post(
+    "/api/artifacts/:id/access",
+    { action: "artifact.share", resource: artifact, writes: true },
+    async (c) => {
+      const resource = c.var.resource;
+      const caller = c.var.caller;
+      const { email, permission } = await parseBody(c, AddAccess);
+      const orgId = c.var.org.id;
+      const me = caller.person;
+      const [person] = await db
+        .select()
+        .from(people)
+        .where(
+          and(
+            eq(people.orgId, orgId),
+            sql`lower(${people.email}) = lower(${email})`,
+            isNull(people.removedAt),
+          ),
+        )
+        .limit(1);
+      const isMember = person && ["owner", "admin", "member"].includes(person.role);
+      if (permission === "publish" && !isMember) {
+        throw new ApiError("invalid", "Only members of the organization can publish.");
+      }
+      if (!person || person.role === "outside") requireCan(caller, "artifact.share_outside", resource);
+      const now = clock.now();
+      await db.insert(activity).values({
+        id: Bun.randomUUIDv7(),
+        orgId,
+        artifactId: resource.id,
+        actorPersonId: me.id,
+        kind: "shared",
+        payload: { permission },
+        createdAt: now,
+      });
+      // Access a token hands out can comment but not decide or resolve, until a person grants it
+      // again (04). A person's grant, new or a change in the Share sheet, is that confirmation.
+      const viaToken = caller.kind !== "person";
+      if (person) {
+        await db
+          .insert(artifactAccess)
+          .values({
+            artifactId: resource.id,
+            orgId,
+            personId: person.id,
             permission,
             grantedBy: me.id,
-            // A token repeating the grant leaves a person's confirmation alone; changing it is unconfirmed.
-            viaToken: viaToken
-              ? sql`case when ${artifactAccess.permission} = ${permission} then ${artifactAccess.viaToken} else true end`
-              : false,
-          },
-        });
-      return c.json({ added: { id: person.id, name: person.name, permission } });
-    }
-    const secret = randomSecret();
-    await db.insert(invites).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      kind: "artifact",
-      email,
-      role: "outside",
-      artifactId: resource.id,
-      permission,
-      viaToken,
-      tokenHash: sha256(secret),
-      createdBy: me.id,
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + 7 * DAY),
-    });
-    return c.json({ url: `${env.publicUrl}/join/${secret}` });
-  });
+            viaToken,
+          })
+          .onConflictDoUpdate({
+            target: [artifactAccess.artifactId, artifactAccess.personId],
+            set: {
+              permission,
+              grantedBy: me.id,
+              // A token repeating the grant leaves a person's confirmation alone; changing it is unconfirmed.
+              viaToken: viaToken
+                ? sql`case when ${artifactAccess.permission} = ${permission} then ${artifactAccess.viaToken} else true end`
+                : false,
+            },
+          });
+        return c.json({ added: { id: person.id, name: person.name, permission } });
+      }
+      const secret = randomSecret();
+      await db.insert(invites).values({
+        id: Bun.randomUUIDv7(),
+        orgId,
+        kind: "artifact",
+        email,
+        role: "outside",
+        artifactId: resource.id,
+        permission,
+        viaToken,
+        tokenHash: sha256(secret),
+        createdBy: me.id,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 7 * DAY),
+      });
+      return c.json({ url: `${env.publicUrl}/join/${secret}` });
+    },
+  );
 
   routes.delete(
     "/api/artifacts/:id/access/:personId",
-    { action: "artifact.share", resource: artifact },
+    { action: "artifact.share", resource: artifact, writes: true },
     async (c) => {
-      const resource = await writable(c as ApiContext);
+      const resource = c.var.resource;
       const removed = isUuid(c.req.param("personId"))
         ? await db
             .delete(artifactAccess)
@@ -263,15 +262,16 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
   /** A team on one artifact. Tokens can do it too, up to `comment`, marked as a person's to confirm (04). */
   routes.put(
     "/api/artifacts/:id/teams/:teamId",
-    { action: "artifact.share", resource: artifact },
+    { action: "artifact.share", resource: artifact, writes: true },
     async (c) => {
-      const resource = await writable(c as ApiContext);
+      const resource = c.var.resource;
+      const caller = c.var.caller;
       const { permission } = await parseBody(c, ShareWithTeam);
-      const viaToken = c.get("caller").kind !== "person";
+      const viaToken = caller.kind !== "person";
       if (viaToken && permission === "publish") {
         throw new ApiError("forbidden", "Only a person can let a team publish. Use the Share sheet.");
       }
-      const orgId = c.get("org").id;
+      const orgId = c.var.org.id;
       const teamId = c.req.param("teamId");
       const [team] = isUuid(teamId)
         ? await db
@@ -288,8 +288,8 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
         .innerJoin(people, eq(people.id, teamMembers.personId))
         .where(and(eq(teamMembers.teamId, team.id), eq(people.role, "outside"), isNull(people.removedAt)))
         .limit(1);
-      if (outsider) requireCan(c as ApiContext, "artifact.share_outside", resource);
-      const me = actor(c as ApiContext);
+      if (outsider) requireCan(caller, "artifact.share_outside", resource);
+      const me = caller.person;
       await db
         .insert(artifactTeamAccess)
         .values({
@@ -326,9 +326,9 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
 
   routes.delete(
     "/api/artifacts/:id/teams/:teamId",
-    { action: "artifact.share", resource: artifact },
+    { action: "artifact.share", resource: artifact, writes: true },
     async (c) => {
-      const resource = await writable(c as ApiContext);
+      const resource = c.var.resource;
       const removed = isUuid(c.req.param("teamId"))
         ? await db
             .delete(artifactTeamAccess)
@@ -345,40 +345,44 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
     },
   );
 
-  routes.post("/api/artifacts/:id/links", { action: "artifact.share", resource: artifact }, async (c) => {
-    const resource = await writable(c as ApiContext);
-    requireCan(c as ApiContext, "artifact.share_outside", resource);
-    if (!c.get("org").settings.linkSharing) {
-      throw new ApiError("forbidden", "Link sharing is turned off for this organization.");
-    }
-    const { permission, expiresIn } = await parseBody(c, CreateShareLink);
-    const secret = randomSecret();
-    const now = clock.now();
-    const expiresAt = expiresIn ? new Date(now.getTime() + EXPIRES[expiresIn]) : null;
-    const [link] = await db
-      .insert(shareLinks)
-      .values({
-        id: Bun.randomUUIDv7(),
-        orgId: c.get("org").id,
-        artifactId: resource.id,
-        tokenHash: sha256(secret),
-        permission,
-        createdBy: actor(c as ApiContext).id,
-        createdAt: now,
-        expiresAt,
-      })
-      .returning();
-    return c.json({
-      link: { id: link?.id, permission, expiresAt: expiresAt?.toISOString() ?? null },
-      url: `${env.publicUrl}/s/${secret}`,
-    });
-  });
+  routes.post(
+    "/api/artifacts/:id/links",
+    { action: "artifact.share", resource: artifact, writes: true },
+    async (c) => {
+      const resource = c.var.resource;
+      requireCan(c.var.caller, "artifact.share_outside", resource);
+      if (!c.var.org.settings.linkSharing) {
+        throw new ApiError("forbidden", "Link sharing is turned off for this organization.");
+      }
+      const { permission, expiresIn } = await parseBody(c, CreateShareLink);
+      const secret = randomSecret();
+      const now = clock.now();
+      const expiresAt = expiresIn ? new Date(now.getTime() + EXPIRES[expiresIn]) : null;
+      const [link] = await db
+        .insert(shareLinks)
+        .values({
+          id: Bun.randomUUIDv7(),
+          orgId: c.var.org.id,
+          artifactId: resource.id,
+          tokenHash: sha256(secret),
+          permission,
+          createdBy: c.var.caller.person.id,
+          createdAt: now,
+          expiresAt,
+        })
+        .returning();
+      return c.json({
+        link: { id: link?.id, permission, expiresAt: expiresAt?.toISOString() ?? null },
+        url: `${env.publicUrl}/s/${secret}`,
+      });
+    },
+  );
 
   routes.delete(
     "/api/artifacts/:id/links/:linkId",
-    { action: "artifact.share", resource: artifact },
+    { action: "artifact.share", resource: artifact, writes: true },
     async (c) => {
-      const resource = await writable(c as ApiContext);
+      const resource = c.var.resource;
       const linkId = c.req.param("linkId");
       const revoked = isUuid(linkId)
         ? await db
@@ -429,7 +433,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
   };
 
   routes.get("/api/s/:token", { public: true }, async (c) => {
-    const { link, artifact: row, project, sharedBy } = await liveLink(c as ApiContext);
+    const { link, artifact: row, project, sharedBy } = await liveLink(c);
     const [first] = await db
       .select({ renders: frames.renders })
       .from(frames)
@@ -463,7 +467,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.get("/api/s/:token/cover", { public: true }, async (c) => {
-    const { artifact: row } = await liveLink(c as ApiContext);
+    const { artifact: row } = await liveLink(c);
     const hash = await ogHash(row.id, row.latestVersion);
     if (hash) return c.redirect(await deps.bucket.presignGet(`blobs/${hash}`), 302);
     const [first] = await db
@@ -479,7 +483,7 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
 
   routes.post("/api/s/:token/guest", { public: true }, async (c) => {
     limits.hit(`guest:${deps.clientIp(c)}`, 20, 3600_000);
-    const { link } = await liveLink(c as ApiContext);
+    const { link } = await liveLink(c);
     const { name } = await parseBody(c, GuestName);
     const orgId = c.get("org").id;
     const now = clock.now();

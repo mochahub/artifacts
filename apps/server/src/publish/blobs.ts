@@ -3,9 +3,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import { blobs } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { blobKey } from "../layout.ts";
 import { mapLimit } from "../map-limit.ts";
 
-export const blobKey = (hash: string) => `blobs/${hash}`;
 export const IMMUTABLE = "public, max-age=31536000, immutable";
 
 export async function knownBlobs(deps: Deps, orgId: string, hashes: string[]): Promise<Map<string, number>> {

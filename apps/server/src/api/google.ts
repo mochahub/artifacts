@@ -9,7 +9,7 @@ import {
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { can } from "../auth/can.ts";
+import { type CallerFor, can } from "../auth/can.ts";
 import { type GoogleClaims, readIdToken } from "../auth/google.ts";
 import { randomSecret, sha256 } from "../auth/secrets.ts";
 import { isSecureRequest, startSession } from "../auth/sessions.ts";
@@ -30,7 +30,7 @@ import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { requestOrigin } from "../http/origins.ts";
 import { isUuid } from "../http/params.ts";
-import type { ApiContext, Routes } from "../http/routes.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
 import { acceptInvite, findLiveInvite, joinTeams } from "./join.ts";
 
 export const CALLBACK_PATH = "/api/auth/google/callback";
@@ -430,9 +430,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.get("/api/me/identities", { action: "account.manage" }, async (c) => {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
-    const { id } = caller.person;
+    const { id } = c.var.caller.person;
     const [rows, keys, password] = await Promise.all([
       db.select().from(identities).where(eq(identities.personId, id)),
       db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, id)),
@@ -447,15 +445,13 @@ export function googleRoutes(routes: Routes, deps: Deps) {
       })),
       passkeys: keys.length,
       password: password.length > 0,
-      google: c.get("org").googleEnabled,
+      google: c.var.org.googleEnabled,
     });
   });
 
   routes.delete("/api/me/identities/:id", { action: "account.manage", recentAuth: true }, async (c) => {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
     const id = c.req.param("id");
-    const { id: personId } = caller.person;
+    const { id: personId } = c.var.caller.person;
     const [row] = isUuid(id)
       ? await db
           .select()
@@ -476,10 +472,8 @@ export function googleRoutes(routes: Routes, deps: Deps) {
   });
 
   /** Turning Google off with no other way in would leave nobody able to confirm it's them, or to undo it. */
-  async function guardLockout(c: ApiContext) {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") return;
-    const { id } = caller.person;
+  async function guardLockout(c: RouteRequest<CallerFor<"org.manage">>) {
+    const { id } = c.var.caller.person;
     const [keys, password] = await Promise.all([
       db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, id)).limit(1),
       db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, id)).limit(1),
@@ -489,32 +483,25 @@ export function googleRoutes(routes: Routes, deps: Deps) {
     }
   }
 
-  async function settingsOf(c: ApiContext): Promise<GoogleSettings> {
-    const [row] = await db
-      .select()
-      .from(orgTable)
-      .where(eq(orgTable.id, c.get("org").id))
-      .limit(1);
-    const caller = c.get("caller");
+  async function settingsOf(c: RouteRequest<CallerFor<"org.manage">>): Promise<GoogleSettings> {
+    const [row] = await db.select().from(orgTable).where(eq(orgTable.id, c.var.org.id)).limit(1);
     return {
       clientId: row?.googleClientId ?? null,
       hasSecret: Boolean(row?.googleClientSecret),
       enabled: row?.googleEnabled ?? false,
-      tested: caller.kind === "person" && row?.googleTestedBy === caller.person.id,
+      tested: row?.googleTestedBy === c.var.caller.person.id,
       redirectUris: (await deps.origins()).map((origin) => `${origin}${CALLBACK_PATH}`),
       autoJoin: row?.settings.googleAutoJoin ?? null,
     };
   }
 
-  routes.get("/api/org/google", { action: "org.manage" }, async (c) =>
-    c.json(await settingsOf(c as ApiContext)),
-  );
+  routes.get("/api/org/google", { action: "org.manage" }, async (c) => c.json(await settingsOf(c)));
 
   // New credentials haven't been proved, so Google goes off until someone tests them.
   routes.put("/api/org/google", { action: "org.manage", recentAuth: true }, async (c) => {
     const { clientId, clientSecret } = await parseBody(c, SaveGoogle);
     const current = c.get("org");
-    await guardLockout(c as ApiContext);
+    await guardLockout(c);
     if (!clientSecret && !current.googleClientSecret) {
       throw new ApiError("invalid", "Paste the client secret too.");
     }
@@ -527,15 +514,14 @@ export function googleRoutes(routes: Routes, deps: Deps) {
         googleTestedBy: null,
       })
       .where(eq(orgTable.id, current.id));
-    return c.json(await settingsOf(c as ApiContext));
+    return c.json(await settingsOf(c));
   });
 
   routes.patch("/api/org/google", { action: "org.manage", recentAuth: true }, async (c) => {
     const { enabled, autoJoin } = await parseBody(c, PatchGoogle);
-    const current = c.get("org");
-    const caller = c.get("caller");
-    if (enabled === false) await guardLockout(c as ApiContext);
-    if (enabled && (caller.kind !== "person" || current.googleTestedBy !== caller.person.id)) {
+    const current = c.var.org;
+    if (enabled === false) await guardLockout(c);
+    if (enabled && current.googleTestedBy !== c.var.caller.person.id) {
       throw new ApiError("conflict", "Run a test with your own account first.");
     }
     await db
@@ -548,12 +534,12 @@ export function googleRoutes(routes: Routes, deps: Deps) {
         },
       })
       .where(eq(orgTable.id, current.id));
-    return c.json(await settingsOf(c as ApiContext));
+    return c.json(await settingsOf(c));
   });
 
   routes.delete("/api/org/google", { action: "org.manage", recentAuth: true }, async (c) => {
     const current = c.get("org");
-    await guardLockout(c as ApiContext);
+    await guardLockout(c);
     await db
       .update(orgTable)
       .set({

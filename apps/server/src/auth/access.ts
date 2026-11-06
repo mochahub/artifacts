@@ -21,8 +21,9 @@ import {
 } from "./can.ts";
 
 export type ArtifactRow = typeof artifacts.$inferSelect;
-export type LoadedArtifact = ArtifactResource & { row: ArtifactRow };
 export type ProjectRow = typeof projects.$inferSelect;
+/** What can() reads, with the rows it came from, so nothing needs looking up again. */
+export type LoadedArtifact = ArtifactResource & { row: ArtifactRow; project: ProjectRow };
 export type LoadedProject = ProjectResource & { row: ProjectRow };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -166,15 +167,19 @@ export async function toResources(deps: Deps, rows: ArtifactRow[]): Promise<Load
       .from(projects)
       .where(inArray(projects.id, [...new Set(rows.map((row) => row.projectId))])),
   ]);
-  return rows.map((row) => ({
-    ...artifactResource(
+  return rows.map((row) => {
+    const project = places.find((place) => place.id === row.projectId) as ProjectRow;
+    return {
+      ...artifactResource(
+        row,
+        project,
+        access.filter((entry) => entry.artifactId === row.id),
+        inherited.get(row.id) ?? [],
+      ),
       row,
-      places.find((place) => place.id === row.projectId) as ProjectRow,
-      access.filter((entry) => entry.artifactId === row.id),
-      inherited.get(row.id) ?? [],
-    ),
-    row,
-  }));
+      project,
+    };
+  });
 }
 
 export async function toResource(deps: Deps, row: ArtifactRow): Promise<LoadedArtifact> {
@@ -221,6 +226,22 @@ export async function findArtifact(deps: Deps, orgId: string, id: string): Promi
     .where(and(eq(artifacts.orgId, orgId), eq(artifacts.id, id)))
     .limit(1);
   return row ? toResource(deps, row) : null;
+}
+
+/** By its project's slug and its own, as links name it. */
+export async function findArtifactBySlug(
+  deps: Deps,
+  orgId: string,
+  project: string,
+  slug: string,
+): Promise<LoadedArtifact | null> {
+  const [found] = await deps.db
+    .select({ row: artifacts })
+    .from(artifacts)
+    .innerJoin(projects, eq(projects.id, artifacts.projectId))
+    .where(and(eq(artifacts.orgId, orgId), eq(projects.slug, project), eq(artifacts.slug, slug)))
+    .limit(1);
+  return found ? toResource(deps, found.row) : null;
 }
 
 /** Many at once, for feeds that would otherwise ask per artifact. */

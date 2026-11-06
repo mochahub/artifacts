@@ -8,16 +8,16 @@ import {
   normalizeRepo,
 } from "@artifacts/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { heldProjects, toResource } from "../auth/access.ts";
+import { findArtifactBySlug, heldProjects, type LoadedArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { artifacts, blocks, frames, pages, projects } from "../db/schema.ts";
+import { blocks, frames, pages, projects } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { libraryCards } from "./cards.ts";
 import { liveVersion } from "./read.ts";
 import { rateLimitSearch, searchHits, snippet } from "./search.ts";
-import { type Loaded, visibleTo } from "./visible.ts";
+import { visibleTo } from "./visible.ts";
 
 const MAX_OFFSET = 100_000;
 
@@ -86,7 +86,7 @@ export async function librarySearch(deps: Deps, orgId: string, caller: Caller, i
   const cards = await libraryCards(
     deps,
     caller,
-    page.map((hit) => known.get(hit.artifactId) as Loaded),
+    page.map((hit) => known.get(hit.artifactId) as LoadedArtifact),
     matches,
   );
   return { cards, nextCursor: nextCursor(offset, limit, hits.length > limit) } satisfies LibraryPage;
@@ -157,24 +157,16 @@ export async function loadArtifact(
   caller: Caller,
   project: string,
   slug: string,
-): Promise<Loaded> {
-  const [found] = await deps.db
-    .select({ row: artifacts, projectSlug: projects.slug })
-    .from(artifacts)
-    .innerJoin(projects, eq(projects.id, artifacts.projectId))
-    .where(and(eq(artifacts.orgId, orgId), eq(projects.slug, project), eq(artifacts.slug, slug)))
-    .limit(1);
-  const resource = found ? await toResource(deps, found.row) : null;
-  if (!found || !resource || !can(caller, "artifact.read", resource)) {
-    throw new ApiError("not_found", "Not found.");
-  }
-  return { row: found.row, resource, projectSlug: found.projectSlug };
+): Promise<LoadedArtifact> {
+  const found = await findArtifactBySlug(deps, orgId, project, slug);
+  if (!found || !can(caller, "artifact.read", found)) throw new ApiError("not_found", "Not found.");
+  return found;
 }
 
 export async function libraryPages(
   deps: Deps,
   caller: Caller,
-  loaded: Loaded,
+  loaded: LoadedArtifact,
   input: { limit?: string; cursor?: string },
 ) {
   const { limit, offset } = paging(input.limit, input.cursor);
@@ -211,7 +203,7 @@ export async function libraryPages(
 
 export async function libraryFrames(
   deps: Deps,
-  loaded: Loaded,
+  loaded: LoadedArtifact,
   input: { page: string; limit?: string; cursor?: string },
 ) {
   const { limit, offset } = paging(input.limit, input.cursor);

@@ -1,15 +1,14 @@
 import type { ActivityKind } from "@artifacts/schema";
 import { CreateTeam, PatchTeam, PutTeamMember } from "@artifacts/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import type { Caller } from "../auth/caller.ts";
-import { can, type TeamResource } from "../auth/can.ts";
-import { isUniqueViolation } from "../db/index.ts";
+import { type CallerFor, can, type TeamResource } from "../auth/can.ts";
+import { isUniqueViolation, type OrgRow } from "../db/index.ts";
 import { activity, artifactTeamAccess, people, projectAccess, teamMembers, teams } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { isUuid } from "../http/params.ts";
-import type { ApiContext, Routes } from "../http/routes.ts";
+import type { ApiContext, RouteRequest, Routes } from "../http/routes.ts";
 import { visibleTo } from "../library/visible.ts";
 
 type TeamRow = typeof teams.$inferSelect;
@@ -22,19 +21,17 @@ const slugOf = (name: string) =>
     .slice(0, 40)
     .replace(/-+$/, "");
 
-const personOf = (caller: Caller) => {
-  if (caller.kind === "person" || caller.kind === "cliToken") return caller.person;
-  throw new ApiError("forbidden", "You can't do that.");
-};
-
 export function teamRoutes(routes: Routes, deps: Deps) {
   const { db, clock } = deps;
 
-  async function findTeam(c: ApiContext): Promise<TeamResource & { row: TeamRow }> {
+  async function findTeam(c: {
+    var: { org: OrgRow };
+    req: ApiContext["req"];
+  }): Promise<TeamResource & { row: TeamRow }> {
     const [row] = await db
       .select()
       .from(teams)
-      .where(and(eq(teams.orgId, c.get("org").id), eq(teams.slug, c.req.param("slug") as string)))
+      .where(and(eq(teams.orgId, c.var.org.id), eq(teams.slug, c.req.param("slug") as string)))
       .limit(1);
     if (!row) throw new ApiError("not_found", "Not found.");
     const leads = await db
@@ -44,11 +41,15 @@ export function teamRoutes(routes: Routes, deps: Deps) {
     return { type: "team", id: row.id, leadIds: leads.map((lead) => lead.id), row };
   }
 
-  const record = (c: ApiContext, kind: ActivityKind, payload: Record<string, unknown>) =>
+  const record = (
+    c: RouteRequest<CallerFor<"team.manage">>,
+    kind: ActivityKind,
+    payload: Record<string, unknown>,
+  ) =>
     db.insert(activity).values({
       id: Bun.randomUUIDv7(),
-      orgId: c.get("org").id,
-      actorPersonId: personOf(c.get("caller")).id,
+      orgId: c.var.org.id,
+      actorPersonId: c.var.caller.person.id,
       kind,
       payload,
       createdAt: clock.now(),
@@ -79,7 +80,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
       .where(eq(teams.orgId, c.get("org").id))
       .orderBy(asc(teams.name));
     const counts = await sizes(rows.map((row) => row.id));
-    const me = personOf(c.get("caller")).id;
+    const me = c.var.caller.person.id;
     const mine = await db
       .select({ teamId: teamMembers.teamId, role: teamMembers.role })
       .from(teamMembers)
@@ -103,22 +104,22 @@ export function teamRoutes(routes: Routes, deps: Deps) {
         slug,
         name: body.name,
         description: body.description ?? null,
-        createdBy: personOf(c.get("caller")).id,
+        createdBy: c.var.caller.person.id,
         createdAt: clock.now(),
       })
       .onConflictDoNothing()
       .returning();
     const [row] = created;
     if (!row) throw new ApiError("conflict", "There's already a team with that name.");
-    await record(c as ApiContext, "team_created", { team: row.name });
+    await record(c, "team_created", { team: row.name });
     return c.json({ team: view(row, 0) });
   });
 
   routes.get("/api/teams/:slug", { action: "team.read" }, async (c) => {
-    const team = await findTeam(c as ApiContext);
-    const caller = c.get("caller");
+    const team = await findTeam(c);
+    const caller = c.var.caller;
     // Starts from what the caller can see, so a team's page can't name work hidden from them.
-    const visible = await visibleTo(deps, c.get("org").id, caller);
+    const visible = await visibleTo(deps, c.var.org.id, caller);
     const granted = await db
       .select({ artifactId: artifactTeamAccess.artifactId, permission: artifactTeamAccess.permission })
       .from(artifactTeamAccess)
@@ -142,10 +143,10 @@ export function teamRoutes(routes: Routes, deps: Deps) {
         role,
         orgRole: person.role,
       })),
-      shared: visible.flatMap(({ row, projectSlug }) => {
+      shared: visible.flatMap(({ row, project }) => {
         const grant = granted.find((entry) => entry.artifactId === row.id);
         return grant
-          ? [{ id: row.id, project: projectSlug, slug: row.slug, title: row.title, level: grant.permission }]
+          ? [{ id: row.id, project: project.slug, slug: row.slug, title: row.title, level: grant.permission }]
           : [];
       }),
       permissions: {
@@ -156,7 +157,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.patch("/api/teams/:slug", { action: "team.manage" }, async (c) => {
-    const team = await findTeam(c as ApiContext);
+    const team = await findTeam(c);
     const body = await parseBody(c, PatchTeam);
     const updated = await db
       .update(teams)
@@ -178,26 +179,24 @@ export function teamRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.delete("/api/teams/:slug", { action: "team.manage" }, async (c) => {
-    const team = await findTeam(c as ApiContext);
+    const team = await findTeam(c);
     await db.transaction(async (tx) => {
       await tx.delete(artifactTeamAccess).where(eq(artifactTeamAccess.teamId, team.id));
       await tx.delete(projectAccess).where(eq(projectAccess.teamId, team.id));
       await tx.delete(teamMembers).where(eq(teamMembers.teamId, team.id));
       await tx.delete(teams).where(eq(teams.id, team.id));
     });
-    await record(c as ApiContext, "team_deleted", { team: team.row.name });
+    await record(c, "team_deleted", { team: team.row.name });
     return c.json({ ok: true });
   });
 
-  const teamResource = (c: ApiContext) => findTeam(c);
-
-  async function memberParam(c: ApiContext) {
+  async function memberParam(c: RouteRequest) {
     const id = c.req.param("personId");
     const [person] = isUuid(id)
       ? await db
           .select()
           .from(people)
-          .where(and(eq(people.orgId, c.get("org").id), eq(people.id, id), isNull(people.removedAt)))
+          .where(and(eq(people.orgId, c.var.org.id), eq(people.id, id), isNull(people.removedAt)))
           .limit(1)
       : [];
     if (!person) throw new ApiError("not_found", "Not found.");
@@ -206,10 +205,10 @@ export function teamRoutes(routes: Routes, deps: Deps) {
 
   routes.put(
     "/api/teams/:slug/members/:personId",
-    { action: "team.members", resource: teamResource },
+    { action: "team.members", resource: findTeam },
     async (c) => {
-      const team = await findTeam(c as ApiContext);
-      const person = await memberParam(c as ApiContext);
+      const team = c.var.resource;
+      const person = await memberParam(c);
       const { role } = await parseBody(c, PutTeamMember);
       // Leading a team hands out its access, which a role capped at commenting shouldn't do.
       if (role === "lead" && (person.role === "outside" || person.role === "reviewer")) {
@@ -222,7 +221,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
           personId: person.id,
           orgId: team.row.orgId,
           role,
-          addedBy: personOf(c.get("caller")).id,
+          addedBy: c.var.caller.person.id,
           createdAt: clock.now(),
         })
         .onConflictDoNothing()
@@ -233,7 +232,7 @@ export function teamRoutes(routes: Routes, deps: Deps) {
           .set({ role })
           .where(and(eq(teamMembers.teamId, team.id), eq(teamMembers.personId, person.id)));
       } else {
-        await record(c as ApiContext, "team_member_added", { team: team.row.name, person: person.name });
+        await record(c, "team_member_added", { team: team.row.name, person: person.name });
       }
       return c.json({ member: { id: person.id, name: person.name, role } });
     },
@@ -241,16 +240,16 @@ export function teamRoutes(routes: Routes, deps: Deps) {
 
   routes.delete(
     "/api/teams/:slug/members/:personId",
-    { action: "team.members", resource: teamResource },
+    { action: "team.members", resource: findTeam },
     async (c) => {
-      const team = await findTeam(c as ApiContext);
-      const person = await memberParam(c as ApiContext);
+      const team = c.var.resource;
+      const person = await memberParam(c);
       const removed = await db
         .delete(teamMembers)
         .where(and(eq(teamMembers.teamId, team.id), eq(teamMembers.personId, person.id)))
         .returning({ id: teamMembers.personId });
       if (removed.length === 0) throw new ApiError("not_found", "Not found.");
-      await record(c as ApiContext, "team_member_removed", { team: team.row.name, person: person.name });
+      await record(c, "team_member_removed", { team: team.row.name, person: person.name });
       return c.json({ ok: true });
     },
   );

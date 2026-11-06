@@ -8,7 +8,8 @@ import {
 } from "@artifacts/schema";
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { projectGrants } from "../auth/access.ts";
-import type { Caller } from "../auth/caller.ts";
+import type { Caller, CallerPerson } from "../auth/caller.ts";
+import { mayTouchRole, runsTheOrg, tokenLimits } from "../auth/can.ts";
 import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
 import { personView, startSession } from "../auth/sessions.ts";
 import type { Db } from "../db/index.ts";
@@ -36,7 +37,7 @@ import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { isUuid } from "../http/params.ts";
-import type { ApiContext, Routes } from "../http/routes.ts";
+import type { ApiContext, RouteRequest, Routes } from "../http/routes.ts";
 import { revokeGrants } from "../oauth/revoke.ts";
 import { VERSION } from "../version.ts";
 import { acceptInvite, findLiveInvite } from "./join.ts";
@@ -47,24 +48,19 @@ const INVITE_DAYS = 7;
 const SEARCH_RESULTS = 20;
 const SEARCHES_PER_MINUTE = 60;
 
-const isAboveMember = (role: string) => role === "owner" || role === "admin";
-
-const actorOf = (caller: Caller) => {
-  if (caller.kind === "person" || caller.kind === "cliToken") return caller.person;
-  throw new ApiError("forbidden", "You can't do that.");
-};
+type PersonRow = typeof people.$inferSelect;
 
 export function peopleRoutes(routes: Routes, deps: Deps) {
   const { db, env, clock } = deps;
   const inviteUrl = (secret: string) => `${env.publicUrl}/join/${secret}`;
 
-  async function target(c: ApiContext) {
+  async function target(c: RouteRequest) {
     const id = c.req.param("id");
     const [row] = isUuid(id)
       ? await db
           .select()
           .from(people)
-          .where(and(eq(people.orgId, c.get("org").id), eq(people.id, id), isNull(people.removedAt)))
+          .where(and(eq(people.orgId, c.var.org.id), eq(people.id, id), isNull(people.removedAt)))
           .limit(1)
       : [];
     if (!row) throw new ApiError("not_found", "Not found.");
@@ -79,33 +75,25 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     return row?.n ?? 0;
   };
 
-  /** A token mustn't mint itself a browser session, which can do what no token may (04). */
-  function guardTokenInvite(c: ApiContext, role: string) {
-    if (c.get("caller").kind !== "person" && role !== "member" && role !== "reviewer") {
+  function guardTokenInvite(caller: Caller, role: string, teamIds: string[] | null | undefined) {
+    if (!tokenLimits.invites(caller, role)) {
       throw new ApiError("forbidden", "Invite admins from the viewer, not with a token.");
     }
+    if (!tokenLimits.joinsTeams(caller, teamIds)) {
+      throw new ApiError("forbidden", "Add people to teams from the viewer, not with a token.");
+    }
   }
-  async function guardTokenReset(c: ApiContext, target: { id: string; orgId: string; role: string }) {
-    const caller = c.get("caller");
+  async function guardTokenReset(caller: Caller, target: PersonRow) {
     if (caller.kind === "person") return;
-    const above = target.role === "admin" || target.role === "owner";
-    // Managing a project or leading a team is what a token may never do, so it can't borrow that either.
     const [lead] = await db
       .select({ id: teamMembers.teamId })
       .from(teamMembers)
       .where(and(eq(teamMembers.personId, target.id), eq(teamMembers.role, "lead")))
       .limit(1);
     const grants = await projectGrants(deps, target.orgId, { personId: target.id });
-    const manages = [...grants.values()].flat().some((grant) => grant.level === "manage");
-    if (above || lead || manages || target.id === actorOf(caller).id) {
+    const managesProject = [...grants.values()].flat().some((grant) => grant.level === "manage");
+    if (!tokenLimits.resets(caller, { ...target, leadsTeam: lead !== undefined, managesProject })) {
       throw new ApiError("forbidden", "Issue this reset link from the viewer, not with a token.");
-    }
-  }
-
-  /** Only a person decides who joins a team (04), so a token can't get an invite that does. */
-  function guardTokenTeams(c: ApiContext, teamIds: string[] | null | undefined) {
-    if (c.get("caller").kind !== "person" && teamIds?.length) {
-      throw new ApiError("forbidden", "Add people to teams from the viewer, not with a token.");
     }
   }
 
@@ -121,15 +109,12 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       .where(and(eq(resetLinks.createdBy, personId), isNull(resetLinks.usedAt)));
   }
 
-  /** Only an owner touches an owner, or an admin could take the deployment over (03). */
-  function guardOwner(c: ApiContext, role: string) {
-    if (role === "owner" && actorOf(c.get("caller")).role !== "owner") {
-      throw new ApiError("forbidden", "Only an owner can do that to an owner.");
-    }
+  function guardOwner(actor: CallerPerson, role: CallerPerson["role"]) {
+    if (!mayTouchRole(actor, role)) throw new ApiError("forbidden", "Only an owner can do that to an owner.");
   }
 
   routes.get("/api/org", { action: "org.read" }, async (c) => {
-    const row = c.get("org");
+    const row = c.var.org;
     const latest = await latestRelease(deps);
     return c.json({
       name: row.name,
@@ -146,7 +131,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
 
   routes.patch("/api/org", { action: "org.manage" }, async (c) => {
     const body = await parseBody(c, PatchOrg);
-    const current = c.get("org");
+    const current = c.var.org;
     const settings = OrgSettings.parse({
       ...current.settings,
       ...body.settings,
@@ -162,14 +147,14 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/people/search", { action: "people.search" }, async (c) => {
     const q = (c.req.query("q") ?? "").trim().slice(0, 100);
     if (q.length < 2) return c.json({ people: [] });
-    deps.limits.hit(`people-search:${actorOf(c.get("caller")).id}`, SEARCHES_PER_MINUTE, 60_000);
+    deps.limits.hit(`people-search:${c.var.caller.person.id}`, SEARCHES_PER_MINUTE, 60_000);
     const like = `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
     const rows = await db
       .select()
       .from(people)
       .where(
         and(
-          eq(people.orgId, c.get("org").id),
+          eq(people.orgId, c.var.org.id),
           isNull(people.removedAt),
           or(ilike(people.name, like), ilike(people.email, like)),
         ),
@@ -180,7 +165,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.get("/api/people", { action: "people.read" }, async (c) => {
-    const orgId = c.get("org").id;
+    const orgId = c.var.org.id;
     const outside = c.req.query("kind") === "outside";
     const rows = await db
       .select()
@@ -285,9 +270,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
 
   routes.patch("/api/people/:id", { action: "people.manage" }, async (c) => {
     const { role } = await parseBody(c, ChangeRole);
-    const person = await target(c as ApiContext);
-    guardOwner(c as ApiContext, person.role);
-    guardOwner(c as ApiContext, role);
+    const person = await target(c);
+    guardOwner(c.var.caller.person, person.role);
+    guardOwner(c.var.caller.person, role);
     if (role === "outside" || person.role === "outside") {
       throw new ApiError("invalid", "Outside people get access per artifact, not a role.");
     }
@@ -299,14 +284,14 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       await tx.update(people).set({ role }).where(eq(people.id, person.id));
       // Losing admin ends what they issued, as removal does: an admin invite or a reset link
       // from before would otherwise hand the same power straight back.
-      if (isAboveMember(person.role) && !isAboveMember(role)) await revokeIssued(tx, person.id, clock.now());
+      if (runsTheOrg(person) && !runsTheOrg({ role })) await revokeIssued(tx, person.id, clock.now());
     });
     return c.json({ person: personView({ ...person, role }) });
   });
 
   routes.delete("/api/people/:id", { action: "people.manage" }, async (c) => {
-    const person = await target(c as ApiContext);
-    guardOwner(c as ApiContext, person.role);
+    const person = await target(c);
+    guardOwner(c.var.caller.person, person.role);
     const now = clock.now();
     await db.transaction(async (tx) => {
       await lockOwners(tx);
@@ -354,9 +339,9 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.post("/api/people/:id/reset-link", { action: "people.invite" }, async (c) => {
-    const person = await target(c as ApiContext);
-    guardOwner(c as ApiContext, person.role);
-    await guardTokenReset(c as ApiContext, person);
+    const person = await target(c);
+    guardOwner(c.var.caller.person, person.role);
+    await guardTokenReset(c.var.caller, person);
     const secret = randomSecret();
     const now = clock.now();
     const expiresAt = new Date(now.getTime() + HOUR);
@@ -365,7 +350,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       orgId: person.orgId,
       personId: person.id,
       tokenHash: sha256(secret),
-      createdBy: actorOf(c.get("caller")).id,
+      createdBy: c.var.caller.person.id,
       createdAt: now,
       expiresAt,
     });
@@ -374,9 +359,8 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
 
   routes.post("/api/invites", { action: "people.invite" }, async (c) => {
     const body = await parseBody(c, CreateInvite);
-    guardTokenInvite(c as ApiContext, body.role);
-    guardTokenTeams(c as ApiContext, body.teamIds);
-    const orgId = c.get("org").id;
+    guardTokenInvite(c.var.caller, body.role, body.teamIds);
+    const orgId = c.var.org.id;
     if (body.teamIds?.length) {
       const known = await db
         .select({ id: teams.id })
@@ -409,7 +393,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         role: body.role,
         teamIds: body.teamIds?.length ? body.teamIds : null,
         tokenHash: sha256(secret),
-        createdBy: actorOf(c.get("caller")).id,
+        createdBy: c.var.caller.person.id,
         createdAt: now,
         expiresAt: new Date(now.getTime() + INVITE_DAYS * 24 * HOUR),
       })
@@ -425,7 +409,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     });
   });
 
-  async function pendingInvite(c: ApiContext) {
+  async function pendingInvite(c: RouteRequest) {
     const id = c.req.param("id");
     const [row] = isUuid(id)
       ? await db
@@ -433,7 +417,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
           .from(invites)
           .where(
             and(
-              eq(invites.orgId, c.get("org").id),
+              eq(invites.orgId, c.var.org.id),
               eq(invites.id, id),
               isNull(invites.acceptedAt),
               isNull(invites.revokedAt),
@@ -446,17 +430,16 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   }
 
   routes.delete("/api/invites/:id", { action: "people.manage" }, async (c) => {
-    const row = await pendingInvite(c as ApiContext);
+    const row = await pendingInvite(c);
     await db.update(invites).set({ revokedAt: clock.now() }).where(eq(invites.id, row.id));
     return c.json({ ok: true });
   });
 
   // Secrets are stored hashed, so "copy it again" means a new link; the old one stops (02).
   routes.post("/api/invites/:id/link", { action: "people.invite" }, async (c) => {
-    const row = await pendingInvite(c as ApiContext);
+    const row = await pendingInvite(c);
     // A new link is a new way in, so a token gets no more here than when it makes the invite.
-    guardTokenInvite(c as ApiContext, row.role);
-    guardTokenTeams(c as ApiContext, row.teamIds);
+    guardTokenInvite(c.var.caller, row.role, row.teamIds);
     const secret = randomSecret();
     await db
       .update(invites)
@@ -469,10 +452,10 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   });
 
   const liveInvite = (c: ApiContext) =>
-    findLiveInvite(deps, c.get("org").id, { tokenHash: sha256(c.req.param("token") as string) });
+    findLiveInvite(deps, c.var.org.id, { tokenHash: sha256(c.req.param("token") as string) });
 
   routes.get("/api/invites/:token", { public: true }, async (c) => {
-    const row = await liveInvite(c as ApiContext);
+    const row = await liveInvite(c);
     const [by] = await db
       .select({ name: people.name })
       .from(people)
@@ -492,7 +475,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       ? await db.select({ name: teams.name }).from(teams).where(inArray(teams.id, row.teamIds))
       : [];
     return c.json({
-      orgName: c.get("org").name,
+      orgName: c.var.org.name,
       invitedBy: by?.name ?? "",
       role: row.role,
       email: row.email,
@@ -503,7 +486,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.post("/api/invites/:token/accept", { public: true }, async (c) => {
-    const invite = await liveInvite(c as ApiContext);
+    const invite = await liveInvite(c);
     const body = await parseBody(c, AcceptInvite);
     const hash = body.password ? await Bun.password.hash(body.password, { algorithm: "argon2id" }) : null;
     const person = await db.transaction((tx) =>
@@ -517,7 +500,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
     const rows = await db
       .select()
       .from(tokens)
-      .where(and(eq(tokens.orgId, c.get("org").id), eq(tokens.kind, "org"), isNull(tokens.revokedAt)))
+      .where(and(eq(tokens.orgId, c.var.org.id), eq(tokens.kind, "org"), isNull(tokens.revokedAt)))
       .orderBy(desc(tokens.createdAt));
     return c.json(
       rows.map((row) => ({
@@ -538,13 +521,13 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       .insert(tokens)
       .values({
         id: Bun.randomUUIDv7(),
-        orgId: c.get("org").id,
+        orgId: c.var.org.id,
         kind: "org",
         name: body.name,
         tokenHash: sha256(secret),
         scopes: body.scopes,
         projectIds: body.projectIds ?? null,
-        createdBy: actorOf(c.get("caller")).id,
+        createdBy: c.var.caller.person.id,
         createdAt: clock.now(),
         expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
       })
@@ -558,7 +541,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
       ? await db
           .update(tokens)
           .set({ revokedAt: clock.now() })
-          .where(and(eq(tokens.orgId, c.get("org").id), eq(tokens.id, id), eq(tokens.kind, "org")))
+          .where(and(eq(tokens.orgId, c.var.org.id), eq(tokens.id, id), eq(tokens.kind, "org")))
           .returning({ id: tokens.id })
       : [];
     if (revoked.length === 0) throw new ApiError("not_found", "Not found.");
@@ -566,7 +549,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
   });
 
   routes.get("/api/shares", { action: "org.manage" }, async (c) => {
-    const orgId = c.get("org").id;
+    const orgId = c.var.org.id;
     const now = clock.now();
     const [links, access, onProjects, inTeams] = await Promise.all([
       db

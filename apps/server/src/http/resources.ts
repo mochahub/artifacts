@@ -1,5 +1,11 @@
 import { and, eq } from "drizzle-orm";
-import { findArtifact, type LoadedArtifact, type LoadedProject, toProject } from "../auth/access.ts";
+import {
+  findArtifact,
+  findArtifactBySlug,
+  type LoadedArtifact,
+  type LoadedProject,
+  toProject,
+} from "../auth/access.ts";
 import { projects } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "./errors.ts";
@@ -23,6 +29,15 @@ export const artifactParam = (deps: Deps, name = "id") =>
   async function load(c: ApiContext): Promise<LoadedArtifact> {
     const id = c.req.param(name);
     const found = isUuid(id) ? await findArtifact(deps, c.get("org").id, id) : null;
+    if (!found) throw new ApiError("not_found", "Not found.");
+    return found;
+  };
+
+/** The `:project/:slug` artifact, for a route guard. */
+export const artifactBySlug = (deps: Deps) =>
+  async function load(c: ApiContext): Promise<LoadedArtifact> {
+    const { project, slug } = c.req.param();
+    const found = await findArtifactBySlug(deps, c.get("org").id, project ?? "", slug ?? "");
     if (!found) throw new ApiError("not_found", "Not found.");
     return found;
   };

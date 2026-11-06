@@ -2,19 +2,11 @@ import { isBundlePath, type VersionBundle } from "@artifacts/schema";
 import { desc, eq } from "drizzle-orm";
 import { decisions, pages, people } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
-import { ApiError } from "../http/errors.ts";
-import { artifactParam } from "../http/resources.ts";
-import type { ApiContext, Routes } from "../http/routes.ts";
+import { artifactBySlug, artifactParam } from "../http/resources.ts";
+import type { Routes } from "../http/routes.ts";
+import { blobKey } from "../layout.ts";
 import { mapLimit } from "../map-limit.ts";
-import { blobKey } from "../publish/blobs.ts";
-import {
-  libraryArtifacts,
-  libraryFrames,
-  libraryPages,
-  libraryProjects,
-  librarySearch,
-  loadArtifact,
-} from "./browse.ts";
+import { libraryArtifacts, libraryFrames, libraryPages, libraryProjects, librarySearch } from "./browse.ts";
 import { libraryCards } from "./cards.ts";
 import { rebuildManifest } from "./manifest.ts";
 import { liveVersion, readArtifact, viewArtifact } from "./read.ts";
@@ -22,14 +14,7 @@ import { liveVersion, readArtifact, viewArtifact } from "./read.ts";
 export function libraryRoutes(routes: Routes, deps: Deps) {
   const { db, bucket } = deps;
   const artifact = artifactParam(deps);
-  const byName = (c: ApiContext) =>
-    loadArtifact(
-      deps,
-      c.get("org").id,
-      c.get("caller"),
-      c.req.param("project") as string,
-      c.req.param("slug") as string,
-    );
+  const byName = artifactBySlug(deps);
 
   routes.get("/api/library/search", { action: "home.read" }, async (c) =>
     c.json(
@@ -66,13 +51,10 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
 
   routes.get(
     "/api/library/projects/:project/:slug",
-    { action: "artifact.read", inHandler: true },
+    { action: "artifact.read", resource: byName },
     async (c) => {
-      const caller = c.get("caller");
-      if (caller.kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-      const loaded = await byName(c as ApiContext);
       return c.json(
-        await libraryPages(deps, caller, loaded, {
+        await libraryPages(deps, c.var.caller, c.var.resource, {
           limit: c.req.query("limit"),
           cursor: c.req.query("cursor"),
         }),
@@ -82,11 +64,10 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
 
   routes.get(
     "/api/library/projects/:project/:slug/pages/:page",
-    { action: "artifact.read", inHandler: true },
+    { action: "artifact.read", resource: byName },
     async (c) => {
-      if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
       return c.json(
-        await libraryFrames(deps, await byName(c as ApiContext), {
+        await libraryFrames(deps, c.var.resource, {
           page: c.req.param("page") as string,
           limit: c.req.query("limit"),
           cursor: c.req.query("cursor"),
@@ -97,13 +78,12 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
 
   routes.get(
     "/api/library/projects/:project/:slug/read",
-    { action: "artifact.read", inHandler: true },
+    { action: "artifact.read", resource: byName },
     async (c) => {
-      if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
       const version = c.req.query("version");
       const chars = c.req.query("chars");
       return c.json(
-        await readArtifact(deps, await byName(c as ApiContext), {
+        await readArtifact(deps, c.var.resource, {
           page: c.req.query("page"),
           version: version ? Number(version) : undefined,
           cursor: c.req.query("cursor"),
@@ -115,12 +95,11 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
 
   routes.get(
     "/api/library/projects/:project/:slug/view",
-    { action: "artifact.read", inHandler: true },
+    { action: "artifact.read", resource: byName },
     async (c) => {
-      if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
       const version = c.req.query("version");
       return c.json(
-        await viewArtifact(deps, await byName(c as ApiContext), {
+        await viewArtifact(deps, c.var.resource, {
           page: c.req.query("page"),
           frame: c.req.query("frame"),
           size: c.req.query("size"),
@@ -133,10 +112,9 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
   /** Everything `artifacts pull` and `export` need. The content host can't serve them: it only answers iframes. */
   routes.get(
     "/api/library/projects/:project/:slug/bundle",
-    { action: "artifact.read", inHandler: true },
+    { action: "artifact.read", resource: byName },
     async (c) => {
-      if (c.get("caller").kind === "anonymous") throw new ApiError("unauthenticated", "Sign in first.");
-      const loaded = await byName(c as ApiContext);
+      const loaded = c.var.resource;
       const number = c.req.query("version");
       const version = await liveVersion(deps, loaded, number ? Number(number) : undefined);
       const files = version.files;
@@ -153,10 +131,10 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
           .from(pages)
           .where(eq(pages.versionId, version.id))
           .orderBy(pages.position);
-        const [card] = await libraryCards(deps, c.get("caller"), [loaded]);
+        const [card] = await libraryCards(deps, c.var.caller, [loaded]);
         manifest = rebuildManifest(
           {
-            project: loaded.projectSlug,
+            project: loaded.project.slug,
             slug: loaded.row.slug,
             title: loaded.row.title,
             visibility: loaded.row.visibility,
@@ -169,7 +147,7 @@ export function libraryRoutes(routes: Routes, deps: Deps) {
       // Older versions were never checked, so a bad path is left out here as well as refused by the CLI.
       const listed = Object.entries(files).filter(([path]) => isBundlePath(path));
       const body: VersionBundle = {
-        project: loaded.projectSlug,
+        project: loaded.project.slug,
         slug: loaded.row.slug,
         version: version.n,
         manifest,
