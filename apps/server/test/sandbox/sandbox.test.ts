@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { OrgSettings } from "@artifacts/schema";
 import { startChild } from "@artifacts/sandbox";
+import type { OrgSettings } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
 import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
