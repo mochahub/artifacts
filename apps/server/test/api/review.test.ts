@@ -50,8 +50,8 @@ describe("the review API", () => {
     cookie = await signIn(t, OWNER.email, OWNER.password);
     id = (await t.server.db.select().from(artifacts))[0]?.id as string;
     const orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    reviewer = await makePerson(t, orgId, "reviewer");
-    viewerOnly = await makePerson(t, orgId, "outside");
+    reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    viewerOnly = (await makePerson(t, orgId, "outside")).token;
   });
   afterAll(() => t.stop());
 
@@ -159,7 +159,7 @@ describe("the review API", () => {
     // A member in a browser, who didn't publish it, can't.
     const orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
     const hash = await Bun.password.hash(OWNER.password, { algorithm: "argon2id" });
-    await makePerson(t, orgId, "member");
+    (await makePerson(t, orgId, "member")).token;
     const member = (await t.server.db.select().from(people)).filter((row) => row.role === "member").at(-1);
     await t.server.db.insert(passwords).values({ personId: member?.id as string, orgId, hash });
     const session = await signIn(t, member?.email as string, OWNER.password);

@@ -62,8 +62,8 @@ describe("brand", () => {
     token = ((await setup.json()) as { token: string }).token;
     cookie = await signIn(t, OWNER.email, OWNER.password);
     const [org] = await t.server.db.query.org.findMany();
-    reviewer = await makePerson(t, (org as { id: string }).id, "reviewer");
-    member = await makePerson(t, (org as { id: string }).id, "member");
+    reviewer = (await makePerson(t, (org as { id: string }).id, "reviewer")).token;
+    member = (await makePerson(t, (org as { id: string }).id, "member")).token;
     mkdirSync(join(folder, "fonts"));
     writeFileSync(join(folder, "fonts/acme.woff2"), "a stand-in for a font file");
     writeFileSync(

@@ -15,7 +15,7 @@ import { bucketOrigin } from "../s3.ts";
 import { corsPreflight, runBackend } from "./proxy.ts";
 import { type ContentPayload, verifyContentToken } from "./token.ts";
 
-const RECHECK_MS = 5000;
+export const RECHECK_MS = 5000;
 const CACHE_BYTES = 64 * 1024 * 1024;
 /** A file bigger than this is only ever read from the bucket a piece at a time, when asked for a range. */
 const PIECE_BYTES = 8 * 1024 * 1024;

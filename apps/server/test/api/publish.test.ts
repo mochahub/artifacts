@@ -114,13 +114,13 @@ describe("publishing", () => {
     expect((await t.api("/api/publish/prepare", { method: "POST", json: body })).status).toBe(401);
 
     const org = (await t.server.db.select().from(people))[0]?.orgId as string;
-    const reviewer = await makePerson(t, org, "reviewer");
+    const reviewer = (await makePerson(t, org, "reviewer")).token;
     expect(
       await error(await t.api("/api/publish/prepare", { method: "POST", bearer: reviewer, json: body })),
     ).toBe("forbidden");
 
     await publish(t, owner.token, { slug: "private", visibility: "me" });
-    const member = await makePerson(t, org, "member");
+    const member = (await makePerson(t, org, "member")).token;
     const denied = await t.api("/api/publish/prepare", {
       method: "POST",
       bearer: member,
@@ -149,7 +149,7 @@ describe("publishing", () => {
     expect(details.error.code).toBe("slug_deleted");
     expect(details.error.details.deletedBy).toBe("Zahin");
     const org = (await t.server.db.select().from(people))[0]?.orgId as string;
-    const member = await makePerson(t, org, "member");
+    const member = (await makePerson(t, org, "member")).token;
     const stranger = await t.api("/api/publish/prepare", { method: "POST", bearer: member, json: body });
     expect(await error(stranger)).toBe("conflict");
   });

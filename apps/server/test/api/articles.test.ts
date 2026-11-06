@@ -146,8 +146,8 @@ describe("articles with no CLI", () => {
   test("the usual permission applies", async () => {
     const [org] = await t.server.db.query.org.findMany();
     const orgId = (org as { id: string }).id;
-    const reviewer = await makePerson(t, orgId, "reviewer");
-    const other = await makePerson(t, orgId, "member");
+    const reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    const other = (await makePerson(t, orgId, "member")).token;
     const args = { project: "notes", title: "T", summary: "S", markdown: "# T\n" };
     expect(
       (await call("artifacts_publish_article", { ...args, slug: "by-reviewer" }, reviewer)).isError,

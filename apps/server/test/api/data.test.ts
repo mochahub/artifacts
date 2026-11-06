@@ -40,8 +40,8 @@ describe("the data store", () => {
     t = await startTestServer();
     token = (await claim(t)).token;
     const orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    sam = await makePerson(t, orgId, "member");
-    jo = await makePerson(t, orgId, "member");
+    sam = (await makePerson(t, orgId, "member")).token;
+    jo = (await makePerson(t, orgId, "member")).token;
     await fresh();
   });
   afterAll(() => t.stop());

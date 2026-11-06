@@ -11,7 +11,7 @@ import { ApiError } from "../http/errors.ts";
 import type { RouteRequest, Routes } from "../http/routes.ts";
 
 const EXPIRES_IN = 600;
-const INTERVAL = 5;
+export const POLL_INTERVAL_S = 5;
 
 const normalize = (code: string) => {
   const letters = code.toUpperCase().replace(/[^A-Z]/g, "");
@@ -43,7 +43,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
       deviceCode,
       userCode,
       verificationUrl: `${env.publicUrl}/device`,
-      interval: INTERVAL,
+      interval: POLL_INTERVAL_S,
       expiresIn: EXPIRES_IN,
     } satisfies DeviceStarted);
   });
@@ -57,7 +57,7 @@ export function deviceRoutes(routes: Routes, deps: Deps) {
       .where(and(eq(deviceCodes.orgId, c.get("org").id), eq(deviceCodes.deviceCodeHash, hash)))
       .limit(1);
     if (!row) throw new ApiError("not_found", "Not found.");
-    limits.hit(`device-poll:${hash}`, 1, INTERVAL * 1000);
+    limits.hit(`device-poll:${hash}`, 1, POLL_INTERVAL_S * 1000);
     if (row.status === "denied") return c.json({ status: "denied" });
     if (row.status === "used" || row.expiresAt <= clock.now()) {
       throw new ApiError("gone", "This sign-in expired. Run artifacts login again.");

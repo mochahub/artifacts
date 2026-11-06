@@ -107,7 +107,7 @@ describe("setting a brand by hand", () => {
   test("only a signed-in admin can, and no token", async () => {
     const before = await t.server.db.select().from(brandProposals).where(eq(brandProposals.orgId, orgId));
     expect((await put(acme, { bearer: token })).status).toBe(403);
-    expect((await put(acme, { bearer: await makePerson(t, orgId, "member") })).status).toBe(403);
+    expect((await put(acme, { bearer: (await makePerson(t, orgId, "member")).token })).status).toBe(403);
     expect((await put(acme, {})).status).toBe(401);
     expect(await t.server.db.select().from(brandProposals).where(eq(brandProposals.orgId, orgId))).toEqual(
       before,

@@ -172,7 +172,7 @@ describe("a box with no login, through the hosted MCP", () => {
     expect(invite.status).toBe(200);
     const { makePerson } = await import("../../../apps/server/test/publish-helper.ts");
     const [org] = await t.server.db.query.org.findMany();
-    const reviewer = await makePerson(t, (org as { id: string }).id, "reviewer");
+    const reviewer = (await makePerson(t, (org as { id: string }).id, "reviewer")).token;
     const response = await fetch(`${url}/api/mcp`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${reviewer}` },

@@ -2,10 +2,21 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  InviteCreated,
+  OrgTokenCreated,
+  Person,
+  RecoverResponse,
+  SetupResponse,
+  type TokenScope,
+} from "@artifacts/schema";
 import postgres from "postgres";
+import sharp from "sharp";
 import type { GoogleProvider } from "../src/auth/google.ts";
+import { findOrg } from "../src/db/index.ts";
 import { parseEnv } from "../src/env.ts";
 import { startServer } from "../src/server.ts";
+import type { softAuthenticator } from "./authenticator.ts";
 
 // docker-compose.test.yml; `bun run test` starts it.
 const ADMIN_URL =
@@ -28,6 +39,13 @@ export async function createDatabase(): Promise<{ url: string; drop(): Promise<v
   };
 }
 
+export const SETUP_TOKEN = "s".repeat(48);
+export const OPS_SECRET = "o".repeat(64);
+/** A password long enough for every check, for people who join. */
+export const PASSWORD = "a perfectly long password";
+/** The viewer's origin in every test server that doesn't set PUBLIC_URL. */
+export const ORIGIN = "http://viewer.test";
+
 export function testEnv(databaseUrl: string, overrides: Record<string, string> = {}) {
   return parseEnv({
     DATABASE_URL: databaseUrl,
@@ -41,10 +59,10 @@ export function testEnv(databaseUrl: string, overrides: Record<string, string> =
     PUBLIC_URL: "http://viewer.test",
     MORE_URLS: "https://art.example.org",
     CONTENT_URL: "http://content.test",
-    SETUP_TOKEN: "s".repeat(48),
+    SETUP_TOKEN,
     GITHUB_RELEASES_REPO: "none",
     SESSION_SECRET: "x".repeat(64),
-    OPS_SECRET: "o".repeat(64),
+    OPS_SECRET,
     PORT: "0",
     CONTENT_PORT: "0",
     INTERNAL_PORT: "0",
@@ -176,19 +194,185 @@ export type TestServer = Awaited<ReturnType<typeof startTestServer>>;
 
 export const OWNER = { name: "Zahin", email: "zahin@example.com", password: "correct horse battery" };
 
-/** Claims the server, and returns the owner's token. */
+/** A response body, cast for tests that only read a field or two. Parse with the schema to check a shape. */
+export const json = async <T = Record<string, unknown>>(response: Response) => (await response.json()) as T;
+
+/** An error response's code. */
+export const code = async (response: Response) =>
+  (await json<{ error: { code: string } }>(response)).error.code;
+
+/** A cookie a response sets (the first, or the one named), ready to send back. */
+export function cookieOf(response: Response, name?: string) {
+  const all = response.headers.getSetCookie();
+  const found = name ? all.find((cookie) => cookie.startsWith(`${name}=`)) : all[0];
+  return (found ?? "").split(";")[0] as string;
+}
+
+type Auth = { cookie?: string; bearer?: string };
+
+/**
+ * Claims the server, and returns the owner and their CLI token. The API never shows an org's id, so it's
+ * read here, once, for the few tests that write rows no route can.
+ */
 export async function claim(t: TestServer) {
   const response = await t.api("/api/setup", {
     method: "POST",
-    json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "Test", ...OWNER },
+    json: { setupToken: SETUP_TOKEN, orgName: "Mochahub", clientName: "Test", ...OWNER },
   });
   if (response.status !== 200) throw new Error(`setup failed: ${await response.text()}`);
-  return (await response.json()) as { person: { id: string }; token: string };
+  const body = SetupResponse.parse(await response.json());
+  const org = await findOrg(t.server.db);
+  if (!org) throw new Error("no org after setup");
+  return { ...body, orgId: org.id };
 }
 
 /** Signs in with a password and returns the cookie to send. */
 export async function signIn(t: TestServer, email: string, password: string) {
   const response = await t.api("/api/auth/password", { method: "POST", json: { email, password } });
   if (response.status !== 200) throw new Error(`sign-in failed: ${await response.text()}`);
-  return (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+  return cookieOf(response);
+}
+
+/** An org token, made the way an admin makes one. `cookie` must be a recent sign-in. */
+export async function orgToken(
+  t: TestServer,
+  cookie: string,
+  body: { name?: string; scopes?: TokenScope[]; projectIds?: string[]; expiresAt?: string } = {},
+) {
+  const response = await t.api("/api/tokens", {
+    method: "POST",
+    cookie,
+    json: { name: "ci", scopes: ["read"], ...body },
+  });
+  if (response.status !== 200) throw new Error(`token failed: ${await response.text()}`);
+  return OrgTokenCreated.parse(await response.json());
+}
+
+/** The secret in a /join/ link. */
+export const inviteSecret = (url: string) => url.split("/join/")[1] as string;
+
+/** Invites someone to the org and returns the join link. */
+export async function invite(t: TestServer, auth: Auth, email: string, role = "member") {
+  const response = await t.api("/api/invites", { method: "POST", json: { email, role }, ...auth });
+  if (response.status !== 200) throw new Error(`invite failed: ${await response.text()}`);
+  return InviteCreated.parse(await response.json()).url;
+}
+
+/** Accepts an invite link with a password; returns the new person and their session cookie. */
+export async function acceptInvite(t: TestServer, url: string, name = "Joiner", password = PASSWORD) {
+  const response = await t.api(`/api/invites/${inviteSecret(url)}/accept`, {
+    method: "POST",
+    json: { name, password },
+  });
+  if (response.status !== 200) throw new Error(`accept failed: ${await response.text()}`);
+  const cookie = cookieOf(response);
+  return { person: Person.parse(((await response.json()) as { person: unknown }).person), cookie };
+}
+
+/** Joins through a share link (its URL or secret) as a named guest, and returns the guest's cookie. */
+export async function joinAsGuest(t: TestServer, link: string, name = "Guest") {
+  const secret = link.includes("/s/") ? (link.split("/s/")[1] as string) : link;
+  const response = await t.api(`/api/s/${secret}/guest`, { method: "POST", json: { name } });
+  if (response.status !== 200) throw new Error(`guest join failed: ${await response.text()}`);
+  return cookieOf(response);
+}
+
+/**
+ * Mints a content token for a version, and returns a fetch for paths under it on the content port, sent
+ * the way the viewer's iframe would.
+ */
+export async function contentFor(t: TestServer, artifactId: string, auth: Auth, version = 1) {
+  const response = await t.api(`/api/artifacts/${artifactId}/content-token`, {
+    method: "POST",
+    json: { version },
+    ...auth,
+  });
+  if (response.status !== 200) throw new Error(`content token failed: ${await response.text()}`);
+  const { base } = (await response.json()) as { base: string };
+  const fetchContent = (path: string, init: RequestInit = {}, host = "content.test") =>
+    fetch(`http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}${path}`, {
+      ...init,
+      headers: { Host: host, "Sec-Fetch-Dest": "iframe", ...(init.headers as Record<string, string>) },
+    });
+  return { base, fetch: fetchContent };
+}
+
+let rpcId = 1;
+/** A JSON-RPC call to /api/mcp. */
+export function mcp(
+  t: TestServer,
+  bearer: string | undefined,
+  method: string,
+  params: object = {},
+  headers: Record<string, string> = {},
+) {
+  return t.api("/api/mcp", {
+    method: "POST",
+    bearer,
+    headers,
+    json: { jsonrpc: "2.0", id: rpcId++, method, params },
+  });
+}
+
+/** The setup token's recovery path: returns the secret in a reset link for an owner. */
+export async function recover(t: TestServer, email = OWNER.email) {
+  const response = await t.api("/api/recover", { method: "POST", json: { setupToken: SETUP_TOKEN, email } });
+  if (response.status !== 200) throw new Error(`recover failed: ${await response.text()}`);
+  return RecoverResponse.parse(await response.json()).resetUrl.split("/reset/")[1] as string;
+}
+
+type Authenticator = ReturnType<typeof softAuthenticator>;
+type Challenge = { challengeId: string; challenge: string };
+
+/** Registers a software passkey for whoever `cookie` signs in, and returns the verify response. */
+export async function addPasskey(t: TestServer, cookie: string, key: Authenticator, name?: string) {
+  const options = (await (
+    await t.api("/api/me/passkeys/options", { method: "POST", cookie, json: {} })
+  ).json()) as Challenge & { rp: { id: string } };
+  return t.api("/api/me/passkeys/verify", {
+    method: "POST",
+    cookie,
+    json: { challengeId: options.challengeId, response: key.register(options, ORIGIN), name },
+  });
+}
+
+/** Signs in with a software passkey, and returns the verify response. */
+export async function passkeySignIn(t: TestServer, key: Authenticator) {
+  const options = (await (
+    await t.api("/api/auth/passkey/options", { method: "POST", json: {} })
+  ).json()) as Challenge & { rpId: string };
+  return t.api("/api/auth/passkey/verify", {
+    method: "POST",
+    json: { challengeId: options.challengeId, response: key.assert(options, ORIGIN) },
+  });
+}
+
+/** Reads a server-sent event stream until `count` events have come, or `ms` pass, then closes it. */
+export async function readEvents(response: Response, count: number, ms = 3000) {
+  const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+  const deadline = Date.now() + ms;
+  let text = "";
+  while ((text.match(/^event:/gm) ?? []).length < count) {
+    const left = deadline - Date.now();
+    if (left <= 0) break;
+    const { value, done } = await Promise.race([
+      reader.read(),
+      Bun.sleep(left).then(() => ({ value: undefined, done: true })),
+    ]);
+    if (done) break;
+    text += new TextDecoder().decode(value);
+  }
+  await reader.cancel();
+  return text;
+}
+
+/** An image of one colour, for renders and crops. */
+export function solidImage(
+  width: number,
+  height: number,
+  background: string,
+  format: "webp" | "png" = "webp",
+) {
+  const image = sharp({ create: { width, height, channels: 4, background } });
+  return (format === "png" ? image.png() : image.webp()).toBuffer();
 }

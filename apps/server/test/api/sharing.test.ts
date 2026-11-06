@@ -45,7 +45,7 @@ describe("sharing", () => {
   afterAll(() => t.stop());
 
   test("visibility: a member can't see a private artifact until it's org-wide", async () => {
-    const member = await makePerson(t, orgId, "member");
+    const member = (await makePerson(t, orgId, "member")).token;
     expect((await t.api(`/api/artifacts/${id}`, { bearer: member })).status).toBe(404);
     expect(
       (await t.api(`/api/artifacts/${id}`, { method: "PATCH", bearer: member, json: { visibility: "org" } }))
@@ -65,7 +65,7 @@ describe("sharing", () => {
   });
 
   test("adding a member gives access at once, and removing takes it away", async () => {
-    await makePerson(t, orgId, "member");
+    (await makePerson(t, orgId, "member")).token;
     const person = (await t.server.db.select().from(people)).at(-1);
     const added = await access({ email: person?.email, permission: "comment" });
     expect(added.status).toBe(200);
@@ -82,7 +82,7 @@ describe("sharing", () => {
   });
 
   test("publish goes only to members, and lets them publish", async () => {
-    const member = await makePerson(t, orgId, "member");
+    const member = (await makePerson(t, orgId, "member")).token;
     const person = (await t.server.db.select().from(people)).at(-1);
     expect(await code(await access({ email: "stranger@example.com", permission: "publish" }))).toBe(
       "invalid",
@@ -90,14 +90,14 @@ describe("sharing", () => {
     expect((await publish(t, member)).status).toBe(409);
     expect((await access({ email: person?.email, permission: "publish" })).status).toBe(200);
     expect((await publish(t, member)).status).toBe(200);
-    const reviewer = await makePerson(t, orgId, "reviewer");
+    const reviewer = (await makePerson(t, orgId, "reviewer")).token;
     expect(reviewer).toBeTruthy();
     const them = (await t.server.db.select().from(people)).at(-1);
     expect(await code(await access({ email: them?.email, permission: "publish" }))).toBe("invalid");
   });
 
   test("only the publisher or an admin shares", async () => {
-    const member = await makePerson(t, orgId, "member");
+    const member = (await makePerson(t, orgId, "member")).token;
     const person = (await t.server.db.select().from(people)).at(-1);
     await access({ email: person?.email, permission: "comment" });
     expect((await access({ email: "x@example.com", permission: "view" }, member)).status).toBe(403);

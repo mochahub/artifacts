@@ -34,7 +34,7 @@ describe("lists and artifacts", () => {
     await publish(t, token, { slug: "secret", visibility: "me" });
     id = (await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "roadmap")))[0]?.id as string;
     orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    member = await makePerson(t, orgId, "member");
+    member = (await makePerson(t, orgId, "member")).token;
   });
   afterAll(() => t.stop());
 

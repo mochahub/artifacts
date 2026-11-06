@@ -148,7 +148,7 @@ describe("live review", () => {
   test("a stream needs read access, the same 404 as a page", async () => {
     expect((await t.api(`/api/events?artifact=${id}`)).status).toBe(401);
     expect((await t.api("/api/events?artifact=nope", { cookie })).status).toBe(404);
-    const stranger = await makePerson(t, orgId, "outside");
+    const stranger = (await makePerson(t, orgId, "outside")).token;
     expect((await t.api(`/api/events?artifact=${id}`, { bearer: stranger })).status).toBe(404);
   });
 
@@ -236,7 +236,7 @@ describe("live review", () => {
 
   test("push: someone who can't see the artifact isn't told", async () => {
     received.length = 0;
-    await makePerson(t, orgId, "outside");
+    (await makePerson(t, orgId, "outside")).token;
     const [row] = await t.server.db.select().from(people).where(eq(people.role, "outside"));
     await addDevice(row?.id as string, "outsider");
     quietDay();
@@ -246,7 +246,7 @@ describe("live review", () => {
 
   test("push: a gone device is forgotten, and the digest counts what others did", async () => {
     received.length = 0;
-    await makePerson(t, orgId, "member");
+    (await makePerson(t, orgId, "member")).token;
     const [other] = await t.server.db.select().from(people).where(eq(people.role, "member"));
     const device = browser();
     await addDevice(other?.id as string, "gone", device.keys);
@@ -274,7 +274,7 @@ describe("live review", () => {
   });
 
   test("push: someone who lost the artifact, or whose session ended, hears nothing more", async () => {
-    await makePerson(t, orgId, "member");
+    (await makePerson(t, orgId, "member")).token;
     const [member] = await t.server.db.select().from(people).where(eq(people.role, "member"));
     const thread = (await (await comment("Private soon")).json()) as { id: string };
     const session = await addDevice(member?.id as string, "lost");
@@ -372,7 +372,7 @@ describe("live review", () => {
     expect((await find("%")).comments).toEqual([]);
     expect((await find("%%%")).comments).toEqual([]);
     expect((await find("x")).artifacts).toEqual([]);
-    const bearer = await makePerson(t, orgId, "outside");
+    const bearer = (await makePerson(t, orgId, "outside")).token;
     expect((await find("needle", { bearer })).comments).toEqual([]);
     expect((await find("live", { bearer })).artifacts).toEqual([]);
   });

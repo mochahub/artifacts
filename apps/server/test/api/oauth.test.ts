@@ -432,7 +432,7 @@ describe("OAuth and the hosted MCP", () => {
   test("a person's reset or removal ends their connectors", async () => {
     const tokens = await signInClient();
     const [org] = await t.server.db.query.org.findMany();
-    const member = await makePerson(t, (org as { id: string }).id, "member");
+    const member = (await makePerson(t, (org as { id: string }).id, "member")).token;
     expect((await call(member, "artifacts_status", { artifact: "game/plan" })).isError).toBeUndefined();
     const people = (await (await t.api("/api/people", { cookie })).json()) as {
       people: { id: string; email: string }[];

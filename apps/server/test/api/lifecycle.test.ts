@@ -54,7 +54,7 @@ describe("lifecycle", () => {
     personId = made.person.id;
     cookie = await signIn(t, OWNER.email, OWNER.password);
     orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    member = await makePerson(t, orgId, "member");
+    member = (await makePerson(t, orgId, "member")).token;
   });
   afterAll(() => t.stop());
 

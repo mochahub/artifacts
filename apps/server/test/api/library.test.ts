@@ -37,9 +37,9 @@ describe("the library", () => {
     owner = claimed.token;
     const [org] = await t.server.db.query.org.findMany();
     orgId = (org as { id: string }).id;
-    member = await makePerson(t, orgId, "member");
-    reviewer = await makePerson(t, orgId, "reviewer");
-    outside = await makePerson(t, orgId, "outside");
+    member = (await makePerson(t, orgId, "member")).token;
+    reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    outside = (await makePerson(t, orgId, "outside")).token;
     orgToken = `art_org${Bun.randomUUIDv7()}`;
     await t.server.db.insert(tokens).values({
       id: Bun.randomUUIDv7(),
@@ -334,7 +334,7 @@ describe("the library", () => {
   }, 120_000);
 
   test("search's limit counts for an agent's cards too", async () => {
-    const flood = await makePerson(t, orgId, "member");
+    const flood = (await makePerson(t, orgId, "member")).token;
     for (let i = 0; i < 60; i++) await get("/api/library/search?q=lantern&limit=1", flood);
     expect((await get("/api/library/search?q=lantern", flood)).status).toBe(429);
   }, 60_000);

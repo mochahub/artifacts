@@ -524,7 +524,7 @@ describe("the backend sandbox", () => {
     }[];
     expect(logs).toHaveLength(100);
     expect(logs[0]).toMatchObject({ level: "log", message: "line 0" });
-    const member = await makePerson(t, orgId, "member");
+    const member = (await makePerson(t, orgId, "member")).token;
     expect((await t.api(`/api/artifacts/${id}/logs`, { bearer: member })).status).toBe(403);
   });
 

@@ -2,9 +2,12 @@ import { type Child, type Job, type Ran, startChild } from "@artifacts/sandbox";
 import { ApiError } from "../http/errors.ts";
 import type { Logger } from "../log.ts";
 
-const WAIT_PER_BACKEND = 4;
-const WAIT_PER_CHILD = 32;
+export const WAIT_PER_BACKEND = 4;
+export const WAIT_PER_CHILD = 32;
 const noop = () => {};
+
+/** Which child a backend runs on: fixed by its hash, so its instance stays warm. */
+export const childIndex = (hash: string, size: number) => Number.parseInt(hash.slice(0, 8), 16) % size;
 
 /**
  * Starts and supervises the sandbox processes (08). Each backend is pinned to one child by its hash, and
@@ -41,7 +44,7 @@ export class SandboxPool {
   }
 
   private indexFor(hash: string) {
-    return Number.parseInt(hash.slice(0, 8), 16) % this.size;
+    return childIndex(hash, this.size);
   }
 
   /** Runs one of an artifact's requests. A child that dies on it answers with `crashed`. */
