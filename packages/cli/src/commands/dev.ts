@@ -163,13 +163,14 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
 
   const artifact = (): Shape<typeof Artifact> => ({
     ...card(),
+    projectName: project,
     visibility: "me",
     publisherId: PERSON.id,
     hasBackend: false,
     pages: pages(),
     decision: null,
     // Comments need a server, so the local viewer is read-only for review.
-    permissions: { comment: false, manage: false, share: false, delete: false, purge: false },
+    permissions: { comment: false, decide: false, manage: false, share: false, delete: false, purge: false },
   });
 
   const versionBody = () => ({
@@ -290,6 +291,7 @@ export async function devCommand({ flags: given }: Input<never, { port?: string 
         publicUrl: viewerOrigin,
         contentUrl: contentOrigin,
         viewerOrigins: [viewerOrigin],
+        google: false,
       });
     }
     if (path === "/api/me")
