@@ -26,7 +26,8 @@ describe("artifacts dev", () => {
       backend,
       readFileSync(backend, "utf8").replace(
         "const who = caller(request);",
-        `if (request.url.endsWith("/escape")) {
+        `if (request.url.includes("/echo")) return Response.json({ url: request.url });
+    if (request.url.endsWith("/escape")) {
       const code = await env.DATA.put("../../escaped.json", 1).catch((error) => error.code);
       return Response.json({ code });
     }
@@ -95,6 +96,11 @@ describe("artifacts dev", () => {
     expect(stored.by.local).toBe("b");
   });
 
+  test("a backend sees the query string, as it does on the server", async () => {
+    const echo = await fetch(`${content}/v1/api/echo?x=1&y=two`);
+    expect(((await echo.json()) as { url: string }).url).toBe("https://backend.invalid/api/echo?x=1&y=two");
+  });
+
   test("a backend's keys and the local store can't leave the data folder", async () => {
     const up = await fetch(`${content}/v1/api/escape`, { method: "POST", body: "{}" });
     expect(await up.json()).toEqual({ code: "invalid" });
@@ -131,4 +137,24 @@ describe("artifacts dev", () => {
     }
     throw new Error("no new version");
   }, 40_000);
+
+  test("a change made while a rebuild runs is built too, not dropped", async () => {
+    const latest = async () =>
+      (
+        (await (await fetch(`${viewer}/api/artifacts/by-slug/demo/poll-backend`)).json()) as {
+          latestVersion: number;
+        }
+      ).latestVersion;
+    const start = await latest();
+    const page = join(dir, "boards/main.html");
+    writeFileSync(page, readFileSync(page, "utf8").replace("Three options", "Four options"));
+    // Past the debounce, so the first rebuild is rendering in WebKit when the second change lands.
+    await Bun.sleep(600);
+    writeFileSync(page, readFileSync(page, "utf8").replace("Four options", "Five options"));
+    for (let i = 0; i < 240; i++) {
+      if ((await latest()) === start + 2) return;
+      await Bun.sleep(250);
+    }
+    throw new Error(`still v${await latest()}, not v${start + 2}`);
+  }, 90_000);
 });

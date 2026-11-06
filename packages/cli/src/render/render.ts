@@ -1,8 +1,16 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@artifacts/schema";
+import {
+  type BlockRecord,
+  DEFAULT_ORG_SETTINGS,
+  type FrameRecord,
+  type Manifest,
+  type PageRecord,
+  type Theme,
+} from "@artifacts/schema";
 import { buildArticle, mermaidSources } from "@artifacts/schema/article";
 import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
+import type { Caller } from "../../../sandbox/src/index.js";
 import type { LocalBrand } from "../brand/cache.ts";
 import { asBun } from "../bun.ts";
 import {
@@ -26,6 +34,14 @@ import { CliError, type Output } from "../output.ts";
 import { ensureHelper } from "./install.ts";
 
 const GAP = 80;
+/** Who a backend serves during a render: a member who can't write, so renders never depend on saved data. */
+const PREVIEW_CALLER: Caller = {
+  id: "preview",
+  name: "Preview",
+  kind: "member",
+  canComment: false,
+  isPublisher: false,
+};
 
 export type BundleFile = { path: string; hash: string; size: number; type: string; source: string };
 
@@ -54,7 +70,6 @@ type HelperFrame = {
   html: string | null;
   contentHash: string;
   renders: FrameRecord["renders"];
-  readsData?: boolean;
 };
 type HelperResult = {
   boards: { key: string; pageKey: string; frames: HelperFrame[] }[];
@@ -195,7 +210,9 @@ export function render(
     root,
     {
       root,
-      backend: backendPath,
+      backend: backendPath
+        ? { path: backendPath, caller: PREVIEW_CALLER, limits: DEFAULT_ORG_SETTINGS.limits }
+        : null,
       boards,
       mermaid,
       images: heavy,

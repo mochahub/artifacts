@@ -70,7 +70,7 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(await child.exited).toBe(1);
     const stderr = await new Response(child.stderr).text();
     expect(stderr).toContain("That isn't one of railway, docker, existing.");
-    expect(stderr.match(/Where should your Artifacts server run\?/g)?.length).toBe(2);
+    expect(stderr).toContain('Stopped at "Where should your Artifacts server run?');
     expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain("init");
   });
 

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import child from "../../../sandbox/src/child.js" with { type: "text" };
 import host from "../../../sandbox/src/host.js" with { type: "text" };
+import type * as Sandbox from "../../../sandbox/src/index.js";
 import prelude from "../../../sandbox/src/prelude.js" with { type: "text" };
 import { asBun } from "../bun.ts";
 import { home } from "../config.ts";
@@ -23,12 +24,13 @@ export function helperInstalled(dir = helperDir()) {
 export function ensureHelper(out: Output): string {
   const dir = helperDir();
   mkdirSync(dir, { recursive: true });
-  // Only when changed: another process may be starting one of these right now.
+  // Only when changed: another process may be starting one of these right now. The sandbox's three keep
+  // their own names, because host.js finds the other two beside it.
   for (const [name, text] of [
     ["render.mjs", helper],
-    ["sandbox-child.js", child],
-    ["sandbox-prelude.js", prelude],
-    ["sandbox-host.js", host],
+    ["host.js", host],
+    ["child.js", child],
+    ["prelude.js", prelude],
   ] as const) {
     const path = join(dir, name);
     if (!existsSync(path) || readFileSync(path, "utf8") !== text) writeFileSync(path, text);
@@ -49,4 +51,12 @@ export function ensureHelper(out: Output): string {
   }
   writeFileSync(marker(dir), PACKAGES.join("\n"));
   return dir;
+}
+
+/**
+ * The sandbox host, from the helper folder rather than bundled: a compiled binary can't start a child from
+ * inside itself, and quickjs-emscripten is installed there (07).
+ */
+export async function sandboxHost(out: Output): Promise<typeof Sandbox> {
+  return import(join(ensureHelper(out), "host.js"));
 }

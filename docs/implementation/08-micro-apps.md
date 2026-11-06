@@ -139,8 +139,8 @@ Backends run in **QuickJS compiled to WebAssembly** (`quickjs-emscripten`, pinne
 
 | File | Runs in | Does |
 |---|---|---|
-| `pool.ts` | The app | Starts and supervises the sandbox processes, routes requests, answers `env.DATA` calls and writes logs |
-| `packages/sandbox/src/host.js` | The app, `artifacts dev` and `artifacts render` | Starts one child and speaks the IPC protocol with it |
+| `pool.ts` | The app | Starts and supervises the sandbox processes and queues each backend's requests |
+| `packages/sandbox/src/host.js` | The app, `artifacts dev` and `artifacts render` | Starts one child and speaks the IPC protocol with it, and `runBackend`: the request a backend sees (URL with its query string, `X-Caller`), the limits, the headers that pass, CORS and the log caps. Finds `child.js` and `prelude.js` beside itself. Types in `index.d.ts` |
 | `packages/sandbox/src/child.js` | Each sandbox process | Holds QuickJS instances and runs requests |
 
 **Processes:**
@@ -180,4 +180,4 @@ Checked before building (M10, `spikes/s10/`): `Bun.spawn` with `ipc` and an empt
   - serves the viewer and content host on `localhost`
   - runs the bridge against `.artifacts/data/` (same layout as the bucket prefix, without `data/<id>/`)
   - runs backends in the same sandbox, from the CLI's helper folder (`quickjs-emscripten` is installed there with Playwright; 07), with `env.DATA` backed by the local folder, reloaded on change
-- **`artifacts render`:** runs the backend the same way against the fixtures for rendering.
+- **`artifacts render`:** runs the backend the same way against the fixtures for rendering: `shared` in `fixtures/data.json` is `shared/…`, and `me` is the render's own `me/<id>/…`. Writes change nothing.

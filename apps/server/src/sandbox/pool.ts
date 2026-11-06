@@ -1,30 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-// @ts-expect-error: plain JavaScript shared with the CLI
-import { startChild } from "@artifacts/sandbox";
+import { type Child, type Job, type Ran, startChild } from "@artifacts/sandbox";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-
-type Limits = { timeoutMs: number; memoryMb: number; dataOpBytes: number };
-export type SandboxRequest = { url: string; method: string; headers: Record<string, string>; body: string };
-export type SandboxResponse = { status: number; headers: [string, string][]; body: string };
-type Log = { level: string; message: string };
-type Child = ReturnType<typeof startChild>;
 
 const WAIT_PER_BACKEND = 4;
 const WAIT_PER_CHILD = 32;
 const noop = () => {};
-
-/** Beside server.js in the image, in packages/sandbox in the repo. */
-function sandboxFiles() {
-  const here = import.meta.dir;
-  for (const dir of [here, join(here, "../../../../packages/sandbox/src")]) {
-    const child = join(dir, existsSync(join(dir, "child.js")) ? "child.js" : "sandbox-child.js");
-    const prelude = join(dir, existsSync(join(dir, "prelude.js")) ? "prelude.js" : "sandbox-prelude.js");
-    if (existsSync(child) && existsSync(prelude)) return { child, prelude: readFileSync(prelude, "utf8") };
-  }
-  throw new Error("The sandbox files are missing.");
-}
 
 /**
  * Starts and supervises the sandbox processes (08). Each backend is pinned to one child by its hash, and
@@ -33,7 +13,6 @@ function sandboxFiles() {
  */
 export class SandboxPool {
   private children: (Child | null)[];
-  private readonly files = sandboxFiles();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly waiting = new Map<string, number>();
   private readonly perChild = new Map<number, number>();
@@ -51,13 +30,11 @@ export class SandboxPool {
     const current = this.children[index];
     if (current?.alive()) return current;
     const started = startChild({
-      childPath: this.files.child,
-      prelude: this.files.prelude,
       onExit: () => {
         if (!this.stopped) this.log.warn("a sandbox process exited; starting another on the next request");
         this.children[index] = null;
       },
-    }) as Child;
+    });
     this.children[index] = started;
     await started.up;
     return started;
@@ -67,16 +44,10 @@ export class SandboxPool {
     return Number.parseInt(hash.slice(0, 8), 16) % this.size;
   }
 
-  async run(options: {
-    artifactId: string;
-    hash: string;
-    code: () => string;
-    limits: Limits;
-    request: SandboxRequest;
-    onData(op: unknown): Promise<unknown>;
-  }): Promise<{ response: SandboxResponse; logs: Log[] }> {
-    const key = `${options.artifactId}:${options.hash}`;
-    const index = this.indexFor(options.hash);
+  /** Runs one of an artifact's requests. A child that dies on it answers with `crashed`. */
+  async run(artifactId: string, job: Job): Promise<Ran> {
+    const key = `${artifactId}:${job.hash}`;
+    const index = this.indexFor(job.hash);
     const backendWaiting = this.waiting.get(key) ?? 0;
     const childWaiting = this.perChild.get(index) ?? 0;
     if (backendWaiting >= WAIT_PER_BACKEND || childWaiting >= WAIT_PER_CHILD) {
@@ -96,10 +67,10 @@ export class SandboxPool {
       let backstop: ReturnType<typeof setTimeout> | undefined;
       const start = () => {
         clearTimeout(backstop);
-        backstop = setTimeout(() => child.kill(), options.limits.timeoutMs + 2000);
+        backstop = setTimeout(() => child.kill(), job.limits.timeoutMs + 2000);
       };
       try {
-        return await child.run({ ...options, hash: key, id, onStart: start });
+        return await child.run({ ...job, hash: key, id, onStart: start });
       } finally {
         clearTimeout(backstop);
       }
@@ -108,14 +79,7 @@ export class SandboxPool {
     const tail = work.then(noop, noop);
     this.queues.set(key, tail);
     try {
-      const result = (await work) as { response?: SandboxResponse; logs: Log[]; crashed?: boolean };
-      if (result.crashed || !result.response) {
-        return {
-          response: { status: 502, headers: [], body: '{"error":"The sandbox stopped."}' },
-          logs: result.logs,
-        };
-      }
-      return { response: result.response, logs: result.logs };
+      return await work;
     } finally {
       const left = (this.waiting.get(key) ?? 1) - 1;
       if (left > 0) this.waiting.set(key, left);
@@ -125,10 +89,10 @@ export class SandboxPool {
     }
   }
 
-  /** Test hooks: what the first child's environment holds, and killing it. */
-  async childEnv() {
-    return (await this.child(0)).env() as Promise<string[]>;
-  }
+  /**
+   * For a test: a backend can't make its own child die, by design, so this is the only way to check that a
+   * child's death answers 502 and the next request gets a new one.
+   */
   async killChild() {
     (await this.child(0)).kill();
   }
