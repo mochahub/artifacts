@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { ContentToken } from "@artifacts/schema";
 import { RECHECK_MS } from "../../src/content/app.ts";
 import { claim, contentFor, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { file, hash, makeAccount, published } from "../publish-helper.ts";
@@ -97,8 +98,15 @@ describe("the content host", () => {
   });
 
   test("an expired token stops working", async () => {
-    const base = await mint();
-    t.clock.advance(2 * 3600_000 + 1000);
+    const minted = await t.api(`/api/artifacts/${id}/content-token`, {
+      method: "POST",
+      cookie,
+      json: { version: 1 },
+    });
+    const { base, expiresAt } = ContentToken.parse(await minted.json());
+    t.clock.advance(new Date(expiresAt).getTime() - t.clock.now().getTime() - 1000);
+    expect((await get(base, "index.html")).status).toBe(200);
+    t.clock.advance(2000);
     expect((await get(base, "index.html")).status).toBe(403);
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
