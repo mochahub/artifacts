@@ -67,7 +67,7 @@ describe("server addresses", () => {
 
 describe("a picture from the API", () => {
   test("says which agent asked, as every other request does", async () => {
-    let agent: string | null = null;
+    let agent = null as string | null;
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
