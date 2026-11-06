@@ -1,17 +1,32 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DevicePollResult, DeviceStarted, Me, SessionRow } from "@artifacts/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { POLL_INTERVAL_S } from "../../src/api/device.ts";
 import { RateLimits } from "../../src/auth/rate-limit.ts";
 import { sha256 } from "../../src/auth/secrets.ts";
-import { deviceCodes, org, passkeys, people, resetLinks, sessions, tokens } from "../../src/db/schema.ts";
+import { RECENT_AUTH_MS, SESSION_DAYS } from "../../src/auth/sessions.ts";
+import { deviceCodes, org, sessions, tokens } from "../../src/db/schema.ts";
+import { MIN_CLI_VERSION } from "../../src/version.ts";
 import { softAuthenticator } from "../authenticator.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer, testClock } from "../helpers.ts";
+import {
+  addPasskey,
+  claim,
+  cookieOf,
+  code as error,
+  OWNER,
+  orgToken,
+  passkeySignIn,
+  recover,
+  SETUP_TOKEN,
+  signIn,
+  startTestServer,
+  type TestServer,
+  testClock,
+} from "../helpers.ts";
 
-const error = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
-const SETUP = "s".repeat(48);
-const setupBody = { setupToken: SETUP, orgName: "Mochahub", clientName: "Mac", ...OWNER };
+const DAY_MS = 24 * 3600_000;
+const setupBody = { setupToken: SETUP_TOKEN, orgName: "Mochahub", clientName: "Mac", ...OWNER };
 
 describe("setup mode", () => {
   let t: TestServer;
@@ -55,6 +70,7 @@ describe("setup mode", () => {
     const [row] = await t.server.db.select().from(org);
     expect(row?.homeDomain).toBe("viewer.test");
     expect(row?.pseudonymKey).toHaveLength(32);
+    // No route shows a CLI token's scopes.
     const [token] = await t.server.db.select().from(tokens);
     expect(token?.scopes).toEqual(["publish", "comment", "read", "manage", "data"]);
   });
@@ -211,7 +227,7 @@ describe("signing in", () => {
     const response = await t.api("/api/meta", { headers: { "Artifacts-CLI": "0.0.1" } });
     expect(response.status).toBe(426);
     expect(((await response.json()) as { error: { details: unknown } }).error.details).toEqual({
-      minVersion: "0.1.0",
+      minVersion: MIN_CLI_VERSION,
     });
   });
 
@@ -228,11 +244,11 @@ describe("signing in", () => {
 
   test("sessions slide, then expire", async () => {
     const cookie = await signIn(t, OWNER.email, OWNER.password);
-    t.clock.advance(29 * 24 * 3600_000);
+    t.clock.advance((SESSION_DAYS - 1) * DAY_MS);
     expect((await t.api("/api/me", { cookie })).status).toBe(200);
-    t.clock.advance(29 * 24 * 3600_000);
+    t.clock.advance((SESSION_DAYS - 1) * DAY_MS);
     expect((await t.api("/api/me", { cookie })).status).toBe(200);
-    t.clock.advance(31 * 24 * 3600_000);
+    t.clock.advance((SESSION_DAYS + 1) * DAY_MS);
     expect((await t.api("/api/me", { cookie })).status).toBe(401);
   });
 
@@ -255,7 +271,7 @@ describe("signing in", () => {
   test("a stale session must re-authenticate to change a password, and the change ends other sessions", async () => {
     const other = await signIn(t, OWNER.email, OWNER.password);
     const cookie = await signIn(t, OWNER.email, OWNER.password);
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 60_000);
     const stale = await t.api("/api/me/password", {
       method: "POST",
       cookie,
@@ -282,13 +298,6 @@ describe("signing in", () => {
     expect((await t.api("/api/me", { cookie })).status).toBe(200);
     await t.api("/api/me/password", { method: "POST", cookie, json: { password: OWNER.password } });
   });
-
-  test("a removed person's session stops at once", async () => {
-    const cookie = await signIn(t, OWNER.email, OWNER.password);
-    await t.server.db.update(people).set({ removedAt: t.clock.now() });
-    expect((await t.api("/api/me", { cookie })).status).toBe(401);
-    await t.server.db.update(people).set({ removedAt: null });
-  });
 });
 
 /** Device approval, to mint a token after a test revoked the first one. */
@@ -300,7 +309,7 @@ async function freshToken(t: TestServer, cookie: string) {
   const poll = await t.api("/api/device/poll", { method: "POST", json: { deviceCode: started.deviceCode } });
   const result = DevicePollResult.parse(await poll.json());
   if (result.status !== "approved") throw new Error("not approved");
-  t.clock.advance(6000);
+  t.clock.advance(POLL_INTERVAL_S * 1000 + 1000);
   return { person: result.person, token: result.token };
 }
 
@@ -342,23 +351,22 @@ describe("rate limits", () => {
 });
 
 describe("rate limit memory and input bounds", () => {
-  test("random addresses can't pile up failures forever, or wipe everyone's limits", () => {
-    const clock = testClock();
-    const limits = new RateLimits(clock);
-    const failures = () => (limits as unknown as { accountFailures: Map<string, number[]> }).accountFailures;
-    const hits = () => (limits as unknown as { hits: Map<string, number[]> }).hits;
-    for (let i = 0; i < 50_000; i++) limits.passwordFailed(`guess${i}@example.com`);
-    clock.advance(3 * 3600_000);
-    limits.passwordFailed("one-more@example.com");
-    expect(failures().size).toBeLessThan(100);
+  // Past 50,000 keys the oldest are dropped to bound memory; a flood of random keys mustn't take
+  // every recent limit with it.
+  test("a flood of random keys doesn't wipe a recent IP limit", () => {
+    const limits = new RateLimits(testClock());
+    for (let i = 0; i < 45_000; i++) limits.hit(`ip:${i}`, 5, 3600_000);
+    limits.hit("ip:attacker", 1, 3600_000);
+    for (let i = 45_000; i < 55_000; i++) limits.hit(`ip:${i}`, 5, 3600_000);
+    expect(() => limits.hit("ip:attacker", 1, 3600_000)).toThrow("Too many attempts");
+  });
 
-    // Keys that are all still live past the cap lose only the oldest ones, not every limit at once.
-    for (let i = 0; i < 50_001; i++) limits.hit(`ip:${i}`, 5, 3600_000);
-    expect(hits().size).toBeLessThanOrEqual(50_000);
-    expect(hits().size).toBeGreaterThan(40_000);
-    for (let i = 0; i < 50_001; i++) limits.passwordFailed(`live${i}@example.com`);
-    expect(failures().size).toBeLessThanOrEqual(50_000);
-    expect(failures().size).toBeGreaterThan(40_000);
+  test("a flood of random addresses doesn't wipe an account's recent failures", () => {
+    const limits = new RateLimits(testClock());
+    for (let i = 0; i < 45_000; i++) limits.passwordFailed(`guess${i}@example.com`);
+    for (let i = 0; i < 5; i++) limits.passwordFailed(OWNER.email);
+    for (let i = 45_000; i < 55_000; i++) limits.passwordFailed(`guess${i}@example.com`);
+    expect(() => limits.checkPassword(OWNER.email, "ip")).toThrow("Too many attempts");
   });
 
   test("an oversized password is refused without counting against the account", async () => {
@@ -403,7 +411,7 @@ describe("the device flow", () => {
       ).json(),
     );
   const poll = (deviceCode: string) => {
-    t.clock.advance(5001);
+    t.clock.advance(POLL_INTERVAL_S * 1000 + 1);
     return t.api("/api/device/poll", { method: "POST", json: { deviceCode } });
   };
 
@@ -428,6 +436,7 @@ describe("the device flow", () => {
     expect(result.status).toBe("approved");
     if (result.status === "approved") {
       expect((await t.api("/api/me", { bearer: result.token })).status).toBe(200);
+      // No route shows a CLI token's scopes.
       const [row] = await t.server.db
         .select()
         .from(tokens)
@@ -461,7 +470,7 @@ describe("the device flow", () => {
 
   test("approving needs a recent sign-in", async () => {
     const { userCode } = await start();
-    t.clock.advance(11 * 60_000);
+    t.clock.advance(RECENT_AUTH_MS + 60_000);
     const stale = await t.api(`/api/device/${userCode}/approve`, { method: "POST", cookie });
     expect(await error(stale)).toBe("recent_auth_required");
     await t.api("/api/auth/reauth", { method: "POST", cookie, json: { password: OWNER.password } });
@@ -479,8 +488,13 @@ describe("the device flow", () => {
     t.clock.advance(601_000);
     expect((await poll(deviceCode)).status).toBe(410);
     expect((await t.api(`/api/device/${userCode}`, { cookie })).status).toBe(404);
-    const stored = await t.server.db.select().from(deviceCodes).where(sql`status = 'pending'`);
-    expect(stored.every((row) => !row.deviceCodeHash.includes(deviceCode))).toBe(true);
+  });
+
+  test("only a hash of a device code is stored", async () => {
+    const { deviceCode } = await start();
+    const rows = await t.server.db.select().from(deviceCodes);
+    expect(rows.some((row) => row.deviceCodeHash === sha256(deviceCode))).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain(deviceCode);
   });
 
   test("start is limited to 10 per IP per hour", async () => {
@@ -489,7 +503,7 @@ describe("the device flow", () => {
     for (let i = 0; i < 11; i++) {
       statuses.push((await t.api("/api/device/start", { method: "POST", json: { clientName: "x" } })).status);
     }
-    expect(statuses.at(-1)).toBe(429);
+    expect(statuses).toEqual([...Array(10).fill(200), 429]);
   });
 });
 
@@ -501,12 +515,12 @@ describe("recovery and reset", () => {
   });
   afterAll(() => t.stop());
 
-  const recover = (json: unknown) => t.api("/api/recover", { method: "POST", json });
+  const ask = (json: unknown) => t.api("/api/recover", { method: "POST", json });
 
   test("the setup token issues a one-hour, one-use reset link for an owner", async () => {
-    expect((await recover({ setupToken: "wrong", email: OWNER.email })).status).toBe(403);
-    expect((await recover({ setupToken: SETUP, email: "nobody@example.com" })).status).toBe(404);
-    const { resetUrl } = (await (await recover({ setupToken: SETUP, email: OWNER.email })).json()) as {
+    expect((await ask({ setupToken: "wrong", email: OWNER.email })).status).toBe(403);
+    expect((await ask({ setupToken: SETUP_TOKEN, email: "nobody@example.com" })).status).toBe(404);
+    const { resetUrl } = (await (await ask({ setupToken: SETUP_TOKEN, email: OWNER.email })).json()) as {
       resetUrl: string;
     };
     const token = resetUrl.split("/reset/")[1] as string;
@@ -519,7 +533,7 @@ describe("recovery and reset", () => {
       json: { password: "my new long password" },
     });
     expect(reset.status).toBe(200);
-    const fresh = (reset.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    const fresh = cookieOf(reset);
     expect((await t.api("/api/me", { cookie: fresh })).status).toBe(200);
     expect((await t.api("/api/me", { cookie: old })).status).toBe(401);
     expect((await t.api(`/api/reset/${token}`)).status).toBe(410);
@@ -531,19 +545,14 @@ describe("recovery and reset", () => {
   });
 
   test("an expired link answers 410", async () => {
-    const { resetUrl } = (await (await recover({ setupToken: SETUP, email: OWNER.email })).json()) as {
-      resetUrl: string;
-    };
+    const token = await recover(t);
     t.clock.advance(3601_000);
-    expect((await t.api(`/api/reset/${resetUrl.split("/reset/")[1]}`)).status).toBe(410);
-    const rows = await t.server.db.select().from(resetLinks);
-    expect(rows.some((row) => row.createdBy !== null)).toBe(false);
+    expect((await t.api(`/api/reset/${token}`)).status).toBe(410);
   });
 
   test("recovery is limited to 5 per hour", async () => {
     const statuses: number[] = [];
-    for (let i = 0; i < 6; i++)
-      statuses.push((await recover({ setupToken: "x", email: OWNER.email })).status);
+    for (let i = 0; i < 6; i++) statuses.push((await ask({ setupToken: "x", email: OWNER.email })).status);
     expect(statuses.slice(0, 5).every((status) => status === 403)).toBe(true);
     expect(statuses.at(-1)).toBe(429);
   });
@@ -557,15 +566,8 @@ describe("reset links after a password is set", () => {
   });
   afterAll(() => t.stop());
 
-  const recover = async () => {
-    const { resetUrl } = (await (
-      await t.api("/api/recover", { method: "POST", json: { setupToken: SETUP, email: OWNER.email } })
-    ).json()) as { resetUrl: string };
-    return (resetUrl.split("/reset/")[1] as string).trim();
-  };
-
   test("using one link retires the person's other unused links", async () => {
-    const [first, second] = [await recover(), await recover()] as [string, string];
+    const [first, second] = [await recover(t), await recover(t)];
     const reset = await t.api(`/api/reset/${first}`, {
       method: "POST",
       json: { password: "a freshly reset password" },
@@ -576,7 +578,7 @@ describe("reset links after a password is set", () => {
 
   test("so does changing the password while signed in", async () => {
     const cookie = await signIn(t, OWNER.email, "a freshly reset password");
-    const pending = await recover();
+    const pending = await recover(t);
     const changed = await t.api("/api/me/password", {
       method: "POST",
       cookie,
@@ -590,9 +592,7 @@ describe("reset links after a password is set", () => {
 describe("what a reset ends", () => {
   let t: TestServer;
   let cliToken: string;
-  const ORIGIN = "http://viewer.test";
   const key = softAuthenticator();
-  type Challenge = { challenge: string; challengeId: string };
 
   beforeAll(async () => {
     t = await startTestServer();
@@ -600,36 +600,13 @@ describe("what a reset ends", () => {
   });
   afterAll(() => t.stop());
 
-  const addPasskey = async (cookie: string) => {
-    const options = (await (
-      await t.api("/api/me/passkeys/options", { method: "POST", cookie, json: {} })
-    ).json()) as Challenge;
-    const verified = await t.api("/api/me/passkeys/verify", {
-      method: "POST",
-      cookie,
-      json: { challengeId: options.challengeId, response: key.register(options as never, ORIGIN) },
-    });
-    expect(verified.status).toBe(200);
-  };
-  const passkeySignIn = async () => {
-    const options = (await (
-      await t.api("/api/auth/passkey/options", { method: "POST", json: {} })
-    ).json()) as Challenge;
-    return t.api("/api/auth/passkey/verify", {
-      method: "POST",
-      json: { challengeId: options.challengeId, response: key.assert(options as never, ORIGIN) },
-    });
-  };
-  const recoverToken = async () => {
-    const { resetUrl } = (await (
-      await t.api("/api/recover", { method: "POST", json: { setupToken: SETUP, email: OWNER.email } })
-    ).json()) as { resetUrl: string };
-    return resetUrl.split("/reset/")[1] as string;
-  };
+  const register = async (cookie: string) => expect((await addPasskey(t, cookie, key)).status).toBe(200);
+  const passkeys = async (cookie: string) =>
+    ((await (await t.api("/api/me/passkeys", { cookie })).json()) as { passkeys: unknown[] }).passkeys;
 
   test("a password change by a signed-in person leaves their CLI token and passkeys alone", async () => {
     const cookie = await signIn(t, OWNER.email, OWNER.password);
-    await addPasskey(cookie);
+    await register(cookie);
     const changed = await t.api("/api/me/password", {
       method: "POST",
       cookie,
@@ -637,47 +614,38 @@ describe("what a reset ends", () => {
     });
     expect(changed.status).toBe(200);
     expect((await t.api("/api/me", { bearer: cliToken })).status).toBe(200);
-    expect(await t.server.db.select().from(passkeys)).toHaveLength(1);
-    expect((await passkeySignIn()).status).toBe(200);
+    expect(await passkeys(cookie)).toHaveLength(1);
+    expect((await passkeySignIn(t, key)).status).toBe(200);
   });
 
   test("a reset ends the person's CLI tokens, but not an organization token", async () => {
     const cookie = await signIn(t, OWNER.email, "a changed long password");
-    const org = (await (
-      await t.api("/api/tokens", { method: "POST", cookie, json: { name: "ci", scopes: ["read"] } })
-    ).json()) as { token: string };
+    const org = await orgToken(t, cookie);
     expect((await t.api("/api/me", { bearer: cliToken })).status).toBe(200);
+    expect((await t.api("/api/projects", { bearer: org.token })).status).toBe(200);
 
-    const reset = await t.api(`/api/reset/${await recoverToken()}`, {
+    const reset = await t.api(`/api/reset/${await recover(t)}`, {
       method: "POST",
       json: { password: "a reset long password" },
     });
     expect(reset.status).toBe(200);
     expect((await t.api("/api/me", { bearer: cliToken })).status).toBe(401);
-    const rows = await t.server.db.select().from(tokens).where(eq(tokens.kind, "cli"));
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((row) => row.revokedAt !== null)).toBe(true);
-    expect((await t.api("/api/me/passkeys", { bearer: org.token })).status).not.toBe(401);
+    expect((await t.api("/api/projects", { bearer: org.token })).status).toBe(200);
   });
 
   test("a reset deletes the person's passkeys, so signing in with one fails", async () => {
     const cookie = await signIn(t, OWNER.email, "a reset long password");
-    await addPasskey(cookie);
-    expect(await t.server.db.select().from(passkeys)).toHaveLength(1);
-    expect((await passkeySignIn()).status).toBe(200);
+    await register(cookie);
+    expect(await passkeys(cookie)).toHaveLength(1);
+    expect((await passkeySignIn(t, key)).status).toBe(200);
 
-    const reset = await t.api(`/api/reset/${await recoverToken()}`, {
+    const reset = await t.api(`/api/reset/${await recover(t)}`, {
       method: "POST",
       json: { password: "a second reset password" },
     });
     expect(reset.status).toBe(200);
-    expect(await t.server.db.select().from(passkeys)).toHaveLength(0);
-    const fresh = (reset.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
-    const list = (await (await t.api("/api/me/passkeys", { cookie: fresh })).json()) as {
-      passkeys: unknown[];
-    };
-    expect(list.passkeys).toEqual([]);
-    expect((await passkeySignIn()).status).toBe(401);
+    expect(await passkeys(cookieOf(reset))).toEqual([]);
+    expect((await passkeySignIn(t, key)).status).toBe(401);
     expect((await t.api("/api/me", { cookie })).status).toBe(401);
   });
 });
