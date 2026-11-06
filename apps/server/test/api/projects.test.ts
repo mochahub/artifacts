@@ -1,34 +1,31 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createECDH, randomBytes } from "node:crypto";
-import type { TokenScope } from "@artifacts/schema";
-import { LibraryPage } from "@artifacts/schema";
+import { ActivityPage, LibraryPage, ProjectAccessList, ProjectRow, type TokenScope } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
-import { sha256 } from "../../src/auth/secrets.ts";
-import { findOrg } from "../../src/db/index.ts";
+import { z } from "zod";
+import { org, projectAccess, projects } from "../../src/db/schema.ts";
 import {
-  activity,
-  artifacts,
-  org,
-  projectAccess,
-  projects,
-  pushSubscriptions,
-  sessions,
-  tokens,
-} from "../../src/db/schema.ts";
-import { sendDigest } from "../../src/push/notify.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makeAccount, publish } from "../publish-helper.ts";
+  acceptInvite,
+  claim,
+  inviteSecret,
+  json,
+  orgToken as makeOrgToken,
+  mcp,
+  OPS_SECRET,
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount, publish, published } from "../publish-helper.ts";
 
 type Account = Awaited<ReturnType<typeof makeAccount>>;
-const json = async <T = Record<string, unknown>>(response: Response) => (await response.json()) as T;
 const error = async (response: Response) =>
   (await json<{ error: { code: string; message: string } }>(response)).error;
-const PASSWORD = "a perfectly long password";
 
 describe("project access", () => {
   let t: TestServer;
   let token: string;
-  let ownerId: string;
   let owner: string;
   let orgId: string;
   let member: Account;
@@ -41,12 +38,8 @@ describe("project access", () => {
     n += 1;
     return `${base}-${n}`;
   };
-  const put = async (bearer: string, project: string, slug: string, options: object = {}) => {
-    const response = await publish(t, bearer, { project, slug, ...options });
-    expect(response.status).toBe(200);
-    const found = await t.api(`/api/artifacts/by-slug/${project}/${slug}`, { bearer });
-    return (await json<{ id: string }>(found)).id;
-  };
+  const put = async (bearer: string, project: string, slug: string, options: object = {}) =>
+    (await published(t, bearer, { project, slug, ...options })).id;
   const grant = (project: string, subject: string, permission: string, cookie = owner) =>
     t.api(`/api/projects/${project}/access/${subject}`, { method: "PUT", cookie, json: { permission } });
   const restrict = (project: string, cookie = owner, more: object = {}) =>
@@ -63,29 +56,24 @@ describe("project access", () => {
     ).team;
   const addTo = (slug: string, who: { id: string }) =>
     t.api(`/api/teams/${slug}/members/${who.id}`, { method: "PUT", cookie: owner, json: {} });
-  const orgToken = async (values: { scopes?: TokenScope[]; projectIds?: string[] | null } = {}) => {
-    const secret = `art_org${Bun.randomUUIDv7()}`;
-    const id = Bun.randomUUIDv7();
-    await t.server.db.insert(tokens).values({
-      id,
-      orgId,
-      kind: "org",
-      name: "ci",
-      tokenHash: sha256(secret),
-      scopes: values.scopes ?? ["read", "publish", "org"],
-      projectIds: values.projectIds ?? null,
-      createdBy: ownerId,
-    });
-    return { secret, id };
+  const orgToken = async (values: { scopes?: TokenScope[]; projectIds?: string[] } = {}) => {
+    const made = await makeOrgToken(t, owner, { scopes: ["read", "publish", "org"], ...values });
+    return { secret: made.token, id: made.id };
   };
+  /** A project's id, as the projects list shows it to an admin. */
+  const projectId = async (slug: string) => {
+    const rows = z.array(ProjectRow).parse(await json(await t.api("/api/projects", { cookie: owner })));
+    return rows.find((row) => row.slug === slug)?.id as string;
+  };
+  const accessOf = async (project: string, cookie = owner) =>
+    ProjectAccessList.parse(await json(await t.api(`/api/projects/${project}/access`, { cookie })));
 
   beforeAll(async () => {
     t = await startTestServer();
     const made = await claim(t);
     token = made.token;
-    ownerId = made.person.id;
     owner = await signIn(t, OWNER.email, OWNER.password);
-    orgId = ((await findOrg(t.server.db)) as { id: string }).id;
+    orgId = made.orgId;
     member = await makeAccount(t, orgId, "member");
     other = await makeAccount(t, orgId, "member");
     reviewer = await makeAccount(t, orgId, "reviewer");
@@ -96,42 +84,46 @@ describe("project access", () => {
   test("whoever makes a project manages it; a token's has no person, and is the token's to reach", async () => {
     const slug = unique("made");
     await put(member.token, slug, "first");
-    const rows = await t.server.db.select().from(projects).where(eq(projects.slug, slug));
-    expect(rows[0]).toMatchObject({ restricted: false, createdBy: member.id, createdByToken: null });
-    const held = await t.server.db
-      .select()
-      .from(projectAccess)
-      .where(eq(projectAccess.projectId, rows[0]?.id as string));
-    expect(held).toEqual([expect.objectContaining({ personId: member.id, permission: "manage" })]);
+    const made = await accessOf(slug);
+    expect(made.project.restricted).toBe(false);
+    expect(made.people.map(({ id, permission }) => ({ id, permission }))).toEqual([
+      { id: member.id, permission: "manage" },
+    ]);
+    expect((await t.api(`/api/projects/${slug}/access`, { cookie: member.cookie })).status).toBe(200);
 
     const ci = await orgToken();
     const byToken = unique("ci-made");
     await put(ci.secret, byToken, "first");
-    const [row] = await t.server.db.select().from(projects).where(eq(projects.slug, byToken));
-    expect(row).toMatchObject({ createdBy: null, createdByToken: ci.id });
-    expect(
-      await t.server.db
-        .select()
-        .from(projectAccess)
-        .where(eq(projectAccess.projectId, row?.id as string)),
-    ).toEqual([]);
+    expect((await accessOf(byToken)).people).toEqual([]);
+    // Restricted, it's still the token's to reach: it made it.
+    expect((await restrict(byToken)).status).toBe(200);
+    expect((await publish(t, ci.secret, { project: byToken, slug: "second" })).status).toBe(200);
   });
 
   test("an old project keeps working: no creator, no rows, and admins manage it", async () => {
     const slug = unique("old");
     await put(token, slug, "first");
-    await t.server.db.delete(projectAccess);
-    await t.server.db.update(projects).set({ createdBy: null }).where(eq(projects.slug, slug));
+    // Projects from before access existed: no creator and no rows, which no route makes now.
+    const [row] = await t.server.db
+      .update(projects)
+      .set({ createdBy: null })
+      .where(eq(projects.slug, slug))
+      .returning({ id: projects.id });
+    await t.server.db.delete(projectAccess).where(eq(projectAccess.projectId, row?.id as string));
     expect((await publish(t, member.token, { project: slug, slug: "second" })).status).toBe(200);
     expect((await t.api(`/api/projects/${slug}/access`, { cookie: owner })).status).toBe(200);
     expect((await t.api(`/api/projects/${slug}/access`, { cookie: member.cookie })).status).toBe(403);
   });
 
   test("defaultProjectAccess: stored settings without it parse, and saving another setting keeps it", async () => {
+    // Settings saved before the setting existed; no route can save them without it.
     const [row] = await t.server.db.select().from(org);
     const { defaultProjectAccess: _, ...stored } = (row as { settings: Record<string, unknown> }).settings;
     await t.server.db.update(org).set({ settings: stored });
-    expect((await findOrg(t.server.db))?.settings.defaultProjectAccess).toBe("org");
+    const stored_ = async () =>
+      (await json<{ settings: { defaultProjectAccess: string } }>(await t.api("/api/org", { cookie: owner })))
+        .settings.defaultProjectAccess;
+    expect(await stored_()).toBe("org");
     const set = (settings: object) =>
       t.api("/api/org", { method: "PATCH", cookie: owner, json: { settings } });
     expect((await set({ defaultVisibility: "org" })).status).toBe(200);
@@ -142,12 +134,11 @@ describe("project access", () => {
     );
     expect(saved.settings.defaultProjectAccess).toBe("restricted");
     expect((await set({ linkSharing: true })).status).toBe(200);
-    expect((await findOrg(t.server.db))?.settings.defaultProjectAccess).toBe("restricted");
+    expect(await stored_()).toBe("restricted");
 
     const slug = unique("starts-restricted");
     await put(member.token, slug, "first");
-    const [made] = await t.server.db.select().from(projects).where(eq(projects.slug, slug));
-    expect(made?.restricted).toBe(true);
+    expect((await accessOf(slug)).project.restricted).toBe(true);
     expect((await publish(t, other.token, { project: slug, slug: "mine" })).status).toBe(409);
 
     // A token that made one can come back, or CI would fail on its second run.
@@ -270,20 +261,13 @@ describe("project access", () => {
     });
 
     test("an organization token that names it can reach it", async () => {
-      const [row] = await t.server.db.select().from(projects).where(eq(projects.slug, project));
-      const named = await orgToken({ projectIds: [row?.id as string] });
+      const named = await orgToken({ projectIds: [await projectId(project)] });
       expect(await look({ bearer: named.secret })).toMatchObject(seen);
     });
 
     test("MCP: no card, no tool, no list", async () => {
-      const call = async (bearer: string, name: string, args: object) => {
-        const response = await t.api("/api/mcp", {
-          method: "POST",
-          bearer,
-          json: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
-        });
-        return JSON.stringify(await response.json());
-      };
+      const call = async (bearer: string, name: string, args: object) =>
+        JSON.stringify(await (await mcp(t, bearer, "tools/call", { name, arguments: args })).json());
       expect(await call(member.token, "artifacts_search", { query: WORD })).not.toContain("secret-plan");
       expect(await call(member.token, "artifacts_list", {})).not.toContain(project);
       expect(await call(member.token, "artifacts_read", { artifact: `${project}/secret-plan` })).toContain(
@@ -348,33 +332,32 @@ describe("project access", () => {
       const local = await startTestServer({}, { pushAllow: () => true });
       try {
         const claimed = await claim(local);
-        const here = ((await findOrg(local.server.db)) as { id: string }).id;
-        const device = async (personId: string) => {
-          const [session] = await local.server.db
-            .select()
-            .from(sessions)
-            .where(eq(sessions.personId, personId));
-          const point = createECDH("prime256v1");
-          await local.server.db.insert(pushSubscriptions).values({
-            id: Bun.randomUUIDv7(),
-            orgId: here,
-            personId,
-            sessionId: session?.id as string,
-            endpoint: `http://127.0.0.1:${service.port}/${personId}`,
-            keys: {
-              p256dh: point.generateKeys().toString("base64url"),
-              auth: randomBytes(16).toString("base64url"),
+        const device = async (who: Account) => {
+          const subscribed = await local.api("/api/push/subscribe", {
+            method: "POST",
+            cookie: who.cookie,
+            json: {
+              endpoint: `http://127.0.0.1:${service.port}/${who.id}`,
+              keys: {
+                p256dh: createECDH("prime256v1").generateKeys().toString("base64url"),
+                auth: randomBytes(16).toString("base64url"),
+              },
             },
           });
+          expect(subscribed.status).toBe(200);
         };
-        const outsider = await makeAccount(local, here, "member");
-        const insider = await makeAccount(local, here, "member");
-        await publish(local, claimed.token, { project: "hush", slug: "one" });
+        const outsider = await makeAccount(local, claimed.orgId, "member");
+        const insider = await makeAccount(local, claimed.orgId, "member");
+        await published(local, claimed.token, { project: "hush", slug: "one" });
         const cookie = await signIn(local, OWNER.email, OWNER.password);
         await restrict2(local, cookie, insider.id);
-        await device(outsider.id);
-        await device(insider.id);
-        await sendDigest(local.server.deps);
+        await device(outsider);
+        await device(insider);
+        const digest = await fetch(`http://127.0.0.1:${local.server.ports.internal}/internal/jobs/digest`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${OPS_SECRET}` },
+        });
+        expect(digest.status).toBe(200);
         expect(received).toHaveLength(1);
       } finally {
         await local.stop();
@@ -433,10 +416,9 @@ describe("project access", () => {
       (await t.api(`/api/artifacts/${id}/archive`, { method: "POST", cookie: reviewer.cookie })).status,
     ).toBe(403);
     expect((await t.api(`/api/projects/${project}/access`, { cookie: reviewer.cookie })).status).toBe(403);
-    const access = await json<{ people: { id: string; capped: boolean }[] }>(
-      await t.api(`/api/projects/${project}/access`, { cookie: owner }),
-    );
-    expect(access.people.find((row) => row.id === reviewer.id)?.capped).toBe(true);
+    expect((await grant(project, `person:${member.id}`, "manage")).status).toBe(200);
+    const capped = Object.fromEntries((await accessOf(project)).people.map((row) => [row.id, row.capped]));
+    expect(capped).toMatchObject({ [reviewer.id]: true, [member.id]: false });
   });
 
   test("an outside person can hold a project at comment, not above", async () => {
@@ -544,11 +526,11 @@ describe("project access", () => {
     expect(await error(await publish(t, broad.secret, { project: shut, slug: "new" }))).toMatchObject({
       code: "conflict",
     });
-    const [row] = await t.server.db.select().from(projects).where(eq(projects.slug, shut));
-    const named = await orgToken({ projectIds: [row?.id as string] });
+    const shutId = await projectId(shut);
+    const named = await orgToken({ projectIds: [shutId] });
     expect((await publish(t, named.secret, { project: shut, slug: "new" })).status).toBe(200);
     expect((await publish(t, named.secret, { project: open, slug: "other" })).status).toBe(403);
-    const noOrg = await orgToken({ scopes: ["read", "publish"], projectIds: [row?.id as string] });
+    const noOrg = await orgToken({ scopes: ["read", "publish"], projectIds: [shutId] });
     expect((await publish(t, noOrg.secret, { project: shut, slug: "newer" })).status).toBe(403);
     // Restricting what a token made doesn't take it away.
     const made = unique("token-made");
@@ -611,9 +593,10 @@ describe("project access", () => {
       expect(before.impact.tokens).toBeGreaterThan(0);
       expect(before.impact.loses).toBeGreaterThan(0);
       expect(before.impact.names).not.toContain(member.name);
-      await t.server.db.update(tokens).set({ revokedAt: new Date() }).where(eq(tokens.id, broad.id));
+      expect((await t.api(`/api/tokens/${broad.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
 
       const secret = made.url.split("/s/")[1] as string;
+      t.clock.advance(1000); // So the change is among Activity's newest lines.
       expect((await restrict(project, member.cookie)).status).toBe(200);
       expect((await t.api(`/api/s/${secret}`)).status).toBe(200);
       expect((await restrict(project, member.cookie, { revokeLinks: true })).status).toBe(200);
@@ -622,8 +605,12 @@ describe("project access", () => {
         await t.api(`/api/projects/${project}/access`, { cookie: member.cookie }),
       );
       expect(after.impact).toMatchObject({ links: 0, invites: 0 });
-      const rows = await t.server.db.select({ kind: activity.kind }).from(activity);
-      expect(rows.map((row) => row.kind)).toContain("project_access_changed");
+      const feed = ActivityPage.parse(await json(await t.api("/api/activity", { cookie: owner })));
+      expect(
+        feed.items
+          .filter((item) => item.kind === "project_access_changed")
+          .map((item) => item.payload.project),
+      ).toContain(project);
     });
   });
 
@@ -660,7 +647,7 @@ describe("project access", () => {
     );
     expect(before.impact.invites).toBe(1);
     await restrict(project, owner, { revokeLinks: true });
-    expect((await t.api(`/api/invites/${url.split("/join/")[1]}`)).status).toBe(410);
+    expect((await t.api(`/api/invites/${inviteSecret(url)}`)).status).toBe(410);
   });
 
   test("a brand proposal can't test whether a hidden artifact exists", async () => {
@@ -705,8 +692,7 @@ describe("project access", () => {
 
   test("a token that can only publish still reaches a restricted project it made", async () => {
     const made = unique("publish-only");
-    const ci = await orgToken({ scopes: ["publish", "org"], projectIds: [] });
-    await t.server.db.update(tokens).set({ projectIds: null }).where(eq(tokens.id, ci.id));
+    const ci = await orgToken({ scopes: ["publish", "org"] });
     expect((await publish(t, ci.secret, { project: made, slug: "one" })).status).toBe(200);
     await restrict(made);
     expect((await publish(t, ci.secret, { project: made, slug: "two" })).status).toBe(200);
@@ -746,8 +732,7 @@ describe("project access", () => {
       });
     expect((await add("capped@example.com", "publish")).status).toBe(400);
     const { url } = await json<{ url: string }>(await add("guest@example.com", "comment"));
-    const secret = url.split("/join/")[1] as string;
-    expect(await t.api(`/api/invites/${secret}`).then(json)).toMatchObject({
+    expect(await t.api(`/api/invites/${inviteSecret(url)}`).then(json)).toMatchObject({
       project: { name: project },
       role: "outside",
     });
@@ -755,12 +740,7 @@ describe("project access", () => {
       await t.api("/api/people?kind=outside", { cookie: owner }),
     );
     expect(listed.invites.map((row) => row.email)).toContain("guest@example.com");
-    const accepted = await t.api(`/api/invites/${secret}/accept`, {
-      method: "POST",
-      json: { name: "Guest", password: PASSWORD },
-    });
-    expect(accepted.status).toBe(200);
-    const cookie = (accepted.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+    const { cookie } = await acceptInvite(t, url, "Guest");
     expect(await t.api(`/api/artifacts/${id}`, { cookie }).then(json)).toMatchObject({
       permissions: { comment: true, manage: false },
     });
@@ -778,11 +758,11 @@ describe("project access", () => {
     const id = await put(token, project, "work");
     await restrict(project);
     const leaver = await makeAccount(t, orgId, "member");
-    await grant(project, `person:${leaver.id}`, "comment");
-    await t.api(`/api/people/${leaver.id}`, { method: "DELETE", cookie: owner });
-    expect(
-      await t.server.db.select().from(projectAccess).where(eq(projectAccess.personId, leaver.id)),
-    ).toEqual([]);
+    expect((await grant(project, `person:${leaver.id}`, "comment")).status).toBe(200);
+    const holders = async () => (await accessOf(project)).people.map((row) => row.id);
+    expect(await holders()).toContain(leaver.id);
+    expect((await t.api(`/api/people/${leaver.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+    expect(await holders()).not.toContain(leaver.id);
 
     const team = await makeTeam(unique("Ending"));
     await addTo(team.slug, member);
@@ -795,7 +775,9 @@ describe("project access", () => {
   test("the people list and Activity show what changed, to admins", async () => {
     const project = unique("visible-to-admins");
     await put(token, project, "work");
-    await grant(project, `person:${member.id}`, "view");
+    // Activity shows the newest 50 lines, and this file makes more than that at one instant.
+    t.clock.advance(1000);
+    expect((await grant(project, `person:${member.id}`, "view")).status).toBe(200);
     const list = await json<{ people: { id: string; projects: { slug: string; permission: string }[] }[] }>(
       await t.api("/api/people", { cookie: owner }),
     );
@@ -829,8 +811,10 @@ describe("project access", () => {
     await grant(project, `person:${other.id}`, "view");
     expect(await audience(token, project, "open", "org")).toMatch(/^Audience-\d+ and 2 people$/);
 
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "open"));
-    const status = (auth: object) => t.api(`/api/artifacts/${row?.id}/status`, auth).then(json);
+    const { id } = await json<{ id: string }>(
+      await t.api(`/api/artifacts/by-slug/${project}/open`, { cookie: owner }),
+    );
+    const status = (auth: object) => t.api(`/api/artifacts/${id}/status`, auth).then(json);
     expect(await status({ cookie: owner })).toMatchObject({ audience: expect.stringContaining("2 people") });
     expect(await status({ cookie: member.cookie })).not.toHaveProperty("audience");
   });

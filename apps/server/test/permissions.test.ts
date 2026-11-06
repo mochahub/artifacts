@@ -6,7 +6,6 @@ import {
   type Action,
   type ArtifactResource,
   can,
-  capFor,
   type Grant,
   inherit,
   type Level,
@@ -664,12 +663,6 @@ describe("what a grant adds up to", () => {
       level: "comment",
       confirmed: "comment",
     });
-  });
-
-  test("the cap reads the same from outside can()", () => {
-    expect(capFor({ role: "reviewer" }, "manage")).toBe("comment");
-    expect(capFor({ role: "outside" }, "view")).toBe("view");
-    expect(capFor({ role: "member" }, "manage")).toBe("manage");
   });
 });
 
