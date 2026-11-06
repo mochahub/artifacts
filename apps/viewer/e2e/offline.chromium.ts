@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { signIn } from "./helpers.ts";
+import { signIn, token } from "./helpers.ts";
 import { publishCopy } from "./seed.ts";
 
 test("a version you've opened works with no network", async ({ page, context }) => {
-  publishCopy("offline", readFileSync("e2e/.token", "utf8").trim());
+  publishCopy("offline", token());
   await signIn(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
   await page.goto("/camerabuddy/offline/mocks");

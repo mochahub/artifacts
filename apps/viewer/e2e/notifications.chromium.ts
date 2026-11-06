@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
+import { auth, token } from "./helpers.ts";
 import { publishCopy } from "./seed.ts";
 
 test.use({ storageState: "e2e/.auth.json" });
@@ -18,9 +18,8 @@ const tap = (page: Page, url: string) =>
     }, url);
 
 test("tapping a notification moves an app that's already open", async ({ page, request }) => {
-  const token = readFileSync("e2e/.token", "utf8").trim();
-  publishCopy("tapped", token);
-  const headers = { Authorization: `Bearer ${token}` };
+  publishCopy("tapped", token());
+  const headers = auth();
   const artifact = await (await request.get("/api/artifacts/by-slug/camerabuddy/tapped", { headers })).json();
   const thread = (body: string) =>
     request.post(`/api/artifacts/${artifact.id}/threads`, {
@@ -66,6 +65,8 @@ test("tapping a notification moves an app that's already open", async ({ page, r
 
   // The app moved itself: a reload would have lost this.
   expect(await page.evaluate(() => (window as unknown as { samePage?: boolean }).samePage)).toBe(true);
-  const left = await page.evaluate(async () => (await caches.open("shell-v1")).match("/tapped-notification"));
-  expect(left).toBeFalsy();
+  const left = await page.evaluate(
+    async () => (await (await caches.open("shell-v1")).match("/tapped-notification")) !== undefined,
+  );
+  expect(left).toBe(false);
 });
