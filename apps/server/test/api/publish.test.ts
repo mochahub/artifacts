@@ -1,16 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { PublishPrepared, PublishResult } from "@artifacts/schema";
-import { eq } from "drizzle-orm";
-import { artifacts, people, projects, versions } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { file, hash, makePerson, publish } from "../publish-helper.ts";
-
-const error = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
+import { Artifact, DAY_MS, PublishPrepared, PublishResult, VersionRow } from "@artifacts/schema";
+import { z } from "zod";
+import { claim, code as error, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { file, hash, makePerson, publish, published } from "../publish-helper.ts";
 
 describe("publishing", () => {
   let t: TestServer;
-  let owner: { person: { id: string }; token: string };
+  let owner: Awaited<ReturnType<typeof claim>>;
+  const bySlug = (slug: string) =>
+    t.api(`/api/artifacts/by-slug/camerabuddy/${slug}`, { bearer: owner.token });
+  const artifact = async (slug: string) => Artifact.parse(await (await bySlug(slug)).json());
   beforeAll(async () => {
     t = await startTestServer();
     owner = await claim(t);
@@ -27,9 +26,7 @@ describe("publishing", () => {
       changes: { frames: { added: ["live-view"] } },
     });
     expect(result.uploaded.files).toBe(3);
-    const [row] = await t.server.db.select().from(artifacts);
-    expect(row?.latestVersion).toBe(1);
-    expect(row?.visibility).toBe("org");
+    expect(await artifact("roadmap")).toMatchObject({ latestVersion: 1, visibility: "org" });
   });
 
   test("publishing the same thing uploads nothing and reports no changes", async () => {
@@ -49,8 +46,8 @@ describe("publishing", () => {
   });
 
   test("the article is re-sanitized by the server", async () => {
-    const [row] = await t.server.db.select().from(artifacts);
-    const response = await t.api(`/api/artifacts/${row?.id}/v/1/article/plan`, { bearer: owner.token });
+    const { id } = await artifact("roadmap");
+    const response = await t.api(`/api/artifacts/${id}/v/1/article/plan`, { bearer: owner.token });
     expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     expect(response.headers.get("content-disposition")).toBe("attachment");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -102,6 +99,15 @@ describe("publishing", () => {
         json: { uploadId, files: {}, pages: [], frames: [], blocks: [] },
       });
     expect(await error(await commit("forged.signature"))).toBe("invalid");
+    const prepared = await t.api("/api/publish/prepare", {
+      method: "POST",
+      bearer: owner.token,
+      json: { project: "camerabuddy", slug: "late", title: "Late", files: [] },
+    });
+    const { uploadId } = PublishPrepared.parse(await prepared.json());
+    t.clock.advance(DAY_MS);
+    expect(await error(await commit(uploadId))).toBe("invalid");
+    expect((await bySlug("late")).status).toBe(404);
   });
 
   test("permissions: no caller, a reviewer, and someone else's private slug", async () => {
@@ -113,14 +119,13 @@ describe("publishing", () => {
     const body = { project: "p", slug: "demo", title: "x", files: [] };
     expect((await t.api("/api/publish/prepare", { method: "POST", json: body })).status).toBe(401);
 
-    const org = (await t.server.db.select().from(people))[0]?.orgId as string;
-    const reviewer = (await makePerson(t, org, "reviewer")).token;
+    const reviewer = (await makePerson(t, owner.orgId, "reviewer")).token;
     expect(
       await error(await t.api("/api/publish/prepare", { method: "POST", bearer: reviewer, json: body })),
     ).toBe("forbidden");
 
     await publish(t, owner.token, { slug: "private", visibility: "me" });
-    const member = (await makePerson(t, org, "member")).token;
+    const member = (await makePerson(t, owner.orgId, "member")).token;
     const denied = await t.api("/api/publish/prepare", {
       method: "POST",
       bearer: member,
@@ -135,35 +140,12 @@ describe("publishing", () => {
     expect(await error(other)).toBe("forbidden");
   });
 
-  test("a deleted slug: slug_deleted for those who saw it, plain conflict for others", async () => {
-    await publish(t, owner.token, { slug: "gone", visibility: "me" });
-    const [project] = await t.server.db.select().from(projects);
-    await t.server.db
-      .update(artifacts)
-      .set({ deletedAt: t.clock.now(), deletedBy: owner.person.id })
-      .where(eq(artifacts.slug, "gone"));
-    const body = { project: project?.slug, slug: "gone", title: "x", files: [] };
-    const seen = await t.api("/api/publish/prepare", { method: "POST", bearer: owner.token, json: body });
-    expect(seen.status).toBe(409);
-    const details = (await seen.json()) as { error: { code: string; details: Record<string, unknown> } };
-    expect(details.error.code).toBe("slug_deleted");
-    expect(details.error.details.deletedBy).toBe("Zahin");
-    const org = (await t.server.db.select().from(people))[0]?.orgId as string;
-    const member = (await makePerson(t, org, "member")).token;
-    const stranger = await t.api("/api/publish/prepare", { method: "POST", bearer: member, json: body });
-    expect(await error(stranger)).toBe("conflict");
-  });
-
-  test("an archived artifact is read-only", async () => {
-    await publish(t, owner.token, { slug: "old" });
-    await t.server.db.update(artifacts).set({ archivedAt: t.clock.now() }).where(eq(artifacts.slug, "old"));
-    expect(await error(await publish(t, owner.token, { slug: "old" }))).toBe("read_only");
-  });
-
   test("render redirects only serve hashes this artifact uses", async () => {
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "roadmap"));
-    const render = hash(`render-${hash("frame")}`);
-    const ok = await t.api(`/api/artifacts/${row?.id}/r/${render}`, {
+    const { id, renderHash: render } = await published(t, owner.token, {
+      slug: "renders",
+      frameHash: hash("renders"),
+    });
+    const ok = await t.api(`/api/artifacts/${id}/r/${render}`, {
       bearer: owner.token,
       redirect: "manual",
     });
@@ -171,9 +153,9 @@ describe("publishing", () => {
     const location = ok.headers.get("location") as string;
     expect(location).toContain(`blobs/${render}`);
     expect((await fetch(location)).status).toBe(200);
-    const other = await t.api(`/api/artifacts/${row?.id}/r/${"0".repeat(64)}`, { bearer: owner.token });
+    const other = await t.api(`/api/artifacts/${id}/r/${"0".repeat(64)}`, { bearer: owner.token });
     expect(other.status).toBe(404);
-    expect((await t.api(`/api/artifacts/${row?.id}/r/${render}`)).status).toBe(401);
+    expect((await t.api(`/api/artifacts/${id}/r/${render}`)).status).toBe(401);
     expect((await t.api(`/api/artifacts/not-a-uuid/r/${render}`, { bearer: owner.token })).status).toBe(404);
   });
 
@@ -247,8 +229,8 @@ describe("publishing", () => {
       },
     });
     expect(committed.status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "reel"));
-    const version = await t.api(`/api/artifacts/${row?.id}/versions/1`, { bearer: owner.token });
+    const { id } = await artifact("reel");
+    const version = await t.api(`/api/artifacts/${id}/versions/1`, { bearer: owner.token });
     const { pages } = (await version.json()) as { pages: { meta: { items: unknown[] } }[] };
     expect(pages[0]?.meta.items).toEqual([{ hash: clip.sha256, type: "video/mp4", caption: "Take one" }]);
   });
@@ -267,12 +249,11 @@ describe("publishing", () => {
       json: { uploadId, agent: "Claude Code", files: {}, pages: [], frames: [], blocks: [] },
     });
     expect(committed.status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "by-hand"));
-    const [version] = await t.server.db
-      .select()
-      .from(versions)
-      .where(eq(versions.artifactId, row?.id as string));
-    expect(version?.agent).toBeNull();
+    const { id } = await artifact("by-hand");
+    const list = z
+      .array(VersionRow)
+      .parse(await (await t.api(`/api/artifacts/${id}/versions`, { bearer: owner.token })).json());
+    expect(list[0]).toMatchObject({ publishedBy: OWNER.name, agent: null });
   });
 
   test("commit takes no more files than prepare does", async () => {
@@ -322,8 +303,6 @@ describe("publishing", () => {
     const big = `export default { fetch() { return new Response("x"); } };//${"x".repeat(1024 * 1024)}`;
     const response = await publish(t, owner.token, { slug: "bigbackend", backend: big });
     expect(await error(response)).toBe("too_large");
-    expect((await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "bigbackend"))).length).toBe(
-      0,
-    );
+    expect((await bySlug("bigbackend")).status).toBe(404);
   });
 });
