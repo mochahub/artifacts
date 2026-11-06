@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { asBun } from "../src/render/install.ts";
+import { asBun } from "../src/bun.ts";
 import { cli, copyFixture, fixture, sandbox } from "./sandbox.ts";
 
 describe("the render helper", () => {

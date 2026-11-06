@@ -57,6 +57,23 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(readFileSync(log, "utf8")).toContain("delete --project proj-1 --yes");
   });
 
+  test("an answer setup doesn't know is asked again, not taken for Railway", async () => {
+    const { env: e, log } = env();
+    const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {
+      env: e,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    child.stdin.write("dokcer\n");
+    child.stdin.end();
+    expect(await child.exited).toBe(1);
+    const stderr = await new Response(child.stderr).text();
+    expect(stderr).toContain("That isn't one of railway, docker, existing.");
+    expect(stderr.match(/Where should your Artifacts server run\?/g)?.length).toBe(2);
+    expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain("init");
+  });
+
   test("a deploy that fails stops the wait, rather than sitting out the timeout", async () => {
     const { env: e } = env({}, false, "FAILED");
     const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {

@@ -4,6 +4,15 @@ import { configDir } from "../config.ts";
 import { CliError } from "../output.ts";
 
 export const SERVICE = "artifacts";
+const TEMPLATE = "kQtqf4";
+
+/** Read once, where a Railway command starts: the template to deploy and how often to look in on it (07). */
+export const railwaySettings = () => ({
+  template: process.env.ARTIFACTS_RAILWAY_TEMPLATE || TEMPLATE,
+  pollMs: Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000),
+  // Tests point setup at a fake Railway, whose domains answer plain http.
+  scheme: process.env.ARTIFACTS_RAILWAY_HTTP ? "http" : "https",
+});
 /** Linked here, so `railway init` never links the user's repo (07). */
 export const railwayDir = (name: string) => {
   const dir = join(configDir(), "railway", name);

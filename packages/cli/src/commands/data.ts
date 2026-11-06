@@ -1,9 +1,10 @@
-import { isDataKey } from "@artifacts/schema";
+import { type DataList, DataScope, isDataKey } from "@artifacts/schema";
+import type { z } from "zod";
 import { type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-import { resolveArtifact, versionNumber } from "./review.ts";
+import { signedIn } from "../session.ts";
+import { resolveArtifact, versionNumber } from "../target.ts";
 
-type ListPage = { keys: { key: string; size: number; updatedAt: string }[]; nextCursor: string | null };
+type ListPage = z.infer<typeof DataList>;
 
 type LogLine = { id: string; version: number; level: string; message: string; createdAt: string };
 
@@ -34,15 +35,15 @@ const print = (lines: LogLine[], out: Output) => {
 export async function dataCommand(
   sub: string | undefined,
   key: string | undefined,
-  flags: { scope?: string; server?: string; target?: string },
+  flags: { scope?: string; server?: string },
   out: Output,
 ) {
   const scope = flags.scope ?? "shared";
-  if (scope !== "shared" && scope !== "me") throw new UsageError("--scope is shared or me.");
+  if (!DataScope.safeParse(scope).success) throw new UsageError("--scope is shared or me.");
   // A key with a ".." part would climb out of the data/ path in the URL.
   if (sub === "get" && key && !isDataKey(key)) throw new UsageError(`"${key}" isn't a valid data key.`);
   const client = await signedIn(flags.server);
-  const artifact = await resolveArtifact(client, flags.target);
+  const artifact = await resolveArtifact(client, undefined);
   const base = `/api/artifacts/${artifact.id}`;
   switch (sub) {
     case "ls": {

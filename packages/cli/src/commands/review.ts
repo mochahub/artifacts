@@ -1,36 +1,14 @@
-import { Artifact, ArtifactReviewStatus, type Thread, Thread as ThreadSchema } from "@artifacts/schema";
+import {
+  ArtifactReviewStatus,
+  type Thread,
+  Thread as ThreadSchema,
+  type VersionRow,
+} from "@artifacts/schema";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
-import { findRoot, loadManifest } from "../bundle/manifest.ts";
-import type { Client } from "../client.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-
-/** A `<project>/<slug>` argument, or the nearest artifact.json (07). */
-export function artifactRef(target: string | undefined) {
-  if (target) {
-    const [project, slug, extra] = target.split("/");
-    // Slugs are a-z, 0-9 and -, so ".." can't climb out of /api/artifacts/by-slug/ in the URL below.
-    if (!project || !slug || extra || ![project, slug].every((part) => /^[a-z0-9-]{1,40}$/.test(part))) {
-      throw new UsageError(`Use <project>/<slug>, not "${target}".`);
-    }
-    return { project, slug };
-  }
-  const { manifest } = loadManifest(findRoot());
-  if (!manifest) throw new CliError("artifact.json isn't valid. Run artifacts lint.");
-  return { project: manifest.project, slug: manifest.slug };
-}
-
-/** A version number from the command line. It lands in a URL, so only digits pass. */
-export function versionNumber(value: string, what = "A version") {
-  if (!/^\d+$/.test(value)) throw new UsageError(`${what} must be a number, not "${value}".`);
-  return value;
-}
-
-export async function resolveArtifact(client: Client, target: string | undefined) {
-  const { project, slug } = artifactRef(target);
-  return Artifact.parse(await client.get(`/api/artifacts/by-slug/${project}/${slug}`));
-}
+import { signedIn } from "../session.ts";
+import { artifactRef, resolveArtifact, versionNumber } from "../target.ts";
 
 /** The agent-facing shape in 07: flat, with the anchor spread out. */
 function threadJson(thread: Thread) {
@@ -121,12 +99,12 @@ export async function commentsCommand(
 export async function replyCommand(
   n: string | undefined,
   text: string | undefined,
-  flags: { fixed?: boolean; target?: string; server?: string },
+  flags: { fixed?: boolean; server?: string },
   out: Output,
 ) {
   if (!n || !text || !/^\d+$/.test(n)) throw new UsageError('Usage: artifacts reply <n> "<text>" [--fixed]');
   const client = await signedIn(flags.server);
-  const artifact = await resolveArtifact(client, flags.target);
+  const artifact = await resolveArtifact(client, undefined);
   const threads = z.array(ThreadSchema).parse(await client.get(`/api/artifacts/${artifact.id}/threads`));
   const thread = threads.find((entry) => entry.n === Number(n));
   if (!thread) throw new CliError(`There's no thread #${n}.`);
@@ -139,62 +117,6 @@ export async function replyCommand(
     out.say(flags.fixed ? `✓ #${n} marked fixed in v${artifact.latestVersion}.` : `✓ Replied to #${n}.`),
   );
 }
-
-/** Frames or blocks that vanished since the latest version, for `frames/renamed` (07). */
-export async function renamedProblems(
-  client: Client,
-  project: string,
-  slug: string,
-  current: { frames: Set<string>; blocks: Set<string> },
-) {
-  type Version = { pages: { key: string; frames?: { key: string }[]; blocks?: { key: string }[] }[] };
-  let artifact: Artifact;
-  try {
-    artifact = Artifact.parse(await client.get(`/api/artifacts/by-slug/${project}/${slug}`));
-  } catch {
-    return []; // Nothing published yet, or not visible to this caller: prepare reports that.
-  }
-  const version = await client.get<Version>(
-    `/api/artifacts/${artifact.id}/versions/${artifact.latestVersion}`,
-  );
-  const threads = z
-    .array(ThreadSchema)
-    .parse(await client.get(`/api/artifacts/${artifact.id}/threads?status=open`));
-  const commented = new Set(
-    threads.flatMap((thread) => {
-      const anchor = thread.anchor;
-      if (!anchor) return [];
-      return [anchor.type === "frame" ? anchor.frameKey : `${thread.pageKey}/${anchor.blockKey}`];
-    }),
-  );
-  const problems: { rule: string; severity: "error" | "warning"; message: string }[] = [];
-  const check = (key: string, kind: string) => {
-    const open = commented.has(key);
-    problems.push({
-      rule: "frames/renamed",
-      severity: open ? "error" : "warning",
-      message: `${kind} "${key}" was in v${artifact.latestVersion} and is gone${open ? ", and it has open comments. Put the id back" : ""}.`,
-    });
-  };
-  for (const page of version.pages) {
-    for (const frame of page.frames ?? []) if (!current.frames.has(frame.key)) check(frame.key, "Frame");
-    for (const block of page.blocks ?? []) {
-      const key = `${page.key}/${block.key}`;
-      if (!current.blocks.has(key) && commented.has(key)) check(key, "Block");
-    }
-  }
-  return problems;
-}
-
-type VersionList = {
-  n: number;
-  name: string | null;
-  message: string | null;
-  publishedBy: string;
-  agent: string | null;
-  publishedAt: string;
-  restoredFrom: number | null;
-}[];
 
 export async function versionsCommand(
   sub: string | undefined,
@@ -212,7 +134,7 @@ export async function versionsCommand(
     return out.result({ n: Number(n), name: label }, () => out.say(`✓ v${n} is "${label}".`));
   }
   const artifact = await resolveArtifact(client, sub);
-  const list = await client.get<VersionList>(`/api/artifacts/${artifact.id}/versions`);
+  const list = await client.get<VersionRow[]>(`/api/artifacts/${artifact.id}/versions`);
   out.result(list, () => {
     for (const version of list) {
       const label = version.name ? ` "${version.name}"` : "";

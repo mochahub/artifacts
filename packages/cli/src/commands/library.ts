@@ -1,36 +1,32 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import {
   Artifact,
   isBundlePath,
+  KEY_PATTERN,
   LibraryFrames,
   LibraryPage,
   LibraryPages,
   LibraryProjects,
   LibraryRead,
   LibraryView,
+  SLUG_PATTERN,
   UNTRUSTED_NOTICE,
   VersionBundle,
+  type VersionRow,
 } from "@artifacts/schema";
 import { isGenerated, LOCAL, MANIFEST, PROJECT_RULES, WORK } from "../bundle/layout.ts";
-import { repoRoot } from "../bundle/manifest.ts";
 import type { Client } from "../client.ts";
+import { gitRepo, repoRoot } from "../git.ts";
+import { sha256 } from "../hash.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-import { artifactRef, versionNumber } from "./review.ts";
-import { gitRepo } from "./write.ts";
+import { signedIn } from "../session.ts";
+import { namedArtifact, versionNumber } from "../target.ts";
 
 const query = (values: Record<string, string | undefined>) => {
   const entries = Object.entries(values).filter((entry): entry is [string, string] => !!entry[1]);
   return entries.length > 0 ? `?${new URLSearchParams(entries)}` : "";
-};
-
-/** Nothing here reads an artifact.json: these work in a fresh clone, or with no repo at all. */
-const namedArtifact = (target: string | undefined) => {
-  if (!target) throw new UsageError("Name an artifact: <project>/<slug>.");
-  return artifactRef(target);
 };
 
 function repoFlag(flags: { repo?: string; here?: boolean }) {
@@ -82,11 +78,9 @@ export async function searchCommand(words: string, flags: ListFlags & { project?
   });
 }
 
-const PATH_PART = /^[a-z0-9-]{1,60}$/;
-
 export async function listCommand(path: string | undefined, flags: ListFlags, out: Output) {
   const parts = path ? path.split("/") : [];
-  if (parts.length > 3 || !parts.every((part) => PATH_PART.test(part))) {
+  if (parts.length > 3 || !parts.every((part) => KEY_PATTERN.test(part))) {
     throw new UsageError("Usage: artifacts list [<project>[/<slug>[/<page>]]]");
   }
   const client = await signedIn(flags.server);
@@ -186,7 +180,7 @@ export async function viewCommand(
   );
   if (!view.image) throw new CliError("This artifact has no picture to show.");
   const image = await client.bytes(view.image);
-  const hash = createHash("sha256").update(image).digest("hex").slice(0, 16);
+  const hash = sha256(image).slice(0, 16);
   const path = flags.out ? resolve(flags.out) : join(tmpdir(), `artifacts-view-${hash}.webp`);
   writeFileSync(path, image);
   const { image: _, ...about } = view;
@@ -206,7 +200,7 @@ async function download(url: string, hash: string): Promise<Uint8Array> {
   const response = await fetch(url);
   if (!response.ok) throw new CliError(`A download failed (${response.status}).`);
   const body = new Uint8Array(await response.arrayBuffer());
-  if (createHash("sha256").update(body).digest("hex") !== hash) {
+  if (sha256(body) !== hash) {
     throw new CliError("A file doesn't match its hash, so nothing was kept.");
   }
   return body;
@@ -312,8 +306,7 @@ export async function exportCommand(
   flags: { dir?: string; server?: string },
   out: Output,
 ) {
-  if (!project || !/^[a-z0-9-]{1,40}$/.test(project))
-    throw new UsageError("Usage: artifacts export <project>");
+  if (!project || !SLUG_PATTERN.test(project)) throw new UsageError("Usage: artifacts export <project>");
   const client = await signedIn(flags.server);
   const root = resolve(flags.dir ?? `${project}-export`);
   if (!isEmpty(root)) throw new CliError(`${root} isn't empty. Use --dir for another folder.`);
@@ -328,7 +321,7 @@ export async function exportCommand(
   for (const entry of cards) {
     const base = join(root, entry.slug);
     const artifact = Artifact.parse(await client.get(`/api/artifacts/by-slug/${project}/${entry.slug}`));
-    const history = await client.get<{ n: number }[]>(`/api/artifacts/${artifact.id}/versions`);
+    const history = await client.get<VersionRow[]>(`/api/artifacts/${artifact.id}/versions`);
     json(join(base, "card.json"), entry);
     json(join(base, "versions.json"), history);
     json(join(base, "comments.json"), await client.get(`/api/artifacts/${artifact.id}/threads?status=all`));

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
 import { ApiCallError } from "./client.ts";
-import { login, logout, recover, serverName, whoami } from "./commands/account.ts";
+import { logout, recover, whoami } from "./commands/account.ts";
 import { brandCommand } from "./commands/brand.ts";
 import { mcpInstall } from "./commands/connect.ts";
 import { dataCommand, logsCommand } from "./commands/data.ts";
@@ -42,6 +42,7 @@ import { normalizeUrl, pickServer } from "./config.ts";
 import { KeychainBlocked } from "./credentials/index.ts";
 import { CliError, createOutput, UsageError } from "./output.ts";
 import { closePrompts } from "./prompt.ts";
+import { login, serverName } from "./session.ts";
 import { installSkill } from "./skill/install.ts";
 import { installStageshow } from "./skill/stageshow.ts";
 import { VERSION } from "./version.ts";
@@ -159,7 +160,6 @@ function portOption(value: string | undefined): number | undefined {
 
 /** `upgrade --server` is a flag, unlike `--server <url>` everywhere else. */
 const optionFlag = (flag: string) => process.argv.includes(flag);
-const serverValue = () => undefined;
 
 async function main(argv: string[]) {
   let parsed: ReturnType<
@@ -278,9 +278,9 @@ async function main(argv: string[]) {
     case "undelete":
       return undeleteCommand(first, { version: optionAfter("--version"), server: values.server }, out);
     case "upgrade":
-      return upgradeCommand({ server: optionFlag("--server"), to: values.to, target: serverValue() }, out);
+      return upgradeCommand({ server: optionFlag("--server"), to: values.to }, out);
     case "domain":
-      return domainCommand(first, positionals[2], { target: values.server }, out);
+      return domainCommand(first, positionals[2], { server: values.server }, out);
     case "org":
       return orgCommand(first, positionals[2], { role: values.role, server: values.server }, out);
     case "visibility":

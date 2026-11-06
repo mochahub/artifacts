@@ -1,19 +1,18 @@
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import qrcode from "qrcode-terminal";
+import { type ClaimAnswers, setupExisting } from "../admin.ts";
 import { setupDocker } from "../docker/setup.ts";
 import type { Output } from "../output.ts";
-import { ask, confirm } from "../prompt.ts";
+import { ask, choose, confirm } from "../prompt.ts";
 import { setupRailway } from "../railway/setup.ts";
 import { installSkill } from "../skill/install.ts";
 import { offerStageshow } from "../skill/stageshow.ts";
-import { type ClaimAnswers, setupExisting } from "./account.ts";
 
 type Flags = ClaimAnswers & {
   docker?: boolean;
   dir?: string;
   image?: string;
   port?: number;
-  setupToken?: string;
   skill?: boolean;
   stageshow?: boolean;
 };
@@ -28,7 +27,11 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
   } else if (url) {
     person = await setupExisting(url, flags, out);
   } else {
-    const choice = await ask("Where should your Artifacts server run? [railway/docker/existing]");
+    const choice = await choose("Where should your Artifacts server run?", [
+      "railway",
+      "docker",
+      "existing",
+    ] as const);
     if (choice === "docker") {
       const result = await setupDocker(flags, out);
       person = result.person;
@@ -44,7 +47,7 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
   }
   if (
     flags.skill !== false &&
-    (await confirm("Install the skill for Claude Code and Codex?").catch(() => false))
+    (await confirm("Install the skill for Claude Code and Codex?", { enter: true, unattended: false }))
   ) {
     installSkill({}, out);
     await offerStageshow(flags.stageshow, out);

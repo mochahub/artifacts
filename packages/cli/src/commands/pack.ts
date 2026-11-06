@@ -1,11 +1,13 @@
-import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SHA256_HEX } from "@artifacts/schema";
 import { PACK_DIR } from "../bundle/layout.ts";
-import { findRoot, repoRoot } from "../bundle/manifest.ts";
+import { findRoot } from "../bundle/manifest.ts";
 import { requireHttps } from "../config.ts";
+import { gitRepo, repoRoot } from "../git.ts";
+import { sha256 } from "../hash.ts";
 import { CliError, type Output } from "../output.ts";
-import { collectForPublish, gitRepo, publishBody, uploadFiles } from "./write.ts";
+import { collectForPublish, publishBody, uploadFiles } from "../publish.ts";
 
 type Pack = {
   project: string;
@@ -38,8 +40,8 @@ export async function packCommand(
   });
   for (const [hash, source] of sources) copyFileSync(source, join(dir, "files", hash));
   const payload = JSON.stringify({ ...commit, declared });
-  const sha256 = createHash("sha256").update(payload).digest("hex");
-  writeFileSync(join(dir, "files", sha256), payload);
+  const payloadHash = sha256(payload);
+  writeFileSync(join(dir, "files", payloadHash), payload);
   const pack: Pack = {
     project: manifest.project,
     ...(manifest.projectName ? { projectName: manifest.projectName } : {}),
@@ -47,7 +49,7 @@ export async function packCommand(
     slug: manifest.slug,
     title: manifest.title,
     ...(manifest.visibility ? { visibility: manifest.visibility } : {}),
-    payload: { sha256, size: Buffer.byteLength(payload) },
+    payload: { sha256: payloadHash, size: Buffer.byteLength(payload) },
   };
   writeFileSync(join(dir, "pack.json"), JSON.stringify(pack, null, 2));
   out.result(pack, () => {
@@ -70,13 +72,13 @@ export async function packUpload(want: string | undefined, plan: string, out: Ou
   // A plan is text an agent passed along. Files only ever go back to where the plan itself came from.
   for (const item of missing) {
     if (new URL(item.url).origin !== planUrl.origin) throw new CliError("That plan points somewhere else.");
-    if (!/^[0-9a-f]{64}$/.test(item.sha256)) throw new CliError("That plan isn't valid.");
+    if (!SHA256_HEX.test(item.sha256)) throw new CliError("That plan isn't valid.");
   }
   const dir = join(root, PACK_DIR, "files");
   const sources = new Map(missing.map((item) => [item.sha256, join(dir, item.sha256)]));
   for (const [hash, path] of sources) {
     if (!existsSync(path)) throw new CliError(`This pack has no file ${hash}. Run artifacts pack again.`);
-    if (createHash("sha256").update(readFileSync(path)).digest("hex") !== hash) {
+    if (sha256(readFileSync(path)) !== hash) {
       throw new CliError("A packed file changed. Run artifacts pack again.");
     }
   }

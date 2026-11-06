@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { BlockRecord, FrameRecord, Manifest, PageRecord, Theme } from "@artifacts/schema";
 import { buildArticle, mermaidSources } from "@artifacts/schema/article";
 import { fontFaceCss, fontPath, themeCss } from "@artifacts/schema/theme-css";
 import type { LocalBrand } from "../brand/cache.ts";
+import { asBun } from "../bun.ts";
 import {
   articlePath,
   BACKEND_BUNDLE,
@@ -20,9 +20,10 @@ import {
   typeOf,
   upTo,
 } from "../bundle/layout.ts";
-import type { Problem } from "../bundle/manifest.ts";
+import { sha256 } from "../hash.ts";
+import type { Problem } from "../lint/problem.ts";
 import { CliError, type Output } from "../output.ts";
-import { asBun, ensureHelper } from "./install.ts";
+import { ensureHelper } from "./install.ts";
 
 const GAP = 80;
 
@@ -84,8 +85,6 @@ export function resolveTheme(
     neutralsDark: { ...merged.neutralsDark, ...layer.neutralsDark },
   }));
 }
-
-const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
 
 function fixtures(root: string) {
   const path = join(root, FIXTURE_DATA);

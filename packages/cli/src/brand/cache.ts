@@ -1,18 +1,17 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Brand, OrgBrand } from "@artifacts/schema";
-import { findClient } from "../commands/account.ts";
 import { configDir, pickServer } from "../config.ts";
+import { sha256 } from "../hash.ts";
 import type { Output } from "../output.ts";
+import { findClient } from "../session.ts";
 
 /** A render shouldn't wait long on a server it can do without. */
 const GIVE_UP_MS = 3000;
 
 export type LocalBrand = Brand & { fontFiles: Map<string, string> };
 
-const folder = (url: string) =>
-  join(configDir(), "brand", createHash("sha256").update(url).digest("hex").slice(0, 16));
+const folder = (url: string) => join(configDir(), "brand", sha256(url).slice(0, 16));
 
 function fromCache(dir: string): { brand: Brand | null; fetchedAt: string } | null {
   try {
@@ -42,7 +41,7 @@ async function refresh(url: string, dir: string, now: Date) {
     const link = body.fonts.find((entry) => entry.hash === font.hash)?.url;
     if (!link) continue;
     const bytes = new Uint8Array(await (await fetch(link)).arrayBuffer());
-    if (createHash("sha256").update(bytes).digest("hex") !== font.hash) continue;
+    if (sha256(bytes) !== font.hash) continue;
     mkdirSync(join(dir, "fonts"), { recursive: true });
     writeFileSync(path, bytes);
   }

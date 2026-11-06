@@ -10,8 +10,8 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import type { Problem } from "../lint/problem.ts";
 import { FIXTURE_DATA, FIXTURE_FILES, MANIFEST } from "./layout.ts";
-import type { Problem } from "./manifest.ts";
 
 export type Crawled = { files: Map<string, string>; problems: Problem[] };
 

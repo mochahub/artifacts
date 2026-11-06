@@ -1,8 +1,16 @@
-import { ProjectAccessList, TeamDetail, TeamList } from "@artifacts/schema";
+import {
+  INVITE_DAYS,
+  type InviteCreated,
+  ProjectAccessList,
+  SLUG_PATTERN,
+  TeamDetail,
+  TeamList,
+} from "@artifacts/schema";
+import type { z } from "zod";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-import { resolveArtifact } from "./review.ts";
+import { signedIn } from "../session.ts";
+import { resolveArtifact } from "../target.ts";
 
 export async function orgCommand(
   sub: string | undefined,
@@ -18,9 +26,9 @@ export async function orgCommand(
   const client = await signedIn(flags.server);
   if (sub === "invite") {
     const role = flags.role ?? "member";
-    const { url } = await client.post<{ url: string }>("/api/invites", { email, role });
+    const { url } = await client.post<z.infer<typeof InviteCreated>>("/api/invites", { email, role });
     return out.result({ url, email, role }, () => {
-      out.say(`✓ Invite for ${email} (${role}), works once, expires in 7 days`);
+      out.say(`✓ Invite for ${email} (${role}), works once, expires in ${INVITE_DAYS} days`);
       out.say(`  ${url}   send this yourself; nothing was emailed`);
     });
   }
@@ -63,7 +71,7 @@ export async function projectCommand(
 ) {
   if (sub !== "access") throw new UsageError("Usage: artifacts project access [<project>]");
   const project = target ?? loadManifest(findRoot()).manifest?.project;
-  if (!project || !/^[a-z0-9-]{1,40}$/.test(project)) {
+  if (!project || !SLUG_PATTERN.test(project)) {
     throw new UsageError("Name a project: artifacts project access <project>");
   }
   const client = await signedIn(server);
@@ -127,7 +135,7 @@ export async function shareCommand(
     throw new UsageError("Only a person can let a team publish. Use the Share sheet.");
   }
   // It lands in a URL, so only a slug passes.
-  if (flags.team && !/^[a-z0-9-]{1,40}$/.test(flags.team)) {
+  if (flags.team && !SLUG_PATTERN.test(flags.team)) {
     throw new UsageError(`--team wants a team's slug, not "${flags.team}". See artifacts teams.`);
   }
   const client = await signedIn(flags.server);

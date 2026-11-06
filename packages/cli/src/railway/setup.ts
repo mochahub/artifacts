@@ -1,7 +1,4 @@
-import { Meta } from "@artifacts/schema";
-import { Client } from "../client.ts";
-import { type ClaimAnswers, claim } from "../commands/account.ts";
-import { IMAGE } from "../commands/operate.ts";
+import { type ClaimAnswers, claim, IMAGE, meta, waitFor } from "../admin.ts";
 import { saveServer } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
 import { ask } from "../prompt.ts";
@@ -14,6 +11,7 @@ import {
   railway,
   railwayDir,
   railwayJson,
+  railwaySettings,
   SERVICE,
   signedInToRailway,
   variables,
@@ -22,9 +20,7 @@ import {
 const VIEWER_PORT = 8080;
 const CONTENT_PORT = 8081;
 const TIMEOUT_MS = 10 * 60_000;
-const POLL_MS = () => Number(process.env.ARTIFACTS_RAILWAY_POLL_MS ?? 5000);
 
-const TEMPLATE = "kQtqf4";
 /** Railway drops plain values from a generated template and then asks for them, which needs a terminal. */
 const TEMPLATE_VALUES = [
   `${SERVICE}.S3_FORCE_PATH_STYLE=false`,
@@ -40,28 +36,22 @@ const TEMPLATE_VALUES = [
 const ownImage = () =>
   process.env.ARTIFACTS_IMAGE ?? (process.execPath.endsWith("/bun") ? null : `${IMAGE}:${VERSION}`);
 
-const until = async (what: string, check: () => boolean | Promise<boolean>) => {
-  const deadline = Date.now() + TIMEOUT_MS;
-  for (;;) {
-    try {
-      if (await check()) return;
-    } catch (error) {
-      if (error instanceof DeployFailed) throw error;
-    }
-    if (Date.now() > deadline) throw new CliError(`Timed out waiting for ${what}.`);
-    await Bun.sleep(POLL_MS());
-  }
-};
-
 /** The Railway path in 07. Every step drives the Railway CLI. */
-export async function setupRailway(flags: ClaimAnswers & { projectName?: string }, out: Output) {
-  const template = process.env.ARTIFACTS_RAILWAY_TEMPLATE || TEMPLATE;
+export async function setupRailway(flags: ClaimAnswers, out: Output) {
+  const { template, pollMs, scheme } = railwaySettings();
+  const until = (what: string, check: () => boolean | Promise<boolean>) =>
+    waitFor(check, {
+      timeoutMs: TIMEOUT_MS,
+      pollMs,
+      failure: `Timed out waiting for ${what}.`,
+      fatal: (error) => error instanceof DeployFailed,
+    });
   if (!hasRailway()) {
     throw new CliError(
       "The Railway CLI isn't installed. Run: brew install railway (or npm i -g @railway/cli)",
     );
   }
-  const name = flags.projectName ?? "artifacts";
+  const name = "artifacts";
   const dir = railwayDir(name);
 
   let who = signedInToRailway(dir);
@@ -102,7 +92,7 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
   const viewer = domains.get(VIEWER_PORT);
   const content = domains.get(CONTENT_PORT);
   if (!viewer || !content) throw new CliError("The template didn't create the viewer and content domains.");
-  const url = `${process.env.ARTIFACTS_RAILWAY_HTTP ? "http" : "https"}://${viewer}`;
+  const url = `${scheme}://${viewer}`;
 
   const image = ownImage();
   const version = image?.split(":").at(-1);
@@ -117,9 +107,9 @@ export async function setupRailway(flags: ClaimAnswers & { projectName?: string 
   }
   // Until it reports the new values, what answers may still be the deploy before this one.
   await until("the server to come back", async () => {
-    const meta = Meta.parse(await new Client(url).get("/api/meta"));
-    const current = !version || meta.version === version;
-    return current && meta.contentUrl === `https://${content}` && isDeployed(dir);
+    const running = await meta(url);
+    const current = !version || running.version === version;
+    return current && running.contentUrl === `https://${content}` && isDeployed(dir);
   });
   out.say(`✓ Running: ${url}   (home domain for passkeys)`);
 

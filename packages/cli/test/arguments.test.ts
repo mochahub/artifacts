@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { capOutput } from "../src/commands/mcp.ts";
-import { artifactRef } from "../src/commands/review.ts";
 import { saveServer } from "../src/config.ts";
 import { UsageError } from "../src/output.ts";
+import { artifactRef } from "../src/target.ts";
 import { cli, sandbox } from "./sandbox.ts";
 
 // Every one of these stops before a request is made, so none needs a server.

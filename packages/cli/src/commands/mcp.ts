@@ -1,9 +1,8 @@
 import { readFileSync, rmSync } from "node:fs";
 import { LibraryProjects, UNTRUSTED_NOTICE } from "@artifacts/schema";
-import { repoRoot } from "../bundle/manifest.ts";
+import { gitRepo, repoRoot } from "../git.ts";
+import { findClient } from "../session.ts";
 import { VERSION } from "../version.ts";
-import { findClient } from "./account.ts";
-import { gitRepo } from "./write.ts";
 
 type Tool = {
   name: string;

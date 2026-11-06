@@ -2,15 +2,14 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import compose from "../../../../deploy/compose/docker-compose.yml" with { type: "text" };
-import { type ClaimAnswers, claim, health } from "../commands/account.ts";
+import { type ClaimAnswers, claim, IMAGE, waitHealthy } from "../admin.ts";
 import { saveServer } from "../config.ts";
 import { CliError, type Output } from "../output.ts";
 import { VERSION } from "../version.ts";
 
 const secret = (bytes: number) => randomBytes(bytes).toString("hex");
-const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-export const defaultImage = () => process.env.ARTIFACTS_IMAGE ?? `ghcr.io/mochahub/artifacts:${VERSION}`;
+const defaultImage = () => process.env.ARTIFACTS_IMAGE ?? `${IMAGE}:${VERSION}`;
 
 function run(command: string[], cwd: string) {
   const result = Bun.spawnSync(command, { cwd, stdout: "ignore", stderr: "pipe" });
@@ -68,14 +67,11 @@ export async function setupDocker(
   run(["docker", "compose", "up", "-d"], dir);
   out.say("Starting the app, Postgres and SeaweedFS…");
 
-  const deadline = Date.now() + 180_000;
-  for (;;) {
-    try {
-      if ((await health(url)).ok) break;
-    } catch {}
-    if (Date.now() > deadline) throw new CliError(`${url} didn't become healthy. See: docker compose logs`);
-    await wait(1000);
-  }
+  await waitHealthy(url, {
+    timeoutMs: 180_000,
+    pollMs: 1000,
+    failure: `${url} didn't become healthy. See: docker compose logs`,
+  });
   out.say(`Running: ${url}`);
   const person = await claim(url, setupToken, flags, out);
   saveServer({ url, name: "docker", docker: { dir } });
