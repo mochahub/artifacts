@@ -24,7 +24,9 @@ describe("parseEnv", () => {
     expect(parseEnv({ ...valid, GITHUB_RELEASES_REPO: "none" }).env.githubReleasesRepo).toBeNull();
   });
 
-  test("applies the defaults in 09", () => {
+  // Both URLs in `valid` are generated Railway domains: up.railway.app is a public suffix, so they're
+  // two sites, and there's no same-site warning.
+  test("applies the defaults in 09, with no warnings for two generated Railway domains", () => {
     const { env, warnings } = parseEnv(valid);
     expect(env.port).toBe(8080);
     expect(env.contentPort).toBe(8081);
@@ -97,9 +99,5 @@ describe("parseEnv", () => {
   test("refuses two ports that are the same", () => {
     expect(() => parseEnv({ ...valid, INTERNAL_PORT: "8080" })).toThrow(/must all be different/);
     expect(() => parseEnv({ ...valid, PORT: "0", CONTENT_PORT: "0" })).not.toThrow();
-  });
-
-  test("doesn't warn for two generated Railway domains: up.railway.app is a public suffix", () => {
-    expect(parseEnv(valid).warnings).toEqual([]);
   });
 });

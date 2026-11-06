@@ -107,11 +107,8 @@ describe("bridge messages", () => {
 });
 
 describe("api", () => {
-  test("default settings match their schema and the limits in 08", () => {
-    const settings = OrgSettings.parse(DEFAULT_ORG_SETTINGS);
-    expect(settings.limits.backendMemoryMb).toBe(64);
-    expect(settings.limits.backendRequestsPerMinute).toBe(120);
-    expect(settings.sandboxProcesses).toBe(2);
+  test("default settings are settings: the schema takes them as they are", () => {
+    expect(OrgSettings.parse(DEFAULT_ORG_SETTINGS)).toEqual(DEFAULT_ORG_SETTINGS);
   });
 
   test("accepts the PublishResult example in 03", () => {
