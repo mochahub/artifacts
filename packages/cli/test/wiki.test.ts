@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Manifest, WikiSpace } from "@artifacts/schema";
 import { GUIDES, SKILL_FILES } from "../../../skill/index.ts";
+import { visibleLine } from "../src/commands/review.ts";
 import { linksSummary, wikiSummary } from "../src/commands/wiki.ts";
 import { publishBody } from "../src/publish.ts";
 import type { RenderResult } from "../src/render/render.ts";
@@ -13,6 +14,7 @@ test("wiki help lists each operation and bad arguments stop before sign-in", asy
   expect(help.stdout).toContain("wiki create <slug>");
   expect(help.stdout).toContain("wiki show <slug>");
   expect(help.stdout).toContain("wiki links <project/slug>");
+  expect(help.stdout).toContain("wiki list");
   for (const args of [
     ["show", "../x"],
     ["links", "a/b/c"],
@@ -20,6 +22,7 @@ test("wiki help lists each operation and bad arguments stop before sign-in", asy
     ["unknown", "brain"],
     ["show", "brain", "extra"],
     ["show", "brain", "--personal"],
+    ["list", "extra"],
   ]) {
     expect((await cli(["wiki", ...args], box.env)).code).toBe(2);
   }
@@ -55,14 +58,26 @@ test("wiki output shows summaries, trust and actionable findings", () => {
         open: 0,
       },
     ],
-    log: [],
+    log: [
+      {
+        at: "2026-11-07T07:01:00.000Z",
+        kind: "commented",
+        slug: "topic",
+        title: "Topic",
+        by: "Person",
+        agent: "Connector",
+        version: null,
+        message: null,
+      },
+    ],
     garden: [{ kind: "wanted", slug: "topic", message: "Write this page.", refs: [] }],
   });
   const output = wikiSummary(space).join("\n");
   expect(output).toContain("Brain (Only you)");
   expect(output).toContain("No rules page yet.");
+  expect(output).toContain("Log\n  2026-11-07  commented  topic  by Person (Connector)");
   expect(output).toContain("clip  Clip [untrusted]: A web source (https://example.com/clip)");
-  expect(output).toContain("wanted topic: Write this page.");
+  expect(output).toContain("\n  wanted topic: Write this page.");
   expect(
     linksSummary({
       wiki: true,
@@ -81,6 +96,8 @@ test("wiki output shows summaries, trust and actionable findings", () => {
 test("wiki guide ships in the skill and hosted guide registry", () => {
   expect(GUIDES.wiki).toBe(SKILL_FILES["references/wiki.md"]);
   expect(GUIDES.wiki).toContain("## GARDEN");
+  expect(GUIDES.wiki).not.toContain("wiki create brain");
+  expect(GUIDES.wiki).toContain("Share sheet");
 });
 
 test("empty wiki sections say none", () => {
@@ -109,6 +126,8 @@ test("empty wiki sections say none", () => {
     "Sources",
     "  none",
     "Garden",
+    "  none",
+    "Log",
     "  none",
   ]);
 });
@@ -205,4 +224,11 @@ test("publish and pack commit metadata preserves wiki fields and clears absent m
   expect(publishBody(rendered, manifest, { notes: {} }).commit.wiki).toEqual(manifest.wiki ?? null);
   delete manifest.wiki;
   expect(publishBody(rendered, manifest, { notes: {} }).commit.wiki).toBeNull();
+});
+
+test("the status audience line reads cleanly and never doubles a full stop", () => {
+  expect(visibleLine("Everyone in Acme Inc.")).toBe("Visible to Everyone in Acme Inc.");
+  expect(visibleLine("Design team and 2 people")).toBe("Visible to Design team and 2 people.");
+  expect(visibleLine("Only you")).toBe("Visible only to you.");
+  expect(visibleLine("Only the publisher")).toBe("Visible only to the publisher.");
 });
