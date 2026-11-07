@@ -51,13 +51,13 @@ Shapes are in `packages/schema/src/api.ts` under "Wikis".
 
 ### `POST /api/wikis`
 
-Body `CreateWiki` `{ slug, name, onlyMe?, team?, personal? }`. Guard `{ action: "project.create" }`. Answers `WikiCreated` `{ slug, name, audience, guidance, url }`: 201 when it makes the wiki, and 200 when the wiki already exists.
+Body `CreateWiki` `{ slug, name, onlyMe?, team?, personal? }`. Guard `{ action: "project.create" }`. Answers `WikiCreated` `{ slug, name, audience, guidance, url, created }`: 201 with `created: true` when it makes the wiki, and 200 with `created: false` when it already exists. `created` is absent from older servers. `personal` is still sent but is deprecated; use `audience`.
 
 | The slug | What happens |
 |---|---|
 | Free | Insert `projects` with `kind: "wiki"` and `restricted: onlyMe || team`. A person caller gets a `manage` grant, as the first publish gives one. A restricted starting audience from an organization token is `invalid`: a token has no person to keep it private to |
-| A wiki the caller sees | Nothing changes. Answers 200 with its current values |
-| An ordinary project the caller manages (admin, or a `manage` grant) | Becomes a wiki and keeps its access. Answers 200 |
+| A wiki the caller sees | Nothing changes. Answers 200 with its current values, unless the request asks for a narrower audience than the actual one (`onlyMe` when others can read it, or `team` when it is organization-wide): that is `conflict` (409), "<slug> already exists with audience …; the audience was not changed", pointing to the viewer's Share sheet. The team slug is not looked up for an existing wiki, so a renamed or deleted team still answers 200 |
+| An ordinary project the caller manages (admin, or a `manage` grant) | Becomes a wiki and keeps its access. Answers 200, with the same narrower-audience refusal, which leaves the project unconverted |
 | Anything else, including a restricted project the caller can't see | `conflict`, "That name is taken." |
 
 ### `GET /api/wikis/:slug`
@@ -121,7 +121,9 @@ The server instructions add one sentence: in a wiki, call `artifacts_wiki` first
 
 - `artifacts publish` and `artifacts pack` pass `project` to `buildArticle`, and `wiki` (from the manifest) in the commit body.
 - `artifacts wiki create <slug> [--name <name>] [--only-me | --team <slug>]` calls `POST /api/wikis`.
-- `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources and the findings. Empty Pages, Sources and Garden sections say `none`.
+- `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources, the findings and the ten latest log entries (comments included). Empty Pages, Sources, Garden and Log sections say `none`. On a project that isn't a wiki it says so and names `artifacts wiki create <slug>`.
+- `artifacts wiki list [--json]` prints each visible wiki's slug, name, audience and page count. JSON gives `{ slug, name, audience, pages, sources }` per wiki (the hosted `artifacts_wiki` list adds `guidance`).
+- `wiki create` names the problem with a bad slug, `--name` or `--team`, and the CLI's own `--json` output leaves out the deprecated `personal`. `created: false` prints "Already exists".
 - `artifacts wiki links <project/slug> [--json]` prints the artifact's role, untrusted mark and origin, then the links, backlinks and sources with origins when present. Empty sections say `none`.
 - The skill's `references/wiki.md` holds the agent's workflows: ingest, ask, garden, and a starter rules page. The hosted MCP serves it as `artifacts://guides/wiki`.
 
@@ -138,6 +140,6 @@ The server instructions add one sentence: in a wiki, call `artifacts_wiki` first
 
 Creation accepts `onlyMe: true` or `team: <slug>` (mutually exclusive), defaults to org, and quietly accepts deprecated `personal: true` as onlyMe. The CLI accepts `--only-me`, `--team <slug>`, and deprecated `--personal`. A team audience creates a restricted project with a publish grant for that team and a manage grant for the creator. Repeated creation returns existing access without changing it.
 
-`guidance: { edits: "direct" | "suggestion", text: string }` accompanies wiki payloads. Direct applies only when the editor owns an only-me wiki; other audiences use suggestions. Owners may mark pages as maintained by agents. These fields describe Part B editing policy; this phase adds no editor or enforcement of suggestions.
+`guidance: { edits: "direct" | "suggestion", text: string }` accompanies wiki payloads. Direct applies only when the editor owns an only-me wiki; other audiences use suggestions. `text` follows the audience: "Only you can read this wiki: edit directly.", "Only the owner can read this wiki: propose suggestions…" for an administrator, "Everyone in <organization> can read this wiki: propose suggestions…", "<Team> team can read this wiki: …", and "Others can read this wiki: …" when the team names are hidden from the caller. Owners may mark pages as maintained by agents. These fields describe Part B editing policy; this phase adds no editor or enforcement of suggestions.
 
-Responses retain deprecated `personal` (true only for audience me) because released CLIs require a boolean when parsing creation and detail responses. New clients use audience exclusively.
+Responses retain deprecated `personal` (true only for audience me) because released CLIs require a boolean when parsing creation and detail responses. The schema descriptions mark it deprecated, and the current CLI leaves it out of its own output. New clients use audience exclusively.

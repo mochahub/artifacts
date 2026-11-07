@@ -420,7 +420,9 @@ export type Home = z.infer<typeof Home>;
 export const PatchArtifact = z.object({ visibility: Visibility.optional() });
 
 // Teams
-const TeamSlug = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/);
+const TeamSlug = z
+  .string()
+  .regex(/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/, "use 1–40 characters of a-z, 0-9 and -");
 const TeamName = z.string().trim().min(1).max(TEAM_NAME_MAX);
 const TeamAbout = z.string().trim().max(TEAM_ABOUT_MAX).nullable();
 export const CreateTeam = z.object({
@@ -1245,20 +1247,23 @@ export const CreateWiki = z
   .object({
     slug: Slug,
     name: z.string().trim().min(1).max(80),
-    /** Deprecated input alias for onlyMe. */
-    personal: z.boolean().optional(),
+    personal: z.boolean().optional().describe("Deprecated alias for onlyMe."),
     onlyMe: z.boolean().optional(),
     team: TeamSlug.optional(),
   })
-  .refine((v) => !(v.team && (v.onlyMe || v.personal)), "Choose onlyMe or team, not both.");
+  .refine((v) => !(v.team && (v.onlyMe || v.personal)), {
+    message: "Choose onlyMe or team, not both.",
+    path: ["team"],
+  });
 export const WikiCreated = z.object({
   slug: z.string(),
   name: z.string(),
-  /** Deprecated compatibility alias; use audience. */
-  personal: z.boolean().optional(),
+  personal: z.boolean().optional().describe("Deprecated compatibility alias; use audience."),
   audience: WikiAudience,
   guidance: WikiGuidance,
   url: z.string(),
+  /** False when the wiki already existed; its audience was not changed. Absent from older servers. */
+  created: z.boolean().optional(),
 });
 export type WikiCreated = z.infer<typeof WikiCreated>;
 export const WikiPage = z.object({
@@ -1304,8 +1309,7 @@ export const WikiSpace = z.object({
   project: z.object({
     slug: z.string(),
     name: z.string(),
-    /** Deprecated compatibility alias; use audience. */
-    personal: z.boolean().optional(),
+    personal: z.boolean().optional().describe("Deprecated compatibility alias; use audience."),
     audience: WikiAudience,
     guidance: WikiGuidance,
     canPublish: z.boolean(),

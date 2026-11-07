@@ -20,11 +20,13 @@ const COMMANDS: Command[] = [
       "wiki create <slug> [--name <name>] [--only-me | --team <slug>]",
       "wiki show <slug> [--json]",
       "wiki links <project/slug> [--json]",
+      "wiki list [--json]",
     ],
     help: [
       "artifacts wiki create <slug> [--name <name>] [--only-me | --team <slug>]",
       "artifacts wiki show <slug> [--json]",
       "artifacts wiki links <project/slug> [--json]",
+      "artifacts wiki list [--json]",
     ],
     args: ["sub", "target"],
     options: {
