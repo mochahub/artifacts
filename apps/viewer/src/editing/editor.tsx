@@ -211,6 +211,10 @@ export function Editor({ artifact, pageKey, state: initial, sources, onClose }: 
       },
       // Called with the view as `this`, during construction too, before `editor` is assigned.
       dispatchTransaction(this: EditorView, tr) {
+        // After Done or Esc, nothing may reach the closed view. y-prosemirror (1.3.7) flushes metas it
+        // queued for cursors and awareness on a timeout, and its "destroyed" check reads a field its
+        // binding never sets, so the guard is here.
+        if (this.isDestroyed) return;
         const next = this.state.apply(tr);
         this.updateState(next);
         const { $from } = next.selection;
@@ -1085,6 +1089,14 @@ function DiffText({ before, after }: { before: string; after: string }) {
 function LinkSheet({ onClose, onLink }: { onClose(): void; onLink(href: string): void }) {
   const href = useSignal("https://");
   const refused = useSignal(false);
+  const field = useRef<HTMLInputElement>(null);
+  // The address takes focus as the sheet opens (after the sheet's own focus), caret after "https://".
+  useLayoutEffect(() => {
+    const input = field.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, []);
   return (
     <Sheet title="Link" onClose={onClose}>
       <form
@@ -1096,6 +1108,7 @@ function LinkSheet({ onClose, onLink }: { onClose(): void; onLink(href: string):
         }}
       >
         <input
+          ref={field}
           class="field"
           type="text"
           inputMode="url"

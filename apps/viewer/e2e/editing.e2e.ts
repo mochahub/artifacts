@@ -88,6 +88,9 @@ async function seedPage(page: Page, wiki: string) {
     },
   });
   expect(response.ok()).toBe(true);
+  const result = await response.json();
+  expect(result.error, JSON.stringify(result)).toBeUndefined();
+  expect(result.result.isError, JSON.stringify(result)).not.toBe(true);
   const artifact = await (await request.get(`/api/artifacts/by-slug/${wiki}/pricing`)).json();
   return artifact.id as string;
 }
@@ -202,9 +205,13 @@ test("Edit loads the editor chunk on tap; typing, modes, a suggestion accepted, 
   await expect(editor(page)).toContainText("Guests review for free.");
   if (info.project.name === "desktop") {
     // ⌘K links the selection; an address that isn't http(s), mailto or a path is refused.
+    await expect(editor(page)).toBeFocused();
     await page.keyboard.press("Shift+Meta+ArrowLeft");
     await page.keyboard.press("Meta+k");
-    const address = page.getByRole("textbox", { name: "Address" });
+    const sheet = page.getByRole("dialog", { name: "Link" });
+    await expect(sheet).toBeVisible();
+    const address = sheet.getByRole("textbox", { name: "Address" });
+    await expect(address).toBeFocused();
     await address.fill("javascript:alert(1)");
     await address.press("Enter");
     await expect(
