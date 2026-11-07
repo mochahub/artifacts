@@ -405,6 +405,8 @@ async function contactSheet(browser, frames) {
   await page.setContent(
     `<!doctype html><style>body{margin:0;padding:24px;background:#1b1d22;color:#f2f3f5;font:13px system-ui;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}figure{margin:0;width:240px}img{display:block;max-width:240px}figcaption{margin-top:6px}</style>${tiles.join("")}`,
   );
+  // Data-URL images decode async; shooting before they do can capture a blank card.
+  await page.evaluate(() => Promise.all([...document.images].map((image) => image.decode().catch(() => {}))));
   await page.screenshot({ path: job.contactSheet, fullPage: true });
   await page.close();
 }
@@ -425,6 +427,8 @@ async function ogImage(browser, frames) {
     ? `<div style="display:flex;gap:28px;justify-content:center;align-items:center;height:630px">${images.join("")}</div>`
     : `<div style="display:flex;align-items:center;height:630px;padding:0 90px;color:#f2f3f5;font:700 72px/1.1 ui-serif,'New York',Georgia,serif">${job.title.replace(/</g, "&lt;")}</div>`;
   await page.setContent(`<!doctype html><style>body{margin:0;background:#1b1d22}</style>${body}`);
+  // Data-URL images decode async; shooting before they do can capture a blank card.
+  await page.evaluate(() => Promise.all([...document.images].map((image) => image.decode().catch(() => {}))));
   const png = await page.screenshot();
   await page.close();
   return webp(png, job.out);
