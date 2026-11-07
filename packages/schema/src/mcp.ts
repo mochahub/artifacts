@@ -155,7 +155,11 @@ export const WIKI_TOOLS = {
 /** Wiki metadata accepted by the hosted article publisher. */
 export const WIKI_ARTICLE_INPUT = {
   role: { type: "string", description: "page or source" },
-  sources: { type: "array", description: "Source slugs in this wiki" },
+  sources: {
+    type: "array",
+    description:
+      "Slugs of existing, readable source artifacts in this wiki; page targets and self-citations are refused",
+  },
   origin: { type: "string", description: "Source http or https address" },
   untrusted: { type: "boolean", description: "Source came from outside" },
 } satisfies Record<string, McpProperty>;

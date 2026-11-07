@@ -6,7 +6,7 @@ Use a wiki for knowledge that grows across sources and conversations. A wiki is 
 
 Call `artifacts_wiki` with the wiki slug, or run `artifacts wiki show <slug>`. Read the `rules` page before writing. Follow its purpose, page types and citation rules. If none exists, publish the starter below as an article with slug `rules`, adapted to the person's purpose. The server derives the index and change log; do not maintain copies as pages.
 
-MCP tool names appear with a connector prefix. If they are not directly listed, find them with ToolSearch "artifacts".
+If your client doesn't list the tools directly, search its tool list for "artifacts".
 
 Create a company wiki with `artifacts wiki create brain --name "Company brain"`, or a personal one with `artifacts wiki create my-notes --personal`. A personal wiki is restricted to its creator and admins initially. Never move personal content into a company wiki unless the person asks.
 
@@ -26,7 +26,7 @@ Read the garden in `artifacts_wiki` or `artifacts wiki show`. Findings mean:
 
 - `untrusted`: a page cites an untrusted source. Check claims and preserve the source's trust mark. The finding stays while the citation does; it is a reminder, not a task to clear.
 - `stale`: a cited source has a newer version. Read it and update the page.
-- `wanted`: a link names a page that is not visible. Write what the evidence supports, say what is unknown, and open a page thread for a missing decision. Correct the link if it is wrong.
+- `wanted`: a link target or cited source is missing or unavailable. For a link, write what the evidence supports or correct the target. For a citation, publish the source first or correct `wiki.sources`; republishing the page is refused until it is fixed.
 - `orphan`: nothing visible links to the page. Connect it where useful.
 - `unsourced`: a page cites no sources although this wiki has sources. Add the sources that support it.
 

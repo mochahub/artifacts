@@ -165,4 +165,18 @@ describe("wiki validation", () => {
     expect(hidden.content[0]?.text?.replace("private-source", "absent")).toBe(missing.content[0]?.text);
     expect(JSON.stringify(hidden)).not.toContain("Private title");
   });
+
+  test("twelve concurrent wiki republishes with sources finish", async () => {
+    const concurrent = (await makePerson(t, orgId, "member")).token;
+    const slugs = Array.from({ length: 12 }, (_, i) => `concurrent-${i}`);
+    // Existing pages avoid the separate, pre-existing toProject() pool use for new artifacts.
+    for (const slug of slugs) expect((await article(slug, {}, concurrent)).isError).toBeUndefined();
+    const results = await Promise.all(
+      slugs.map((slug) => article(slug, { sources: ["source"] }, concurrent)),
+    );
+    expect(results.filter((result) => result.isError)).toEqual([]);
+    const wiki = await space();
+    for (const slug of slugs)
+      expect(wiki.pages.find((p) => p.slug === slug)).toMatchObject({ version: 2, sources: ["source"] });
+  }, 10_000);
 });
