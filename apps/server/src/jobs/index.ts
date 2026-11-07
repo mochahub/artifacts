@@ -26,6 +26,7 @@ import {
 import type { Deps } from "../deps.ts";
 import { BLOBS, CROPS, DATA, hashOf, PLANS } from "../layout.ts";
 import { sendDigest } from "../push/notify.ts";
+import { startEditingSweep } from "./editing.ts";
 import { purgeExpired } from "./purge.ts";
 
 const GC_MIN_AGE_MS = DAY_MS;
@@ -198,8 +199,10 @@ export function startJobs(deps: Deps) {
   // Soon after boot too: a server redeployed daily would otherwise never reach its first run.
   const first = setTimeout(tick, FIRST_RUN_MS);
   const timer = setInterval(tick, DAY_MS);
+  const stopSweep = startEditingSweep(deps);
   return () => {
     clearTimeout(first);
     clearInterval(timer);
+    stopSweep();
   };
 }

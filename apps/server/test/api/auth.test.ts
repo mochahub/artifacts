@@ -72,7 +72,7 @@ describe("setup mode", () => {
     expect(row?.pseudonymKey).toHaveLength(32);
     // No route shows a CLI token's scopes.
     const [token] = await t.server.db.select().from(tokens);
-    expect(token?.scopes).toEqual(["publish", "comment", "read", "manage", "data"]);
+    expect(token?.scopes).toEqual(["publish", "comment", "read", "manage", "data", "edit"]);
   });
 
   test("setup runs once", async () => {
@@ -441,7 +441,7 @@ describe("the device flow", () => {
         .select()
         .from(tokens)
         .where(eq(tokens.tokenHash, sha256(result.token)));
-      expect(row?.scopes).toEqual(["publish", "comment", "read", "manage", "data"]);
+      expect(row?.scopes).toEqual(["publish", "comment", "read", "manage", "data", "edit"]);
     }
     expect((await poll(started.deviceCode)).status).toBe(410);
   });

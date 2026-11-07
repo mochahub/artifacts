@@ -15,6 +15,7 @@ import { type Env, EnvError } from "./env.ts";
 import { createApp } from "./http/app.ts";
 import { apiGuards } from "./http/guards.ts";
 import { MCP_PATH, viewerOrigins } from "./http/origins.ts";
+import { artifactParam } from "./http/resources.ts";
 import { type ApiVars, Routes } from "./http/routes.ts";
 import { requireViewerHost, serveViewer, viewerHeaders } from "./http/viewer.ts";
 import { wellKnownWebauthn } from "./http/well-known.ts";
@@ -25,6 +26,7 @@ import { mcpChallenge } from "./mcp/routes.ts";
 import { fetchMetadata, type MetadataFetch } from "./oauth/metadata.ts";
 import { isPushEndpoint } from "./push/notify.ts";
 import { Events } from "./realtime/events.ts";
+import { DocHub, syncRoute, syncSocket } from "./realtime/sync.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
 import { SandboxPool } from "./sandbox/pool.ts";
 
@@ -96,6 +98,8 @@ export async function startServer(env: Env, options: StartOptions) {
 
   const events = new Events(env.databaseUrl, undefined, options.heartbeatMs);
   await events.start();
+  const docs = new DocHub(env.databaseUrl, log);
+  await docs.start();
 
   const deps: Deps = {
     env,
@@ -111,7 +115,9 @@ export async function startServer(env: Env, options: StartOptions) {
     pushAllow: options.pushAllow ?? isPushEndpoint,
     clientMetadata: options.clientMetadata ?? fetchMetadata,
     google: options.google ?? googleProvider,
+    docs,
   };
+  docs.attach(deps);
 
   const viewer = createApp(log) as unknown as ReturnType<typeof createApp> & import("hono").Hono<ApiVars>;
   viewer.use(viewerHeaders(env, bucketOrigin(env.s3)));
@@ -124,13 +130,19 @@ export async function startServer(env: Env, options: StartOptions) {
   viewer.get("/.well-known/webauthn", wellKnownWebauthn(deps));
   const routes = new Routes(viewer);
   mountApi(routes, deps);
+  // The draft's sync socket (13, "Sync"): the guard, then the upgrade into `syncSocket` below.
+  routes.get(
+    "/api/artifacts/:id/doc/sync",
+    { action: "artifact.edit", resource: artifactParam(deps) },
+    syncRoute(deps) as never,
+  );
   // This transport has no stream to open and no session to end (MCP, Streamable HTTP).
   viewer.on(["GET", "DELETE"], MCP_PATH, (c) => c.body(null, 405, { Allow: "POST" }));
   viewer.all("/api/*", (c) => c.notFound());
   viewer.get("*", serveViewer(options.viewerDir === undefined ? findViewerDir() : options.viewerDir, deps));
 
   const servers = [
-    Bun.serve({ port: env.port, fetch: viewer.fetch }),
+    Bun.serve({ port: env.port, fetch: viewer.fetch, websocket: syncSocket(docs) }),
     Bun.serve({ port: env.contentPort, fetch: createContentApp(deps).fetch }),
     // It takes no body at all, so a large one isn't read, whoever sends it.
     Bun.serve({
@@ -161,6 +173,7 @@ export async function startServer(env: Env, options: StartOptions) {
     async stop() {
       stopJobs();
       deps.sandbox.stop();
+      await docs.stop();
       await Promise.all(servers.map((server) => server.stop(true)));
       await events.stop();
       await close();

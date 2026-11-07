@@ -76,12 +76,13 @@ export async function projectGrants(
 /**
  * Who holds each artifact through a team or its project. Lists pass `personId`, which needs only that
  * person's rows; one artifact, or a push to many people, needs everyone's. Either way it's one query
- * per concern.
+ * per concern. `wikis` holds the ids of the rows' projects that are wikis, where project grants can edit.
  */
 export async function inheritedAccess(
   deps: Deps,
   orgId: string,
   rows: ArtifactRow[],
+  wikis: ReadonlySet<string>,
   personId?: string,
 ): Promise<Map<string, Inherited[]>> {
   const artifactIds = rows.map((row) => row.id);
@@ -118,7 +119,11 @@ export async function inheritedAccess(
   return new Map(
     rows.map((row) => [
       row.id,
-      inherit([...(onArtifacts.get(row.id) ?? []), ...(onProjects.get(row.projectId) ?? [])], row.visibility),
+      inherit(
+        [...(onArtifacts.get(row.id) ?? []), ...(onProjects.get(row.projectId) ?? [])],
+        row.visibility,
+        wikis.has(row.projectId),
+      ),
     ]),
   );
 }
@@ -126,7 +131,7 @@ export async function inheritedAccess(
 /** A row and its grants as can() reads them. The only place that shape is made. */
 export const artifactResource = (
   row: ArtifactRow,
-  project: Pick<ProjectRow, "restricted" | "createdByToken">,
+  project: Pick<ProjectRow, "restricted" | "createdByToken" | "kind">,
   access: ArtifactResource["access"],
   inherited: Inherited[],
 ): ArtifactResource => ({
@@ -141,6 +146,7 @@ export const artifactResource = (
   access,
   restricted: project.restricted,
   projectTokenId: project.createdByToken,
+  inWiki: project.kind === "wiki",
   inherited,
 });
 
@@ -148,7 +154,12 @@ export async function toResources(deps: Deps, rows: ArtifactRow[]): Promise<Load
   const [first] = rows;
   if (!first) return [];
   const artifactIds = rows.map((row) => row.id);
-  const [access, inherited, places] = await Promise.all([
+  const places = await deps.db
+    .select()
+    .from(projects)
+    .where(inArray(projects.id, [...new Set(rows.map((row) => row.projectId))]));
+  const wikis = new Set(places.filter((place) => place.kind === "wiki").map((place) => place.id));
+  const [access, inherited] = await Promise.all([
     deps.db
       .select({
         artifactId: artifactAccess.artifactId,
@@ -158,11 +169,7 @@ export async function toResources(deps: Deps, rows: ArtifactRow[]): Promise<Load
       })
       .from(artifactAccess)
       .where(and(eq(artifactAccess.orgId, first.orgId), inArray(artifactAccess.artifactId, artifactIds))),
-    inheritedAccess(deps, first.orgId, rows),
-    deps.db
-      .select()
-      .from(projects)
-      .where(inArray(projects.id, [...new Set(rows.map((row) => row.projectId))])),
+    inheritedAccess(deps, first.orgId, rows, wikis),
   ]);
   return rows.map((row) => {
     const project = places.find((place) => place.id === row.projectId) as ProjectRow;

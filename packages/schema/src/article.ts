@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, normalize, sep } from "node:path";
 import type { Element, ElementContent, Nodes, Root } from "hast";
 import { toString as hastText } from "hast-util-to-string";
+import type { RootContent as MdContent, Root as MdRoot } from "mdast";
 import rehypeParse from "rehype-parse";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
@@ -13,6 +14,7 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { chartSvg } from "./chart.ts";
+import { BLOCK_ID_PATTERN } from "./constants.ts";
 import { ARTICLE_SCHEMA } from "./sanitize.ts";
 import { remarkWikilinks } from "./wiki.ts";
 
@@ -48,6 +50,11 @@ export type ArticleInput = {
   mermaid: Map<string, string>;
   /** The project, so `[[Page]]` links resolve to `/<project>/<slug>` (SPEC 16). Without it they stay text. */
   project?: string;
+  /**
+   * An edited page's lasting block ids (13), one per group of `articleBlocks`, in order. Each becomes its
+   * element's `data-block` and its blocks row's key; headings keep their slug as `id` and in the outline.
+   */
+  blockIds?: string[];
 };
 
 export type ArticleOutput = {
@@ -91,6 +98,33 @@ export function articleRecords(
   };
 }
 
+const soleChild = (node: MdContent | undefined, type: string) =>
+  node?.type === "paragraph" && node.children.length === 1 && node.children[0]?.type === type;
+
+/**
+ * The top-level blocks of a parsed article as an editor sees them (13, "Ids in versions"): each node is
+ * one block, except that an image paragraph and the italic caption after it are one, the figure the read
+ * pipeline merges. `markdownToDoc` groups with this too, so ids pair with the same blocks on both sides.
+ */
+export function articleBlocks(root: MdRoot): MdContent[][] {
+  const groups: MdContent[][] = [];
+  for (let i = 0; i < root.children.length; i++) {
+    const node = root.children[i] as MdContent;
+    const next = root.children[i + 1];
+    if (soleChild(node, "image") && soleChild(next, "emphasis")) {
+      groups.push([node, next as MdContent]);
+      i += 1;
+    } else groups.push([node]);
+  }
+  return groups;
+}
+
+/** How many blocks an article's Markdown has, as `articleBlocks` groups them: one lasting id each. */
+export function articleBlockCount(markdown: string): number {
+  const tree = unified().use(remarkParse).use(remarkGfm).use(remarkDirective).parse(markdown) as MdRoot;
+  return articleBlocks(tree).length;
+}
+
 /** Every ```mermaid block, so the render helper can draw them first. */
 export function mermaidSources(markdown: string): string[] {
   const tree = unified().use(remarkParse).use(remarkGfm).parse(markdown);
@@ -122,6 +156,33 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
   const blocks: ArticleOutput["blocks"] = [];
   const outline: ArticleOutput["outline"] = [];
   const problems: ArticleOutput["problems"] = [];
+  const blockIds = input.blockIds;
+
+  // Lasting ids ride on the mdast nodes, so they reach their elements through remark-rehype (13).
+  const lasting = () => (tree: MdRoot) => {
+    if (!blockIds) return;
+    const groups = articleBlocks(tree);
+    const fail = (message: string) =>
+      problems.push({ rule: "article/blocks", severity: "error", message: `${input.path}: ${message}` });
+    if (blockIds.length > groups.length) fail(`${blockIds.length} block ids for ${groups.length} blocks.`);
+    const used = new Set<string>();
+    for (const [index, group] of groups.entries()) {
+      const id = blockIds[index];
+      const first = group[0];
+      if (id === undefined || !first) continue;
+      if (!BLOCK_ID_PATTERN.test(id)) {
+        fail(`block id "${id.slice(0, 40)}" isn't valid.`);
+        continue;
+      }
+      if (used.has(id)) {
+        fail(`block id "${id}" is used twice.`);
+        continue;
+      }
+      used.add(id);
+      const data = (first.data ?? {}) as { hProperties?: Record<string, unknown> };
+      first.data = { ...data, hProperties: { ...data.hProperties, dataBlock: id } } as typeof first.data;
+    }
+  };
 
   const directives = () => (tree: Root) => {
     visit(tree as unknown as Nodes, (node) => {
@@ -196,9 +257,11 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
           });
           return;
         }
-        parent.children[index] = element("figure", { dataFrameRef: ref }, [
-          element("img", { src: `artifacts:blob/${hash}`, alt: ref.split("/").at(-1) ?? ref }, []),
-        ]);
+        parent.children[index] = element(
+          "figure",
+          { dataFrameRef: ref, dataBlock: node.properties.dataBlock },
+          [element("img", { src: `artifacts:blob/${hash}`, alt: ref.split("/").at(-1) ?? ref }, [])],
+        );
       } else {
         let svg: string | undefined;
         if (embed === "chart") {
@@ -220,7 +283,11 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
           });
           return;
         }
-        parent.children[index] = element("figure", {}, parseFragment(svg).children as ElementContent[]);
+        parent.children[index] = element(
+          "figure",
+          { dataBlock: node.properties.dataBlock },
+          parseFragment(svg).children as ElementContent[],
+        );
       }
     });
 
@@ -244,7 +311,12 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
         caption?.type === "element" &&
         caption.tagName === "em"
       ) {
-        merged.push(element("figure", {}, [image, element("figcaption", {}, caption.children)]));
+        merged.push(
+          element("figure", { dataBlock: (node as Element).properties.dataBlock }, [
+            image,
+            element("figcaption", {}, caption.children),
+          ]),
+        );
         i += 1;
       } else merged.push(node);
     }
@@ -277,19 +349,31 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       return index + parts.length;
     });
 
-    // Block ids (05): heading slug, or <heading>/p<n> below it.
+    // Block ids (05): heading slug, or <heading>/p<n> below it. With lasting ids (13), an element's own
+    // `data-block`, and `<last id>/x<n>` for what the pipeline adds itself, such as footnotes.
     let heading = "intro";
     let n = 0;
     const seen = new Set<string>();
     for (const node of tree.children) {
       if (node.type !== "element") continue;
       const level = /^h([1-6])$/.exec(node.tagName);
+      if (level)
+        outline.push({ id: String(node.properties.id), title: hastText(node), level: Number(level[1]) });
       let key: string;
-      if (level) {
+      const own = node.properties.dataBlock;
+      if (blockIds) {
+        if (typeof own === "string" && own) {
+          key = own;
+          heading = own;
+          n = 0;
+        } else {
+          n += 1;
+          key = `${heading}/x${n}`;
+        }
+      } else if (level) {
         key = String(node.properties.id);
         heading = key;
         n = 0;
-        outline.push({ id: key, title: hastText(node), level: Number(level[1]) });
       } else {
         n += 1;
         key = `${heading}/p${n}`;
@@ -315,6 +399,7 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       .use(remarkDirective)
       .use(directives as never)
       .use(remarkWikilinks(input.project) as never)
+      .use(lasting as never)
       .use(remarkRehype)
       .use(rehypeSlug)
       .use(decorate)

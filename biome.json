@@ -10,6 +10,7 @@
       "**",
       "!fixtures",
       "!**/test/fixtures",
+      "!packages/doc/fixtures",
       "!packages/kit/src/templates",
       "!skill/references/kit.md",
       "!spikes",

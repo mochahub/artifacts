@@ -4,6 +4,7 @@ import { GUEST_COOKIE, SESSION_COOKIE } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
 import type { Deps } from "../deps.ts";
 import { MIN_CLI_VERSION } from "../version.ts";
+import { olderClient, rewriteForOlderClient } from "./compat.ts";
 import { ApiError } from "./errors.ts";
 import type { ApiVars } from "./routes.ts";
 
@@ -26,6 +27,15 @@ export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
   return async (c, next) => {
     const path = c.req.path;
     if (!path.startsWith("/api/")) return next();
+    if (olderClient(c)) {
+      await guard(c, next);
+      return rewriteForOlderClient(c);
+    }
+    return guard(c, next);
+  };
+
+  async function guard(c: Parameters<MiddlewareHandler<ApiVars>>[0], next: () => Promise<void>) {
+    const path = c.req.path;
 
     const cli = c.req.header("artifacts-cli");
     if (cli && newerThan(MIN_CLI_VERSION, cli)) {
@@ -56,5 +66,5 @@ export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
     c.set("org", org);
     c.set("caller", await resolveCaller(c, deps, org));
     return next();
-  };
+  }
 }

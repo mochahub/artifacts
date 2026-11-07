@@ -229,6 +229,7 @@ const artifact = (
   ],
   restricted: place === "restricted",
   projectTokenId: MAKER_TOKEN,
+  inWiki: false,
   inherited: inherit(GRANTS, visibility),
 });
 
@@ -488,6 +489,10 @@ function expected(
       return managers.includes(name); // The publisher deleted it in this table, so they and admins may undelete.
     case "artifact.purge":
       return ["owner", "admin", "member (publisher)"].includes(name);
+    case "artifact.edit":
+    case "artifact.accept":
+    case "artifact.maintain":
+      return false; // Only in a wiki (13); the wiki block below covers those.
     case "data.export":
       return live && seen && exporters.includes(name);
     case "org.read":
@@ -775,5 +780,119 @@ describe("rules the matrix can't express", () => {
     expect(can(content(false), "data.write", live)).toBe(false);
     expect(can(content(true), "data.write", live)).toBe(true);
     expect(can(content(true), "data.write", artifact("org", "archived"))).toBe(false);
+  });
+});
+
+/** 13, "The edit level": the three editing actions, on a page in a wiki. */
+describe("editing a wiki page", () => {
+  const EDITOR = "00000000-0000-7000-8000-000000000050";
+  const REVIEWER_EDIT = "00000000-0000-7000-8000-000000000051";
+  const OUTSIDE_EDIT = "00000000-0000-7000-8000-000000000052";
+  const TEAM_EDIT = "00000000-0000-7000-8000-000000000053";
+  const page = (
+    grants: Grant[],
+    access: ArtifactResource["access"] = [],
+    inWiki = true,
+  ): ArtifactResource => ({
+    ...artifact("org", "active"),
+    inWiki,
+    access,
+    inherited: inherit(grants, "org", inWiki),
+  });
+  const cli = (id: string, scopes: TokenScope[], role: "member" | "reviewer" = "member"): Caller => ({
+    kind: "cliToken",
+    person: { id, name: "x", email: "x@example.com", role },
+    tokenId: "t",
+    scopes,
+  });
+  const WITH_EDIT: TokenScope[] = [...CLI_SCOPES, "edit"];
+  const onProject = (personId: string, level: Level): Grant => ({
+    personId,
+    kind: "project",
+    team: null,
+    level,
+    viaToken: false,
+  });
+  const onTeam = (personId: string, level: "view" | "comment" | "edit" | "publish"): Grant => ({
+    personId,
+    kind: "team",
+    teamId: "team",
+    slug: "team",
+    name: "Team",
+    level,
+    viaToken: false,
+  });
+
+  test("a member's role default stays comment, in a wiki too", () => {
+    const resource = page([]);
+    expect(can(person(OTHER, "member"), "artifact.comment", resource)).toBe(true);
+    expect(can(person(OTHER, "member"), "artifact.edit", resource)).toBe(false);
+  });
+
+  test("a direct, team or project grant of edit edits, and project publish edits in a wiki only", () => {
+    expect(
+      can(
+        person(EDITOR, "member"),
+        "artifact.edit",
+        page([], [{ personId: EDITOR, permission: "edit", viaToken: false }]),
+      ),
+    ).toBe(true);
+    expect(can(person(TEAM_EDIT, "member"), "artifact.edit", page([onTeam(TEAM_EDIT, "edit")]))).toBe(true);
+    expect(can(person(EDITOR, "member"), "artifact.edit", page([onProject(EDITOR, "edit")]))).toBe(true);
+    expect(can(person(EDITOR, "member"), "artifact.edit", page([onProject(EDITOR, "publish")]))).toBe(true);
+    // Outside a wiki, project publish and edit are comment, and nothing edits.
+    const plain = page([onProject(EDITOR, "publish")], [], false);
+    expect(can(person(EDITOR, "member"), "artifact.edit", plain)).toBe(false);
+    expect(can(person(EDITOR, "member"), "artifact.comment", plain)).toBe(true);
+    expect(can(person(EDITOR, "member"), "artifact.publish", plain)).toBe(false);
+  });
+
+  test("an edit grant never publishes, manages or shares", () => {
+    const resource = page([onProject(EDITOR, "edit")]);
+    for (const action of [
+      "artifact.publish",
+      "artifact.manage",
+      "artifact.share",
+      "artifact.maintain",
+    ] as const) {
+      expect(can(person(EDITOR, "member"), action, resource)).toBe(false);
+    }
+  });
+
+  test("reviewers and outside people stop at comment with an edit grant", () => {
+    const resource = page(
+      [onProject(REVIEWER_EDIT, "edit")],
+      [{ personId: OUTSIDE_EDIT, permission: "edit", viaToken: false }],
+    );
+    expect(can(person(REVIEWER_EDIT, "reviewer"), "artifact.edit", resource)).toBe(false);
+    expect(can(person(REVIEWER_EDIT, "reviewer"), "artifact.comment", resource)).toBe(true);
+    expect(can(person(OUTSIDE_EDIT, "outside"), "artifact.edit", resource)).toBe(false);
+    expect(can(person(OUTSIDE_EDIT, "outside"), "artifact.comment", resource)).toBe(true);
+  });
+
+  test("tokens need the edit scope, and project manage through a token is comment", () => {
+    const resource = page([onProject(EDITOR, "edit"), onProject(CLI_MANAGE, "manage")]);
+    expect(can(cli(EDITOR, WITH_EDIT), "artifact.edit", resource)).toBe(true);
+    expect(can(cli(EDITOR, CLI_SCOPES), "artifact.edit", resource)).toBe(false);
+    expect(can(cli(CLI_MANAGE, WITH_EDIT), "artifact.edit", resource)).toBe(false);
+    expect(can(person(CLI_MANAGE, "member"), "artifact.edit", resource)).toBe(true);
+    expect(can(orgToken(null, [...ALL_SCOPES, "edit"]), "artifact.edit", resource)).toBe(true);
+    expect(can(orgToken(null), "artifact.edit", resource)).toBe(false);
+    expect(can(orgToken([OTHER_PROJECT], [...ALL_SCOPES, "edit"]), "artifact.edit", resource)).toBe(false);
+  });
+
+  test("no token accepts or maintains; people with the right do, and guests never edit", () => {
+    const resource = page([onProject(EDITOR, "edit")]);
+    expect(can(person(EDITOR, "member"), "artifact.accept", resource)).toBe(true);
+    expect(can(cli(EDITOR, WITH_EDIT), "artifact.accept", resource)).toBe(false);
+    expect(can(person(PUBLISHER, "member"), "artifact.maintain", resource)).toBe(true);
+    expect(can(person(EDITOR, "member"), "artifact.maintain", resource)).toBe(false);
+    expect(can(cli(PUBLISHER, WITH_EDIT), "artifact.maintain", resource)).toBe(false);
+    expect(can(guest("comment", true), "artifact.edit", resource)).toBe(false);
+  });
+
+  test("an archived page can't be edited", () => {
+    const resource = { ...page([onProject(EDITOR, "edit")]), archivedAt: new Date() };
+    expect(can(person(EDITOR, "member"), "artifact.edit", resource)).toBe(false);
   });
 });

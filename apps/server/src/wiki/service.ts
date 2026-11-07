@@ -174,7 +174,7 @@ export async function wikiAudience(deps: Deps, caller: Caller, place: LoadedProj
     },
     guidance: {
       edits: direct ? ("direct" as const) : ("suggestion" as const),
-      text: "Edits apply directly where only the editor can read; where others can read, propose suggestions. An owner can mark a page as maintained by agents. Editing ships in Part B.",
+      text: "Agent edits apply directly where only the editor can read, or on pages an owner marked agent-maintained; elsewhere they arrive as suggestions. Someone writing keeps agents out; someone pairing turns agent edits into suggestions.",
     },
   };
 }

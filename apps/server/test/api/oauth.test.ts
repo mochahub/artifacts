@@ -140,7 +140,7 @@ describe("OAuth and the hosted MCP", () => {
     expect(header).toContain(
       'resource_metadata="http://viewer.test/.well-known/oauth-protected-resource/api/mcp"',
     );
-    expect(header).toContain('scope="read comment publish"');
+    expect(header).toContain('scope="read comment publish edit"');
     for (const [host, origin] of [
       ["viewer.test", "http://viewer.test"],
       ["art.example.org", "https://art.example.org"],
@@ -176,7 +176,7 @@ describe("OAuth and the hosted MCP", () => {
       refresh_token: string;
       scope: string;
     };
-    expect(tokens.scope).toBe("read comment publish");
+    expect(tokens.scope).toBe("read comment publish edit");
     expect((await mcp(tokens.access_token, "tools/list")).status).toBe(200);
 
     const list = (await (await t.api("/api/me/sessions", { cookie })).json()) as {
@@ -482,7 +482,7 @@ describe("OAuth and the hosted MCP", () => {
     expect(discover.result.supportedVersions).toContain("2026-07-28");
     const tools = await mcp(owner, "tools/list", meta, { ...modern, "Mcp-Method": "tools/list" });
     const list = (await tools.json()) as { result: { tools: { name: string }[]; ttlMs: number } };
-    expect(list.result.tools).toHaveLength(15);
+    expect(list.result.tools).toHaveLength(21);
     expect(list.result.ttlMs).toBeGreaterThan(0);
     const mismatch = await mcp(owner, "tools/list", meta, { ...modern, "Mcp-Method": "tools/call" });
     expect(mismatch.status).toBe(400);

@@ -9,6 +9,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@artifacts/doc": "workspace:*",
     "@artifacts/kit": "workspace:*",
     "@artifacts/sandbox": "workspace:*",
     "@artifacts/schema": "workspace:*",
@@ -20,6 +21,8 @@
     "postgres": "^4.0.0",
     "sharp": "0.35.5",
     "tldts": "^7.4.19",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.33",
     "zod": "^4.6.7"
   },
   "devDependencies": {

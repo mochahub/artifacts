@@ -633,6 +633,11 @@ export type Renders = FrameRecord["renders"];
 
 export const PublishCommit = z.object({
   uploadId: z.string(),
+  /**
+   * Retire a page's draft without saving it first, when it can't be saved (13, "When a version is made
+   * outside the draft"). The loss is logged. Without it, a draft that fails to checkpoint refuses the publish.
+   */
+  discardDraft: z.boolean().optional(),
   message: z.string().nullable().optional(),
   name: z.string().nullable().optional(),
   // Optional here: an older CLI has neither, and `manifest/summary` is what asks for one (07).

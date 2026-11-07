@@ -47,7 +47,7 @@ const OpMarkdown = z.string().max(EDIT_OP_MARKDOWN_MAX);
 export const AgentPolicy = z.object({
   edits: z.enum(["direct", "suggestion", "refused"]),
   /** Why: the audience, an agent-maintained page, a Delegate run, someone in Pair or in Write. */
-  reason: z.enum(["only_reader", "maintained", "run", "audience", "pair", "writing", "no_edit"]),
+  reason: z.enum(["only_reader", "maintained", "run", "audience", "pair", "writing", "no_edit", "person"]),
   text: z.string(),
 });
 export type AgentPolicy = z.infer<typeof AgentPolicy>;

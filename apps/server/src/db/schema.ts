@@ -995,8 +995,16 @@ export const editDocs = pgTable("edit_docs", {
   checkpointSeq: bigint("checkpoint_seq", { mode: "number" }).notNull().default(0),
   snapshotSeq: bigint("snapshot_seq", { mode: "number" }).notNull().default(0),
   snapshot: bytea("snapshot").notNull(),
-  /** Title, summary, tags and sources set since the last checkpoint. */
-  meta: jsonb("meta").$type<{ title?: string; summary?: string; tags?: string[]; sources?: string[] }>(),
+  /** Title, summary, tags and sources set since the last checkpoint, and threads a direct edit fixes. */
+  meta: jsonb("meta").$type<{
+    title?: string;
+    summary?: string;
+    tags?: string[];
+    sources?: string[];
+    fixes?: { n: number; personId: string | null; agent: string | null; tokenId?: string | null }[];
+    /** The sweep's back-off for a draft that failed to checkpoint: attempts, and when to try next. */
+    sweep?: { attempts: number; next: string };
+  }>(),
   /** Author keys are `a1`, `a2`, ... per artifact. */
   authorCounter: integer("author_counter").notNull().default(0),
   lastActorPersonId: uuid("last_actor_person_id").references(() => people.id),

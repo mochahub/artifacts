@@ -5,6 +5,7 @@ import {
   COMMENT_MAX,
   CreateThread,
   CreateWiki,
+  EditRequest,
   FILES_MAX,
   KEY_PATTERN,
   MANIFEST,
@@ -15,6 +16,8 @@ import {
   PublishPrepare,
   SHA256_HEX,
   SLUG_PATTERN,
+  StartRun,
+  SuggestionStatus,
   Summary,
   Tags,
   type Thread,
@@ -23,6 +26,7 @@ import {
 } from "@artifacts/schema";
 import { articleRecords, buildArticle } from "@artifacts/schema/article";
 import {
+  EDIT_TOOLS,
   MCP_GUIDANCE as GUIDANCE,
   MCP_LEGACY as LEGACY,
   libraryTools,
@@ -33,6 +37,7 @@ import {
   type McpProperty,
   type McpToolSpec,
   MCP_MODERN as MODERN,
+  pageReadText,
   REPLY_INPUT,
   REVIEW_TOOLS,
   WIKI_ARTICLE_INPUT,
@@ -42,11 +47,14 @@ import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { GUIDES } from "../../../../skill/index.ts";
-import { toProject } from "../auth/access.ts";
+import { findArtifactBySlug, toProject } from "../auth/access.ts";
 import type { Asker, Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { pages, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { applyOps, pageRead } from "../editing/ops.ts";
+import { cancelRun, findRun, finishRun, startRun } from "../editing/runs.ts";
+import { listSuggestions } from "../editing/suggestions.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
 import type { ApiVars, Routes } from "../http/routes.ts";
@@ -103,7 +111,7 @@ type Content = { type: "text"; text: string } | { type: "image"; data: string; m
 type McpCaller = Extract<Caller, { kind: "cliToken" | "orgToken" }>;
 type Context = { asker: Asker<McpCaller>; caller: McpCaller; orgId: string; input: Input };
 type Tool = McpToolSpec & {
-  scope: "read" | "comment" | "publish";
+  scope: "read" | "comment" | "edit" | "publish";
   run(context: Context): Promise<unknown | { content: Content[] }>;
 };
 
@@ -128,6 +136,25 @@ const artifactOf = (value: unknown) => {
 const load = ({ orgId, caller, input }: Context, deps: Deps) => {
   const { project, slug } = artifactOf(input.artifact);
   return loadArtifact(deps, orgId, caller, project, slug);
+};
+
+/** Tool arguments as an `EditRequest`, with zod's words when they don't fit. */
+const editRequest = (input: Input, suggest: boolean): EditRequest => {
+  const parsed = EditRequest.safeParse({
+    ops: input.ops,
+    sources: input.sources,
+    note: input.note,
+    fixes: input.fixes,
+    run: input.run,
+    ...(suggest ? { suggest: true } : { checkpoint: input.checkpoint }),
+    agent: "Connector",
+  });
+  if (!parsed.success) {
+    throw new ToolError(
+      parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("\n"),
+    );
+  }
+  return parsed.data;
 };
 
 const threadJson = (thread: Thread) => {
@@ -196,7 +223,239 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
     }
   }
 
+  const publishArticle: Tool = {
+    name: "artifacts_publish_article",
+    description:
+      "Publish Markdown as an article, with no CLI. No local images, Mermaid or embeds. Republishing makes a new version.",
+    scope: "publish",
+    properties: {
+      project: { type: "string", description: "Project slug" },
+      slug: { type: "string", description: "Artifact slug" },
+      title: { type: "string", description: "Title" },
+      summary: { type: "string", description: "What it holds and why it mattered, up to 280 characters" },
+      markdown: { type: "string", description: "The article" },
+      tags: { type: "array", description: "Up to 8" },
+      message: { type: "string", description: "What changed" },
+      repo,
+      ...WIKI_ARTICLE_INPUT,
+    },
+    required: ["project", "slug", "title", "summary", "markdown"],
+    async run({ asker, caller, orgId, input }) {
+      const fields = PublishPrepare.pick({ project: true, slug: true, title: true }).safeParse(input);
+      if (!fields.success) throw new ToolError("project, slug or title isn't valid.");
+      const summary = Summary.safeParse(input.summary);
+      if (!summary.success) throw new ToolError("summary is required, up to 280 characters.");
+      const tags = Tags.optional().safeParse(input.tags);
+      if (!tags.success) throw new ToolError("tags: up to 8, each up to 32 characters.");
+      const markdown = typeof input.markdown === "string" ? input.markdown : "";
+      if (!markdown.trim()) throw new ToolError("markdown is required.");
+      if (Buffer.byteLength(markdown) > MAX_MARKDOWN) {
+        throw new ApiError("too_large", "That article is too long.", { limit: MAX_MARKDOWN });
+      }
+      const wikiFields = Object.fromEntries(
+        ["role", "sources", "origin", "untrusted"]
+          .filter((k) => input[k] !== undefined)
+          .map((k) => [k, input[k]]),
+      );
+      const wiki = Object.keys(wikiFields).length ? WikiMeta.safeParse(wikiFields) : null;
+      if (wiki && !wiki.success)
+        throw new ToolError(
+          wiki.error.issues.map((issue) => `wiki.${issue.path.join(".")}: ${issue.message}`).join("\n"),
+        );
+      const wikiMeta = wiki?.success ? wiki.data : undefined;
+      const { project, slug, title } = fields.data;
+      // Before anything is stored: the permission check, and the same one prepare and commit run.
+      const { row: existing } = await publisher.target(asker, project, slug);
+      if (existing) {
+        const rows = await deps.db
+          .select({ key: pages.pageKey, kind: pages.kind })
+          .from(pages)
+          .innerJoin(versions, eq(versions.id, pages.versionId))
+          .where(and(eq(versions.artifactId, existing.id), eq(versions.n, existing.latestVersion)));
+        if (rows.length !== 1 || rows[0]?.kind !== "article" || rows[0]?.key !== ARTICLE_PAGE) {
+          throw new ToolError("That artifact has other pages, which this would replace. Use artifacts pack.");
+        }
+      }
+      const who = "tokenId" in caller ? caller.tokenId : "none";
+      deps.limits.hit(`article:${who}`, ARTICLES_PER_MINUTE, MINUTE_MS);
+      const built = buildArticle({
+        project,
+        path: "doc.md",
+        source: markdown,
+        readFile: () => "",
+        blobHash: () => undefined,
+        frameHash: () => undefined,
+        mermaid: new Map(),
+      });
+      const problem = built.problems.find((entry) => entry.severity === "error");
+      if (problem) {
+        throw new ToolError(
+          `${problem.message} This tool takes text only: images, Mermaid and embeds need artifacts pack.`,
+        );
+      }
+      const encode = (text: string) => new TextEncoder().encode(text);
+      const manifest = JSON.stringify(
+        {
+          project,
+          slug,
+          title,
+          wiki: wikiMeta,
+          summary: summary.data,
+          ...(tags.data ? { tags: tags.data } : {}),
+          pages: [{ id: ARTICLE_PAGE, kind: "article", src: "doc.md", title }],
+        },
+        null,
+        2,
+      );
+      const types: [string, string, string][] = [
+        ["doc.md", markdown, "text/markdown"],
+        [MANIFEST, manifest, "application/json"],
+        [articleHtmlPath(ARTICLE_PAGE), built.html, "text/html; charset=utf-8"],
+      ];
+      const stored = await Promise.all(
+        types.map(async ([path, body, type]) => {
+          const bytes = encode(body);
+          return { path, sha256: await putBlob(deps, orgId, bytes, type), size: bytes.length, type };
+        }),
+      );
+      const repoName = normalizeRepo(str(input.repo, "repo"));
+      const prepared = await publisher.prepare(asker, {
+        project,
+        slug,
+        title,
+        repo: repoName,
+        files: stored,
+      });
+      const theme = ArticleTheme.safeParse(asker.org.brand?.theme ?? {});
+      const article = articleRecords(built, {
+        id: ARTICLE_PAGE,
+        title,
+        group: null,
+        position: 0,
+        htmlHash: stored[2]?.sha256,
+        theme: theme.success && Object.keys(theme.data).length > 0 ? theme.data : null,
+      });
+      return publisher.commit(asker, {
+        uploadId: prepared.uploadId,
+        message: str(input.message, "message", 2000) ?? null,
+        name: null,
+        summary: summary.data,
+        tags: tags.data ?? null,
+        wiki: wikiMeta,
+        notes: {},
+        agent: "Connector",
+        files: Object.fromEntries(
+          stored.map((file) => [file.path, { hash: file.sha256, size: file.size, type: file.type }]),
+        ),
+        backendHash: null,
+        pages: [article.page],
+        frames: [],
+        blocks: article.blocks,
+      });
+    },
+  };
+
+  /** Editing wiki pages by operation (13, "Hosted MCP tools"). */
+  const editTools: Tool[] = [
+    {
+      ...EDIT_TOOLS.read,
+      scope: "read",
+      async run(context) {
+        const loaded = await load(context, deps);
+        const draft = context.input.draft;
+        if (draft !== undefined && typeof draft !== "boolean") throw new ToolError("draft is true or false.");
+        const read = await pageRead(deps, context.caller, loaded, {
+          draft,
+          cursor: str(context.input.cursor, "cursor", 20),
+        });
+        return { content: [{ type: "text", text: pageReadText(read) }] };
+      },
+    },
+    {
+      ...EDIT_TOOLS.edit,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        return applyOps(deps, context.caller, loaded, editRequest(context.input, false));
+      },
+    },
+    {
+      ...EDIT_TOOLS.suggest,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        return applyOps(deps, context.caller, loaded, editRequest(context.input, true));
+      },
+    },
+    {
+      ...EDIT_TOOLS.create,
+      scope: "publish",
+      async run(context) {
+        const wiki = str(context.input.wiki, "wiki", 40);
+        const slug = str(context.input.slug, "slug", 40);
+        if (!wiki || !slug || !SLUG_PATTERN.test(wiki) || !SLUG_PATTERN.test(slug))
+          throw new ToolError("wiki and slug are lowercase slugs.");
+        const [project] = await deps.db
+          .select()
+          .from(projects)
+          .where(and(eq(projects.orgId, context.orgId), eq(projects.slug, wiki), eq(projects.kind, "wiki")));
+        if (!project || !can(context.caller, "project.read", await toProject(deps, project)))
+          throw new ApiError("not_found", "There's no such wiki.");
+        const existing = await findArtifactBySlug(deps, context.orgId, wiki, slug);
+        if (existing && can(context.caller, "artifact.read", existing)) {
+          throw new ApiError("conflict", "That page exists. Change it with artifacts_page_edit.", {
+            reason: "exists",
+          });
+        }
+        const { wiki: _, ...rest } = context.input;
+        return publishArticle.run({ ...context, input: { ...rest, project: wiki } });
+      },
+    },
+    {
+      ...EDIT_TOOLS.suggestions,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        if (!can(context.caller, "artifact.edit", loaded))
+          throw new ApiError("forbidden", "Suggestions are for people and agents who can edit this page.");
+        const raw = str(context.input.status, "status", 12) ?? "open";
+        const status = raw === "all" ? undefined : SuggestionStatus.safeParse(raw);
+        if (status && !status.success) throw new ToolError("status isn't one of the suggestion statuses.");
+        return listSuggestions(deps, context.caller, loaded, {
+          status: status?.data,
+          run: str(context.input.run, "run", 40),
+          cursor: str(context.input.cursor, "cursor", 40),
+        });
+      },
+    },
+    {
+      ...EDIT_TOOLS.delegate,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        if (!can(context.caller, "artifact.edit", loaded))
+          throw new ApiError("forbidden", "You can't edit this page.");
+        const action = str(context.input.action, "action", 10);
+        if (action === "start") {
+          const body = StartRun.safeParse({ goal: context.input.goal, agent: "Connector" });
+          if (!body.success) throw new ToolError("start needs a goal, up to 500 characters.");
+          return startRun(deps, context.caller, loaded, body.data);
+        }
+        if (action !== "finish" && action !== "cancel")
+          throw new ToolError("action is start, finish or cancel.");
+        const id = str(context.input.run, "run", 40);
+        const row = id ? await findRun(deps, context.orgId, id) : null;
+        if (!row || row.artifactId !== loaded.id)
+          throw new ApiError("not_found", "There's no such run on this page.");
+        return action === "finish"
+          ? finishRun(deps, context.caller, loaded, row, str(context.input.message, "message", 2000))
+          : cancelRun(deps, context.caller, loaded, row);
+      },
+    },
+  ];
+
   return [
+    ...editTools,
     {
       ...WIKI_TOOLS.wiki,
       scope: "read",
@@ -422,139 +681,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         }));
       },
     },
-    {
-      name: "artifacts_publish_article",
-      description:
-        "Publish Markdown as an article, with no CLI. No local images, Mermaid or embeds. Republishing makes a new version.",
-      scope: "publish",
-      properties: {
-        project: { type: "string", description: "Project slug" },
-        slug: { type: "string", description: "Artifact slug" },
-        title: { type: "string", description: "Title" },
-        summary: { type: "string", description: "What it holds and why it mattered, up to 280 characters" },
-        markdown: { type: "string", description: "The article" },
-        tags: { type: "array", description: "Up to 8" },
-        message: { type: "string", description: "What changed" },
-        repo,
-        ...WIKI_ARTICLE_INPUT,
-      },
-      required: ["project", "slug", "title", "summary", "markdown"],
-      async run({ asker, caller, orgId, input }) {
-        const fields = PublishPrepare.pick({ project: true, slug: true, title: true }).safeParse(input);
-        if (!fields.success) throw new ToolError("project, slug or title isn't valid.");
-        const summary = Summary.safeParse(input.summary);
-        if (!summary.success) throw new ToolError("summary is required, up to 280 characters.");
-        const tags = Tags.optional().safeParse(input.tags);
-        if (!tags.success) throw new ToolError("tags: up to 8, each up to 32 characters.");
-        const markdown = typeof input.markdown === "string" ? input.markdown : "";
-        if (!markdown.trim()) throw new ToolError("markdown is required.");
-        if (Buffer.byteLength(markdown) > MAX_MARKDOWN) {
-          throw new ApiError("too_large", "That article is too long.", { limit: MAX_MARKDOWN });
-        }
-        const wikiFields = Object.fromEntries(
-          ["role", "sources", "origin", "untrusted"]
-            .filter((k) => input[k] !== undefined)
-            .map((k) => [k, input[k]]),
-        );
-        const wiki = Object.keys(wikiFields).length ? WikiMeta.safeParse(wikiFields) : null;
-        if (wiki && !wiki.success)
-          throw new ToolError(
-            wiki.error.issues.map((issue) => `wiki.${issue.path.join(".")}: ${issue.message}`).join("\n"),
-          );
-        const wikiMeta = wiki?.success ? wiki.data : undefined;
-        const { project, slug, title } = fields.data;
-        // Before anything is stored: the permission check, and the same one prepare and commit run.
-        const { row: existing } = await publisher.target(asker, project, slug);
-        if (existing) {
-          const rows = await deps.db
-            .select({ key: pages.pageKey, kind: pages.kind })
-            .from(pages)
-            .innerJoin(versions, eq(versions.id, pages.versionId))
-            .where(and(eq(versions.artifactId, existing.id), eq(versions.n, existing.latestVersion)));
-          if (rows.length !== 1 || rows[0]?.kind !== "article" || rows[0]?.key !== ARTICLE_PAGE) {
-            throw new ToolError(
-              "That artifact has other pages, which this would replace. Use artifacts pack.",
-            );
-          }
-        }
-        const who = "tokenId" in caller ? caller.tokenId : "none";
-        deps.limits.hit(`article:${who}`, ARTICLES_PER_MINUTE, MINUTE_MS);
-        const built = buildArticle({
-          project,
-          path: "doc.md",
-          source: markdown,
-          readFile: () => "",
-          blobHash: () => undefined,
-          frameHash: () => undefined,
-          mermaid: new Map(),
-        });
-        const problem = built.problems.find((entry) => entry.severity === "error");
-        if (problem) {
-          throw new ToolError(
-            `${problem.message} This tool takes text only: images, Mermaid and embeds need artifacts pack.`,
-          );
-        }
-        const encode = (text: string) => new TextEncoder().encode(text);
-        const manifest = JSON.stringify(
-          {
-            project,
-            slug,
-            title,
-            wiki: wikiMeta,
-            summary: summary.data,
-            ...(tags.data ? { tags: tags.data } : {}),
-            pages: [{ id: ARTICLE_PAGE, kind: "article", src: "doc.md", title }],
-          },
-          null,
-          2,
-        );
-        const types: [string, string, string][] = [
-          ["doc.md", markdown, "text/markdown"],
-          [MANIFEST, manifest, "application/json"],
-          [articleHtmlPath(ARTICLE_PAGE), built.html, "text/html; charset=utf-8"],
-        ];
-        const stored = await Promise.all(
-          types.map(async ([path, body, type]) => {
-            const bytes = encode(body);
-            return { path, sha256: await putBlob(deps, orgId, bytes, type), size: bytes.length, type };
-          }),
-        );
-        const repoName = normalizeRepo(str(input.repo, "repo"));
-        const prepared = await publisher.prepare(asker, {
-          project,
-          slug,
-          title,
-          repo: repoName,
-          files: stored,
-        });
-        const theme = ArticleTheme.safeParse(asker.org.brand?.theme ?? {});
-        const article = articleRecords(built, {
-          id: ARTICLE_PAGE,
-          title,
-          group: null,
-          position: 0,
-          htmlHash: stored[2]?.sha256,
-          theme: theme.success && Object.keys(theme.data).length > 0 ? theme.data : null,
-        });
-        return publisher.commit(asker, {
-          uploadId: prepared.uploadId,
-          message: str(input.message, "message", 2000) ?? null,
-          name: null,
-          summary: summary.data,
-          tags: tags.data ?? null,
-          wiki: wikiMeta,
-          notes: {},
-          agent: "Connector",
-          files: Object.fromEntries(
-            stored.map((file) => [file.path, { hash: file.sha256, size: file.size, type: file.type }]),
-          ),
-          backendHash: null,
-          pages: [article.page],
-          frames: [],
-          blocks: article.blocks,
-        });
-      },
-    },
+    publishArticle,
     {
       name: "artifacts_publish_prepare",
       description:

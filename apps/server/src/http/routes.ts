@@ -80,6 +80,16 @@ function denial(caller: Caller, action: Action, resource: Resource, page = false
   }
   if (resource.type === "team" && !can(caller, "team.read", ORG)) return notFound();
   if (resource.type === "project" && !seesProject(caller, resource)) return notFound();
+  // A token from before editing lacks the scope; the CLI reads `scope` and says to sign in again (13).
+  if (
+    action === "artifact.edit" &&
+    (caller.kind === "cliToken" || caller.kind === "orgToken") &&
+    !caller.scopes.includes("edit")
+  ) {
+    return new ApiError("forbidden", "This token can't edit pages. Sign in again to get the edit scope.", {
+      scope: "edit",
+    });
+  }
   return new ApiError("forbidden", "You can't do that.");
 }
 
