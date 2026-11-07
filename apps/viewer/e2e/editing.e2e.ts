@@ -162,11 +162,15 @@ async function ready(page: Page) {
   await expect(page.getByText("Connecting to the page…")).toHaveCount(0, { timeout: 15_000 });
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
 }
+// The browser runs on this machine: ⌘ moves by document on a Mac, Ctrl+End does on Linux and Windows.
+const MAC = process.platform === "darwin";
+const DOC_END = MAC ? "Meta+ArrowDown" : "Control+End";
+const LINE_SELECT_BACK = MAC ? "Shift+Meta+ArrowLeft" : "Shift+Home";
 /** A new paragraph after the page's last one. */
 async function typeAtEnd(page: Page, text: string) {
   await editor(page).locator("p").last().click();
   // The document's end, not the visual line's: a wrapped paragraph would be split.
-  await page.keyboard.press("Meta+ArrowDown");
+  await page.keyboard.press(DOC_END);
   await page.keyboard.press("Enter");
   await page.keyboard.type(text);
 }
@@ -206,8 +210,8 @@ test("Edit loads the editor chunk on tap; typing, modes, a suggestion accepted, 
   if (info.project.name === "desktop") {
     // ⌘K links the selection; an address that isn't http(s), mailto or a path is refused.
     await expect(editor(page)).toBeFocused();
-    await page.keyboard.press("Shift+Meta+ArrowLeft");
-    await page.keyboard.press("Meta+k");
+    await page.keyboard.press(LINE_SELECT_BACK);
+    await page.keyboard.press("ControlOrMeta+k");
     const sheet = page.getByRole("dialog", { name: "Link" });
     await expect(sheet).toBeVisible();
     const address = sheet.getByRole("textbox", { name: "Address" });
@@ -224,7 +228,7 @@ test("Edit loads the editor chunk on tap; typing, modes, a suggestion accepted, 
     );
     // A pasted link keeps its words and loses an unsafe address.
     await editor(page).locator("p").last().click();
-    await page.keyboard.press("Meta+ArrowDown");
+    await page.keyboard.press(DOC_END);
     await editor(page).evaluate((dom) => {
       const data = new DataTransfer();
       data.setData(
@@ -285,7 +289,7 @@ test("Edit loads the editor chunk on tap; typing, modes, a suggestion accepted, 
   expect(posted["suggestion:accept"]).toHaveLength(1);
 
   // Save version, from the keyboard on a desktop and the menu on a phone.
-  if (info.project.name === "desktop") await page.keyboard.press("Meta+s");
+  if (info.project.name === "desktop") await page.keyboard.press("ControlOrMeta+s");
   else {
     await page.getByRole("button", { name: "More" }).click();
     await page.getByRole("button", { name: /Save version/ }).click();
@@ -479,4 +483,30 @@ test("signing out forgets the drafts this device kept", async ({ browser }) => {
   expect(await unsent(false)).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem("artifacts.edit.x.author"))).toBeNull();
   await context.close();
+});
+
+test("Ctrl+K is Link in the editor, as on Linux and Windows, and Search stays shut", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "desktop", "A keyboard shortcut");
+  // ProseMirror reads the platform once, when it loads: as on Linux, Mod is Ctrl, whatever this machine is.
+  await page.addInitScript(() =>
+    Object.defineProperty(Navigator.prototype, "platform", { get: () => "Linux x86_64" }),
+  );
+  const wiki = `edit-ctrl-${info.repeatEachIndex}`;
+  const id = await seedPage(page, wiki);
+  await mockEditing(page, id, { doc: () => docState(), suggestions: () => [] });
+  await page.goto(`/${wiki}/pricing`);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await ready(page);
+  await editor(page).locator("p").last().click();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Link" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Search" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // Out of the editor, the same chord is still Search.
+  await page.keyboard.press("Escape");
+  await page.locator(".article h1").click();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
 });
