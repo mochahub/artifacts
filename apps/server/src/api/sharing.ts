@@ -182,6 +182,14 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       if (permission === "publish" && !isMember) {
         throw new ApiError("invalid", "Only members of the organization can publish.");
       }
+      // Editing is granted by a person in a browser, never by a token, and only to members (13), so an
+      // invite can't carry it either. Checked before anything is written.
+      if (permission === "edit" && caller.kind !== "person") {
+        throw new ApiError("forbidden", "Only a person can let someone edit. Use the Share sheet.");
+      }
+      if (permission === "edit" && !isMember) {
+        throw new ApiError("invalid", "Only members of the organization can edit.");
+      }
       if (!person || person.role === "outside") requireCan(caller, "artifact.share_outside", resource);
       const now = clock.now();
       await db.insert(activity).values({
@@ -266,6 +274,9 @@ export function sharingRoutes(routes: Routes, deps: Deps) {
       const viaToken = caller.kind !== "person";
       if (viaToken && permission === "publish") {
         throw new ApiError("forbidden", "Only a person can let a team publish. Use the Share sheet.");
+      }
+      if (viaToken && permission === "edit") {
+        throw new ApiError("forbidden", "Only a person can let a team edit. Use the Share sheet.");
       }
       const orgId = c.var.org.id;
       const teamId = c.req.param("teamId");

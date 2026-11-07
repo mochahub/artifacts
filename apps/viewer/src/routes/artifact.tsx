@@ -28,7 +28,7 @@ const KIND_LABELS: Record<Artifact["pages"][number]["kind"], string> = {
 
 export function ArtifactPage() {
   const { params } = useRoute();
-  const { route } = useLocation();
+  const { route, url } = useLocation();
   const project = params.project ?? "";
   const remote = usePoll<Artifact>(artifactApi({ project, slug: params.artifact ?? "" }), 10_000);
   // Another artifact's detail must not stand in for this one while it loads: the shape does.
@@ -39,7 +39,8 @@ export function ArtifactPage() {
       ? artifactHref(artifact, artifact.pages[0]?.key)
       : null;
   useEffect(() => {
-    if (single) route(single, true);
+    // The query rides along: `?edit=1` opens the editor on the page it lands on.
+    if (single) route(`${single}${url.includes("?") ? url.slice(url.indexOf("?")) : ""}`, true);
   }, [single]);
   if (single) return null;
   const waiting = (inner: ComponentChildren) => (

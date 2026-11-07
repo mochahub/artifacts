@@ -25,6 +25,7 @@ import {
   versions,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { outsideDraft } from "../editing/checkpoint.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
 import { artifactParam } from "../http/resources.ts";
@@ -323,8 +324,14 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       const { resource, version } = await versionParam(c);
       if (version.deletedAt) throw new ApiError("conflict", "That version is removed. Bring it back first.");
       const publisher = actorOf(c.var.caller);
+      let flushDraft = () => {};
       const n = await db.transaction(async (tx) => {
         await lockArtifact(tx, resource.id, "content");
+        // A page being edited isn't restored over; a dirty draft is saved first (13).
+        const draft = await outsideDraft(deps, tx, resource, {
+          discard: c.req.query("discardDraft") === "1",
+          by: publisher,
+        });
         const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, resource.id)).limit(1);
         if (!current || current.deletedAt) throw new ApiError("conflict", "That artifact was just deleted.");
         if (current.archivedAt)
@@ -381,8 +388,11 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           .update(artifacts)
           .set({ latestVersion: next, hasBackend: version.backendHash !== null, updatedAt: now })
           .where(eq(artifacts.id, resource.id));
+        await draft?.retire(next);
+        if (draft) flushDraft = draft.flush;
         return next;
       });
+      flushDraft();
       await record(c, "restored", { version: n, from: version.n });
       return c.json({ n } satisfies RestoreResult);
     },

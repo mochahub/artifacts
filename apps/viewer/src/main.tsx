@@ -32,6 +32,8 @@ function QuickSearch() {
   const open = useSignal(false);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Something nearer took it first: in the editor, ⌘K is Link.
+      if (event.defaultPrevented) return;
       if (event.key === "k" && (event.metaKey || event.ctrlKey) && me.value) {
         event.preventDefault();
         open.value = !open.value;

@@ -1,0 +1,514 @@
+/* The editor (13, "Viewer"; the design board artifacts/phase-2b-editing-design). Solid surfaces, the
+   viewer's tokens: yellow is the person's pen, blue the agent's pencil. No glass, no bars beside text. */
+:root.editing,
+:root.editing body {
+  overflow: hidden;
+}
+.ed {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--tx);
+  font: 17px / 1.4 var(--ui);
+  padding-top: env(safe-area-inset-top);
+}
+.ed .sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ed-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 52px;
+  padding: 0 8px 0 max(8px, env(safe-area-inset-left));
+  flex: none;
+}
+.txtbtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  font: 700 17px var(--ui);
+  color: var(--tx);
+  background: none;
+  border: 0;
+}
+.ed .saved {
+  font-size: 14px;
+  color: var(--tx2);
+  padding: 0 4px;
+  white-space: nowrap;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-who {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0 4px;
+}
+.ed-who li {
+  display: flex;
+}
+.ed-who .av {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.ed-who li + li .av {
+  margin-left: -6px;
+}
+.ed-title,
+.ed-modes-wide,
+.ed-save-wide,
+.ed-aud-wide,
+.ed-redo {
+  display: none;
+}
+.tag {
+  font: 600 13px var(--ui);
+  color: var(--tx2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The mode switch: three words, the current one underlined. Never a pill. */
+.ed-modes-row {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 0.5px solid var(--sep);
+  flex: none;
+}
+.ed-modes {
+  display: flex;
+  gap: 4px;
+}
+.ed-modes button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  font: 600 16px var(--ui);
+  color: var(--tx2);
+  background: none;
+  border: 0;
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -0.5px;
+}
+.ed-modes button.on {
+  color: var(--tx);
+  border-bottom-color: var(--tx);
+}
+.ed-modes-row .aud {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--tx2);
+  white-space: nowrap;
+}
+
+.lockline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  font: 15px / 1.35 var(--ui);
+  color: var(--tx2);
+  background: var(--card);
+  border-bottom: 0.5px solid var(--sep);
+}
+.lockline svg {
+  width: 17px;
+  height: 17px;
+  color: var(--agent-word);
+}
+
+/* The page: the reader's article column, unchanged in type and width. */
+.ed-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(84px + var(--kb, 0px) + env(safe-area-inset-bottom));
+}
+.ed-article {
+  padding-top: 10px;
+}
+.ed-body {
+  outline: none;
+  font: var(--read-size, 19px) / 1.55 var(--read-font, var(--serif));
+  min-height: 40vh;
+  caret-color: var(--mark-word);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ed-body > * {
+  position: relative;
+}
+.ed-body p {
+  margin: 0 0 14px;
+}
+/* The page's own first heading is its title, as the reader draws it. */
+.ed-body > h1:first-child {
+  font: 700 32px / 1.14 var(--read-font, var(--serif));
+  letter-spacing: -0.01em;
+  margin: 6px 0 10px;
+}
+.ed-body:focus-visible {
+  outline: none;
+}
+.ed-body [data-atom] {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--lift);
+  font: 15px var(--ui);
+  color: var(--tx2);
+  margin: 0 0 14px;
+}
+.ed-body [data-atom]::before {
+  content: attr(data-atom);
+  text-transform: capitalize;
+  font-weight: 700;
+}
+.ed-body [data-atom].ProseMirror-selectednode {
+  box-shadow: 0 0 0 2px var(--mark);
+}
+.ed-wikilink {
+  color: var(--tx);
+  text-decoration: underline 1px var(--tx3);
+  text-underline-offset: 4px;
+}
+
+/* Remote carets: y-prosemirror's caret, with a flag saying whose. */
+.ed-caret {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.2em;
+  margin: 0 -1px;
+  vertical-align: -0.2em;
+  border-left: 2px solid var(--tx2);
+  pointer-events: none;
+}
+.ed-caret.ag {
+  border-left-color: var(--agent);
+}
+.ed-caret .flag {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  padding: 2px 7px;
+  border-radius: 6px 6px 6px 0;
+  background: var(--tx2);
+  color: var(--bg);
+  font: 700 12px / 1.3 var(--ui);
+  white-space: nowrap;
+  user-select: none;
+}
+.ed-caret.ag .flag {
+  background: var(--agent-word);
+  color: var(--bg);
+}
+.ProseMirror-yjs-selection {
+  background: var(--soft);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ed-caret .flag {
+    animation: ed-flag 1.6s ease-out 1 forwards;
+  }
+}
+@keyframes ed-flag {
+  80% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.7;
+  }
+}
+
+/* A suggestion: the edit itself in the blue pencil, the old words struck, under its block. */
+.sug-on {
+  color: var(--tx2);
+}
+.sug-gone {
+  text-decoration: line-through 1.5px var(--warn-word);
+  color: var(--tx2);
+}
+.sug {
+  font: 16px / 1.4 var(--ui);
+  background: var(--card);
+  border-radius: 18px;
+  box-shadow: var(--lift);
+  padding: 12px 14px 14px;
+  margin: -2px 0 16px;
+  white-space: normal;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sug .hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--tx2);
+  margin-bottom: 6px;
+}
+.sug .hd .av {
+  width: 26px;
+  height: 26px;
+}
+.sug .hd b {
+  color: var(--agent-word);
+}
+.sug .grow {
+  flex: 1;
+}
+.sug-text,
+.review-diff p {
+  font: 17px / 1.5 var(--read-font, var(--serif));
+  margin: 0 0 10px;
+  color: var(--tx);
+}
+ins.s {
+  text-decoration: none;
+  color: var(--agent-word);
+  background: rgba(43, 140, 214, 0.13);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px rgba(43, 140, 214, 0.13);
+}
+del.s {
+  color: var(--warn-word);
+  text-decoration: line-through 1.5px;
+}
+.sug .why {
+  color: var(--tx);
+  margin-bottom: 10px;
+}
+/* The toolbar: under the bar on a desktop; at the foot on a phone, riding the keyboard's top edge. */
+.ed-tools {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--kb, 0px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 50px;
+  padding: 3px max(6px, env(safe-area-inset-right)) calc(3px + env(safe-area-inset-bottom))
+    max(6px, env(safe-area-inset-left));
+  background: var(--card);
+  border-top: 0.5px solid var(--sep);
+  overflow-x: auto;
+}
+.ed.typing .ed-tools {
+  padding-bottom: 3px;
+}
+.ed-tools .k {
+  min-width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  font: 700 17px var(--ui);
+  color: var(--tx);
+  background: none;
+  border: 0;
+  flex: none;
+}
+.ed-tools .k svg {
+  width: 21px;
+  height: 21px;
+}
+.ed-tools .k.serif {
+  font-family: var(--serif);
+}
+.ed-tools .k.on {
+  background: var(--soft);
+}
+.ed-tools .k.mode {
+  display: inline-flex;
+  gap: 4px;
+  padding: 0 10px 0 12px;
+  font-size: 16px;
+  border-radius: 0;
+  border-right: 0.5px solid var(--sep);
+  margin-right: 2px;
+}
+.ed-tools .k.mode svg {
+  width: 16px;
+  height: 16px;
+}
+.ed-tools .vs {
+  display: none;
+  width: 0.5px;
+  height: 24px;
+  background: var(--sep);
+  margin: 0 6px;
+}
+.ed-tools .grow,
+.ed .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A run at the foot, above the toolbar. */
+.ed .strip {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(64px + var(--kb, 0px) + env(safe-area-inset-bottom));
+  z-index: 3;
+  padding: 12px 12px 12px 14px;
+  border-radius: 24px;
+  background: var(--card);
+  box-shadow:
+    0 0 0 0.5px var(--sep),
+    0 10px 28px -10px rgba(18, 20, 24, 0.3);
+  font: 15px / 1.35 var(--ui);
+}
+.ed .strip .acts {
+  margin-top: 10px;
+}
+.ed .toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(70px + var(--kb, 0px) + env(safe-area-inset-bottom));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px;
+  min-height: 48px;
+  border-radius: 24px;
+  background: var(--tx);
+  color: var(--bg);
+  font: 600 15px var(--ui);
+  max-width: calc(100vw - 32px);
+}
+.ed .toast .txtbtn {
+  color: var(--mark);
+  font-size: 15px;
+}
+.ed-offline {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 100px);
+  left: 24px;
+  right: 24px;
+  text-align: center;
+}
+
+/* Sheets inside the editor: the kit's sheet. Their forms keep 16px+ inputs, so iOS doesn't zoom. */
+.ed form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ed .field {
+  font-size: 17px;
+}
+.ed textarea.field {
+  min-height: 112px;
+  font: 18px / 1.45 var(--serif);
+  resize: vertical;
+}
+.review-change {
+  align-items: flex-start;
+}
+.review-list {
+  margin: 12px 0 14px;
+}
+
+@media (min-width: 760px) {
+  .ed-bar {
+    min-height: 60px;
+    padding: 0 18px;
+    background: var(--card);
+    border-bottom: 0.5px solid var(--sep);
+    gap: 8px;
+  }
+  .ed-title,
+  .ed-save-wide,
+  .ed-redo {
+    display: initial;
+  }
+  .ed-save-wide {
+    display: flex;
+  }
+  .ed-modes-wide {
+    display: block;
+    margin: 0 auto;
+  }
+  .ed-modes-wide .ed-modes button {
+    min-height: 58px;
+  }
+  .ed-modes-row {
+    display: none;
+  }
+  .ed-aud-wide {
+    display: block;
+  }
+  .ed-tools {
+    position: static;
+    order: 0;
+    min-height: 48px;
+    padding: 0 max(16px, calc(50% - 330px));
+    background: var(--bg);
+    border-top: 0;
+    border-bottom: 0.5px solid var(--sep);
+  }
+  .ed-tools .k {
+    min-width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    font-size: 16px;
+  }
+  .ed-tools .vs {
+    display: block;
+  }
+  .ed-page {
+    padding-bottom: 120px;
+  }
+  .ed .strip {
+    left: auto;
+    right: 24px;
+    width: 380px;
+    bottom: 24px;
+  }
+  .ed .toast {
+    bottom: 32px;
+  }
+}
+
+/* Before the page has arrived: a quiet line, and nothing to type into yet. */
+.ed-wait {
+  font: 16px / 1.4 var(--ui);
+  color: var(--tx2);
+  margin: 4px 0 12px;
+}
+.ed-mount.waiting {
+  opacity: 0.5;
+}
+
+/* A refusal sits at the top, clear of the run strip and the toolbar at the foot. */
+.ed .toast.err-toast {
+  top: calc(env(safe-area-inset-top) + 60px);
+  bottom: auto;
+}

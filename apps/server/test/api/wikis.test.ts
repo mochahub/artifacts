@@ -302,16 +302,17 @@ describe("wikis", () => {
     const member = await makePerson(t, orgId, "member");
     const text = async (slug: string, extra: object) =>
       WikiCreated.parse(await (await create(slug, extra, member.token)).json()).guidance.text;
-    expect(await text("g-me", { onlyMe: true })).toBe("Only you can read this wiki: edit directly.");
-    expect(await text("g-org", {})).toBe(
-      "Everyone in Mochahub can read this wiki: propose suggestions rather than editing directly.",
+    const presence =
+      "A Delegate run follows the same rule. Someone writing keeps agents out; someone pairing turns agent edits into suggestions.";
+    const suggest = `agent edits arrive as suggestions, except on pages an owner marked agent-maintained. ${presence}`;
+    expect(await text("g-me", { onlyMe: true })).toBe(
+      `Only you can read this wiki: agent edits apply directly, except on pages you share, where they arrive as suggestions. ${presence}`,
     );
+    expect(await text("g-org", {})).toBe(`Everyone in Mochahub can read this wiki: ${suggest}`);
     await t.server.db
       .insert(teams)
       .values({ id: Bun.randomUUIDv7(), orgId, slug: "g-team", name: "Guide", createdBy: member.id });
-    expect(await text("g-team-wiki", { team: "g-team" })).toBe(
-      "Guide team can read this wiki: propose suggestions rather than editing directly.",
-    );
+    expect(await text("g-team-wiki", { team: "g-team" })).toBe(`Guide team can read this wiki: ${suggest}`);
     const reviewer = await makePerson(t, orgId, "reviewer");
     const [project] = await t.server.db.select().from(projects).where(eq(projects.slug, "g-team-wiki"));
     if (!project) throw new Error("Missing wiki");
@@ -326,14 +327,12 @@ describe("wikis", () => {
     const hidden = WikiSpace.parse(
       await (await t.api("/api/wikis/g-team-wiki", { bearer: reviewer.token })).json(),
     );
-    expect(hidden.project.guidance.text).toBe(
-      "Others can read this wiki: propose suggestions rather than editing directly.",
-    );
+    expect(hidden.project.guidance.text).toBe(`Others can read this wiki: ${suggest}`);
     expect(JSON.stringify(hidden)).not.toContain("Guide");
     const adminView = WikiSpace.parse(await (await t.api("/api/wikis/g-me", { bearer: token })).json());
     expect(adminView.project.guidance).toEqual({
       edits: "suggestion",
-      text: "Only the owner can read this wiki: propose suggestions rather than editing directly.",
+      text: `Only the owner can read this wiki: ${suggest}`,
     });
   });
   test("refusals say why", async () => {

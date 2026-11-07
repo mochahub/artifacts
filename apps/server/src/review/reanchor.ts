@@ -1,7 +1,7 @@
 import type { Anchor } from "@artifacts/schema";
 import { and, eq, ne } from "drizzle-orm";
 import type { Tx } from "../db/index.ts";
-import { threads, versions } from "../db/schema.ts";
+import { blockAliases, threads, versions } from "../db/schema.ts";
 import { hashesOf, NOTHING, type VersionHashes } from "../versions/diff.ts";
 
 export type AnchorResult = { anchor: Anchor | null; state: "ok" | "updated" | "orphaned" };
@@ -84,6 +84,16 @@ export async function reanchorThreads(
     .where(and(eq(threads.artifactId, artifactId), ne(threads.status, "resolved")))
     .orderBy(threads.n);
   const pageKeys = new Set(pageRows.map((page) => page.key));
+  // An edited page's first checkpoint renumbers its blocks: the legacy keys map to lasting ids (13).
+  const aliases = new Map(
+    (
+      await tx
+        .select({ legacyKey: blockAliases.legacyKey, blockId: blockAliases.blockId })
+        .from(blockAliases)
+        .where(eq(blockAliases.artifactId, artifactId))
+        .limit(20_000)
+    ).map((row) => [row.legacyKey, row.blockId]),
+  );
   const threadsOnChanged: number[] = [];
   const orphaned: number[] = [];
   const cache = new Map<number, VersionHashes>();
@@ -108,9 +118,18 @@ export async function reanchorThreads(
           .filter(([key]) => key.startsWith(prefix))
           .map(([key, hash]) => [key.slice(prefix.length), hash]),
       );
+    const thenBlocks = unprefix(then.blocks);
+    let anchor = thread.anchor;
+    const alias = anchor.type === "frame" ? undefined : aliases.get(anchor.blockKey);
+    if (anchor.type !== "frame" && alias) {
+      // Compared by the hash the legacy block had, so the renumbering alone never orphans it.
+      const hash = thenBlocks.get(anchor.blockKey);
+      if (hash !== undefined) thenBlocks.set(alias, hash);
+      anchor = { ...anchor, blockKey: alias };
+    }
     const result = reanchor(
-      thread.anchor,
-      { frames: unprefix(then.frames), blocks: unprefix(then.blocks) },
+      anchor,
+      { frames: unprefix(then.frames), blocks: thenBlocks },
       {
         frames: new Map(
           frameRows.filter((f) => f.pageKey === thread.pageKey).map((f) => [f.frameKey, f.contentHash]),

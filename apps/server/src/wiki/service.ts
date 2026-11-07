@@ -196,23 +196,26 @@ export async function wikiAudience(deps: Deps, caller: Caller, place: LoadedProj
   };
 }
 
+/** Step 5 of the editing policy (13) in words, with the presence steps that come before it. */
 function guidanceText(
   kind: "me" | "team" | "org",
   isSelf: boolean,
   teams: { name: string }[],
   orgName = "the organization",
 ) {
-  if (kind === "me")
-    return isSelf
-      ? "Only you can read this wiki: edit directly."
-      : "Only the owner can read this wiki: propose suggestions rather than editing directly.";
+  const presence =
+    "A Delegate run follows the same rule. Someone writing keeps agents out; someone pairing turns agent edits into suggestions.";
+  if (kind === "me" && isSelf)
+    return `Only you can read this wiki: agent edits apply directly, except on pages you share, where they arrive as suggestions. ${presence}`;
   const readers =
-    kind === "org"
-      ? `Everyone in ${orgName} can read this wiki`
-      : teams.length
-        ? `${teams.map((t) => `${t.name} team`).join(", ")} can read this wiki`
-        : "Others can read this wiki";
-  return `${readers}: propose suggestions rather than editing directly.`;
+    kind === "me"
+      ? "Only the owner can read this wiki"
+      : kind === "org"
+        ? `Everyone in ${orgName} can read this wiki`
+        : teams.length
+          ? `${teams.map((t) => `${t.name} team`).join(", ")} can read this wiki`
+          : "Others can read this wiki";
+  return `${readers}: agent edits arrive as suggestions, except on pages an owner marked agent-maintained. ${presence}`;
 }
 
 // One latest-version join for the visible library keeps every derived count and reference private.

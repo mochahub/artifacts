@@ -28,4 +28,18 @@ export type Deps = {
   /** Fetches an OAuth client's metadata document, from wherever its client_id points. */
   clientMetadata: MetadataFetch;
   google: GoogleProvider;
+  /**
+   * The draft hub (13, "Replicas"): tells editors on every replica about a persisted update (`u`),
+   * awareness (`a`) or a control message (`c`). Absent where nothing serves sockets, as in some tests.
+   */
+  docs?: {
+    notify(artifactId: string, kind: "u" | "a" | "c", payload: unknown): void;
+    /** An agent at work on the page, shown to editors until `AGENT_PRESENCE_MS` after its last call. */
+    agentPresence(
+      artifactId: string,
+      author: { name?: string | null; personId?: string | null; key?: string },
+      block: string | null,
+      run: string | null,
+    ): void;
+  };
 };

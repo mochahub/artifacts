@@ -1,6 +1,9 @@
 import {
   agentLabel,
+  type BlockRecord,
+  type CheckpointKind,
   FILES_MAX,
+  type FrameRecord,
   HOUR_MS,
   isBundlePath,
   normalizeRepo,
@@ -17,9 +20,12 @@ import { type ArtifactRow, findArtifact, type ProjectRow, toProject, toResource 
 import { type Asker, actorOf, agentOf } from "../auth/caller.ts";
 import { type CallerFor, can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
+import type { Tx } from "../db/index.ts";
 import { lockArtifact } from "../db/locks.ts";
 import { activity, artifacts, blobs, people, projectAccess, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { carryIds } from "../editing/carry.ts";
+import { outsideDraft } from "../editing/checkpoint.ts";
 import { ApiError } from "../http/errors.ts";
 import { requireCan } from "../http/routes.ts";
 import { blobKey } from "../layout.ts";
@@ -71,6 +77,104 @@ const withoutPage = (change: Changes): Changes => ({
 });
 
 export type Publisher = ReturnType<typeof createPublisher>;
+
+/** What a new version holds, from a publish, an article or a checkpoint (13, "Checkpoints"). */
+export type VersionInput = {
+  artifactId: string;
+  orgId: string;
+  projectId: string;
+  title: string;
+  files: Record<string, { hash: string; size: number; type: string }>;
+  backendHash: string | null;
+  message: string | null;
+  name: string | null;
+  notes: Record<string, string>;
+  summary: string | null;
+  tags: string[] | null;
+  wiki: (typeof versions.$inferInsert)["wiki"];
+  links: string[];
+  pages: PageRecord[];
+  frames: FrameRecord[];
+  blocks: (BlockRecord & { authors?: { s: number; e: number; a: string; t: string }[] | null })[];
+  checkpoint: CheckpointKind | null;
+  docSeq: number | null;
+  now: Date;
+};
+
+/**
+ * The part of a commit after the permission check (13): the version row, its content, re-anchoring, the
+ * artifact's latest version and the log. Publishes, articles and checkpoints all come through here, inside
+ * the artifact's lock. `current` is the artifacts row as read under that lock.
+ */
+export async function commitVersion(
+  tx: Tx,
+  current: ArtifactRow | undefined,
+  input: VersionInput,
+  by: { personId: string; agent: string | null },
+) {
+  const n = (current?.latestVersion ?? 0) + 1;
+  const [previous] = current
+    ? await tx
+        .select()
+        .from(versions)
+        .where(and(eq(versions.artifactId, current.id), eq(versions.n, current.latestVersion)))
+        .limit(1)
+    : [];
+  const versionId = Bun.randomUUIDv7();
+  await tx.insert(versions).values({
+    id: versionId,
+    orgId: input.orgId,
+    artifactId: input.artifactId,
+    n,
+    files: input.files,
+    backendHash: input.backendHash,
+    message: input.message,
+    name: input.name,
+    notes: input.notes,
+    summary: input.summary,
+    tags: input.tags,
+    wiki: input.wiki,
+    links: input.links,
+    publishedBy: by.personId,
+    agent: by.agent,
+    checkpoint: input.checkpoint,
+    docSeq: input.docSeq,
+    publishedAt: input.now,
+  });
+  await writeContent(tx, input.orgId, versionId, input.pages, input.frames, input.blocks);
+  const reanchored = await reanchorThreads(tx, input.artifactId, input.pages, input.frames, input.blocks);
+  const before = previous ? await hashesOf(tx, previous.id) : NOTHING;
+  const after = { frames: frameHashes(input.frames), blocks: blockHashes(input.blocks) };
+  await tx
+    .update(artifacts)
+    .set({
+      latestVersion: n,
+      title: input.title,
+      hasBackend: Boolean(input.backendHash),
+      updatedAt: input.now,
+    })
+    .where(eq(artifacts.id, input.artifactId));
+  await tx.update(projects).set({ updatedAt: input.now }).where(eq(projects.id, input.projectId));
+  await tx.insert(activity).values({
+    id: Bun.randomUUIDv7(),
+    orgId: input.orgId,
+    artifactId: input.artifactId,
+    projectId: input.projectId,
+    actorPersonId: by.personId,
+    agent: by.agent,
+    kind: input.checkpoint ? "checkpointed" : "published",
+    payload: input.checkpoint
+      ? { version: n, kind: input.checkpoint, message: input.message }
+      : { version: n, message: input.message },
+    createdAt: input.now,
+  });
+  return {
+    version: n,
+    frames: withoutPage(changes(before.frames, after.frames)),
+    blocks: changes(before.blocks, after.blocks),
+    ...reanchored,
+  };
+}
 
 /** Publishing, for the API and the hosted MCP alike. */
 export function createPublisher(deps: Deps) {
@@ -237,27 +341,52 @@ export function createPublisher(deps: Deps) {
 
     // The CLI's article HTML can't be trusted: it goes into the viewer's own page (05).
     const linked = new Set<string>();
+    const carried = new Map<string, z.infer<typeof PublishCommit>["blocks"]>();
     const safePages: PageRecord[] = await mapLimit(body.pages, 4, async (page) => {
       const hash = page.meta.htmlHash;
       if (page.kind !== "article") return page;
       if (!hash || !wanted.has(hash)) throw new ApiError("invalid", `Article ${page.key} has no HTML.`);
       const object = await bucket.get(blobKey(hash));
       if (!object) throw new ApiError("invalid", `Article ${page.key} has no HTML.`);
+      // Only checkpoints set lasting ids (13); a client's are ignored.
+      const { blockIds: _ignored, ...meta } = page.meta;
       const clean = sanitizeArticle(new TextDecoder().decode(object.body));
       // From the HTML just cleaned, never from the client: backlinks are only as true as this (SPEC 16).
       for (const link of articleLinks(clean)) linked.add(link);
+      // A page that was edited in the browser keeps its lasting ids where the blocks still match (13).
+      const kept = existing
+        ? await carryIds(deps, {
+            artifactId: existing.id,
+            latestVersion: existing.latestVersion,
+            pageKey: page.key,
+            project: ticket.project,
+            files: body.files,
+            html: clean,
+            blocks: body.blocks.filter((block) => block.pageKey === page.key),
+          })
+        : null;
+      if (kept) carried.set(page.key, kept.blocks);
       const htmlHash = await putBlob(
         deps,
         org.id,
-        new TextEncoder().encode(clean),
+        new TextEncoder().encode(kept?.html ?? clean),
         "text/html; charset=utf-8",
       );
-      return { ...page, meta: { ...page.meta, htmlHash } };
+      return { ...page, meta: { ...meta, htmlHash, ...(kept ? { blockIds: kept.blockIds } : {}) } };
     });
 
+    const taken = new Map<string, number>();
+    const blockRows = body.blocks.map((block) => {
+      const list = carried.get(block.pageKey);
+      if (!list) return block;
+      const at = taken.get(block.pageKey) ?? 0;
+      taken.set(block.pageKey, at + 1);
+      return list[at] ?? block;
+    });
     const publisher = actorOf(caller);
     const agent = agentOf(caller, body.agent);
     const now = clock.now();
+    let flushDraft = () => {};
     const result = await db.transaction(async (tx) => {
       await lockArtifact(tx, ticket.artifactId, "content");
 
@@ -344,14 +473,6 @@ export function createPublisher(deps: Deps) {
         throw new ApiError("read_only", "This artifact is archived, so it's read-only.");
       if (current?.deletedAt) throw new ApiError("conflict", "That artifact was just deleted.");
 
-      const n = (current?.latestVersion ?? 0) + 1;
-      const [previous] = current
-        ? await tx
-            .select()
-            .from(versions)
-            .where(and(eq(versions.artifactId, current.id), eq(versions.n, current.latestVersion)))
-            .limit(1)
-        : [];
       // GC removes a blob's row before its object, so a hash it took meanwhile shows up here.
       const hashes = [...wanted.keys(), ...safePages.flatMap((page) => page.meta.htmlHash ?? [])];
       const present = await tx
@@ -362,56 +483,51 @@ export function createPublisher(deps: Deps) {
         throw new ApiError("conflict", "A file was cleaned up during this publish. Publish again.");
       }
 
-      const versionId = Bun.randomUUIDv7();
-      await tx.insert(versions).values({
-        id: versionId,
-        orgId: org.id,
-        artifactId: ticket.artifactId,
-        n,
-        files: body.files,
-        backendHash: body.backendHash ?? null,
-        message: body.message ?? null,
-        name: body.name ?? null,
-        notes: body.notes,
-        summary: body.summary ?? null,
-        tags: body.tags ?? null,
-        wiki: body.wiki ?? null,
-        links: [...linked].filter((link) => link !== `${ticket.project}/${ticket.slug}`),
-        publishedBy: publisher,
-        agent,
-        publishedAt: now,
-      });
-      await writeContent(tx, org.id, versionId, safePages, body.frames, body.blocks);
+      // A page someone is editing isn't replaced; a dirty draft is saved first, then retired (13).
+      const draft = current
+        ? await outsideDraft(
+            deps,
+            tx,
+            { row: current, project },
+            { discard: body.discardDraft, by: publisher },
+          )
+        : null;
+      const [latest] = draft?.saved
+        ? await tx.select().from(artifacts).where(eq(artifacts.id, ticket.artifactId)).limit(1)
+        : [current];
 
-      const reanchored = await reanchorThreads(tx, ticket.artifactId, safePages, body.frames, body.blocks);
-
-      const before = previous ? await hashesOf(tx, previous.id) : NOTHING;
-      const after = { frames: frameHashes(body.frames), blocks: blockHashes(body.blocks) };
-
-      await tx
-        .update(artifacts)
-        .set({ latestVersion: n, title: ticket.title, hasBackend: Boolean(body.backendHash), updatedAt: now })
-        .where(eq(artifacts.id, ticket.artifactId));
-      await tx.update(projects).set({ updatedAt: now }).where(eq(projects.id, project.id));
-      await tx.insert(activity).values({
-        id: Bun.randomUUIDv7(),
-        orgId: org.id,
-        artifactId: ticket.artifactId,
-        projectId: project.id,
-        actorPersonId: publisher,
-        agent,
-        kind: "published",
-        payload: { version: n, message: body.message ?? null },
-        createdAt: now,
-      });
-      return {
-        version: n,
-        frames: withoutPage(changes(before.frames, after.frames)),
-        blocks: changes(before.blocks, after.blocks),
-        ...reanchored,
-      };
+      const result = await commitVersion(
+        tx,
+        latest,
+        {
+          artifactId: ticket.artifactId,
+          orgId: org.id,
+          projectId: project.id,
+          title: ticket.title,
+          files: body.files,
+          backendHash: body.backendHash ?? null,
+          message: body.message ?? null,
+          name: body.name ?? null,
+          notes: body.notes,
+          summary: body.summary ?? null,
+          tags: body.tags ?? null,
+          wiki: body.wiki ?? null,
+          links: [...linked].filter((link) => link !== `${ticket.project}/${ticket.slug}`),
+          pages: safePages,
+          frames: body.frames,
+          blocks: blockRows,
+          checkpoint: null,
+          docSeq: null,
+          now,
+        },
+        { personId: publisher, agent },
+      );
+      await draft?.retire(result.version);
+      if (draft) flushDraft = draft.flush;
+      return result;
     });
 
+    flushDraft();
     const published = await findArtifact(deps, org.id, ticket.artifactId);
     void deps.events.emit(ticket.artifactId, "version", { version: result.version });
     if (published) {

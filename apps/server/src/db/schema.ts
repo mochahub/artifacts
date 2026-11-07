@@ -2,9 +2,12 @@ import {
   ACTIVITY_KINDS,
   ANCHOR_STATES,
   type Anchor,
+  ATOM_KINDS,
   type Brand,
+  CHECKPOINT_KINDS,
   COMMENT_MAX,
   DECISION_KINDS,
+  EDIT_MODES,
   type OAuthScope,
   type OrgSettings,
   PAGE_KINDS,
@@ -14,6 +17,9 @@ import {
   PROJECT_PERMISSIONS,
   type Renders,
   ROLES,
+  RUN_STATUSES,
+  SUGGESTION_OPS,
+  SUGGESTION_STATUSES,
   TEAM_ROLES,
   THREAD_STATUSES,
   type TokenScope,
@@ -69,6 +75,12 @@ export const deviceStatus = pgEnum("device_status", ["pending", "approved", "den
 export const teamRole = pgEnum("team_role", TEAM_ROLES);
 export const activityKind = pgEnum("activity_kind", ACTIVITY_KINDS);
 export const projectKind = pgEnum("project_kind", PROJECT_KINDS);
+export const checkpointKind = pgEnum("checkpoint_kind", CHECKPOINT_KINDS);
+export const editMode = pgEnum("edit_mode", EDIT_MODES);
+export const atomKind = pgEnum("atom_kind", ATOM_KINDS);
+export const suggestionStatus = pgEnum("suggestion_status", SUGGESTION_STATUSES);
+export const suggestionOp = pgEnum("suggestion_op", SUGGESTION_OPS);
+export const runStatus = pgEnum("run_status", RUN_STATUSES);
 
 // Organization and people
 
@@ -370,6 +382,10 @@ export const artifacts = pgTable(
     latestVersion: integer("latest_version").notNull().default(0),
     hasBackend: boolean("has_backend").notNull().default(false),
     threadCounter: integer("thread_counter").notNull().default(0),
+    /** An owner let agents edit this wiki page directly, whatever its audience (13). */
+    agentMaintained: boolean("agent_maintained").notNull().default(false),
+    agentMaintainedBy: uuid("agent_maintained_by").references(() => people.id),
+    agentMaintainedAt: time("agent_maintained_at"),
     archivedAt: time("archived_at"),
     archivedBy: uuid("archived_by").references(() => people.id),
     deletedAt: time("deleted_at"),
@@ -662,6 +678,10 @@ export const versions = pgTable(
       .references(() => people.id),
     agent: text("agent"),
     restoredFrom: integer("restored_from"),
+    /** What made this version, when an edited draft became it (13). Null for a publish or a restore. */
+    checkpoint: checkpointKind("checkpoint"),
+    /** The draft's `edit_docs.seq` that this checkpoint holds. */
+    docSeq: bigint("doc_seq", { mode: "number" }),
     publishedAt: time("published_at").notNull().defaultNow(),
     deletedAt: time("deleted_at"),
     deletedBy: uuid("deleted_by").references(() => people.id),
@@ -733,6 +753,8 @@ export const blocks = pgTable(
     blockKey: text("block_key").notNull(),
     contentHash: text("content_hash").notNull(),
     text: text("text").notNull(),
+    /** Who wrote which passage of `text`: `[{ s, e, a, t }]`, with author keys from `edit_authors` (13). */
+    authors: jsonb("authors").$type<{ s: number; e: number; a: string; t: string }[]>(),
   },
   (t) => [
     unique("blocks_version_page_block_unique").on(t.versionId, t.pageKey, t.blockKey),
@@ -950,4 +972,228 @@ export const pushSubscriptions = pgTable(
     lastOkAt: time("last_ok_at"),
   },
   (t) => [index("push_subscriptions_person_idx").on(t.personId)],
+);
+
+// Editing (13-editing.md owns these)
+
+/** The live draft of an editable article page: a Yjs document, as a snapshot and the updates after it. */
+export const editDocs = pgTable("edit_docs", {
+  artifactId: uuid("artifact_id")
+    .primaryKey()
+    .references(() => artifacts.id),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => org.id),
+  pageKey: text("page_key").notNull(),
+  /** Starts at 1, and goes up each time the draft is started again from a version. */
+  epoch: integer("epoch").notNull().default(1),
+  /** The version this lineage was seeded from, and the latest checkpoint made from it. */
+  baseVersion: integer("base_version").notNull(),
+  version: integer("version").notNull(),
+  /** The last update's number, the one the latest checkpoint holds, and the one the snapshot holds. */
+  seq: bigint("seq", { mode: "number" }).notNull().default(0),
+  checkpointSeq: bigint("checkpoint_seq", { mode: "number" }).notNull().default(0),
+  snapshotSeq: bigint("snapshot_seq", { mode: "number" }).notNull().default(0),
+  snapshot: bytea("snapshot").notNull(),
+  /** Title, summary, tags and sources set since the last checkpoint, and threads a direct edit fixes. */
+  meta: jsonb("meta").$type<{
+    title?: string;
+    summary?: string;
+    tags?: string[];
+    sources?: string[];
+    fixes?: { n: number; personId: string | null; agent: string | null; tokenId?: string | null }[];
+    /** The sweep's back-off for a draft that failed to checkpoint: attempts, and when to try next. */
+    sweep?: { attempts: number; next: string };
+  }>(),
+  /** Author keys are `a1`, `a2`, ... per artifact. */
+  authorCounter: integer("author_counter").notNull().default(0),
+  lastActorPersonId: uuid("last_actor_person_id").references(() => people.id),
+  lastAgent: text("last_agent"),
+  /** When the first change after the latest checkpoint arrived, and the last change. */
+  dirtySince: time("dirty_since"),
+  updatedAt: time("updated_at"),
+  createdAt: createdAt(),
+});
+
+export const editUpdates = pgTable(
+  "edit_updates",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    epoch: integer("epoch").notNull(),
+    update: bytea("update").notNull(),
+    /** A person, or the person an agent acts for. Null for the server's own fixes and org tokens. */
+    actorPersonId: uuid("actor_person_id").references(() => people.id),
+    agent: text("agent"),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    origin: text("origin").$type<"person" | "agent" | "server">().notNull(),
+    size: integer("size").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.artifactId, t.seq] })],
+);
+
+/** Who is in the editor now, coarsely: enough for agents' operations on any replica to respect them. */
+export const editPresence = pgTable(
+  "edit_presence",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    connectionId: text("connection_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    mode: editMode("mode").notNull(),
+    /** The caret's block first, then blocks with changes not yet sent. */
+    blocks: text("blocks").array().notNull().default(sql`'{}'::text[]`),
+    replica: text("replica").notNull(),
+    seenAt: time("seen_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artifactId, t.connectionId] }),
+    index("edit_presence_seen_idx").on(t.seenAt),
+  ],
+);
+
+/** Blocks the editor can't represent: exact Markdown, and a diagram's SVG from the version it came from. */
+export const editAtoms = pgTable(
+  "edit_atoms",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    /** SHA-256 of `source`. */
+    hash: text("hash").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    kind: atomKind("kind").notNull(),
+    source: text("source").notNull(),
+    /** Mermaid only: the sanitized SVG the read pipeline drew, which the server can't draw again. */
+    svg: text("svg"),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.artifactId, t.hash] })],
+);
+
+/** What an author key stands for: a person, or an agent acting for one, and the sources it wrote from. */
+export const editAuthors = pgTable(
+  "edit_authors",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    key: text("key").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    kind: text("kind").$type<"person" | "agent">().notNull(),
+    personId: uuid("person_id").references(() => people.id),
+    agent: text("agent"),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    sources: text("sources").array().notNull().default(sql`'{}'::text[]`),
+    /** SHA-256 of kind, person, agent, token and sorted sources, so one author gets one key. */
+    fingerprint: text("fingerprint").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artifactId, t.key] }),
+    unique("edit_authors_artifact_fingerprint_unique").on(t.artifactId, t.fingerprint),
+  ],
+);
+
+/** An older version's `<heading>/p<n>` keys, and the lasting ids the first edit gave those blocks. */
+export const blockAliases = pgTable(
+  "block_aliases",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    legacyKey: text("legacy_key").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    blockId: text("block_id").notNull(),
+    version: integer("version").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.artifactId, t.legacyKey] })],
+);
+
+export const editRuns = pgTable(
+  "edit_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    status: runStatus("status").notNull().default("active"),
+    /** Fixed when the run starts: whether its edits apply, or wait as one change set. */
+    edits: text("edits").$type<"direct" | "suggestion">().notNull(),
+    goal: text("goal").notNull(),
+    agent: text("agent"),
+    /** The person whose run it is; for an organization token, whoever made the token. */
+    startedBy: uuid("started_by")
+      .notNull()
+      .references(() => people.id),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    startedAt: time("started_at").notNull(),
+    expiresAt: time("expires_at").notNull(),
+    finishedAt: time("finished_at"),
+    decidedBy: uuid("decided_by").references(() => people.id),
+    version: integer("version"),
+  },
+  (t) => [index("edit_runs_artifact_status_idx").on(t.artifactId, t.status)],
+);
+
+export const suggestions = pgTable(
+  "suggestions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    pageKey: text("page_key").notNull(),
+    op: suggestionOp("op").notNull(),
+    blockId: text("block_id"),
+    newBlockId: text("new_block_id"),
+    base: text("base"),
+    markdown: text("markdown"),
+    meta: jsonb("meta").$type<{ title?: string; summary?: string; tags?: string[]; sources?: string[] }>(),
+    note: text("note"),
+    sources: text("sources").array().notNull().default(sql`'{}'::text[]`),
+    fixes: integer("fixes").array().notNull().default(sql`'{}'::integer[]`),
+    status: suggestionStatus("status").notNull().default("open"),
+    runId: uuid("run_id").references(() => editRuns.id),
+    /** The author key its text carries once accepted. */
+    authorKey: text("author_key").notNull(),
+    authorPersonId: uuid("author_person_id").references(() => people.id),
+    agent: text("agent"),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    createdAt: createdAt(),
+    expiresAt: time("expires_at").notNull(),
+    decidedAt: time("decided_at"),
+    decidedBy: uuid("decided_by").references(() => people.id),
+    decisionNote: text("decision_note"),
+    /** The checkpoint that carried it, once accepted. */
+    version: integer("version"),
+  },
+  (t) => [
+    index("suggestions_artifact_status_idx").on(t.artifactId, t.status),
+    index("suggestions_run_idx").on(t.runId),
+  ],
 );

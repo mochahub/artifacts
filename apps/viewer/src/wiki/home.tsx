@@ -236,6 +236,7 @@ export function WikiHome({ slug }: { slug: string }) {
         {sharing.value && (
           <ProjectShareSheet
             slug={slug}
+            wiki
             onClose={() => {
               sharing.value = false;
             }}

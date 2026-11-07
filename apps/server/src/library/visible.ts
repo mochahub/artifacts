@@ -46,7 +46,15 @@ export async function visibleTo(
           .from(artifactAccess)
           .where(and(eq(artifactAccess.orgId, orgId), eq(artifactAccess.personId, person)))
       : [],
-    person ? inheritedAccess(deps, orgId, list, person) : new Map<string, Inherited[]>(),
+    person
+      ? inheritedAccess(
+          deps,
+          orgId,
+          list,
+          new Set(rows.filter(({ project }) => project.kind === "wiki").map(({ project }) => project.id)),
+          person,
+        )
+      : new Map<string, Inherited[]>(),
   ]);
   const byArtifact = new Map<string, typeof access>();
   for (const entry of access) {

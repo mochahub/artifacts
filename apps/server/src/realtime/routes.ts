@@ -38,16 +38,21 @@ export function eventRoutes(routes: Routes, deps: Deps) {
           currentCaller(deps, c.var.org, caller),
           findArtifact(deps, c.get("org").id, resource.id),
         ]);
-        return fresh !== null && current !== null && can(fresh, "artifact.read", current);
+        if (fresh === null || current === null || !can(fresh, "artifact.read", current)) return false;
+        // `draft` events go only to editors (13), so what the stream may hear is looked at again too.
+        editor = can(fresh, "artifact.edit", current);
+        return true;
       } catch {
         return false; // The browser reconnects, and that goes through the guard.
       }
     };
+    let editor = can(caller, "artifact.edit", resource);
     let finish = () => {};
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         const write = (text: string) => controller.enqueue(encoder.encode(text));
         const unsubscribe = deps.events.subscribe(resource.id, ({ type, data }) => {
+          if (type === "draft" && !editor) return;
           write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
         });
         let done = false;

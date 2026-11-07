@@ -11,6 +11,7 @@ import {
   TeamList,
 } from "@artifacts/schema";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
+import { ApiCallError } from "../client.ts";
 import type { Input } from "../command.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { signedIn } from "../session.ts";
@@ -54,6 +55,7 @@ export async function teamsCommand({ flags }: Input<never, { server?: string }>,
 const LEVEL_WORDS = {
   view: "can view",
   comment: "can comment",
+  edit: "can edit",
   publish: "can publish",
   manage: "can manage",
 };
@@ -105,6 +107,23 @@ export async function visibilityCommand(
   );
 }
 
+/** Only a person can give edit access (04): the server refuses a token, and this says what to do instead. */
+async function tokenCantGiveEdit<T>(
+  edit: boolean | undefined,
+  out: Output,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    // With --json the server's own error is what a script reads.
+    if (edit && !out.json && error instanceof ApiCallError && error.failure.code === "forbidden") {
+      throw new CliError("Only a person can give edit access. Use the Share sheet.");
+    }
+    throw error;
+  }
+}
+
 export async function shareCommand(
   {
     args: { target },
@@ -117,6 +136,7 @@ export async function shareCommand(
       invite?: string;
       team?: string;
       comment?: boolean;
+      edit?: boolean;
       publish?: boolean;
       expires?: string;
       server?: string;
@@ -125,6 +145,12 @@ export async function shareCommand(
   out: Output,
 ) {
   if (!flags.link && !flags.invite && !flags.team) throw usage();
+  if (flags.edit && (flags.comment || flags.publish)) {
+    throw new UsageError("Pick one of --comment, --edit and --publish.");
+  }
+  // A link would let a stranger edit (13, "Permissions").
+  if (flags.link && flags.edit)
+    throw new UsageError("A link can't let people edit. Share with a person or a team.");
   if (flags.team && flags.publish) {
     throw new UsageError("Only a person can let a team publish. Use the Share sheet.");
   }
@@ -143,19 +169,23 @@ export async function shareCommand(
   }
   if (flags.team) {
     const { team } = TeamDetail.parse(await client.get(`/api/teams/${flags.team}`));
-    const permission = flags.comment ? "comment" : "view";
-    await client.request("PUT", `/api/artifacts/${artifact.id}/teams/${team.id}`, { permission });
+    const permission = flags.edit ? "edit" : flags.comment ? "comment" : "view";
+    await tokenCantGiveEdit(flags.edit, out, () =>
+      client.request("PUT", `/api/artifacts/${artifact.id}/teams/${team.id}`, { permission }),
+    );
     return out.result({ team: team.slug, permission }, () =>
       out.say(
         `✓ ${team.name} can ${permission} ${artifact.title}. Until a person confirms it, they can't approve.`,
       ),
     );
   }
-  const permission = flags.publish ? "publish" : flags.comment ? "comment" : "view";
-  const result = await client.post<AccessAdded>(`/api/artifacts/${artifact.id}/access`, {
-    email: flags.invite,
-    permission,
-  });
+  const permission = flags.publish ? "publish" : flags.edit ? "edit" : flags.comment ? "comment" : "view";
+  const result = await tokenCantGiveEdit(flags.edit, out, () =>
+    client.post<AccessAdded>(`/api/artifacts/${artifact.id}/access`, {
+      email: flags.invite,
+      permission,
+    }),
+  );
   out.result(result, () =>
     out.say("url" in result ? result.url : `✓ ${flags.invite} can ${permission} ${artifact.title}.`),
   );

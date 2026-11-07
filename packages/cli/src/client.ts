@@ -1,4 +1,4 @@
-import type { ApiErrorBody } from "@artifacts/schema";
+import { type ApiErrorBody, EDITING_FEATURE, FEATURES_HEADER } from "@artifacts/schema";
 import { detectAgent } from "./agent.ts";
 import { requireHttps } from "./config.ts";
 import { CliError } from "./output.ts";
@@ -44,6 +44,8 @@ export class Client {
       method: init.method ?? "GET",
       headers: {
         "Artifacts-CLI": VERSION,
+        // This CLI knows the editing values (13, "Older clients"): without it the server answers as it did before them.
+        [FEATURES_HEADER]: EDITING_FEATURE,
         ...(agent ? { "Artifacts-Agent": agent } : {}),
         ...(init.json ? { "Content-Type": "application/json" } : {}),
         ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
@@ -57,7 +59,8 @@ export class Client {
     });
   }
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /** The answer's body as text, or the failure the server gave. */
+  private async fetchText(method: string, path: string, body?: unknown): Promise<string> {
     const response = await this.send(path, {
       method,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -85,8 +88,16 @@ export class Client {
       } catch {}
       throw new ApiCallError(failure);
     }
+    return text;
+  }
+
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const text = await this.fetchText(method, path, body);
     return (text ? JSON.parse(text) : undefined) as T;
   }
+
+  /** A route that answers text, such as a page's Markdown. */
+  text = (path: string) => this.fetchText("GET", path);
 
   /** A picture from the API, as bytes. A redirect isn't followed, as everywhere, so it counts as a failure. */
   async bytes(path: string): Promise<Uint8Array> {

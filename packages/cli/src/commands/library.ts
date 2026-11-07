@@ -209,7 +209,7 @@ async function download(url: string, hash: string): Promise<Uint8Array> {
   return body;
 }
 
-async function writeFiles(
+export async function writeFiles(
   root: string,
   files: VersionBundle["files"],
   keep: (path: string) => boolean,
@@ -239,7 +239,7 @@ async function writeFiles(
   return { written, skipped };
 }
 
-const isEmpty = (path: string) => !existsSync(path) || readdirSync(path).length === 0;
+export const isEmpty = (path: string) => !existsSync(path) || readdirSync(path).length === 0;
 
 /** Puts a published version back into a working folder (07). */
 export async function pullCommand(

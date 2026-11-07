@@ -1,6 +1,7 @@
 import { createPasskeys } from "../auth/passkeys.ts";
 import { dataRoutes } from "../data/routes.ts";
 import type { Deps } from "../deps.ts";
+import { editingRoutes } from "../editing/routes.ts";
 import type { Routes } from "../http/routes.ts";
 import { brandRoutes } from "../library/brand.ts";
 import { libraryRoutes } from "../library/routes.ts";
@@ -45,6 +46,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   publishRoutes(routes, publisher);
   listRoutes(routes, deps);
   wikiRoutes(routes, deps);
+  editingRoutes(routes, deps);
   libraryRoutes(routes, deps);
   brandRoutes(routes, deps);
   reviewRoutes(routes, deps, review);

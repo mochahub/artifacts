@@ -9,6 +9,15 @@ import { usePoll } from "../poll.ts";
 import { useAction } from "./reauth.tsx";
 import { Sheet } from "./sheet.tsx";
 
+/** How a checkpoint was made, in the version list's words. */
+const CHECKPOINT_WORDS: Record<NonNullable<VersionRow["checkpoint"]>, string> = {
+  saved: "Saved",
+  agent: "Checkpoint",
+  delegate: "Delegate checkpoint",
+  quiet: "After a quiet spell",
+  handoff: "Before a publish",
+};
+
 export function VersionSheet({ artifact, onClose }: { artifact: Artifact; onClose(): void }) {
   const { route, path } = useLocation();
   const list = usePoll<VersionRow[]>(`/api/artifacts/${artifact.id}/versions`, 60_000);
@@ -35,10 +44,12 @@ export function VersionSheet({ artifact, onClose }: { artifact: Artifact; onClos
                   naming.value = false;
                 }}
               >
-                <b>v{version.n}</b>
+                {/* An agent's checkpoint carries the blue number (13, "Checkpoints"). */}
+                <b style={version.agent ? { color: "var(--agent-word)" } : undefined}>v{version.n}</b>
                 <div class="grow">
                   <div class="tt">{version.name ?? ago(version.publishedAt)}</div>
                   <div class="ss">
+                    {version.checkpoint ? `${CHECKPOINT_WORDS[version.checkpoint]}, ` : ""}
                     {version.name ? `${ago(version.publishedAt)}, ` : ""}
                     {agentShort(version.agent ?? version.publishedBy)}
                     {current ? ", current version" : ""}

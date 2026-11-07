@@ -50,6 +50,9 @@ const CALLER_KINDS = {
   "project.access.read": PEOPLE,
   "project.access.write": SESSION,
   "artifact.share_outside": PEOPLE,
+  "artifact.edit": MEMBERS,
+  "artifact.accept": SESSION,
+  "artifact.maintain": SESSION,
 } as const satisfies Record<string, readonly Caller["kind"][]>;
 
 export type Action = keyof typeof CALLER_KINDS;
@@ -57,15 +60,15 @@ export const ACTIONS = Object.keys(CALLER_KINDS) as Action[];
 /** The callers an action can ever allow. */
 export type CallerFor<A extends Action> = Extract<Caller, { kind: (typeof CALLER_KINDS)[A][number] }>;
 
-/** What a person can do, from least to most. `manage` only ever comes from a project. */
-export type Level = "view" | "comment" | "publish" | "manage";
+/** What a person can do, from least to most. `manage` only ever comes from a project. `edit` is 13's. */
+export type Level = "view" | "comment" | "edit" | "publish" | "manage";
 type Standing = Level | "none";
-const ORDER: Standing[] = ["none", "view", "comment", "publish", "manage"];
+const ORDER: Standing[] = ["none", "view", "comment", "edit", "publish", "manage"];
 const atLeast = (level: Standing, wanted: Standing) => ORDER.indexOf(level) >= ORDER.indexOf(wanted);
 const higher = (a: Standing, b: Standing) => (atLeast(a, b) ? a : b);
 const best = (a: Level, b: Level) => higher(a, b) as Level;
-/** The role cap: reviewers and outside people never go above commenting. */
-const low = (level: Standing): Standing => (atLeast(level, "publish") ? "comment" : level);
+/** The role cap: reviewers and outside people never go above commenting, so never edit either. */
+const low = (level: Standing): Standing => (atLeast(level, "edit") ? "comment" : level);
 
 /** One way a person holds access to an artifact. A token-made grant keeps `viaToken` (04). */
 export type GrantSource =
@@ -88,14 +91,20 @@ export type Grant = GrantSource & { personId: string };
 
 /**
  * What a grant means on one artifact. Project "Can publish" only adds new artifacts: a new version can
- * carry a backend that reads everyone's `me` data, so on an artifact it's worth a comment.
+ * carry a backend that reads everyone's `me` data, so on an artifact it's worth a comment. In a wiki,
+ * project "Can publish" and "Can edit" both let a person edit its pages' text, which never touches a
+ * backend (13, "The edit level"); outside a wiki a project `edit` grant is a comment too.
  */
-const onArtifact = (source: GrantSource): Level =>
-  source.kind === "project" && source.level === "publish" ? "comment" : source.level;
+const onArtifact = (source: GrantSource, inWiki: boolean): Level =>
+  source.kind === "project" && (source.level === "publish" || source.level === "edit")
+    ? inWiki
+      ? "edit"
+      : "comment"
+    : source.level;
 
 /** Project `manage` is for a person in a browser, so a token gets comment from it, and no more. */
-const forToken = (source: GrantSource): Level =>
-  onArtifact(source) === "manage" ? "comment" : onArtifact(source);
+const forToken = (source: GrantSource, inWiki: boolean): Level =>
+  onArtifact(source, inWiki) === "manage" ? "comment" : onArtifact(source, inWiki);
 
 /** One row per person. `confirmed` is the best level a person granted, so a token-made tie can't block them. */
 export type Inherited = {
@@ -109,11 +118,11 @@ export type Inherited = {
  * What the grants on an artifact add up to. Both loaders call this, so every rule stays in this file.
  * Project grants reach `org` artifacts only: `me` stays private to its publisher and whoever is added.
  */
-export function inherit(grants: Grant[], visibility: "me" | "org"): Inherited[] {
+export function inherit(grants: Grant[], visibility: "me" | "org", inWiki = false): Inherited[] {
   const rows = new Map<string, Inherited>();
   for (const { personId, ...source } of grants) {
     if (source.kind === "project" && visibility === "me") continue;
-    const level = onArtifact(source);
+    const level = onArtifact(source, inWiki);
     const row = rows.get(personId) ?? { personId, level, confirmed: null, sources: [] };
     row.level = higher(row.level, level) as Level;
     if (!source.viaToken) row.confirmed = higher(row.confirmed ?? "none", level) as Level;
@@ -146,11 +155,13 @@ export type ArtifactResource = {
   deletedAt: Date | null;
   deletedBy: string | null;
   /** artifact_access rows for this artifact. `viaToken`: a token granted it and no person has confirmed it. */
-  access: { personId: string; permission: "view" | "comment" | "publish"; viaToken: boolean }[];
+  access: { personId: string; permission: "view" | "comment" | "edit" | "publish"; viaToken: boolean }[];
   /** Open to the organization, or only to its grant holders. */
   restricted: boolean;
   /** The token that created this project, if any. See "Organization tokens" in 04. */
   projectTokenId: string | null;
+  /** Its project is a wiki: the only place `artifact.edit` can hold (13). */
+  inWiki: boolean;
   /** One row per person with access through a team or the project. */
   inherited: Inherited[];
 };
@@ -202,7 +213,9 @@ export function effective(person: CallerPerson, artifact: ArtifactResource, sess
   const capped = (level: Standing) => (person.role === "member" ? level : low(level));
   if (person.role !== "outside" && artifact.publisherId === person.id) return "manage";
   const row = artifact.inherited.find((entry) => entry.personId === person.id);
-  const held = session ? row?.level : row?.sources.map(forToken).reduce<Level>(best, "view");
+  const held = session
+    ? row?.level
+    : row?.sources.map((source) => forToken(source, artifact.inWiki)).reduce<Level>(best, "view");
   const inherited = capped(held ?? "none");
   if (inherited === "manage") return "manage";
   const direct = artifact.access.find((entry) => entry.personId === person.id);
@@ -271,6 +284,19 @@ function mayPublish(caller: Caller, artifact: ArtifactResource): boolean {
   );
 }
 
+/**
+ * Changing a wiki page's text through its draft (13, "Actions"): a person at `edit` or above, a CLI token
+ * with `edit` whose person is at `edit` by its token reading, or an organization token with `edit` that
+ * reaches the project (seesArtifact checked that). Never outside a wiki.
+ */
+function mayEdit(caller: Caller, artifact: ArtifactResource): boolean {
+  if (!artifact.inWiki || !hasScope(caller, "edit")) return false;
+  if (caller.kind === "orgToken") return true;
+  const person = personOf(caller);
+  if (!person) return false;
+  return atLeast(effective(person, artifact, caller.kind === "person"), "edit");
+}
+
 /** Publisher, admins and owner; a CLI token only as the publisher (04). */
 function mayManage(caller: Caller, artifact: ArtifactResource): boolean {
   if (caller.kind === "person") return effective(caller.person, artifact) === "manage";
@@ -331,6 +357,17 @@ function canOnArtifact(caller: Caller, action: Action, artifact: ArtifactResourc
       );
     case "artifact.publish":
       return writable && mayPublish(caller, artifact);
+    case "artifact.edit":
+      return writable && mayEdit(caller, artifact);
+    case "artifact.accept":
+      return (
+        writable &&
+        caller.kind === "person" &&
+        mayEdit(caller, artifact) &&
+        !commentOnlyFromTokenGrant(caller, artifact)
+      );
+    case "artifact.maintain":
+      return writable && artifact.inWiki && caller.kind === "person" && mayManage(caller, artifact);
     case "artifact.manage":
     case "artifact.share":
     case "artifact.archive":

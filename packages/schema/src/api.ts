@@ -3,6 +3,8 @@ import {
   ACTIVITY_KINDS,
   AGENT_MAX,
   ANCHOR_STATES,
+  BLOCK_ID_PATTERN,
+  CHECKPOINT_KINDS,
   COMMENT_MAX,
   DATA_SCOPES,
   DECISION_KINDS,
@@ -504,7 +506,8 @@ export const ProjectAccessList = z.object({
 });
 export type ProjectAccessList = z.infer<typeof ProjectAccessList>;
 export const CreateShareLink = z.object({
-  permission: Permission.exclude(["publish"]),
+  // A guest never edits (13): editing needs a person who signed in.
+  permission: Permission.exclude(["publish", "edit"]),
   expiresIn: z.enum(["1d", "7d", "30d"]).nullable().optional(),
 });
 
@@ -517,6 +520,8 @@ export const VersionRow = z.object({
   agent: z.string().nullable(),
   publishedAt: Time,
   restoredFrom: z.number().int().nullable(),
+  /** What made a checkpoint (13); absent or null for a publish or a restore. */
+  checkpoint: z.enum(CHECKPOINT_KINDS).nullable().optional(),
   summary: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   decision: DecisionKind.optional(),
@@ -594,6 +599,8 @@ export const PageRecord = z.object({
     items: z
       .array(z.object({ hash: Sha256, caption: z.string().optional(), type: z.string().optional() }))
       .optional(),
+    /** An editable article's lasting block ids, in block order (13). The server sets it; a CLI never does. */
+    blockIds: z.array(z.string().regex(BLOCK_ID_PATTERN)).optional(),
   }),
 });
 export type PageRecord = z.infer<typeof PageRecord>;
@@ -628,6 +635,11 @@ export type Renders = FrameRecord["renders"];
 
 export const PublishCommit = z.object({
   uploadId: z.string(),
+  /**
+   * Retire a page's draft without saving it first, when it can't be saved (13, "When a version is made
+   * outside the draft"). The loss is logged. Without it, a draft that fails to checkpoint refuses the publish.
+   */
+  discardDraft: z.boolean().optional(),
   message: z.string().nullable().optional(),
   name: z.string().nullable().optional(),
   // Optional here: an older CLI has neither, and `manifest/summary` is what asks for one (07).

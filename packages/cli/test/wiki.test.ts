@@ -15,6 +15,7 @@ test("wiki help lists each operation and bad arguments stop before sign-in", asy
   expect(help.stdout).toContain("wiki show <slug>");
   expect(help.stdout).toContain("wiki links <project/slug>");
   expect(help.stdout).toContain("wiki list");
+  expect(help.stdout).toContain("wiki export <wiki> <dir>");
   for (const args of [
     ["show", "../x"],
     ["links", "a/b/c"],

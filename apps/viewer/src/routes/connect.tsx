@@ -13,6 +13,7 @@ const MEANS: Record<OAuthScope, string> = {
   read: "Search and read what you can see",
   comment: "Comment and reply as you",
   publish: "Publish new versions as you",
+  edit: "Edit wiki pages as you",
 };
 
 /** "Connect an app": a client's OAuth request, in the same plain style as approving the CLI. */

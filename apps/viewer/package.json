@@ -14,15 +14,37 @@
       "path": "dist/assets/index-*.js",
       "limit": "80 KB",
       "gzip": true
+    },
+    {
+      "name": "editor (with the sync provider and Yjs)",
+      "path": [
+        "dist/assets/editor-*.js",
+        "dist/assets/provider-*.js"
+      ],
+      "limit": "120 KB",
+      "gzip": true
     }
   ],
   "dependencies": {
+    "@artifacts/doc": "workspace:*",
     "@artifacts/schema": "workspace:*",
     "@preact/signals": "^2.11.4",
     "@simplewebauthn/browser": "14.0.0",
+    "lib0": "0.2.119",
     "lucide-preact": "^1.65.0",
     "preact": "^11.1.0",
-    "preact-iso": "^2.12.2"
+    "preact-iso": "^2.12.2",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-schema-list": "1.6.0",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-tables": "1.8.5",
+    "prosemirror-transform": "1.12.5",
+    "prosemirror-view": "1.42.9",
+    "y-prosemirror": "1.3.7",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.33"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

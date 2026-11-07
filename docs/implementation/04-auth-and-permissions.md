@@ -160,10 +160,11 @@ CLI tokens work as a static bearer at the same endpoint, for clients with no OAu
 | `manage` | Visibility, sharing, archive/unarchive, delete/undelete (never purge) |
 | `data` | `artifacts data` commands, `artifacts logs` |
 | `org` | Org-token only: create projects |
+| `edit` | Edit wiki pages: read drafts, operations, checkpoints, runs ([13](13-editing.md#permissions)). Never accept, maintain or grant edit |
 
 - **CLI tokens** from the device flow or setup get `publish comment read manage data`.
 - **Org tokens:** the admin picks scopes and projects.
-- **What no token can do:** resolve threads, decide (approve or request changes), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner, itself, or anyone who leads a team or manages a project. Those come from the viewer.
+- **What no token can do:** resolve threads, decide (approve or request changes), accept or reject a suggestion or a run, mark a page agent-maintained, grant `edit` (13), purge, change roles or remove people, manage org settings, or approve devices. An admin's CLI token can print invite and reset links (`people.invite`), because the CLI is how SPEC §10 says that's done. Those are people-only actions (SPEC §5.5, §6). A token must not mint itself a browser session, which can do what no token may, so it can invite only members and reviewers (and get a fresh link for one of those), and can't issue a reset link for an admin, an owner, itself, or anyone who leads a team or manages a project. Those come from the viewer.
 
 ## The permission function
 
@@ -256,6 +257,8 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `team.read` | Members and up; cliToken with `read`. A token sees a team's name, size and shared work, not its members. |
 | `team.manage` | Admins, owner, as people: create, rename, delete. |
 | `team.members` | The team's leads, admins, owner, as people. |
+
+The editing actions `artifact.edit`, `artifact.accept` and `artifact.maintain`, and the `edit` level between comment and publish, are in [13-editing.md](13-editing.md#permissions). Reviewers and outside people stop at comment there too.
 
 ### Test matrix
 

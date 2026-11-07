@@ -5,6 +5,7 @@ import { useRoute } from "preact-iso";
 import { post } from "../../api.ts";
 import { SignedIn } from "../../components/guard.tsx";
 import { useAction } from "../../components/reauth.tsx";
+import { forgetDrafts } from "../../editing/forget.ts";
 import { clearOffline, turnOffNotifications } from "../../notify.ts";
 import { useTitle } from "../../title.ts";
 import { BrandSettings } from "./brand.tsx";
@@ -58,6 +59,7 @@ function Index() {
             await turnOffNotifications().catch(() => {});
             await post("/api/auth/logout");
             await clearOffline();
+            await forgetDrafts().catch(() => {});
             location.href = "/sign-in";
           })
         }

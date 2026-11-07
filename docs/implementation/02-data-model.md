@@ -17,8 +17,8 @@
 |---|---|
 | `role` | `owner`, `admin`, `member`, `reviewer`, `outside` |
 | `visibility` | `me`, `org` |
-| `permission` | `view`, `comment`, `publish` (`publish` only for organization members in `artifact_access`; it includes `comment`) |
-| `project_permission` | `view`, `comment`, `publish`, `manage` |
+| `permission` | `view`, `comment`, `edit`, `publish` (`publish` only for organization members in `artifact_access`; it includes `comment`; `edit` is 13's and includes `comment`) |
+| `project_permission` | `view`, `comment`, `edit`, `publish`, `manage` |
 | `token_kind` | `cli`, `org`, `oauth` |
 | `invite_kind` | `org`, `artifact`, `project` |
 | `page_kind` | `canvas`, `article`, `prototype`, `gallery`, `deck` |
@@ -27,8 +27,14 @@
 | `decision_kind` | `approved`, `changes_requested` |
 | `device_status` | `pending`, `approved`, `denied`, `used` |
 | `team_role` | `lead`, `member` |
-| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed`, `identity_linked` |
+| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed`, `identity_linked`, and for editing (13) `checkpointed`, `edited`, `suggested`, `suggestion_accepted`, `suggestion_rejected`, `run_started`, `run_finished`, `maintained_changed` |
 | `project_kind` | `project`, `wiki` |
+| `checkpoint_kind` | `saved`, `quiet`, `delegate`, `agent`, `handoff` (what made a checkpoint version, 13) |
+| `edit_mode` | `write`, `pair`, `delegate` |
+| `atom_kind` | `image`, `chart`, `mermaid`, `frame`, `html`, `markdown` |
+| `suggestion_status` | `open`, `accepted`, `rejected`, `stale`, `expired`, `withdrawn` |
+| `suggestion_op` | `replace`, `insert`, `delete`, `meta` |
+| `run_status` | `active`, `finished`, `accepted`, `rejected`, `cancelled`, `expired` |
 
 ## Tables
 
@@ -200,6 +206,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 | `latest_version` | int | Highest live version number. |
 | `has_backend` | bool | True if the latest version has a backend. |
 | `thread_counter` | int | The last thread number used. Numbers are never reused, even after a thread's only comment is deleted. |
+| `agent_maintained`, `agent_maintained_by`, `agent_maintained_at` | bool not null default false, uuid null FK people, timestamptz null | An owner let agents edit this wiki page directly, whatever its audience (13). Lasts across versions. |
 | `archived_at`, `archived_by` | timestamptz, uuid null | Archived = read-only (SPEC §5.5). |
 | `deleted_at`, `deleted_by`, `purge_after` | timestamptz, uuid null, timestamptz | In Recently deleted while set; `purge_after` = `deleted_at` + 30 days. |
 | `created_at`, `updated_at` | timestamptz | |
@@ -233,6 +240,8 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `published_by` | uuid FK people | |
 | `agent` | text null | "Claude Code", from the CLI's detection. |
 | `restored_from` | int null | Set when the version was made by restoring version n. |
+| `checkpoint` | `checkpoint_kind` null | What made the version from an edited draft (13). Null for a publish or a restore. |
+| `doc_seq` | bigint null | The draft's `edit_docs.seq` that the checkpoint holds. |
 | `published_at` | timestamptz | |
 | `deleted_at`, `deleted_by`, `purge_after` | | Removing one version (SPEC §5.5). The latest and the only version can't be removed. |
 
@@ -254,7 +263,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `renders` | jsonb | `{ "1x": "<sha256>", "2x": "<sha256>", "3x": "<sha256>", "thumb": "<sha256>" }`, WebP blobs. |
 | `live_path` | text null | Path of the frame's live HTML inside the bundle, for Try it. |
 
-**`blocks`**: article blocks. `id`, `org_id`, `version_id`, `page_key`, `block_key` text (heading slug or `<heading slug>/p<n>`), `content_hash` text, `text` text (plain text, for quote re-anchoring and search). Unique `(version_id, page_key, block_key)`. GIN index on `to_tsvector('english', text)`. Ids are in reading order, because they're UUIDv7 written in order.
+**`blocks`**: article blocks. `id`, `org_id`, `version_id`, `page_key`, `block_key` text (heading slug or `<heading slug>/p<n>`), `content_hash` text, `text` text (plain text, for quote re-anchoring and search), `authors` jsonb null (who wrote which passage of `text`, `[{ s, e, a, t }]`, from a checkpoint, 13). Unique `(version_id, page_key, block_key)`. GIN index on `to_tsvector('english', text)`. Ids are in reading order, because they're UUIDv7 written in order.
 
 ### Review
 
@@ -298,7 +307,119 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 **`releases`**: none. The app learns the latest release from GitHub Releases (cached 6 hours) for the admin "new version" notice.
 
+**Editing tables** (Phase 2 Part B): `edit_docs`, `edit_updates`, `edit_presence`, `edit_atoms`, `edit_authors`, `block_aliases`, `edit_runs` and `suggestions`, and the columns `artifacts.agent_maintained` (with `_by`, `_at`), `versions.checkpoint`, `versions.doc_seq` and `blocks.authors`. [13-editing.md](13-editing.md#persistence) owns them.
+
 **`artifact_usage`** ships with M9; `backend_logs` with M10 and `push_subscriptions` with M11.
+
+### Editing
+
+13-editing.md owns these tables; this is their shape. A page has at most one draft, kept as a Yjs snapshot and the updates after it.
+
+**`edit_docs`**: the live draft of an editable article page.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id` | uuid PK FK artifacts | |
+| `org_id` | uuid | |
+| `page_key` | text | The article page. |
+| `epoch` | int not null default 1 | Goes up when the draft is started again from a version made outside it. |
+| `base_version`, `version` | int | The version it was seeded from, and the latest checkpoint made from it. |
+| `seq`, `checkpoint_seq`, `snapshot_seq` | bigint | The last update's number (never goes back), the one the latest checkpoint holds, and the one the snapshot holds. |
+| `snapshot` | bytea | A Yjs update holding everything up to `snapshot_seq`. Empty while a retired draft waits to be seeded again. |
+| `meta` | jsonb null | Title, summary, tags and sources set since the last checkpoint, and threads a direct edit fixes. |
+| `author_counter` | int | Author keys are `a1`, `a2`, ... per artifact. |
+| `last_actor_person_id`, `last_agent` | uuid null FK people, text null | Who a quiet checkpoint is by. |
+| `dirty_since`, `updated_at` | timestamptz null | The first change after the latest checkpoint, and the last change. |
+| `created_at` | timestamptz | |
+
+**`edit_updates`**: one persisted (coalesced) Yjs update. PK `(artifact_id, seq)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `seq` | uuid, bigint | |
+| `org_id` | uuid | |
+| `epoch` | int | Rows of an old epoch are deleted when the draft is retired. |
+| `update` | bytea | |
+| `actor_person_id`, `agent`, `token_id` | uuid null, text null, uuid null | A person, or the person an agent acts for. |
+| `origin` | text | `person`, `agent` or `server`. |
+| `size` | int | Bytes, for compaction. |
+| `created_at` | timestamptz | |
+
+**`edit_presence`**: who is in the editor now. PK `(artifact_id, connection_id)`; index `(seen_at)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `connection_id` | uuid, text | |
+| `org_id`, `person_id` | uuid | |
+| `mode` | `edit_mode` | |
+| `blocks` | text[] | The caret's block first, then blocks with unsent changes. |
+| `replica` | text | |
+| `seen_at` | timestamptz | Fresh within `PRESENCE_TTL_MS`; the sweep deletes rows older than five times that. |
+
+**`edit_atoms`**: blocks the editor can't represent. PK `(artifact_id, hash)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `hash` | uuid, text | `hash` is the SHA-256 of `source`. |
+| `org_id` | uuid | |
+| `kind` | `atom_kind` | |
+| `source` | text | Exact Markdown. |
+| `svg` | text null | Mermaid only: the sanitized SVG the read pipeline drew. |
+| `created_at` | timestamptz | |
+
+**`edit_authors`**: what an author key stands for. PK `(artifact_id, key)`; unique `(artifact_id, fingerprint)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `key` | uuid, text | |
+| `org_id` | uuid | |
+| `kind` | text | `person` or `agent`. |
+| `person_id`, `agent`, `token_id` | uuid null, text null, uuid null | |
+| `sources` | text[] | Source slugs the passages were written from. |
+| `fingerprint` | text | SHA-256 of kind, person, agent, token and sorted sources. |
+| `created_at` | timestamptz | |
+
+**`block_aliases`**: an older version's `<heading>/p<n>` keys and the lasting ids the first edit gave them. PK `(artifact_id, legacy_key)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `legacy_key` | uuid, text | |
+| `org_id` | uuid | |
+| `block_id` | text | |
+| `version` | int | The version the keys are from. |
+
+**`edit_runs`**: Delegate runs. Index `(artifact_id, status)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `org_id`, `artifact_id` | uuid | |
+| `status` | `run_status` | |
+| `edits` | text | `direct` or `suggestion`, fixed when the run starts. |
+| `goal`, `agent` | text, text null | |
+| `started_by`, `token_id` | uuid FK people, uuid null | The run's person (for an organization token, its creator), and the token. |
+| `started_at`, `expires_at`, `finished_at` | timestamptz | |
+| `decided_by` | uuid null | Who accepted, rejected or cancelled it. |
+| `version` | int null | The checkpoint it ended in. |
+
+**`suggestions`**: agent edits waiting for a person. Indexes `(artifact_id, status)` and `(run_id)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `org_id`, `artifact_id` | uuid | |
+| `page_key` | text | |
+| `op` | `suggestion_op` | |
+| `block_id`, `new_block_id`, `base` | text null | The block, the id an insert would make, and the block's hash when suggested. |
+| `markdown`, `meta`, `note` | text null, jsonb null, text null | Untrusted text. |
+| `sources` | text[] | |
+| `fixes` | int[] | Thread numbers. |
+| `status` | `suggestion_status` | |
+| `run_id` | uuid null FK edit_runs | |
+| `author_key`, `author_person_id`, `agent`, `token_id` | text, uuid null, text null, uuid null | |
+| `created_at`, `expires_at`, `decided_at` | timestamptz | |
+| `decided_by`, `decision_note` | uuid null, text null | |
+| `version` | int null | The checkpoint that carried it, once accepted. |
 
 ## Derived state, not stored
 

@@ -137,7 +137,7 @@ const SENTENCE_TABLES: Record<string, string[]> = {
   ],
   blobs: ["org_id", "hash", "size", "verified_at"],
   pages: ["id", "org_id", "version_id", "page_key", "kind", "title", "group", "position", "meta"],
-  blocks: ["id", "org_id", "version_id", "page_key", "block_key", "content_hash", "text"],
+  blocks: ["id", "org_id", "version_id", "page_key", "block_key", "content_hash", "text", "authors"],
   comments: [
     "id",
     "thread_id",
@@ -218,7 +218,14 @@ describe("the database matches 02-data-model.md", () => {
     expect(Object.keys(tables).sort()).toEqual(
       [
         "artifacts",
+        "block_aliases",
         "device_codes",
+        "edit_atoms",
+        "edit_authors",
+        "edit_docs",
+        "edit_presence",
+        "edit_runs",
+        "edit_updates",
         "frames",
         "guests",
         "invites",
@@ -226,6 +233,7 @@ describe("the database matches 02-data-model.md", () => {
         "passkeys",
         "people",
         "sessions",
+        "suggestions",
         "threads",
         "tokens",
         "versions",
