@@ -112,29 +112,33 @@ test("wiki home, direct reading, sources, backlinks and audience labels", async 
   expect(errors).toEqual([]);
 });
 
-test("long unbroken audience labels wrap on wiki home and project rows at 375px", async ({
-  page,
-  request,
-}, info) => {
-  const slug = `wrap-${info.project.name}`;
-  await request.post("/api/wikis", { headers: auth(), data: { slug, name: "Wrapping" } });
-  const label = "Audience".repeat(50);
-  await page.route("**/api/wikis/*", async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    body.project.audience.label = label;
-    await route.fulfill({ response, json: body });
+// The service worker answers /api reads itself, and page.route cannot see those: block it so the mocks apply.
+test.describe("long audience labels", () => {
+  test.use({ serviceWorkers: "block" });
+  test("long unbroken audience labels wrap on wiki home and project rows at 375px", async ({
+    page,
+    request,
+  }, info) => {
+    const slug = `wrap-${info.project.name}`;
+    await request.post("/api/wikis", { headers: auth(), data: { slug, name: "Wrapping" } });
+    const label = "Audience".repeat(50);
+    await page.route("**/api/wikis/*", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.project.audience.label = label;
+      await route.fulfill({ response, body: JSON.stringify(body), contentType: "application/json" });
+    });
+    await page.route("**/api/projects*", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const project of body) if (project.slug === slug) project.audience.label = label;
+      await route.fulfill({ response, body: JSON.stringify(body), contentType: "application/json" });
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    for (const path of [`/${slug}`, "/projects"]) {
+      await page.goto(path);
+      await expect(page.getByText(label, { exact: path !== "/projects" })).toBeVisible();
+      expect(await overflowsSideways(page)).toBe(false);
+    }
   });
-  await page.route("**/api/projects*", async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    for (const project of body) if (project.slug === slug) project.audience.label = label;
-    await route.fulfill({ response, json: body });
-  });
-  await page.setViewportSize({ width: 375, height: 812 });
-  for (const path of [`/${slug}`, "/projects"]) {
-    await page.goto(path);
-    await expect(page.getByText(label, { exact: path !== "/projects" })).toBeVisible();
-    expect(await overflowsSideways(page)).toBe(false);
-  }
 });
