@@ -99,7 +99,7 @@ export const REPLY_INPUT = {
 
 /** What both servers tell a model about the library. Each puts its own lines between these. */
 export const MCP_GUIDANCE = {
-  wiki: "In a wiki, call artifacts_wiki first and follow its rules page.",
+  wiki: "In a wiki, call artifacts_wiki first and follow its rules page and audience guidance: direct edits only where the editor is the sole reader, suggestions where others can read. Owners may mark pages as maintained by agents; editing ships in Part B.",
   library: "Artifacts is this team's library of published plans, research, designs and prototypes.",
   searchFirst: "Before research, design or prototyping, call artifacts_search",
   reading:
@@ -135,7 +135,9 @@ export const WIKI_TOOLS = {
     properties: {
       slug: { type: "string", description: "Wiki slug" },
       name: { type: "string", description: "Wiki name" },
-      personal: { type: "boolean", description: "Only you and admins" },
+      onlyMe: { type: "boolean", description: "Start with only you as reader" },
+      team: { type: "string", description: "Starting audience team slug" },
+      personal: { type: "boolean", description: "Deprecated alias for onlyMe" },
     },
     required: ["slug", "name"],
     untrusted: true,

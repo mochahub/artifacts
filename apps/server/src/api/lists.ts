@@ -30,6 +30,7 @@ import { buildCards } from "../library/cards.ts";
 import { rateLimitSearch, searchHits, snippet } from "../library/search.ts";
 import { visibleTo } from "../library/visible.ts";
 import { changedSince, hashesOf } from "../versions/diff.ts";
+import { wikiAudience } from "../wiki/service.ts";
 
 const RESULTS = 20;
 const MAX_POSITION_CHARS = 2000;
@@ -172,32 +173,38 @@ export function listRoutes(routes: Routes, deps: Deps) {
     const rows = onTeam ? merged.filter((row) => onTeam.has(row.id)) : merged;
     const q = c.req.query("q");
     const sort = c.req.query("sort") === "name" ? "name" : "recent";
-    const body = rows
-      .filter((row) => matches(row.name, q) || matches(row.slug, q))
-      .map((row) => {
-        const own = list.filter((entry) => entry.row.projectId === row.id);
-        const live = own.filter((entry) => !entry.row.archivedAt);
-        const updated = own.reduce(
-          (latest, entry) => Math.max(latest, entry.row.updatedAt.getTime()),
-          own.length === 0 ? row.updatedAt.getTime() : 0,
-        );
-        return {
-          id: row.id,
-          slug: row.slug,
-          name: row.name,
-          repo: row.repo,
-          artifactCount: live.length,
-          openCount: cards
-            .filter((card) => live.some((entry) => entry.row.id === card.id))
-            .reduce((sum, card) => sum + card.counts.open, 0),
-          updatedAt: new Date(updated).toISOString(),
-          restricted: row.restricted,
-          kind: row.kind,
-        };
-      })
-      .sort((a, b) =>
-        sort === "name" ? a.name.localeCompare(b.name) : b.updatedAt.localeCompare(a.updatedAt),
-      );
+    const body = (
+      await Promise.all(
+        rows
+          .filter((row) => matches(row.name, q) || matches(row.slug, q))
+          .map(async (row) => {
+            const own = list.filter((entry) => entry.row.projectId === row.id);
+            const live = own.filter((entry) => !entry.row.archivedAt);
+            const updated = own.reduce(
+              (latest, entry) => Math.max(latest, entry.row.updatedAt.getTime()),
+              own.length === 0 ? row.updatedAt.getTime() : 0,
+            );
+            return {
+              id: row.id,
+              slug: row.slug,
+              name: row.name,
+              repo: row.repo,
+              ...(row.kind === "wiki"
+                ? await wikiAudience(deps, c.get("caller"), await toProject(deps, row))
+                : {}),
+              artifactCount: live.length,
+              openCount: cards
+                .filter((card) => live.some((entry) => entry.row.id === card.id))
+                .reduce((sum, card) => sum + card.counts.open, 0),
+              updatedAt: new Date(updated).toISOString(),
+              restricted: row.restricted,
+              kind: row.kind,
+            };
+          }),
+      )
+    ).sort((a, b) =>
+      sort === "name" ? a.name.localeCompare(b.name) : b.updatedAt.localeCompare(a.updatedAt),
+    );
     return etagJson(c, body);
   });
 

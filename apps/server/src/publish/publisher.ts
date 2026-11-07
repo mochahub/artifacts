@@ -432,7 +432,7 @@ export function createPublisher(deps: Deps) {
       orphaned: result.orphaned,
       uploaded: ticket.uploaded,
       reused: ticket.reused,
-      ...(published ? { audience: await audienceOf(deps, org.name, published) } : {}),
+      ...(published ? { audience: await audienceOf(deps, org.name, published, caller) } : {}),
     };
     return response;
   }

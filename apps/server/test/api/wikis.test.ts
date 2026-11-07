@@ -1,16 +1,24 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ArtifactLinks, PublishPrepared, PublishResult, WikiSpace } from "@artifacts/schema";
+import {
+  ArtifactLinks,
+  ProjectRow,
+  PublishPrepared,
+  PublishResult,
+  WikiCreated,
+  WikiSpace,
+} from "@artifacts/schema";
 import { articleRecords, buildArticle } from "@artifacts/schema/article";
 import { and, eq } from "drizzle-orm";
 import { GUIDES } from "../../../../skill/index.ts";
-import { artifacts, tokens, versions } from "../../src/db/schema.ts";
-import { claim, mcp, startTestServer, type TestServer } from "../helpers.ts";
+import { artifacts, projectAccess, projects, teams, tokens, versions } from "../../src/db/schema.ts";
+import { claim, mcp, OWNER, orgToken, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { file, makePerson, publish } from "../publish-helper.ts";
 
 describe("wikis", () => {
   let t: TestServer;
   let token: string;
   let orgId: string;
+  let cookie: string;
   const call = async (name: string, args: object, bearer = token) => {
     const r = await mcp(t, bearer, "tools/call", { name, arguments: args });
     const b = (await r.json()) as { result: { content: { text: string }[]; isError?: boolean } };
@@ -30,6 +38,7 @@ describe("wikis", () => {
   beforeAll(async () => {
     t = await startTestServer();
     ({ token, orgId } = await claim(t));
+    cookie = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
   test("creation is idempotent and managed projects convert", async () => {
@@ -40,10 +49,138 @@ describe("wikis", () => {
     const other = await makePerson(t, orgId, "member");
     await publish(t, token, { project: "taken" });
     expect((await create("taken", {}, other.token)).status).toBe(409);
-    expect((await create("private", { personal: true }, other.token)).status).toBe(201);
+    expect((await create("private", { onlyMe: true }, other.token)).status).toBe(201);
     const stranger = await makePerson(t, orgId, "member");
     expect((await t.api("/api/wikis/private", { bearer: stranger.token })).status).toBe(404);
     expect((await t.api("/api/wikis/private", { bearer: other.token })).status).toBe(200);
+  });
+  test("audiences follow real access, retain legacy input, and hide team metadata", async () => {
+    const member = await makePerson(t, orgId, "member");
+    const createAs = (slug: string, extra: object) => create(slug, extra, member.token);
+    const mine = WikiCreated.parse(await (await createAs("mine", { onlyMe: true })).json());
+    expect(mine.audience).toEqual({ kind: "me", label: "Only you" });
+    expect(mine.guidance.edits).toBe("direct");
+    expect(WikiCreated.parse(await (await createAs("legacy", { personal: true })).json()).audience).toEqual(
+      mine.audience,
+    );
+    expect(WikiCreated.parse(await (await createAs("open", {})).json()).audience).toEqual({
+      kind: "org",
+      label: "Everyone in Mochahub",
+    });
+    const teamId = Bun.randomUUIDv7();
+    await t.server.db
+      .insert(teams)
+      .values({ id: teamId, orgId, slug: "design", name: "Design", createdBy: member.id });
+    const shared = WikiCreated.parse(await (await createAs("team-wiki", { team: "design" })).json());
+    expect(shared.audience).toEqual({
+      kind: "team",
+      label: "Design team",
+      teams: [{ slug: "design", name: "Design" }],
+    });
+    expect(shared.guidance.edits).toBe("suggestion");
+    expect(WikiCreated.parse(await (await createAs("team-wiki", { onlyMe: true })).json()).audience).toEqual(
+      shared.audience,
+    );
+    expect((await createAs("conflicting", { onlyMe: true, team: "design" })).status).toBe(400);
+    expect((await createAs("bad-team", { team: "absent" })).status).toBe(400);
+    const reviewer = await makePerson(t, orgId, "reviewer");
+    const [project] = await t.server.db.select().from(projects).where(eq(projects.slug, "team-wiki"));
+    if (!project) throw new Error("Missing wiki");
+    await t.server.db.insert(projectAccess).values({
+      id: Bun.randomUUIDv7(),
+      orgId,
+      projectId: project.id,
+      personId: reviewer.id,
+      permission: "view",
+      grantedBy: member.id,
+    });
+    const hidden = WikiSpace.parse(
+      await (await t.api("/api/wikis/team-wiki", { bearer: reviewer.token })).json(),
+    );
+    expect(hidden.project.audience).toEqual({ kind: "team", label: "Shared wiki" });
+    expect(JSON.stringify(hidden)).not.toContain("Design");
+    expect(JSON.stringify(hidden)).not.toContain("design");
+    const listed = ProjectRow.array().parse(
+      await (await t.api("/api/projects", { bearer: reviewer.token })).json(),
+    );
+    expect(listed.find((p: { slug: string }) => p.slug === "team-wiki")?.audience).toEqual(
+      hidden.project.audience,
+    );
+  });
+  test("status redacts team wiki audiences for readers without directory access", async () => {
+    const owner = await makePerson(t, orgId, "member");
+    await t.server.db.insert(teams).values({
+      id: Bun.randomUUIDv7(),
+      orgId,
+      slug: "secret-team",
+      name: "Confidential",
+      createdBy: owner.id,
+    });
+    await create("status-wiki", { team: "secret-team" }, owner.token);
+    await call(
+      "artifacts_publish_article",
+      { project: "status-wiki", slug: "topic", title: "Topic", summary: "A topic", markdown: "Hello" },
+      owner.token,
+    );
+    const [project] = await t.server.db.select().from(projects).where(eq(projects.slug, "status-wiki"));
+    if (!project) throw new Error("Missing project");
+    const [page] = await t.server.db.select().from(artifacts).where(eq(artifacts.projectId, project.id));
+    if (!project) throw new Error("Missing project");
+    const reader = await orgToken(t, cookie, { projectIds: [project.id] });
+    if (!page) throw new Error("Missing page");
+    const response = await t.api(`/api/artifacts/${page.id}/status`, { bearer: reader.token });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { audience: string }).audience).toBe("Shared wiki");
+    const status = await call("artifacts_status", { artifact: "status-wiki/topic" }, reader.token);
+    expect(status.isError).not.toBe(true);
+    expect(JSON.stringify(status)).toContain("Shared wiki");
+    expect(JSON.stringify(status)).not.toContain("Confidential");
+  });
+  test("an organization token reader changes only-me guidance until revoked", async () => {
+    await create("token-reader", { onlyMe: true });
+    const [project] = await t.server.db.select().from(projects).where(eq(projects.slug, "token-reader"));
+    if (!project) throw new Error("Missing project");
+    const reader = await orgToken(t, cookie, { projectIds: [project.id] });
+    const detail = () =>
+      t.api("/api/wikis/token-reader", { bearer: token }).then(async (r) => WikiSpace.parse(await r.json()));
+    expect((await detail()).project).toMatchObject({
+      audience: { kind: "team", label: "Shared wiki" },
+      guidance: { edits: "suggestion" },
+    });
+    await t.server.db.update(tokens).set({ revokedAt: t.clock.now() }).where(eq(tokens.id, reader.id));
+    expect((await detail()).project).toMatchObject({
+      audience: { kind: "me", label: "Only you" },
+      guidance: { edits: "direct" },
+    });
+  });
+  test("idempotent creation ignores renamed and deleted requested teams", async () => {
+    const id = Bun.randomUUIDv7();
+    const owner = await makePerson(t, orgId, "member");
+    await t.server.db.insert(teams).values({ id, orgId, slug: "old-team", name: "Old", createdBy: owner.id });
+    await create("rename-wiki", { team: "old-team" }, owner.token);
+    await t.server.db.update(teams).set({ slug: "new-team", name: "New" }).where(eq(teams.id, id));
+    const renamed = await create("rename-wiki", { team: "old-team" }, owner.token);
+    expect(renamed.status).toBe(200);
+    expect(WikiCreated.parse(await renamed.json()).audience.label).toBe("New team");
+    await t.server.db.delete(projectAccess).where(eq(projectAccess.teamId, id));
+    await t.server.db.delete(teams).where(eq(teams.id, id));
+    const deleted = await create("rename-wiki", { team: "old-team" }, owner.token);
+    expect(deleted.status).toBe(200);
+    expect(WikiCreated.parse(await deleted.json()).audience.kind).toBe("me");
+  });
+  test("HTTP and MCP accept team slugs reserved for project routes", async () => {
+    const owner = await makePerson(t, orgId, "member");
+    await t.server.db
+      .insert(teams)
+      .values({ id: Bun.randomUUIDv7(), orgId, slug: "settings", name: "Settings", createdBy: owner.id });
+    expect((await create("reserved-team", { team: "settings" }, owner.token)).status).toBe(201);
+    const result = await call(
+      "artifacts_wiki_create",
+      { slug: "reserved-mcp", name: "Reserved", team: "settings" },
+      owner.token,
+    );
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result)).toContain("Settings team");
   });
   test("latest links, sources and every garden finding respect visibility", async () => {
     await article("rules", "# Rules\nFollow these rules.");
@@ -81,6 +218,11 @@ describe("wikis", () => {
           ?.text as string,
       ).id,
     ).toBe(1);
+    expect(
+      WikiSpace.parse(await (await t.api("/api/wikis/brain", { bearer: token })).json()).log.some(
+        (e: { kind: string }) => e.kind === "commented",
+      ),
+    ).toBe(true);
     await t.server.db
       .update(artifacts)
       .set({ visibility: "me" })
@@ -115,7 +257,8 @@ describe("wikis", () => {
       expect(listed).toContainEqual({
         slug: "counts",
         name: "counts",
-        personal: false,
+        audience: { kind: "org", label: "Everyone in Mochahub" },
+        guidance: detail.project.guidance,
         pages: detail.pages.length,
         sources: detail.sources.length,
       });
@@ -142,7 +285,7 @@ describe("wikis", () => {
   });
   test("reserved and inaccessible cross-wiki targets create no local wanted finding", async () => {
     await create("link-scope");
-    await create("hidden-links", { personal: true });
+    await create("hidden-links", { onlyMe: true });
     await article("secret", "# Secret", { project: "hidden-links" });
     await article("topic", "[[Settings]] [[hidden-links/Secret]]", { project: "link-scope" });
     const other = await makePerson(t, orgId, "member");

@@ -1,13 +1,17 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
-import type { LoadedArtifact } from "../auth/access.ts";
+import { type LoadedArtifact, toProject } from "../auth/access.ts";
+import type { Caller } from "../auth/caller.ts";
 import { artifactAccess, artifactTeamAccess, people, projectAccess, teams } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { wikiAudience } from "../wiki/service.ts";
 
 const list = (parts: string[]) =>
   parts.length < 2 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 
 /** Who can see an artifact, in words: "Everyone in Acme", or "Design team and 2 people". */
-export async function audienceOf(deps: Deps, orgName: string, resource: LoadedArtifact) {
+export async function audienceOf(deps: Deps, orgName: string, resource: LoadedArtifact, caller: Caller) {
+  if (resource.project.kind === "wiki")
+    return (await wikiAudience(deps, caller, await toProject(deps, resource.project))).audience.label;
   if (resource.visibility === "org" && !resource.restricted) return `Everyone in ${orgName}`;
   const onProject = resource.visibility === "org";
   const [teamRows, added, granted] = await Promise.all([
