@@ -27,9 +27,9 @@ export function rateLimitSearch(deps: Deps, caller: Caller) {
 /** Words of a query, letters and digits only, so nothing in it reaches the tsquery syntax. */
 const tokensOf = (q: string) => (q.match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, MAX_TOKENS);
 
-/** Every word must match, and the last is a prefix, because ⌘K searches as you type. */
-const tsQuery = (tokens: string[]) =>
-  tokens.map((token, i) => `'${token}'${i === tokens.length - 1 ? ":*" : ""}`).join(" & ");
+/** The last word is a prefix, because ⌘K searches as you type. */
+const tsTerms = (tokens: string[]) =>
+  tokens.map((token, i) => `'${token}'${i === tokens.length - 1 ? ":*" : ""}`);
 
 /**
  * The best match per artifact, over each artifact's latest version only. `ids` must already have
@@ -41,17 +41,25 @@ export async function searchHits(
 ): Promise<Hit[]> {
   const { ids, q, limit, offset, sources } = options;
   if (ids.length === 0) return [];
-  const tokens = tokensOf(q);
-  const like = containing(q);
-  const query = tokens.length > 0 ? tsQuery(tokens) : "";
+  const phrase = /^"([^"]+)"$/.exec(q)?.[1];
+  const terms = tsTerms(tokensOf(q));
+  const like = containing(phrase ?? q);
+  const query = phrase
+    ? sql`phraseto_tsquery('english', ${phrase})`
+    : sql`to_tsquery('english', ${terms.join(" | ")})`;
+  const queries = phrase ? [query] : terms.map((term) => sql`to_tsquery('english', ${term})`);
   const vector = (text: unknown) => sql`to_tsvector('english', ${text})`;
   const matches = (text: unknown) => sql`(${vector(text)} @@ q.query)`;
   const rank = (text: unknown) => sql`ts_rank(${vector(text)}, q.query)`;
+  const matched = (text: unknown) =>
+    sql`array(select distinct term::text from unnest(q.terms) term where ${vector(text)} @@ term)`;
+  const titleText = sql`concat_ws(' ', title, slug)`;
+  const tagText = sql`array_to_string(tags, ', ')`;
   const noteText = sql.raw(
     `concat_ws(' ', latest.message, latest.name, (select string_agg(value, ' ') from jsonb_each_text(latest.notes)))`,
   );
   const rows = await deps.db.execute(sql`
-    with q as (select to_tsquery('english', ${query}) as query),
+    with q as (select ${query} as query, array[${sql.join(queries, sql`, `)}]::tsquery[] as terms),
     latest as (
       select a.id as artifact_id, a.title, a.slug, a.updated_at, v.id as version_id,
         v.summary, v.tags, v.message, v.name, v.notes
@@ -61,32 +69,37 @@ export async function searchHits(
     ),
     hits as (
       select artifact_id, 'title' as source, null as page, null as ref, title as text,
-        5 + ${rank(sql`title`)} as score
-      from latest, q where title ilike ${like} or slug ilike ${like} or ${matches(sql`title`)}
+        5 + ${rank(sql`title`)} as score, ${matched(titleText)} as terms
+      from latest, q where title ilike ${like} or slug ilike ${like}
+        or ${matches(sql`title`)} or ${matches(sql`slug`)}
       union all
-      select artifact_id, 'tag', null, null, array_to_string(tags, ', '), 4
-      from latest where exists (select 1 from unnest(tags) tag where tag ilike ${like})
+      select artifact_id, 'tag', null, null, ${tagText}, 4, ${matched(tagText)}
+      from latest, q where exists (select 1 from unnest(tags) tag where tag ilike ${like})
+        or ${matches(tagText)}
       union all
-      select artifact_id, 'summary', null, null, summary, 3 + ${rank(sql`summary`)}
+      select artifact_id, 'summary', null, null, summary, 3 + ${rank(sql`summary`)}, ${matched(sql`summary`)}
       from latest, q where summary ilike ${like} or ${matches(sql`summary`)}
       union all
-      select latest.artifact_id, 'page', p.page_key, null, p.title, 2 + ${rank(sql`p.title`)}
+      select latest.artifact_id, 'page', p.page_key, null, p.title,
+        2 + ${rank(sql`p.title`)}, ${matched(sql`p.title`)}
       from latest join pages p on p.version_id = latest.version_id, q
       where p.title ilike ${like} or ${matches(sql`p.title`)}
       union all
-      select latest.artifact_id, 'frame', f.page_key, f.frame_key, f.title, 2 + ${rank(sql`f.title`)}
+      select latest.artifact_id, 'frame', f.page_key, f.frame_key, f.title,
+        2 + ${rank(sql`f.title`)}, ${matched(sql`f.title`)}
       from latest join frames f on f.version_id = latest.version_id, q
       where f.title ilike ${like} or ${matches(sql`f.title`)}
       union all
       select latest.artifact_id, 'block', b.page_key, b.block_key, left(b.text, ${MAX_TEXT}),
-        1 + ${rank(sql`b.text`)}
+        1 + ${rank(sql`b.text`)}, ${matched(sql`b.text`)}
       from latest join blocks b on b.version_id = latest.version_id, q
       where ${matches(sql`b.text`)}
       union all
-      select latest.artifact_id, 'note', null, null, ${noteText}, 1 + ${rank(noteText)}
+      select latest.artifact_id, 'note', null, null, ${noteText}, 1 + ${rank(noteText)}, ${matched(noteText)}
       from latest, q where ${matches(noteText)}
       union all
-      select t.artifact_id, 'comment', t.page_key, t.n::text, c.body, ${rank(sql`c.body`)}
+      select t.artifact_id, 'comment', t.page_key, t.n::text, c.body,
+        ${rank(sql`c.body`)}, ${matched(sql`c.body`)}
       from comments c
       join threads t on t.id = c.thread_id
       join latest on latest.artifact_id = t.artifact_id, q
@@ -96,14 +109,23 @@ export async function searchHits(
       select * from hits
       where ${sources ? sql`source = any(string_to_array(${sources.join(",")}, ','))` : sql`true`}
     ),
+    -- A term counts once per artifact, even across fields or repeated mentions.
+    coverage as (
+      select artifact_id, count(distinct term) as matched
+      from allowed cross join lateral unnest(terms) term
+      group by artifact_id
+    ),
     best as (
-      select *, row_number() over (partition by artifact_id order by score desc, source, page, ref) as r
+      select *, row_number() over (
+        partition by artifact_id order by cardinality(terms) desc, score desc, source, page, ref, text
+      ) as r
       from allowed
     )
     select best.artifact_id, best.source, best.page, best.ref, best.text, best.score
     from best join latest on latest.artifact_id = best.artifact_id
+    left join coverage on coverage.artifact_id = best.artifact_id
     where best.r = 1
-    order by best.score desc, latest.updated_at desc, best.artifact_id
+    order by coalesce(coverage.matched, 0) desc, best.score desc, latest.updated_at desc, best.artifact_id
     limit ${limit} offset ${offset}
   `);
   return (rows as unknown as Record<string, unknown>[]).map((row) => ({

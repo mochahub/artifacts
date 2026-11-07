@@ -36,7 +36,7 @@ export const libraryTools = (repo: McpProperty) =>
     search: {
       name: "artifacts_search",
       description:
-        "Search published work: short cards with a snippet. Do this before researching or designing.",
+        "Search published work: short cards with a snippet, ranked by matching words. Quote a phrase to find it together. Wiki cards also include role, untrusted and origin. Do this before researching or designing.",
       properties: {
         query: { type: "string", description: "Words to find" },
         project: { type: "string", description: "Only this project" },

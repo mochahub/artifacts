@@ -10,6 +10,7 @@ import type { z } from "zod";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { type Caller, viewerId } from "../auth/caller.ts";
 import {
+  artifacts,
   blocks,
   comments,
   decisions,
@@ -23,6 +24,7 @@ import {
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { changes, frameHashes } from "../versions/diff.ts";
+import { visibleTo } from "./visible.ts";
 
 const clip = (text: string) => {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -58,6 +60,45 @@ async function fallbackSummaries(deps: Deps, rows: { id: string; message: string
   return result;
 }
 
+/** Like the wiki view, derive trust only from sources this caller can read, including off-page ones. */
+async function wikiMetadata(deps: Deps, caller: Caller, list: LoadedArtifact[]) {
+  const projectIds = [...new Set(list.filter((a) => a.project.kind === "wiki").map((a) => a.project.id))];
+  const result = new Map<string, Pick<LibraryCard, "role" | "untrusted" | "origin">>();
+  const first = list[0];
+  if (!first || !projectIds.length) return result;
+  const visible = await visibleTo(deps, first.row.orgId, caller, { projectIds });
+  if (!visible.length) return result;
+  const latest = await deps.db
+    .select({ id: artifacts.id, projectId: artifacts.projectId, slug: artifacts.slug, wiki: versions.wiki })
+    .from(artifacts)
+    .innerJoin(versions, and(eq(versions.artifactId, artifacts.id), eq(versions.n, artifacts.latestVersion)))
+    .where(
+      inArray(
+        artifacts.id,
+        visible.map((a) => a.id),
+      ),
+    );
+  const wanted = new Set(list.map((a) => a.id));
+  for (const a of latest) {
+    if (!wanted.has(a.id)) continue;
+    result.set(a.id, {
+      role: a.wiki?.role ?? "page",
+      origin: a.wiki?.origin ?? null,
+      untrusted:
+        a.wiki?.role === "source"
+          ? a.wiki.untrusted === true
+          : latest.some(
+              (s) =>
+                s.projectId === a.projectId &&
+                s.wiki?.role === "source" &&
+                a.wiki?.sources.includes(s.slug) &&
+                s.wiki.untrusted === true,
+            ),
+    });
+  }
+  return result;
+}
+
 /** Compact cards, in the order given: everything an agent needs to decide whether to open one. */
 export async function libraryCards(
   deps: Deps,
@@ -67,7 +108,7 @@ export async function libraryCards(
 ): Promise<LibraryCard[]> {
   if (list.length === 0) return [];
   const ids = list.map(({ row }) => row.id);
-  const [cards, versionRows, decisionRows] = await Promise.all([
+  const [cards, versionRows, decisionRows, wiki] = await Promise.all([
     buildCards(deps, caller, list),
     deps.db
       .select({
@@ -85,6 +126,7 @@ export async function libraryCards(
       .from(decisions)
       .where(inArray(decisions.artifactId, ids))
       .orderBy(desc(decisions.createdAt)),
+    wikiMetadata(deps, caller, list),
   ]);
   const head = new Map(
     list.flatMap(({ row }) => {
@@ -119,6 +161,7 @@ export async function libraryCards(
         latestVersion: row.latestVersion,
         updatedAt: row.updatedAt.toISOString(),
         match: matches.get(row.id) ?? null,
+        ...wiki.get(row.id),
       },
     ];
   });
