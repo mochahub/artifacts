@@ -385,8 +385,8 @@ Both are on viewer origins only, never the Live-preview origin. Issuer, resource
 
 ## Wikis
 
-- `POST /api/wikis` (`project.create`): CreateWiki → WikiCreated, 201 when created, 200 when already visible or converted from a managed project. Conflicts answer 409.
-- `GET /api/wikis/:slug` (`project.read`): WikiSpace with visible rules, pages, sources, log and garden findings. Ordinary projects answer 404.
+- `POST /api/wikis` (`project.create`): CreateWiki → WikiCreated, 201 when created, 200 when already visible or converted from a managed project (`created` says which). A request for a narrower audience than an existing wiki or project has answers 409 and changes nothing. Other conflicts answer 409 too.
+- `GET /api/wikis/:slug` (`project.read`): WikiSpace with visible rules, pages, sources, log and garden findings. Ordinary projects answer 404, saying the project isn't a wiki.
 - `GET /api/artifacts/:id/links` (`artifact.read`): ArtifactLinks with outgoing targets, backlinks and sources. Hidden targets look missing.
 
 See [12-wikis.md](12-wikis.md) for the wiki contract.

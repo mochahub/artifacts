@@ -8,7 +8,11 @@ Call `artifacts_wiki` with the wiki slug, or run `artifacts wiki show <slug>`. R
 
 If your client doesn't list the tools directly, search its tool list for "artifacts".
 
-Create a wiki with `artifacts wiki create brain --name "Brain"` (everyone in Mochahub), `artifacts wiki create my-notes --only-me`, or `artifacts wiki create notes --team design`. A wiki has an audience, derived from ordinary project sharing. Read the server's `audience` and `guidance` fields. Never move content to a wider audience without its owner's request.
+Create a wiki with `artifacts wiki create my-wiki --name "My wiki"` (everyone in your organization), `artifacts wiki create my-notes --only-me`, or `artifacts wiki create my-team-notes --team design`. Choose a slug nobody uses yet: list the wikis with `artifacts wiki list` (MCP: `artifacts_wiki` with no argument). The list shows wikis only, so an ordinary project can still hold the slug. Over MCP, `artifacts_wiki_create` takes `slug`, `name` and optionally `onlyMe` or `team`.
+
+A wiki has an audience, derived from ordinary project sharing. Read the server's `audience` and `guidance` fields; the guidance text says whether to edit directly or suggest. Never move content to a wider audience without its owner's request.
+
+Repeating a create is idempotent: for a slug that already exists it answers `created: false` and changes nothing, and the CLI prints "Already exists". An audience flag never changes an existing wiki. Asking for a narrower audience than the wiki has (`--only-me` on a wiki others can read, `--team` on one the whole organization can read) is refused with a conflict that names the real audience, so you can't write private notes into a shared wiki by mistake. The same applies when converting an existing project. To change who can read it, use the viewer's Share sheet. `personal` is a deprecated alias for `onlyMe`.
 
 Edits apply directly where only the editor can read the wiki, and arrive as suggestions where others can. An owner can mark a page as maintained by agents. Editing ships in Part B; for now follow this guidance when planning changes.
 
