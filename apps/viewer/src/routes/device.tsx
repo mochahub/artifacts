@@ -1,7 +1,7 @@
 import type { DeviceDetails } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Laptop, Lock, Terminal } from "lucide-preact";
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, message, post } from "../api.ts";
 import { useAction } from "../components/reauth.tsx";
@@ -15,7 +15,8 @@ const KEPT_CODE = "artifacts.device-code";
 export function Device() {
   const { route, path, query } = useLocation();
   // A Google round trip reloads the page. The person typed this, so it only lasts for this tab.
-  const code = useSignal(query.google ? (readStored(KEPT_CODE, "session") ?? "") : "");
+  const [kept] = useState(() => (query.google ? (readStored(KEPT_CODE, "session") ?? "") : ""));
+  const code = useSignal(kept);
   const details = useSignal<DeviceDetails | null>(null);
   const error = useSignal<string | null>(null);
   const outcome = useSignal<"approved" | "denied" | null>(null);
@@ -39,7 +40,8 @@ export function Device() {
   }
   useEffect(() => {
     forgetStored(KEPT_CODE, "session");
-    if (code.value) find();
+    // Only a kept code: this can run after the first keystroke, and what's being typed waits for Continue.
+    if (kept) find();
   }, []);
 
   const decide = (kind: "approve" | "deny") =>
