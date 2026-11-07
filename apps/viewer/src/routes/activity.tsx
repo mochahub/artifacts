@@ -50,6 +50,14 @@ const VERBS: Record<ActivityKind, string> = {
   team_member_removed: "removed someone from",
   project_access_changed: "changed who has access to",
   identity_linked: "connected Google",
+  checkpointed: "saved a version of",
+  edited: "edited",
+  suggested: "suggested a change to",
+  suggestion_accepted: "accepted a suggestion on",
+  suggestion_rejected: "turned down a suggestion on",
+  run_started: "started an agent on",
+  run_finished: "finished an agent run on",
+  maintained_changed: "changed who maintains",
 };
 
 const day = (iso: string) =>

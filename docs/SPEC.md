@@ -41,8 +41,8 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 9. **Micro apps when needed.** An artifact can be just pages, or a small app: a frontend, an optional backend that ships in the same bundle, and an optional data folder (§7.9). Most artifacts use none of the extras.
 
 ### Non-goals (for now)
-- Editing in the browser. Agents and repos are where content is written; the viewer is for reading and reviewing.
-- Real-time co-editing, or a Figma replacement.
+- Editing anything but wiki articles in the browser. Canvases, prototypes, galleries and multi-page artifacts are written by agents and repos; the viewer reads and reviews them. Wiki articles are edited in the browser, live, by people and agents together (§16).
+- A Figma replacement. Live co-editing covers wiki articles only.
 - A hosted, multi-tenant service, for now. Artifacts is open source that each team deploys for itself: one click from the Railway template, or Docker Compose anywhere (§14, [hosting evaluation](hosting-evaluation.md)).
 
 - Sending email. Invite, reset and share links are copied and sent by hand, so a deploy needs no email provider.
@@ -848,7 +848,7 @@ Defaults the builder uses until the user says otherwise:
 
 A wiki is a project of kind `wiki`. Its artifacts are pages. A wiki has an audience through ordinary sharing: only me, a team, or everyone in Mochahub. Admins retain their normal access. Content moves to a wider audience only when its owner asks. The server derives audience labels from actual project access and reveals no hidden team names or counts.
 
-Agent edits apply directly where only the editor can read and arrive as suggestions where others can. An owner can mark a page as maintained by agents. Editing ships in Part B.
+Agent edits apply directly where only the editor can read and arrive as suggestions where others can. An owner can mark a page as maintained by agents.
 
 Artifacts have role `page` (the default) or `source`. Sources preserve raw inputs;
 new input versions are republished, never rewritten into maintained pages.
@@ -874,7 +874,45 @@ can convert an ordinary project to a wiki while preserving its access. Readers
 see only content they can access; publishers maintain pages and sources; access
 managers control sharing. Agents use the CLI or hosted MCP tools.
 
-Phase 1 lets agents write and people read and comment. It does not provide
-browser editing; that comes in Phase 2. It does not maintain hand-written index
-or log pages. See the [wiki contract](implementation/12-wikis.md) for names and
-shapes, and the hosted plan artifact `artifacts/company-brain` for the plan.
+Phase 1 lets agents write and people read and comment. It does not maintain
+hand-written index or log pages. See the [wiki contract](implementation/12-wikis.md)
+for names and shapes, and the hosted plan artifact `artifacts/company-brain` for
+the plan.
+
+### Editing (Phase 2 Part B)
+
+A wiki article is edited in the browser: tap Edit, and the editor loads. People
+in the editor see each other's carets and typing live, and agents edit the same
+page through the MCP or the CLI, one block at a time. Agents never replace a
+whole page while someone is in it.
+
+- **A new level, edit,** sits between comment and publish. It changes a page's
+  text, title, summary, tags and sources, never its files. Reviewers and outside
+  people stop at comment. A token edits only with the `edit` scope, and only a
+  person grants edit, accepts suggestions or marks a page agent-maintained.
+- **Checkpoints are versions.** A page saves as you type into a live draft.
+  A checkpoint is made when someone taps Save version, when an agent finishes a
+  Delegate run, after two quiet minutes, or before a CLI publish lands on a draft.
+  Readers see the latest checkpoint; people who can edit see the draft. Version
+  numbers, compare, restore, comments, fixed and re-anchoring work on checkpoints
+  as on any version. Links, backlinks, the garden and search follow checkpoints.
+- **Three modes.** Each person in the editor picks one, and can switch at any time:
+  - Write: agents stay out.
+  - Pair: agents' edits arrive inline as suggestions the person accepts or rejects.
+  - Delegate: an agent works on its own and leaves a checkpoint to review.
+- **Suggest or apply** follows the wiki's audience. Edits apply directly where
+  the editor is the only reader or the page is agent-maintained, and arrive as
+  suggestions elsewhere. A Delegate run on a page whose edits are suggestions
+  waits as one change set until a person accepts it. An agent's replacement of a
+  block someone is typing in becomes a suggestion.
+- **You can see who wrote what.** Agent text carries the blue pencil. Tap a
+  passage to see who wrote it, when, and from which sources.
+- **Blocks have lasting ids,** so comments and agents point at the same paragraph
+  however the page grows. Images, diagrams and charts stay as written, shown as
+  cards in the editor.
+- **Export.** Any page, or a whole wiki, exports as Markdown.
+
+Only wiki articles with one page and no backend can be edited in the browser.
+Everything else is published as before. Text in pages, sources and suggestions
+is data, never instructions, for agents too. The
+[editing contract](implementation/13-editing.md) owns the names and shapes.

@@ -24,6 +24,7 @@ type Level = ProjectPermission;
 export const LEVELS: Record<Level, string> = {
   view: "Can view",
   comment: "Can comment",
+  edit: "Can edit",
   publish: "Can publish",
   manage: "Can manage",
 };

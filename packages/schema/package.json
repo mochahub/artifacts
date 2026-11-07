@@ -12,7 +12,8 @@
     "./theme-css": "./src/theme-css.ts",
     "./article": "./src/article.ts",
     "./mcp": "./src/mcp.ts",
-    "./wiki": "./src/wiki.ts"
+    "./wiki": "./src/wiki.ts",
+    "./editing": "./src/editing.ts"
   },
   "dependencies": {
     "hast-util-sanitize": "^5.0.2",

@@ -570,7 +570,42 @@ Rules: [SPEC.md §5.5](SPEC.md#55-archive-and-delete).
 | CLI commands | [07 The CLI and the skill](implementation/07-cli-and-skill.md) |
 | Micro apps | [08 Micro apps](implementation/08-micro-apps.md) |
 | Deploying and releases | [09 Deploying](implementation/09-deploy.md) |
+| Wikis | [12 Wikis](implementation/12-wikis.md) |
+| Editing wiki pages, live sync, agent operations | [13 Editing](implementation/13-editing.md) |
 
 ## Agents: the library and the connector
 
 Agents reach hosted work three ways, all ending in the same functions in `apps/server/src/library/` and the same `can()`: the CLI (`search`, `list`, `read`, `view`), the local `artifacts mcp`, and the hosted MCP at `/api/mcp`. The hosted one signs in through our own OAuth server (`apps/server/src/oauth/`). Rendering stays on the client: `artifacts pack` writes a publish to a folder, files go straight to the bucket, and the server commits by hash. [03](implementation/03-api.md#oauth-and-the-hosted-mcp) has the details.
+
+## Editing wiki pages
+
+A wiki article can be edited in the browser by several people at once, while agents edit it by operation ([13](implementation/13-editing.md)). The server stays the source of truth and never runs a browser or a model.
+
+```mermaid
+flowchart LR
+  subgraph browser["Browser (lazy editor chunk)"]
+    pm["ProseMirror and y-prosemirror"]
+    provider["Sync provider, IndexedDB for offline"]
+  end
+  agent["Agent: MCP or CLI"]
+  subgraph replica["Each server replica (port 8080)"]
+    ws["Sync socket: /api/artifacts/:id/doc/sync"]
+    ops["Operations: replace, insert, delete, suggest"]
+    policy["agentPolicy(): direct, suggestion or refused"]
+    doc["In-memory Y.Doc per held page"]
+    ckpt["Checkpoint: Markdown, buildArticle, sanitizer, publisher"]
+  end
+  pg[("Postgres: edit_docs, edit_updates, presence, suggestions, versions")]
+  pm --> provider --> ws --> doc
+  agent --> ops --> policy
+  ops --> doc
+  doc -- "persist, then broadcast" --> pg
+  pg -- "NOTIFY artifacts_docs {page, seq}" --> doc
+  doc --> ckpt --> pg
+```
+
+- **One document per page.** A page's draft is a Yjs document, stored as a snapshot plus numbered updates. A replica persists an update before it broadcasts it, and other replicas hear of it through `NOTIFY` with only the page and the sequence number, then read the rows. Any replica can apply an agent's operation without holding the page.
+- **Checkpoints are versions.** Save version, the end of a Delegate run, a quiet spell, or a CLI publish landing on a draft turn the draft into Markdown, then into sanitized HTML through the same `buildArticle` and sanitizer as every publish, then into an ordinary version. So comments, fixed, compare, restore, links, the garden and search work as before. Readers see versions; editors see the draft.
+- **Lasting block ids** (`~` and ten characters) live in the document and in each checkpoint's page metadata, so comments and agents point at the same block however the page changes. Older pages get ids on their first edit, with aliases that move their threads across.
+- **Agents never touch the CRDT.** They read Markdown with block ids and send operations. `agentPolicy()` decides whether each applies, becomes a suggestion for a person to accept, or is refused because someone is writing. A replacement of a block someone is typing in becomes a suggestion; otherwise it applies as a text diff inside the block, so concurrent typing survives.
+- **Atoms.** Images, diagrams, charts and embeds stay as their exact Markdown, shown as cards in the editor, and are drawn at checkpoint from what the version they came from already drew.

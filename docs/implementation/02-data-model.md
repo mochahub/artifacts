@@ -17,8 +17,8 @@
 |---|---|
 | `role` | `owner`, `admin`, `member`, `reviewer`, `outside` |
 | `visibility` | `me`, `org` |
-| `permission` | `view`, `comment`, `publish` (`publish` only for organization members in `artifact_access`; it includes `comment`) |
-| `project_permission` | `view`, `comment`, `publish`, `manage` |
+| `permission` | `view`, `comment`, `edit`, `publish` (`publish` only for organization members in `artifact_access`; it includes `comment`; `edit` is 13's and includes `comment`) |
+| `project_permission` | `view`, `comment`, `edit`, `publish`, `manage` |
 | `token_kind` | `cli`, `org`, `oauth` |
 | `invite_kind` | `org`, `artifact`, `project` |
 | `page_kind` | `canvas`, `article`, `prototype`, `gallery`, `deck` |
@@ -27,8 +27,9 @@
 | `decision_kind` | `approved`, `changes_requested` |
 | `device_status` | `pending`, `approved`, `denied`, `used` |
 | `team_role` | `lead`, `member` |
-| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed`, `identity_linked` |
+| `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed`, `identity_linked`, and for editing (13) `checkpointed`, `edited`, `suggested`, `suggestion_accepted`, `suggestion_rejected`, `run_started`, `run_finished`, `maintained_changed` |
 | `project_kind` | `project`, `wiki` |
+| `checkpoint_kind`, `edit_mode`, `atom_kind`, `suggestion_status`, `suggestion_op`, `run_status` | Owned by [13-editing.md](13-editing.md) |
 
 ## Tables
 
@@ -297,6 +298,8 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 **`push_subscriptions`** (Phase 2): `id`, `org_id`, `person_id`, `session_id` (cascades, so ending a session ends its device's pushes), `endpoint` text unique, `keys` jsonb, `created_at`, `last_ok_at`.
 
 **`releases`**: none. The app learns the latest release from GitHub Releases (cached 6 hours) for the admin "new version" notice.
+
+**Editing tables** (Phase 2 Part B): `edit_docs`, `edit_updates`, `edit_presence`, `edit_atoms`, `edit_authors`, `block_aliases`, `edit_runs` and `suggestions`, and the columns `artifacts.agent_maintained` (with `_by`, `_at`), `versions.checkpoint`, `versions.doc_seq` and `blocks.authors`. [13-editing.md](13-editing.md#persistence) owns them.
 
 **`artifact_usage`** ships with M9; `backend_logs` with M10 and `push_subscriptions` with M11.
 

@@ -57,15 +57,15 @@ export const ACTIONS = Object.keys(CALLER_KINDS) as Action[];
 /** The callers an action can ever allow. */
 export type CallerFor<A extends Action> = Extract<Caller, { kind: (typeof CALLER_KINDS)[A][number] }>;
 
-/** What a person can do, from least to most. `manage` only ever comes from a project. */
-export type Level = "view" | "comment" | "publish" | "manage";
+/** What a person can do, from least to most. `manage` only ever comes from a project. `edit` is 13's. */
+export type Level = "view" | "comment" | "edit" | "publish" | "manage";
 type Standing = Level | "none";
-const ORDER: Standing[] = ["none", "view", "comment", "publish", "manage"];
+const ORDER: Standing[] = ["none", "view", "comment", "edit", "publish", "manage"];
 const atLeast = (level: Standing, wanted: Standing) => ORDER.indexOf(level) >= ORDER.indexOf(wanted);
 const higher = (a: Standing, b: Standing) => (atLeast(a, b) ? a : b);
 const best = (a: Level, b: Level) => higher(a, b) as Level;
-/** The role cap: reviewers and outside people never go above commenting. */
-const low = (level: Standing): Standing => (atLeast(level, "publish") ? "comment" : level);
+/** The role cap: reviewers and outside people never go above commenting, so never edit either. */
+const low = (level: Standing): Standing => (atLeast(level, "edit") ? "comment" : level);
 
 /** One way a person holds access to an artifact. A token-made grant keeps `viaToken` (04). */
 export type GrantSource =
@@ -146,7 +146,7 @@ export type ArtifactResource = {
   deletedAt: Date | null;
   deletedBy: string | null;
   /** artifact_access rows for this artifact. `viaToken`: a token granted it and no person has confirmed it. */
-  access: { personId: string; permission: "view" | "comment" | "publish"; viaToken: boolean }[];
+  access: { personId: string; permission: "view" | "comment" | "edit" | "publish"; viaToken: boolean }[];
   /** Open to the organization, or only to its grant holders. */
   restricted: boolean;
   /** The token that created this project, if any. See "Organization tokens" in 04. */

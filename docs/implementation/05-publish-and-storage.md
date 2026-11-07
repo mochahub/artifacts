@@ -108,6 +108,7 @@ It then runs `remark-rehype`, `rehype-slug` and `rehype-sanitize`. Sanitizing us
 - Each block's `data-block` attribute is its id.
 - Each block's `content_hash` is the SHA-256 of its normalized text (whitespace collapsed).
 - `blocks.text` stores the plain text.
+- **Editable wiki pages are the exception** ([13](13-editing.md#block-ids)): once a page is edited, its blocks keep lasting ids like `~k3j9x0a1b2`, carried in `pages.meta.blockIds` and passed to `buildArticle` as `blockIds`. Headings keep their slug as `id` and in the outline. A later CLI publish to such a page keeps ids by matching content.
 
 **The server re-sanitizes at commit.** The CLI's output can't be trusted (any token with `publish` could upload anything), and article HTML is inserted into the viewer's own page. So `commit` re-runs `rehype-sanitize` with the same allowlist (`@artifacts/schema/sanitize`) over every article's HTML blob, including inline SVG from Mermaid and charts (no `script`, `foreignObject`, `style` elements or attributes, or event attributes). Mermaid's styles are copied onto presentation attributes in the render helper, because a `<style>` in an article would apply to the whole viewer page. It stores the result as a new blob and records that hash in `pages.meta.htmlHash`. The viewer only ever loads that hash.
 

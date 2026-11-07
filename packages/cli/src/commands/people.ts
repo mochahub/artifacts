@@ -54,6 +54,7 @@ export async function teamsCommand({ flags }: Input<never, { server?: string }>,
 const LEVEL_WORDS = {
   view: "can view",
   comment: "can comment",
+  edit: "can edit",
   publish: "can publish",
   manage: "can manage",
 };

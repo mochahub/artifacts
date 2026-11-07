@@ -9,8 +9,9 @@ export const ROLES = ["owner", "admin", "member", "reviewer", "outside"] as cons
 export const INVITE_ROLES = ["admin", "member", "reviewer"] as const;
 export type InviteRole = (typeof INVITE_ROLES)[number];
 export const VISIBILITIES = ["me", "org"] as const;
-export const PERMISSIONS = ["view", "comment", "publish"] as const;
-export const PROJECT_PERMISSIONS = ["view", "comment", "publish", "manage"] as const;
+/** `edit` sits between comment and publish: change an editable page's text, never its files (13). */
+export const PERMISSIONS = ["view", "comment", "edit", "publish"] as const;
+export const PROJECT_PERMISSIONS = ["view", "comment", "edit", "publish", "manage"] as const;
 export const TEAM_ROLES = ["lead", "member"] as const;
 export const PAGE_KINDS = ["canvas", "article", "prototype", "gallery", "deck"] as const;
 export const THREAD_STATUSES = ["open", "fixed", "resolved"] as const;
@@ -53,19 +54,47 @@ export const ACTIVITY_KINDS = [
   "team_member_removed",
   "project_access_changed",
   "identity_linked",
+  // Editing (13). A CLI that doesn't send EDITING_FEATURE never sees these: see "Older clients" in 13.
+  "checkpointed",
+  "edited",
+  "suggested",
+  "suggestion_accepted",
+  "suggestion_rejected",
+  "run_started",
+  "run_finished",
+  "maintained_changed",
 ] as const;
+/** The activity kinds an older CLI can't parse, and what it is sent instead (null: left out). */
+export const EDITING_ACTIVITY_FALLBACK = {
+  checkpointed: "published",
+  edited: null,
+  suggested: null,
+  suggestion_accepted: null,
+  suggestion_rejected: null,
+  run_started: null,
+  run_finished: null,
+  maintained_changed: null,
+} as const;
 
 /** What a token may do (04, "Scopes"). Sessions have no scopes. */
-export const TOKEN_SCOPES = ["publish", "comment", "read", "manage", "data", "org"] as const;
+export const TOKEN_SCOPES = ["publish", "comment", "read", "manage", "data", "org", "edit"] as const;
 type TokenScope = (typeof TOKEN_SCOPES)[number];
 /** What a CLI sign-in gets: everything but `org`, which only an organization token holds. */
-export const CLI_SCOPES = ["publish", "comment", "read", "manage", "data"] as const satisfies TokenScope[];
+export const CLI_SCOPES = [
+  "publish",
+  "comment",
+  "read",
+  "manage",
+  "data",
+  "edit",
+] as const satisfies TokenScope[];
 /** What a connector can ask for (04, "Connectors"). */
-export const OAUTH_SCOPES = ["read", "comment", "publish"] as const satisfies TokenScope[];
+export const OAUTH_SCOPES = ["read", "comment", "publish", "edit"] as const satisfies TokenScope[];
 export type OAuthScope = (typeof OAUTH_SCOPES)[number];
 
 /** What `GET /api/events` sends (03). */
-export const EVENT_TYPES = ["thread", "comment", "version", "decision", "data"] as const;
+/** `draft` goes only to streams whose caller can edit the artifact (13). */
+export const EVENT_TYPES = ["thread", "comment", "version", "decision", "data", "draft"] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
 /** The `?google=` result on a redirect back from Google (03, "Google sign-in"). */
@@ -89,12 +118,43 @@ export const GOOGLE_OUTCOMES = [
 ] as const;
 export type GoogleOutcome = (typeof GOOGLE_OUTCOMES)[number];
 
+// Editing (13)
+/** How agents may work on a page right now, as each person in the editor chooses it. */
+export const EDIT_MODES = ["write", "pair", "delegate"] as const;
+/** What made a checkpoint version. Null on `versions.checkpoint` for an ordinary publish or restore. */
+export const CHECKPOINT_KINDS = ["saved", "quiet", "delegate", "agent", "handoff"] as const;
+export const SUGGESTION_STATUSES = ["open", "accepted", "rejected", "stale", "expired", "withdrawn"] as const;
+export const SUGGESTION_OPS = ["replace", "insert", "delete", "meta"] as const;
+export const RUN_STATUSES = ["active", "finished", "accepted", "rejected", "cancelled", "expired"] as const;
+/** What a block the editor can't represent losslessly holds: its exact Markdown, drawn by the read pipeline. */
+export const ATOM_KINDS = ["image", "chart", "mermaid", "frame", "html", "markdown"] as const;
+/** Why a page can't be edited in the browser. */
+export const NOT_EDITABLE_REASONS = [
+  "not_wiki",
+  "not_article",
+  "has_backend",
+  "archived",
+  "redraw",
+  "no_access",
+] as const;
+/**
+ * A CLI that parses the editing enum values sends this header with this word. A request with
+ * `Artifacts-CLI` and without it gets the fallbacks in 13, "Older clients".
+ */
+export const FEATURES_HEADER = "Artifacts-Features";
+export const EDITING_FEATURE = "editing";
+
 // Patterns
 export const SHA256_HEX = /^[0-9a-f]{64}$/;
 /** Project and artifact slugs. */
 export const SLUG_PATTERN = /^[a-z0-9-]{1,40}$/;
 /** Page and board ids. */
 export const KEY_PATTERN = /^[a-z0-9-]{1,60}$/;
+/**
+ * A lasting block id on an editable page (13): `~` and ten base-36 characters. A heading slug never
+ * holds `~`, so these can't collide with the `<heading>/p<n>` ids of older versions.
+ */
+export const BLOCK_ID_PATTERN = /^~[0-9a-z]{10}$/;
 export const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 export const FONT_NAME = /^[A-Za-z0-9][A-Za-z0-9 -]{0,39}$/;
 export const FONT_WEIGHT = /^[1-9]00$/;
@@ -123,6 +183,28 @@ export const TAG_MAX = 32;
 export const MAX_BRAND_FONTS = 8;
 export const MAX_FONT_BYTES = 4 * 1024 * 1024;
 
+// Editing limits (13)
+export const EDIT_UPDATE_MAX = 1024 * 1024;
+export const EDIT_DOC_MAX = 4 * 1024 * 1024;
+export const EDIT_BLOCKS_MAX = 2000;
+export const EDIT_MESSAGES_PER_SECOND = 30;
+export const EDIT_SOCKETS_PER_PERSON = 10;
+export const EDIT_EDITORS_MAX = 25;
+export const EDIT_OPS_MAX = 50;
+export const EDIT_OP_MARKDOWN_MAX = 64 * 1024;
+export const EDIT_CALL_MARKDOWN_MAX = 256 * 1024;
+export const EDIT_CALLS_PER_MINUTE = 60;
+export const SUGGESTIONS_OPEN_MAX = 200;
+export const SUGGESTION_NOTE_MAX = 2000;
+export const RUN_GOAL_MAX = 500;
+export const EDIT_COMPACT_UPDATES = 500;
+export const EDIT_COMPACT_BYTES = 1024 * 1024;
+/** Coalesce one connection's updates this long before persisting them. */
+export const EDIT_COALESCE_MS = 100;
+export const EDIT_HEARTBEAT_MS = 25_000;
+/** Bigger awareness updates aren't sent through NOTIFY (8000-byte payloads); replicas re-query. */
+export const EDIT_NOTIFY_AWARENESS_MAX = 6000;
+
 // How long things last (04)
 export const INVITE_DAYS = 7;
 export const RESET_HOURS = 1;
@@ -131,3 +213,14 @@ export const PURGE_DAYS = 30;
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
+/** Editing (13): a quiet spell checkpoints, and so does a draft this old without one. */
+export const EDIT_QUIET_MS = 2 * MINUTE_MS;
+export const EDIT_DRAFT_MAX_MS = 30 * MINUTE_MS;
+/** After the last editor leaves, a dirty draft checkpoints this soon. */
+export const EDIT_LEAVE_MS = 30_000;
+/** A presence row older than this doesn't count: nobody is there. */
+export const PRESENCE_TTL_MS = 30_000;
+/** An agent shows in presence this long after its last operation. */
+export const AGENT_PRESENCE_MS = MINUTE_MS;
+export const RUN_MAX_MS = HOUR_MS;
+export const SUGGESTION_DAYS = 14;
