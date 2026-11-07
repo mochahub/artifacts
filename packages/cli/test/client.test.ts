@@ -80,7 +80,7 @@ describe("a picture from the API", () => {
 });
 
 describe("the editing header", () => {
-  test("every kind of request says this CLI knows the editing values, and a text route comes back as text", async () => {
+  test("every kind of request says this CLI knows the editing and board values, and a text route comes back as text", async () => {
     const seen: (string | null)[] = [];
     const server = Bun.serve({
       port: 0,
@@ -98,7 +98,7 @@ describe("the editing header", () => {
       await client.post("/json", { a: 1 });
       await client.bytes("/bytes");
       expect(await client.text("/text")).toBe("# Hi\n");
-      expect(seen).toEqual(["editing", "editing", "editing", "editing"]);
+      expect(seen).toEqual(Array(4).fill("editing,boards"));
     } finally {
       server.stop(true);
     }

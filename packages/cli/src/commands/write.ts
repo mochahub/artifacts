@@ -64,6 +64,21 @@ export async function publishCommand(
     if (result.threadsOnChanged.length > 0) {
       out.say(`  threads on changed frames  ${result.threadsOnChanged.map((n) => `#${n}`).join(", ")}`);
     }
+    // A drawn board (14): the picture is published, and where it sits is a separate decision.
+    if (result.board) {
+      const { placed, suggestions, unplaced } = result.board;
+      if (placed.length > 0) out.say(`  placed on the board  ${placed.join(", ")}`);
+      if (suggestions.length > 0)
+        out.say(
+          `  waiting as ${suggestions.length} placement suggestion${suggestions.length === 1 ? "" : "s"} for a person to accept`,
+        );
+      if (unplaced.length > 0) {
+        out.say(`  not on the board yet  ${unplaced.join(", ")}`);
+        out.say(
+          "  Put one beside a sketch with artifacts board place-frame <project/slug> --frame <key> --near <object>",
+        );
+      }
+    }
   });
 }
 

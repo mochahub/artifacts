@@ -1,5 +1,6 @@
 // The skill, as text imports: the CLI installs it from its one binary, and the MCP serves the references.
 
+import boards from "./references/boards.md" with { type: "text" };
 import brand from "./references/brand.md" with { type: "text" };
 import kit from "./references/kit.md" with { type: "text" };
 import lint from "./references/lint.md" with { type: "text" };
@@ -21,6 +22,7 @@ import skill from "./SKILL.md" with { type: "text" };
 /** Every file in this folder that ships, by its path here. */
 export const SKILL_FILES: Record<string, string> = {
   "SKILL.md": skill,
+  "references/boards.md": boards,
   "references/brand.md": brand,
   "references/kit.md": kit,
   "references/lint.md": lint,

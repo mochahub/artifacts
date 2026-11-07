@@ -19,6 +19,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { findArtifact, type LoadedArtifact, toProject } from "../auth/access.ts";
 import { actorOf, agentOf, type Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
+import { boardRoutes } from "../boards/routes.ts";
 import {
   activity,
   artifacts,
@@ -70,6 +71,8 @@ type PmNode = { type: string; attrs?: Record<string, unknown>; content?: PmNode[
 
 const notEditable = (reason: string) =>
   new ApiError("conflict", "This page can't be edited here.", { reason: "not_editable", editable: reason });
+/** Article-only routes refuse a board draft with `not_article` (14, "Sync and holds"). */
+const isBoard = (state: object) => (state as { kind?: string }).kind === "board";
 
 async function blobText(deps: Deps, hash: string | undefined) {
   if (!hash) return null;
@@ -183,6 +186,7 @@ export async function docState(deps: Deps, caller: Caller, artifact: LoadedArtif
 async function draftView(deps: Deps, artifact: LoadedArtifact): Promise<DraftView> {
   const state = await editability(deps, artifact);
   if (!state.editable) throw notEditable(state.reason);
+  if (isBoard(state)) throw notEditable("not_article");
   await ensureDoc(deps, artifact);
   const { ydoc, row } = await loadDoc(deps, artifact.id);
   const atoms = await deps.db
@@ -350,6 +354,8 @@ export function editingRoutes(routes: Routes, deps: Deps) {
   const artifact = artifactParam(deps);
   const suggestion = suggestionParam(deps);
   const run = runParam(deps);
+  // Board routes are registered here too, so the one API keeps one list of handlers (14).
+  boardRoutes(routes, deps);
 
   routes.get("/api/artifacts/:id/doc", { action: "artifact.read", resource: artifact }, async (c) =>
     c.json(await docState(deps, c.var.caller, c.var.resource)),
@@ -380,6 +386,7 @@ export function editingRoutes(routes: Routes, deps: Deps) {
       const body = await parseBody(c, Checkpoint);
       const state = await editability(deps, c.var.resource);
       if (!state.editable) throw notEditable(state.reason);
+      if (isBoard(state)) throw notEditable("not_article");
       const { caller } = c.var;
       return c.json(
         await checkpoint(deps, c.var.resource.id, {

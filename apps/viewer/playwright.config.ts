@@ -11,7 +11,8 @@ import {
 
 export default defineConfig({
   testDir: "e2e",
-  testMatch: "*.e2e.ts",
+  // Boards (14): the reader, editor and pointer specs; the iPad project runs only the pointer one.
+  testMatch: ["*.e2e.ts", "boards*.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: "line",
@@ -30,6 +31,18 @@ export default defineConfig({
     {
       name: "desktop",
       use: { viewport: { width: 1440, height: 900 }, storageState: "e2e/.auth.json" },
+      dependencies: ["claim"],
+    },
+    {
+      name: "ipad",
+      testMatch: "boards-pointers.spec.ts",
+      use: {
+        viewport: { width: 820, height: 1180 },
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+        storageState: "e2e/.auth.json",
+      },
       dependencies: ["claim"],
     },
     // Virtual authenticators need Chromium's CDP (10), and the offline test its service worker controls.

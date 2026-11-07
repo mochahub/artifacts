@@ -3,6 +3,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [preact()],
+  // scripts/board-size.ts walks this to price a cold board Edit, shared chunks included (14).
+  build: { manifest: true },
   server: {
     port: 5173,
     strictPort: true,

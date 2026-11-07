@@ -1,0 +1,13 @@
+.screen {
+  width: 240px;
+  height: 160px;
+  background: #fff;
+  color: #111;
+  padding: 12px;
+}
+.title {
+  font-size: 18px;
+}
+.hint {
+  font-size: 14px;
+}

@@ -737,6 +737,9 @@ artifacts reply <id> "<text>" [--fixed]
 artifacts wiki create <slug> | show <slug> | links <project/slug> | export <wiki> <dir>   # wikis (§16); export writes Markdown files
 artifacts page read | edit | suggest | save | suggestions | delegate | export <project/slug>   # a wiki page by block ids and operations (§16)
 artifacts page create <wiki>/<slug> --title <t> --summary <s> --file <md>   # a new wiki page, text only
+artifacts board read | edit | suggest | save | suggestions | delegate | export <project/slug>   # a drawn board by object ids and batches (§17)
+artifacts board place-frame <project/slug> --frame <key> --near <object>   # put a published mock beside a sketch
+artifacts board create <wiki>/<slug> --title <t> --summary <s> | asset add <project/slug> <file>   # a new native board; a validated picture
 artifacts visibility org|me       # who inside the organization can see it
 artifacts share --link [--comment] [--expires 7d]          # external link
 artifacts share --invite sam@example.com [--comment]       # external person; prints their link (--edit is for people to give in the viewer)
@@ -983,6 +986,18 @@ by the MIT self-hosting licence requirement. No model or browser runs on the ser
 - **Accessible alternatives:** labelled keyboard tools, keyboard movement/text
   editing, a navigable Objects outline with text/alt/connection descriptions,
   reduced-motion fit/pan and a readable text alternative to the visual board.
+- **Agents use the CLI as well as the tools.** `artifacts board read --draft` gives
+  the sketch as objects with ids and bases; `board edit` sends one atomic batch
+  from a file or standard input and exits 0 when it was applied, 2 when it became a
+  suggestion and 1 when it was refused. The loop for "turn this sketch into mocks"
+  is `artifacts publish` for the pictures, then `board place-frame --frame <key>
+  --near <object>` to put each beside the sketch, then `board save`. A save from
+  the CLI is JSON with pictures pending. Object-anchored comments reach a CLI that
+  advertises `Artifacts-Features: editing,boards`; an older one sees them without an
+  anchor, with their `where` text and crop.
+- **Export.** `artifacts board export` writes one checkpoint as its schema-1 JSON,
+  a plain-text outline, its pictures by hash and its rendered frames; a wiki export
+  includes each board that way. Drafts are never exported.
 - **Budget:** reading stays within the existing 80 KB gzip limit; board editing
   loads only on Edit, with a separate 160 KB incremental JS+CSS gzip ceiling,
   including Yjs and the provider. No editor prefetch while reading.

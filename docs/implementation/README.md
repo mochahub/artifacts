@@ -13,7 +13,7 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 | 04 | [Sign-in, callers and permissions](04-auth-and-permissions.md) | **Contract** | Caller types, cookie and token formats, scopes, permission actions and matrix, rate limits |
 | 05 | [Publishing, rendering and storage](05-publish-and-storage.md) | **Contract** | Manifest schema, render outputs, block ids, re-anchoring, crops, clean-up |
 | 06 | [The viewer](06-viewer.md) | Guide | Routes, screens per mock board, canvas engine, design rules |
-| 07 | [The CLI and the skill](07-cli-and-skill.md) | **Contract** | Command names and flags (including `page` and `wiki export`), config files, credentials, lint rule ids, the skill |
+| 07 | [The CLI and the skill](07-cli-and-skill.md) | **Contract** | Command names and flags (including `page`, `board` and `wiki export`), config files, credentials, lint rule ids, the skill |
 | 08 | [Micro apps](08-micro-apps.md) | **Contract** | Bridge messages, data store rules and limits, the backend sandbox, request flow |
 | 09 | [Deploying](09-deploy.md) | **Contract** | Images, environment variables, the Railway template, Compose, releases |
 | 10 | [Testing and acceptance](10-testing-and-acceptance.md) | Guide | Test layers, fixtures, what the agent verifies versus the user |

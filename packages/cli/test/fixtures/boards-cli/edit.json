@@ -1,0 +1,40 @@
+{
+  "epoch": 2,
+  "bases": {
+    "~sk3tch0001": "bbbbbbbbbbbb"
+  },
+  "ops": [
+    {
+      "op": "update",
+      "object": "~sk3tch0001",
+      "patch": {
+        "text": "Pay with card or wallet"
+      }
+    },
+    {
+      "op": "add",
+      "ref": "$total",
+      "object": {
+        "kind": "sticky",
+        "text": "Total",
+        "pose": {
+          "x": 20,
+          "y": 200,
+          "w": 160,
+          "h": 80,
+          "angle": 0
+        },
+        "parent": "~gr0up00004",
+        "label": "",
+        "style": {
+          "fill": "transparent",
+          "stroke": "#242424",
+          "strokeWidth": 2,
+          "opacity": 1,
+          "fontSize": 20,
+          "align": "left"
+        }
+      }
+    }
+  ]
+}

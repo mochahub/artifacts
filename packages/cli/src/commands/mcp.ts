@@ -1,6 +1,8 @@
 import { readFileSync, rmSync } from "node:fs";
 import { EditRequest, LibraryProjects, UNTRUSTED_NOTICE } from "@artifacts/schema";
+import { BoardEditRequest } from "@artifacts/schema/boards";
 import {
+  BOARD_TOOLS,
   EDIT_TOOLS,
   MCP_GUIDANCE as GUIDANCE,
   libraryTools,
@@ -30,7 +32,7 @@ type Tool = McpToolSpec & {
   stdin?(input: Record<string, unknown>): string;
   /** The command's own text form is what a model should read, so it runs without --json. */
   plain?: boolean;
-  /** The command prints its whole answer even when it exits 1 (a refused operation), as the hosted tool returns it. */
+  /** The command prints its whole answer even when it exits 1 (a refused operation) or 2 (a board suggestion), as the hosted tool returns it. */
   answersOnRefusal?: boolean;
 };
 
@@ -78,6 +80,8 @@ const KEY = /^[a-z0-9][a-z0-9-]{0,59}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CURSOR = /^[A-Za-z0-9:_-]{1,40}$/;
 const NUMBER = /^\d{1,9}$/;
+/** A board cursor binds the read it came from, so it is longer than a page cursor; it still rides as one argument. */
+const BOARD_CURSOR = /^[^\s\0]{1,500}$/;
 const REPO = /^[\w@:/.+%~-]{1,300}$/;
 const LIST_PATH = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*){0,2}$/;
 const limitAndCursor = (input: Record<string, unknown>, flag: Flag) => [
@@ -118,6 +122,57 @@ const editArgs = (input: Record<string, unknown>, flag: Flag) => [
     : []),
   ...flag("run", input.run, UUID, "run"),
 ];
+
+/**
+ * What a model sent as a board batch (14), checked here so a bad call fails before a process starts.
+ * A request id or bases it leaves out are the command's to fill, as they are for a person.
+ */
+const boardOps = (input: Record<string, unknown>, suggest: boolean) => {
+  const { artifact: _artifact, ...rest } = input;
+  const request = BoardEditRequest.partial({ requestId: true, bases: true }).safeParse({
+    ...rest,
+    ...(suggest ? { suggest: true } : {}),
+  });
+  if (!request.success) {
+    throw new BadArguments(
+      request.error.issues
+        .map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`)
+        .join("; "),
+    );
+  }
+  if (suggest && request.data.checkpoint) throw new BadArguments("A suggestion has nothing to checkpoint.");
+  return JSON.stringify(request.data);
+};
+const epochFlag = (flag: Flag, value: unknown) => {
+  if (!Number.isInteger(value) || (value as number) < 1) throw new BadArguments("epoch is required.");
+  return flag("epoch", value, NUMBER, "epoch");
+};
+const csv = (flag: Flag, name: string, value: unknown, form: RegExp, label: string) => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 50) throw new BadArguments(`${label} must be a list.`);
+  for (const item of value)
+    if (typeof item !== "string" || !form.test(item) || item.includes(","))
+      throw new BadArguments(`${label} isn't valid.`);
+  return flag(name, value.join(","), /^.{0,2000}$/s, label);
+};
+
+/**
+ * `artifacts_board_create` has no spec in `@artifacts/schema/mcp` yet; this is its input from 14, and it
+ * moves there with the others.
+ */
+const BOARD_CREATE: McpToolSpec = {
+  name: "artifacts_board_create",
+  description: "Create an empty board as a new wiki page, to draw on or to place published mocks on.",
+  properties: {
+    project: { type: "string", description: "Wiki slug" },
+    slug: { type: "string", description: "Page slug" },
+    title: { type: "string", description: "Title" },
+    summary: { type: "string", description: "What it holds, up to 280 characters" },
+    tags: { type: "array", description: "Up to 8" },
+    sources: { type: "array", description: "Source slugs in this wiki" },
+  },
+  required: ["project", "slug", "title", "summary"],
+};
 
 /** Each tool is one CLI command with --json, so tools without a shell behave the same as those with one. */
 const TOOLS: Tool[] = [
@@ -273,6 +328,92 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    ...BOARD_TOOLS.read,
+    command: "board",
+    args: (input, flag) => [
+      "read",
+      ...(input.draft === true ? ["--draft"] : []),
+      ...flag("version", input.version, NUMBER, "version"),
+      ...flag("cursor", input.cursor, BOARD_CURSOR, "cursor"),
+      ...requiredArtifact(input.artifact),
+    ],
+  },
+  {
+    ...BOARD_TOOLS.edit,
+    command: "board",
+    answersOnRefusal: true,
+    args: (input) => ["edit", "--ops=-", ...requiredArtifact(input.artifact)],
+    stdin: (input) => boardOps(input, false),
+  },
+  {
+    ...BOARD_TOOLS.suggest,
+    command: "board",
+    answersOnRefusal: true,
+    args: (input) => ["suggest", "--ops=-", ...requiredArtifact(input.artifact)],
+    stdin: (input) => boardOps(input, true),
+  },
+  {
+    ...BOARD_TOOLS.checkpoint,
+    command: "board",
+    args: (input, flag) => [
+      "save",
+      ...epochFlag(flag, input.epoch),
+      ...flag("name", input.name, /^[^\0]{1,120}$/s, "name"),
+      ...flag("message", input.message, /^[^\0]{1,2000}$/s, "message"),
+      ...requiredArtifact(input.artifact),
+    ],
+  },
+  {
+    ...BOARD_TOOLS.suggestions,
+    command: "board",
+    args: (input, flag) => [
+      "suggestions",
+      ...flag("status", input.status, /^(open|accepted|rejected|stale|expired|withdrawn|all)$/, "status"),
+      ...flag("preview", input.preview, UUID, "preview"),
+      ...flag("cursor", input.cursor, BOARD_CURSOR, "cursor"),
+      ...requiredArtifact(input.artifact),
+    ],
+  },
+  {
+    ...BOARD_TOOLS.delegate,
+    command: "board",
+    args: (input, flag) => {
+      const artifact = requiredArtifact(input.artifact);
+      if ((input.goal === undefined) === (input.finish === undefined))
+        throw new BadArguments("Give a goal to start a run, or finish with a run id.");
+      if (input.goal !== undefined)
+        return [
+          "delegate",
+          ...flag("goal", text(input.goal, "goal"), /^[^\0]{1,500}$/s, "goal"),
+          ...flag("agent", input.agent, /^[^\0]{1,80}$/s, "agent"),
+          ...artifact,
+        ];
+      return [
+        "delegate",
+        ...flag("finish", text(input.finish, "finish"), UUID, "run"),
+        ...flag("message", input.message, /^[^\0]{1,2000}$/s, "message"),
+        ...artifact,
+      ];
+    },
+  },
+  {
+    ...BOARD_CREATE,
+    command: "board",
+    args: (input, flag) => {
+      const wikiSlug = `${text(input.project, "project")}/${text(input.slug, "slug")}`;
+      if (!/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/.test(wikiSlug))
+        throw new BadArguments("project and slug must be slugs.");
+      return [
+        "create",
+        ...flag("title", text(input.title, "title"), /^[^\0]{1,120}$/s, "title"),
+        ...flag("summary", text(input.summary, "summary"), /^[^\0]{1,280}$/s, "summary"),
+        ...csv(flag, "tags", input.tags, /^[^\0]{1,32}$/s, "tags"),
+        ...csv(flag, "sources", input.sources, KEY, "sources"),
+        wikiSlug,
+      ];
+    },
+  },
+  {
     name: "artifacts_publish",
     description: "Lint, render and publish the artifact in the working folder.",
     command: "publish",
@@ -358,8 +499,10 @@ async function callTool(name: string, args: string[], stdin?: string) {
   if (name === "artifacts_view" && code === 0) return imageResult(out);
   const tool = TOOLS.find((entry) => entry.name === name);
   // A refused edit is an answer, not a failure of the tool: it holds the block's current text, which is data.
+  // So is a board batch that became a suggestion (exit 2), as long as the command printed its receipt.
   const answered =
-    code === 0 || (tool?.answersOnRefusal === true && code === 1 && out.trimStart().startsWith("{"));
+    code === 0 ||
+    (tool?.answersOnRefusal === true && (code === 1 || code === 2) && out.trimStart().startsWith("{"));
   return {
     content: [
       ...(tool?.untrusted && answered ? [{ type: "text", text: UNTRUSTED_NOTICE }] : []),

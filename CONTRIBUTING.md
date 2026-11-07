@@ -35,6 +35,8 @@ bun test --timeout=30000 apps/server/test/permissions.test.ts
 bun test --timeout=30000 -t "purge" apps/server    # by test name
 ```
 
+Several people (or agents) working at once can each run a copy of that file under another project name and other host ports, and point the runner at it with `TEST_DATABASE_URL` and `TEST_S3_ENDPOINT` (the defaults are the ports in that file). The CLI's tests that need a server, such as `packages/cli/test/board.e2e.test.ts`, are `bun test` files and read the same two variables; the ones that don't (`board.test.ts` mocks the server) need no stack.
+
 A full `bun run test` also checks that every API route was reached by a test (`scripts/route-coverage.ts`), which a single file can't.
 
 For one e2e file, pass it to the script, which hands its arguments to Playwright:

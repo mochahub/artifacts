@@ -1,5 +1,18 @@
 import { randomUUID } from "node:crypto";
 import {
+  ASSETS,
+  BOARD,
+  BOARD_SHARES,
+  boardAuthorCounts,
+  DELETED,
+  OBJECTS,
+  REGISTERS,
+  repairBoard,
+  TEXT_KINDS,
+  validateBoard,
+} from "@artifacts/doc/board";
+import { isBoardObjectId } from "@artifacts/doc/board-ids";
+import {
   Awareness,
   applyAwarenessUpdate,
   awarenessMessage,
@@ -16,6 +29,7 @@ import {
   syncUpdate,
 } from "@artifacts/doc/sync";
 import { FRAGMENT, fixIds, SERVER_ORIGIN, TOO_MANY_BLOCKS, validate } from "@artifacts/doc/ydoc";
+import { BoardAwarenessState } from "@artifacts/schema/boards";
 import {
   AGENT_PRESENCE_MS,
   EDIT_COALESCE_MS,
@@ -36,7 +50,7 @@ import {
   type SyncControl,
 } from "@artifacts/schema/editing";
 import type { ServerWebSocket, WebSocketHandler } from "bun";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import postgres from "postgres";
 import * as Y from "yjs";
 import { findArtifact } from "../auth/access.ts";
@@ -44,9 +58,9 @@ import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { currentCaller } from "../auth/resolve.ts";
 import type { OrgRow } from "../db/index.ts";
-import { editAtoms, editDocs, editPresence, editUpdates, people } from "../db/schema.ts";
+import { boardAssets, editAtoms, editDocs, editPresence, editUpdates, people } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
-import { authorKey, editActor, editability, loadDoc, persistUpdate } from "../editing/store.ts";
+import { authorKey, type DocKind, editActor, editability, loadDoc, persistUpdate } from "../editing/store.ts";
 import { ApiError } from "../http/errors.ts";
 import type { RouteContext } from "../http/routes.ts";
 import type { Logger } from "../log.ts";
@@ -88,6 +102,8 @@ type Conn = {
   mode: EditMode;
   block: string | null;
   pending: string[];
+  /** Board holds: selected/dragged/edited objects and unsent object changes (14, "Sync and holds"). */
+  objects: string[];
   /** Awareness client ids this connection introduced: it may update only these. */
   clients: Set<number>;
   /** Checked updates not yet persisted. They are in the shadow, never in the document editors see. */
@@ -110,6 +126,8 @@ type AgentState = { client: number; clock: number; until: number; renew: Timer |
 type Held = {
   artifactId: string;
   orgId: string;
+  /** Which validator, model and author counts this document uses: the row's kind, never guessed. */
+  kind: DocKind;
   epoch: number;
   version: number;
   /** The document every editor sees. */
@@ -123,6 +141,7 @@ type Held = {
   /** Work on this document, one at a time: updates, catch-ups. */
   chain: Promise<void>;
   release: Timer | null;
+  /** Article atom hashes, or a board's validated image hashes. */
   atoms: Set<string>;
   /** The most characters each author key has had: a key other than the writer's may not gain past it. */
   high: Map<string, number>;
@@ -130,7 +149,79 @@ type Held = {
   collect: Collector | null;
 };
 
-type Collector = { touched: Set<string>; problem: string | null; foreign: boolean; own: string };
+type Collector = {
+  touched: Set<string>;
+  problem: string | null;
+  foreign: boolean;
+  own: string;
+  /** Board image hashes the update added to `assets`. */
+  assets: Set<string>;
+};
+
+/** Characters per author key, by the document's kind. */
+const countsOf = (kind: DocKind, ydoc: Y.Doc) =>
+  kind === "board" ? boardAuthorCounts(ydoc) : authorCounts(ydoc);
+const AUTHOR_KEY = /^a[1-9][0-9]*$/;
+const FUTURE_MS = 10 * 60_000;
+
+/** A board register or tombstone stamped by this connection, at a believable time. */
+function ownStamp(value: unknown, own: string): string | null {
+  const stamp = value as { a?: unknown; t?: unknown } | null;
+  if (!stamp || typeof stamp !== "object" || typeof stamp.a !== "string" || typeof stamp.t !== "string")
+    return "a change without an author";
+  if (stamp.a !== own) return "a change marked with someone else's key";
+  const at = Date.parse(stamp.t);
+  if (Number.isNaN(at) || at > Date.now() + FUTURE_MS) return "an author time in the future";
+  return null;
+}
+
+/** Board text a client inserted: its own key, or a known key that may not grow (as articles). */
+function checkBoardText(
+  attributes: Record<string, unknown> | undefined,
+  collect: Collector,
+  allowed: (key: string) => boolean,
+): string | null {
+  const author = attributes?.author as { a?: unknown; t?: unknown } | undefined;
+  if (!author || typeof author.a !== "string" || !AUTHOR_KEY.test(author.a)) return "text without an author";
+  if (
+    typeof author.t !== "string" ||
+    Number.isNaN(Date.parse(author.t)) ||
+    Date.parse(author.t) > Date.now() + FUTURE_MS
+  )
+    return "an author time in the future";
+  if (author.a !== collect.own) {
+    if (!allowed(author.a)) return "text marked with someone else's key";
+    collect.foreign = true;
+  }
+  return null;
+}
+
+/** A whole new object map from a client: its own id, made entirely by this connection. */
+function checkNewObject(id: string, map: unknown, collect: Collector): string | null {
+  if (!(map instanceof Y.Map)) return "an object that isn't a map";
+  if (!isBoardObjectId(id) || map.get("id") !== id) return "an object with the wrong id";
+  const kind = map.get("kind");
+  // Rendered frames are the server's: only publishing makes or changes them.
+  if (kind === "rendered_frame") return "a rendered frame from a client";
+  const created = ownStamp(map.get("created"), collect.own);
+  if (created) return created;
+  for (const key of REGISTERS) {
+    const problem = ownStamp(map.get(key), collect.own);
+    if (problem) return problem;
+  }
+  const text = map.get("text");
+  if (text !== undefined) {
+    if (!(text instanceof Y.Text) || !TEXT_KINDS.has(kind as never)) return "text on an object without text";
+    for (const op of text.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]) {
+      if (typeof op.insert !== "string") return "an embed in text";
+      const author = op.attributes?.author as { a?: unknown } | undefined;
+      if (author?.a !== collect.own) return "a new object with someone else's text";
+      const problem = checkBoardText(op.attributes, collect, () => false);
+      if (problem) return problem;
+    }
+  }
+  return null;
+}
 
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 const fromBase64 = (text: string) => new Uint8Array(Buffer.from(text, "base64"));
@@ -404,7 +495,7 @@ export class DocHub {
         }
         // Words other replicas and operations added count toward each author's most, as local ones do.
         if (rows.length > 0)
-          for (const [key, n] of authorCounts(held.ydoc))
+          for (const [key, n] of countsOf(held.kind, held.ydoc))
             held.high.set(key, Math.max(held.high.get(key) ?? 0, n));
       })
       .catch((error) => this.log.warn("couldn't catch a draft up", { error: String(error) }));
@@ -435,10 +526,17 @@ export class DocHub {
   private async load(artifactId: string): Promise<Held> {
     const deps = this.d;
     const { ydoc, row } = await loadDoc(deps, artifactId);
-    const atoms = await deps.db
-      .select({ hash: editAtoms.hash })
-      .from(editAtoms)
-      .where(eq(editAtoms.artifactId, artifactId));
+    const kind: DocKind = row.kind === "board" ? "board" : "article";
+    const atoms =
+      kind === "board"
+        ? await deps.db
+            .select({ hash: boardAssets.hash })
+            .from(boardAssets)
+            .where(and(eq(boardAssets.artifactId, artifactId), isNotNull(boardAssets.validatedAt)))
+        : await deps.db
+            .select({ hash: editAtoms.hash })
+            .from(editAtoms)
+            .where(eq(editAtoms.artifactId, artifactId));
     const shadow = new Y.Doc();
     const state = Y.encodeStateAsUpdate(ydoc);
     Y.applyUpdate(shadow, state);
@@ -447,6 +545,7 @@ export class DocHub {
     const held: Held = {
       artifactId,
       orgId: row.orgId,
+      kind,
       epoch: row.epoch,
       version: row.version,
       ydoc,
@@ -458,7 +557,7 @@ export class DocHub {
       chain: Promise.resolve(),
       release: null,
       atoms: new Set(atoms.map((atom) => atom.hash)),
-      high: authorCounts(ydoc),
+      high: countsOf(kind, ydoc),
       size: state.length,
       collect: null,
     };
@@ -486,6 +585,7 @@ export class DocHub {
 
   /** Collects what a client update touched on the shadow, and checks its authors as it lands. */
   private watch(held: Held) {
+    if (held.kind === "board") return this.watchBoard(held);
     const fragment = held.shadow.getXmlFragment(FRAGMENT);
     fragment.observeDeep((events) => {
       const collect = held.collect;
@@ -531,6 +631,128 @@ export class DocHub {
     });
   }
 
+  /**
+   * The board's check as an update lands on the shadow (14, "Per-object attribution must travel in
+   * updates"): objects are added whole by this connection and never replaced or removed; ids, kinds,
+   * creation stamps and text slots never change; every changed register carries this connection's key;
+   * rendered frames and stroke points are never a client's to change; a tombstone is this connection's
+   * to add, and only its own to clear (its undo); board meta never changes; images are only added.
+   */
+  private watchBoard(held: Held) {
+    const shadow = held.shadow;
+    const objects = shadow.getMap<Y.Map<unknown>>(OBJECTS);
+    const deleted = shadow.getMap<{ a?: string }>(DELETED);
+    const fail = (collect: Collector, problem: string | null) => {
+      if (problem && !collect.problem) collect.problem = problem;
+    };
+    objects.observeDeep((events) => {
+      const collect = held.collect;
+      if (!collect) return;
+      const allowed = (key: string) => key === collect.own || (held.high.get(key) ?? 0) > 0;
+      for (const event of events) {
+        if (collect.problem) return;
+        if (event.target === objects) {
+          for (const [id, change] of (event as Y.YMapEvent<unknown>).changes.keys) {
+            collect.touched.add(id);
+            if (change.action !== "add") fail(collect, "objects are deleted with a tombstone, never removed");
+            else fail(collect, checkNewObject(id, objects.get(id), collect));
+          }
+          continue;
+        }
+        if (event.target instanceof Y.Text) {
+          const map = event.target.parent;
+          if (!(map instanceof Y.Map) || map.parent !== objects) {
+            fail(collect, "text outside an object");
+            continue;
+          }
+          collect.touched.add(String(map.get("id")));
+          for (const op of event.delta as {
+            insert?: unknown;
+            retain?: number;
+            attributes?: Record<string, unknown>;
+          }[]) {
+            if (typeof op.insert === "string") fail(collect, checkBoardText(op.attributes, collect, allowed));
+            else if (op.insert !== undefined) fail(collect, "an embed in text");
+            else if (op.retain !== undefined && op.attributes)
+              // Yjs' own format cleanup may drop an author mark (null): the model projects that span to
+              // its neighbour's author. Any other formatting is refused; a new author must be allowed.
+              fail(
+                collect,
+                Object.keys(op.attributes).some((k) => k !== "author")
+                  ? "text with formatting other than its author"
+                  : op.attributes.author === null
+                    ? null
+                    : checkBoardText(op.attributes, collect, allowed),
+              );
+          }
+          continue;
+        }
+        const map = event.target;
+        if (!(map instanceof Y.Map) || map.parent !== objects) {
+          fail(collect, "a change outside an object's fields");
+          continue;
+        }
+        const id = String(map.get("id"));
+        collect.touched.add(id);
+        const kind = map.get("kind");
+        for (const [key, change] of (event as Y.YMapEvent<unknown>).changes.keys) {
+          if (!(REGISTERS as readonly string[]).includes(key) || change.action !== "update") {
+            fail(collect, `an object's ${key} can't change`);
+            continue;
+          }
+          if (key === "data" && (kind === "rendered_frame" || kind === "stroke"))
+            fail(
+              collect,
+              kind === "stroke" ? "a stroke's points can't change" : "a rendered frame is published",
+            );
+          fail(collect, ownStamp(map.get(key), collect.own));
+        }
+      }
+    });
+    deleted.observe((event) => {
+      const collect = held.collect;
+      if (!collect) return;
+      for (const [id, change] of event.changes.keys) {
+        collect.touched.add(id);
+        if (change.action === "add") fail(collect, ownStamp(deleted.get(id), collect.own));
+        else if (change.action === "delete") {
+          // Clearing a tombstone is an undo of this connection's own deletion, checked from the old value.
+          const old = change.oldValue as { a?: string } | undefined;
+          if (old?.a !== collect.own) fail(collect, "a deletion that isn't yours to undo");
+        } else fail(collect, "a tombstone can't change");
+      }
+    });
+    shadow.getMap(BOARD).observe(() => {
+      if (held.collect) fail(held.collect, "a board's page can't change");
+    });
+    const assets = shadow.getMap(ASSETS);
+    assets.observe((event) => {
+      const collect = held.collect;
+      if (!collect) return;
+      for (const [hash, change] of event.changes.keys) {
+        if (change.action !== "add") fail(collect, "an image's metadata can't change");
+        else collect.assets.add(hash);
+      }
+    });
+  }
+
+  /** Images this artifact validated since the document was held, on any replica. */
+  private async refreshAssets(held: Held, wanted: string[]) {
+    const missing = wanted.filter((hash) => !held.atoms.has(hash));
+    if (missing.length === 0) return;
+    const rows = await this.d.db
+      .select({ hash: boardAssets.hash })
+      .from(boardAssets)
+      .where(
+        and(
+          eq(boardAssets.artifactId, held.artifactId),
+          inArray(boardAssets.hash, missing),
+          isNotNull(boardAssets.validatedAt),
+        ),
+      );
+    for (const row of rows) held.atoms.add(row.hash);
+  }
+
   private drop(held: Held) {
     if (this.held.get(held.artifactId) !== held) return;
     this.held.delete(held.artifactId);
@@ -574,6 +796,7 @@ export class DocHub {
       mode: "write",
       block: null,
       pending: [],
+      objects: [],
       clients: new Set(),
       updates: [],
       accepted: 0,
@@ -597,6 +820,8 @@ export class DocHub {
         return this.close(conn, SYNC_CLOSE.notFound, "not found");
       const held = await this.hold(artifactId);
       if (conn.closed) return this.leave(held, conn);
+      // A board update can't enter an article document, nor the other way round.
+      if (held.kind !== editable.kind) return this.close(conn, SYNC_CLOSE.notFound, "not found");
       if (held.conns.size >= EDIT_EDITORS_MAX)
         return this.close(conn, SYNC_CLOSE.rateLimited, "too many editors");
       // Epoch 0 is what DocState says before the first seed: that draft is the one just loaded.
@@ -676,7 +901,8 @@ export class DocHub {
   private async writePresence(held: Held, conn: Conn, force = false) {
     if (conn.closed || this.held.get(held.artifactId) !== held) return;
     const blocks = [conn.block, ...conn.pending].filter((block): block is string => Boolean(block));
-    const written = JSON.stringify([conn.mode, blocks]);
+    const objects = [...new Set(conn.objects)];
+    const written = JSON.stringify([conn.mode, blocks, objects]);
     if (!force && written === conn.presence.written) return;
     const wait = conn.presence.at + PRESENCE_WRITE_MS - Date.now();
     if (!force && wait > 0) {
@@ -690,7 +916,12 @@ export class DocHub {
     conn.presence.written = written;
     await this.d.db
       .update(editPresence)
-      .set({ mode: conn.mode, blocks: [...new Set(blocks)].slice(0, 51), seenAt: this.d.clock.now() })
+      .set({
+        mode: conn.mode,
+        blocks: [...new Set(blocks)].slice(0, 51),
+        objects,
+        seenAt: this.d.clock.now(),
+      })
       .where(and(eq(editPresence.artifactId, held.artifactId), eq(editPresence.connectionId, conn.id)));
   }
 
@@ -746,9 +977,15 @@ export class DocHub {
 
   /** A client's update (13, "Writing an update"): checked on the shadow, applied, coalesced, persisted. */
   private update(held: Held, conn: Conn, update: Uint8Array) {
-    held.chain = held.chain.then(() => {
+    held.chain = held.chain.then(async () => {
       if (conn.closed || !this.held.has(held.artifactId)) return;
-      const collect: Collector = { touched: new Set(), problem: null, foreign: false, own: conn.author };
+      const collect: Collector = {
+        touched: new Set(),
+        problem: null,
+        foreign: false,
+        own: conn.author,
+        assets: new Set(),
+      };
       held.collect = collect;
       try {
         Y.applyUpdate(held.shadow, update, conn);
@@ -759,16 +996,43 @@ export class DocHub {
       }
       let problem = collect.problem;
       let overBlocks = false;
-      if (!problem && collect.touched.size > 0) {
-        const result = validate(held.shadow, collect.touched, { atoms: (hash) => held.atoms.has(hash) });
+      if (!problem && held.kind === "article") {
+        for (const name of held.shadow.share.keys())
+          if (name !== FRAGMENT && BOARD_SHARES.has(name)) problem = "a board change in an article";
+        if (!problem && collect.touched.size > 0) {
+          const result = validate(held.shadow, collect.touched, { atoms: (hash) => held.atoms.has(hash) });
+          if (!result.ok) {
+            problem = result.reason;
+            overBlocks = result.reason === TOO_MANY_BLOCKS;
+          }
+        }
+      } else if (!problem) {
+        // Shared types, graph and limits on every update; each touched object in full.
+        const check = () => validateBoard(held.shadow, { assets: held.atoms, touched: collect.touched });
+        let result = check();
+        if (!result.ok && /image/.test(result.reason)) {
+          // Committed on another replica a moment ago: look again before refusing.
+          const images = [
+            ...collect.assets,
+            ...[...collect.touched].flatMap((id) => {
+              const data = held.shadow.getMap<Y.Map<unknown>>(OBJECTS).get(id)?.get("data") as
+                | { value?: { asset?: unknown } }
+                | undefined;
+              return typeof data?.value?.asset === "string" ? [data.value.asset] : [];
+            }),
+          ];
+          await this.refreshAssets(held, images);
+          if (conn.closed || this.held.get(held.artifactId) !== held) return;
+          result = check();
+        }
         if (!result.ok) {
           problem = result.reason;
-          overBlocks = result.reason === TOO_MANY_BLOCKS;
+          overBlocks = result.reason === "too many objects";
         }
       }
       let counts: Map<string, number> | null = null;
       if (!problem && collect.foreign) {
-        counts = authorCounts(held.shadow);
+        counts = countsOf(held.kind, held.shadow);
         for (const [key, n] of counts)
           if (key !== conn.author && n > (held.high.get(key) ?? 0))
             problem = "text marked with someone else's key";
@@ -790,7 +1054,11 @@ export class DocHub {
             controlMessage({
               t: "error",
               code: "too_large",
-              message: overBlocks ? "This page has too many blocks." : "This page is too large to grow.",
+              message: overBlocks
+                ? held.kind === "board"
+                  ? "This board has too many objects."
+                  : "This page has too many blocks."
+                : "This page is too large to grow.",
             }),
           );
           return this.close(conn, SYNC_CLOSE.tooLarge, "too large");
@@ -806,7 +1074,7 @@ export class DocHub {
       if (counts) for (const [key, n] of counts) held.high.set(key, Math.max(held.high.get(key) ?? 0, n));
       else if (collect.touched.size > 0) {
         // Own words only: the writer's count can only have grown.
-        const own = authorCounts(held.shadow).get(conn.author) ?? 0;
+        const own = countsOf(held.kind, held.shadow).get(conn.author) ?? 0;
         held.high.set(conn.author, Math.max(held.high.get(conn.author) ?? 0, own));
       }
       conn.updates.push(update);
@@ -852,6 +1120,34 @@ export class DocHub {
   }
 
   /**
+   * A board's referential projection (14, "Z-order and containment"): concurrent cycles, hidden parents
+   * and connectors bound to deleted targets are repaired by the server as its own update, worked out on
+   * a copy and persisted before anyone sees it, keeping every register's existing stamp.
+   */
+  private async repairPersisted(held: Held) {
+    const copy = new Y.Doc();
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(held.ydoc));
+    const fix = repairBoard(copy);
+    copy.destroy();
+    if (!fix) return;
+    try {
+      await persistUpdate(
+        this.d,
+        held.artifactId,
+        fix,
+        { origin: "server", personId: null, agent: null, tokenId: null },
+        undefined,
+        held.epoch,
+      );
+      if (this.held.get(held.artifactId) !== held) return;
+      Y.applyUpdate(held.shadow, fix, SERVER_ORIGIN);
+      Y.applyUpdate(held.ydoc, fix, SERVER_ORIGIN);
+    } catch (error) {
+      this.log.warn("couldn't persist a board repair", { error: String(error) });
+    }
+  }
+
+  /**
    * Persists a connection's checked updates, one batch at a time and in order (13, "Writing an update").
    * Only then do they reach the document editors see, and the writer hears `saved`. `lastSeq` isn't
    * moved here: the catch-up reads every seq after the last one it applied, so another writer's commit
@@ -883,7 +1179,8 @@ export class DocHub {
       if (this.held.get(held.artifactId) !== held) return;
       Y.applyUpdate(held.ydoc, merged, conn);
       if (!final) this.write(conn, savedMessage(count));
-      await this.fixIdsPersisted(held);
+      if (held.kind === "board") await this.repairPersisted(held);
+      else await this.fixIdsPersisted(held);
     });
   }
 
@@ -906,6 +1203,25 @@ export class DocHub {
       }
       if (entry.state === null) {
         kept.push(entry);
+        conn.objects = [];
+        continue;
+      }
+      if (held.kind === "board") {
+        const board = BoardAwarenessState.safeParse(entry.state);
+        if (!board.success) continue;
+        // Protections are never silently truncated: over 50 held objects, the state is refused whole.
+        const objects = [...new Set([...board.data.objects, ...board.data.pending])];
+        if (objects.length > 50) continue;
+        const color = HEX_COLOR.test(board.data.user.color) ? board.data.user.color : "#555555";
+        kept.push({
+          ...entry,
+          state: {
+            ...board.data,
+            mode: conn.mode,
+            user: { author: conn.author, name: conn.name, kind: "person", color },
+          },
+        });
+        conn.objects = objects;
         continue;
       }
       const parsed = AwarenessState.safeParse(entry.state);
@@ -970,8 +1286,10 @@ export class DocHub {
     author: { name?: string | null; personId?: string | null; key?: string },
     block: string | null,
     run: string | null,
+    /** On a board: the objects the agent is working on (14), shown instead of a block. */
+    objects?: string[],
   ) {
-    void this.agentPresenceAsync(artifactId, author, block, run).catch((error) =>
+    void this.agentPresenceAsync(artifactId, author, block, run, objects).catch((error) =>
       this.log.warn("couldn't show an agent's presence", { error: String(error) }),
     );
   }
@@ -981,6 +1299,7 @@ export class DocHub {
     author: { name?: string | null; personId?: string | null; key?: string },
     block: string | null,
     run: string | null,
+    objects?: string[],
   ) {
     const name = author.name?.trim() || "Agent";
     const id = `${name}\u0000${author.personId ?? ""}`;
@@ -1004,14 +1323,18 @@ export class DocHub {
       states.set(id, agent);
     }
     agent.until = Date.now() + AGENT_PRESENCE_MS;
-    agent.state = {
-      user: { author: author.key ?? "", name, kind: "agent", color: AGENT_COLOR },
-      mode: "delegate",
-      block,
-      pending: [],
-      for: forName,
-      run,
-    };
+    const user = { author: author.key ?? "", name, kind: "agent", color: AGENT_COLOR };
+    agent.state = objects
+      ? {
+          user,
+          mode: "delegate",
+          objects: [...new Set(objects)].slice(0, 50),
+          pending: [],
+          cursor: null,
+          for: forName,
+          run,
+        }
+      : { user, mode: "delegate", block, pending: [], for: forName, run };
     const publish = () => {
       const current = agent as AgentState;
       current.clock += 1;

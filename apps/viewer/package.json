@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "size": "size-limit"
+    "size": "size-limit",
+    "board-size": "bun scripts/board-size.ts"
   },
   "size-limit": [
     {

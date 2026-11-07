@@ -8,6 +8,7 @@ import {
   Thread as ThreadSchema,
   type VersionRow,
 } from "@artifacts/schema";
+import type { BoardObjectAnchor } from "@artifacts/schema/boards";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
 import type { Input } from "../command.ts";
@@ -19,11 +20,14 @@ import { artifactRef, resolveArtifact, versionNumber } from "../target.ts";
 function threadJson(thread: Thread) {
   const [first, ...replies] = thread.comments;
   const anchor = thread.anchor;
+  const pin = anchor && "object" in anchor ? (anchor as unknown as BoardObjectAnchor) : null;
   return {
     id: thread.n,
     page: thread.pageKey,
     ...(anchor?.type === "frame" ? { frame: anchor.frameKey, x: anchor.x, y: anchor.y } : {}),
-    ...(anchor && anchor.type !== "frame" ? { block: anchor.blockKey } : {}),
+    ...(anchor && "blockKey" in anchor ? { block: anchor.blockKey } : {}),
+    // A pin on a drawn board's object (14): the object's id, and where on it the pin sits.
+    ...(pin ? { object: pin.object, x: pin.u, y: pin.v } : {}),
     ...(anchor?.type === "text" ? { quote: anchor.quote.exact } : {}),
     version: thread.createdVersion,
     author: thread.author.name,

@@ -1,0 +1,15 @@
+{
+  "project": "sketch",
+  "slug": "map",
+  "title": "Checkout flow",
+  "summary": "Rendered mocks for a sketched checkout flow.",
+  "pages": [
+    {
+      "id": "board",
+      "kind": "canvas",
+      "boards": [{ "id": "screens", "title": "Screens", "src": "boards/screens.html" }],
+      "styles": ["style.css"],
+      "scripts": []
+    }
+  ]
+}

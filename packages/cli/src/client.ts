@@ -1,4 +1,4 @@
-import { type ApiErrorBody, EDITING_FEATURE, FEATURES_HEADER } from "@artifacts/schema";
+import { type ApiErrorBody, BOARDS_FEATURE, EDITING_FEATURE, FEATURES_HEADER } from "@artifacts/schema";
 import { detectAgent } from "./agent.ts";
 import { requireHttps } from "./config.ts";
 import { CliError } from "./output.ts";
@@ -44,8 +44,9 @@ export class Client {
       method: init.method ?? "GET",
       headers: {
         "Artifacts-CLI": VERSION,
-        // This CLI knows the editing values (13, "Older clients"): without it the server answers as it did before them.
-        [FEATURES_HEADER]: EDITING_FEATURE,
+        // This CLI knows the editing values (13, "Older clients") and native board anchors (14): without
+        // them the server answers as it did before, with object-anchored threads carrying anchor null.
+        [FEATURES_HEADER]: `${EDITING_FEATURE},${BOARDS_FEATURE}`,
         ...(agent ? { "Artifacts-Agent": agent } : {}),
         ...(init.json ? { "Content-Type": "application/json" } : {}),
         ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
@@ -105,6 +106,26 @@ export class Client {
     if (response.status !== 200)
       throw new CliError(`The server answered ${response.status} for that picture.`);
     return new Uint8Array(await response.arrayBuffer());
+  }
+
+  /**
+   * A picture the API answers with a redirect to storage (14, board assets). The token goes to the API
+   * alone: the one redirect is followed without it, as a download from a presigned URL is.
+   */
+  async redirected(path: string): Promise<Uint8Array> {
+    const response = await this.send(path);
+    if (response.status === 200) return new Uint8Array(await response.arrayBuffer());
+    const location = response.headers.get("Location");
+    if (response.status < 300 || response.status >= 400 || !location)
+      throw new CliError(`The server answered ${response.status} for that picture.`);
+    const target = new URL(location, this.url);
+    const next = await fetch(target, { redirect: "manual", signal: AbortSignal.timeout(timeoutMs()) }).catch(
+      (error) => {
+        throw new CliError(`Can't reach ${target.origin}: ${(error as Error).message}`);
+      },
+    );
+    if (next.status !== 200) throw new CliError(`The storage answered ${next.status} for that picture.`);
+    return new Uint8Array(await next.arrayBuffer());
   }
 
   get = <T>(path: string) => this.request<T>("GET", path);

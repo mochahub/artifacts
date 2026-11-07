@@ -25,7 +25,9 @@ import {
   WikiMeta,
 } from "@artifacts/schema";
 import { articleRecords, buildArticle } from "@artifacts/schema/article";
+import { BoardEditRequest } from "@artifacts/schema/boards";
 import {
+  BOARD_TOOLS,
   EDIT_TOOLS,
   MCP_GUIDANCE as GUIDANCE,
   MCP_LEGACY as LEGACY,
@@ -50,10 +52,15 @@ import { GUIDES } from "../../../../skill/index.ts";
 import { findArtifactBySlug, toProject } from "../auth/access.ts";
 import type { Asker, Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
+import { boardEdit } from "../boards/ops.ts";
+import { readBoard } from "../boards/read.ts";
+import { listBoardSuggestions } from "../boards/suggestions.ts";
 import { pages, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { checkpointLocked } from "../editing/checkpoint.ts";
 import { applyOps, pageRead } from "../editing/ops.ts";
 import { cancelRun, findRun, finishRun, startRun } from "../editing/runs.ts";
+import { loadDoc, withDocLock } from "../editing/store.ts";
 import { listSuggestions } from "../editing/suggestions.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
@@ -147,6 +154,23 @@ const editRequest = (input: Input, suggest: boolean): EditRequest => {
     fixes: input.fixes,
     run: input.run,
     ...(suggest ? { suggest: true } : { checkpoint: input.checkpoint }),
+    agent: "Connector",
+  });
+  if (!parsed.success) {
+    throw new ToolError(
+      parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("\n"),
+    );
+  }
+  return parsed.data;
+};
+
+/** Tool arguments as a `BoardEditRequest`, with zod's words when they don't fit. */
+const boardRequest = (input: Input, suggest: boolean): BoardEditRequest => {
+  const { artifact: _, ...rest } = input;
+  const parsed = BoardEditRequest.safeParse({
+    ...rest,
+    bases: rest.bases ?? {},
+    ...(suggest ? { suggest: true, checkpoint: undefined } : {}),
     agent: "Connector",
   });
   if (!parsed.success) {
@@ -454,8 +478,118 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
     },
   ];
 
+  /** Drawn boards by operation (14, "Hosted MCP tools"): the same functions the HTTP routes call. */
+  const boardTools: Tool[] = [
+    {
+      ...BOARD_TOOLS.read,
+      scope: "read",
+      async run(context) {
+        const loaded = await load(context, deps);
+        const draft = context.input.draft;
+        if (draft !== undefined && typeof draft !== "boolean") throw new ToolError("draft is true or false.");
+        return readBoard(deps, context.caller, loaded, {
+          draft,
+          version: whole(context.input.version, "version"),
+          cursor: str(context.input.cursor, "cursor", 200),
+        });
+      },
+    },
+    {
+      ...BOARD_TOOLS.edit,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        return boardEdit(deps, context.caller, loaded, boardRequest(context.input, false));
+      },
+    },
+    {
+      ...BOARD_TOOLS.suggest,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        return boardEdit(deps, context.caller, loaded, boardRequest(context.input, true));
+      },
+    },
+    {
+      ...BOARD_TOOLS.checkpoint,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        if (!can(context.caller, "artifact.edit", loaded))
+          throw new ApiError("forbidden", "You can't edit this board.");
+        const epoch = whole(context.input.epoch, "epoch");
+        if (!epoch) throw new ToolError("epoch is the draft's, from artifacts_board_read.");
+        const caller = context.caller;
+        return withDocLock(deps, loaded.id, async (lock) => {
+          const { row } = await loadDoc(deps, loaded.id, lock);
+          if (row.epoch !== epoch)
+            throw new ApiError(
+              "conflict",
+              `The board was started again: read it, then use epoch ${row.epoch}.`,
+              {
+                reason: "stale_epoch",
+              },
+            );
+          return checkpointLocked(
+            deps,
+            lock,
+            { row: loaded.row, project: loaded.project },
+            {
+              kind: "agent",
+              personId: caller.kind === "orgToken" ? caller.createdBy : caller.person.id,
+              agent: "Connector",
+              name: str(context.input.name, "name", 120) ?? null,
+              message: str(context.input.message, "message", 2000) ?? null,
+            },
+          );
+        });
+      },
+    },
+    {
+      ...BOARD_TOOLS.suggestions,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        if (!can(context.caller, "artifact.edit", loaded))
+          throw new ApiError("forbidden", "Suggestions are for people and agents who can edit this board.");
+        if (context.input.preview !== undefined)
+          throw new ToolError(
+            "Ghost previews aren't served here yet: read the suggestion's request instead.",
+          );
+        const raw = str(context.input.status, "status", 12) ?? "open";
+        const status = raw === "all" ? undefined : SuggestionStatus.safeParse(raw);
+        if (status && !status.success) throw new ToolError("status isn't one of the suggestion statuses.");
+        return listBoardSuggestions(deps, context.caller, loaded, {
+          status: status?.data,
+          cursor: str(context.input.cursor, "cursor", 40),
+        });
+      },
+    },
+    {
+      ...BOARD_TOOLS.delegate,
+      scope: "edit",
+      async run(context) {
+        const loaded = await load(context, deps);
+        if (!can(context.caller, "artifact.edit", loaded))
+          throw new ApiError("forbidden", "You can't edit this board.");
+        const finish = str(context.input.finish, "finish", 40);
+        if (!finish) {
+          const body = StartRun.safeParse({ goal: context.input.goal, agent: "Connector" });
+          if (!body.success)
+            throw new ToolError("Give a goal (up to 500 characters) to start, or finish: runId.");
+          return startRun(deps, context.caller, loaded, body.data);
+        }
+        const row = await findRun(deps, context.orgId, finish);
+        if (!row || row.artifactId !== loaded.id)
+          throw new ApiError("not_found", "There's no such run on this board.");
+        return finishRun(deps, context.caller, loaded, row, str(context.input.message, "message", 2000));
+      },
+    },
+  ];
+
   return [
     ...editTools,
+    ...boardTools,
     {
       ...WIKI_TOOLS.wiki,
       scope: "read",

@@ -56,6 +56,9 @@ describe("artifacts mcp", () => {
     const by = (id: number) => lines.find((line) => line.id === id);
     expect(by(1).result.serverInfo.name).toBe("artifacts");
     expect(by(2).result.tools.map((tool: { name: string }) => tool.name)).toContain("artifacts_reply");
+    const names = by(2).result.tools.map((tool: { name: string }) => tool.name);
+    for (const name of ["read", "edit", "suggest", "checkpoint", "suggestions", "delegate", "create"])
+      expect(names).toContain(`artifacts_board_${name}`);
     expect(by(3).result.isError).toBe(true);
     expect(by(4).error.code).toBe(-32602);
     expect(by(5).error.code).toBe(-32601);

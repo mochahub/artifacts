@@ -647,6 +647,14 @@ and their live content remain isolated on the content host. `board_assets`,
 
 Agents read structured objects/bases and send atomic batches through HTTP, MCP or
 the CLI, including `place_frame` beside a sketch. They never send raw CRDT updates.
+The CLI is another client of the same routes: `artifacts board` reads the draft,
+sends a batch from a file or standard input (exit 0 applied, 2 suggested, 1 refused),
+uploads checked pictures straight to storage, saves JSON checkpoints with pictures
+pending (it has no browser) and exports a checkpoint as files. `board place-frame`
+reads the draft, takes the epoch and bases from that read and sends one `place_frame`
+operation, so publishing a mock and putting it beside a sketch stay two steps. It
+sends `Artifacts-Features: editing,boards`; the local `artifacts mcp` runs the same
+commands for the board tools, passing a batch on standard input.
 Readers see checkpoints, editors see drafts; all derived search/wiki/link metadata
 uses checkpoints. Reading retains the 80 KB budget. The board editor and sync
 dependencies load only on Edit, within a separate 160 KB incremental gzip budget.
