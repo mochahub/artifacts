@@ -99,6 +99,7 @@ export const REPLY_INPUT = {
 
 /** What both servers tell a model about the library. Each puts its own lines between these. */
 export const MCP_GUIDANCE = {
+  wiki: "In a wiki, call artifacts_wiki first and follow its rules page.",
   library: "Artifacts is this team's library of published plans, research, designs and prototypes.",
   searchFirst: "Before research, design or prototyping, call artifacts_search",
   reading:
@@ -112,3 +113,49 @@ export const MCP_GUIDANCE = {
     "If the work needs motion or interaction, publish a page with kind prototype, after testing it in a sandboxed iframe with artifacts dev",
   sharing: "Sharing outside the org, changing visibility or deleting needs an explicit request.",
 };
+
+/** Hosted wiki tools share the HTTP wiki service. */
+export const WIKI_TOOLS = {
+  wiki: {
+    name: "artifacts_wiki",
+    description: "Read a wiki and its rules before writing, or list visible wikis.",
+    properties: { wiki: { type: "string", description: "Wiki slug" } },
+    untrusted: true,
+  },
+  links: {
+    name: "artifacts_wiki_links",
+    description: "Read a page's outgoing links, backlinks and sources.",
+    properties: { artifact: MCP_ARTIFACT },
+    required: ["artifact"],
+    untrusted: true,
+  },
+  create: {
+    name: "artifacts_wiki_create",
+    description: "Create a wiki or convert a project you manage.",
+    properties: {
+      slug: { type: "string", description: "Wiki slug" },
+      name: { type: "string", description: "Wiki name" },
+      personal: { type: "boolean", description: "Only you and admins" },
+    },
+    required: ["slug", "name"],
+    untrusted: true,
+  },
+  comment: {
+    name: "artifacts_comment",
+    description: "Open a page-level comment on the latest version.",
+    properties: {
+      artifact: MCP_ARTIFACT,
+      message: { type: "string", description: "Comment" },
+      page: { type: "string", description: "Page key" },
+    },
+    required: ["artifact", "message"],
+  },
+} satisfies Record<string, McpToolSpec>;
+
+/** Wiki metadata accepted by the hosted article publisher. */
+export const WIKI_ARTICLE_INPUT = {
+  role: { type: "string", description: "page or source" },
+  sources: { type: "array", description: "Source slugs in this wiki" },
+  origin: { type: "string", description: "Source http or https address" },
+  untrusted: { type: "boolean", description: "Source came from outside" },
+} satisfies Record<string, McpProperty>;

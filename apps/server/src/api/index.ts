@@ -12,6 +12,7 @@ import { pushRoutes } from "../push/routes.ts";
 import { eventRoutes } from "../realtime/routes.ts";
 import { reviewRoutes } from "../review/routes.ts";
 import { createReview } from "../review/service.ts";
+import { wikiRoutes } from "../wiki/routes.ts";
 import { authRoutes } from "./auth.ts";
 import { deviceRoutes } from "./device.ts";
 import { fileRoutes } from "./files.ts";
@@ -43,6 +44,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   deviceRoutes(routes, deps);
   publishRoutes(routes, publisher);
   listRoutes(routes, deps);
+  wikiRoutes(routes, deps);
   libraryRoutes(routes, deps);
   brandRoutes(routes, deps);
   reviewRoutes(routes, deps, review);

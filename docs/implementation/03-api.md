@@ -382,3 +382,11 @@ Both are on viewer origins only, never the Live-preview origin. Issuer, resource
 | `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. Access is checked again on each 25-second heartbeat, with the caller as they are now, so a stream closes within one heartbeat of a removed person, an ended session, a revoked token or a lost team. A stream also closes after 5 minutes and the browser reconnects. 10 streams per caller. |
 | `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. `keys.p256dh` must be an uncompressed P-256 point (65 bytes) and `keys.auth` 16 bytes, base64url. 10 devices per person; ended sessions' devices are removed daily. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |
+
+## Wikis
+
+- `POST /api/wikis` (`project.create`): CreateWiki → WikiCreated, 201 when created, 200 when already visible or converted from a managed project. Conflicts answer 409.
+- `GET /api/wikis/:slug` (`project.read`): WikiSpace with visible rules, pages, sources, log and garden findings. Ordinary projects answer 404.
+- `GET /api/artifacts/:id/links` (`artifact.read`): ArtifactLinks with outgoing targets, backlinks and sources. Hidden targets look missing.
+
+See [12-wikis.md](12-wikis.md) for the wiki contract.

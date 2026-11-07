@@ -33,6 +33,15 @@ type Props = {
 const SIZES = [17, 19, 21];
 const stored = (key: string, fallback: string) => readStored(`artifacts.read.${key}`) ?? fallback;
 
+/** "example.com" for a source's address: the whole URL is too long for one line on a phone. */
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
 export function ArticleView({
   artifact,
   page,
@@ -271,7 +280,7 @@ export function ArticleView({
           <p class="wiki-trust word">
             <ShieldAlert />
             {links.value.role === "source" ? "Untrusted source" : "Written from untrusted sources"}
-            {links.value.origin && `, ${links.value.origin}`}
+            {links.value.origin && `, ${hostOf(links.value.origin)}`}
           </p>
         )}
         <div ref={body} />
@@ -283,29 +292,32 @@ export function ArticleView({
                 ["Sources", links.value.sources],
                 ["Linked from", links.value.backlinks],
               ] as const
-            ).map(([title, items]) => (
-              <section key={title}>
-                <h2>{title}</h2>
-                {items.length === 0 ? (
-                  <p class="ss">{title === "Sources" ? "No sources cited." : "No pages link here yet."}</p>
-                ) : (
-                  items.map((link) => (
-                    <a class="li" href={artifactHref(link)} key={`${link.project}/${link.slug}`}>
-                      <div class="grow">
-                        <div class="tt">{link.title ?? link.slug}</div>
-                        {link.summary && <div class="ss">{link.summary}</div>}
-                        {link.untrusted && (
-                          <span class="word">
-                            <ShieldAlert />
-                            Untrusted source, {link.project}/{link.slug}
-                          </span>
-                        )}
-                      </div>
-                    </a>
-                  ))
-                )}
-              </section>
-            ))}
+            )
+              // A source is where pages come from; it cites nothing itself.
+              .filter(([title]) => title !== "Sources" || links.value?.role !== "source")
+              .map(([title, items]) => (
+                <section key={title}>
+                  <h2>{title}</h2>
+                  {items.length === 0 ? (
+                    <p class="ss">{title === "Sources" ? "No sources cited." : "No pages link here yet."}</p>
+                  ) : (
+                    items.map((link) => (
+                      <a class="li" href={artifactHref(link)} key={`${link.project}/${link.slug}`}>
+                        <div class="grow">
+                          <div class="tt">{link.title ?? link.slug}</div>
+                          {link.summary && <div class="ss">{link.summary}</div>}
+                          {link.untrusted && (
+                            <span class="word">
+                              <ShieldAlert />
+                              Untrusted source{link.origin ? `, ${hostOf(link.origin)}` : ""}
+                            </span>
+                          )}
+                        </div>
+                      </a>
+                    ))
+                  )}
+                </section>
+              ))}
           </footer>
         )}
       </article>

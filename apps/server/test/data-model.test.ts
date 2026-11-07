@@ -99,6 +99,7 @@ const SENTENCE_TABLES: Record<string, string[]> = {
     "name",
     "repo",
     "restricted",
+    "kind",
     "created_by",
     "created_by_token",
     "created_at",

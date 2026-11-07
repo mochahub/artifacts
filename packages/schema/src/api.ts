@@ -1301,6 +1301,8 @@ export const WikiLink = z.object({
   summary: z.string().nullable(),
   exists: z.boolean(),
   untrusted: z.boolean(),
+  /** A source's own address, when it has one. Absent from older servers. */
+  origin: z.string().nullable().optional(),
 });
 export type WikiLink = z.infer<typeof WikiLink>;
 export const ArtifactLinks = z.object({

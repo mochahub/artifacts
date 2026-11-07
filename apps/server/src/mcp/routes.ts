@@ -3,6 +3,8 @@ import {
   ArticleTheme,
   articleHtmlPath,
   COMMENT_MAX,
+  CreateThread,
+  CreateWiki,
   FILES_MAX,
   KEY_PATTERN,
   MANIFEST,
@@ -17,6 +19,7 @@ import {
   Tags,
   type Thread,
   UNTRUSTED_NOTICE,
+  WikiMeta,
 } from "@artifacts/schema";
 import { articleRecords, buildArticle } from "@artifacts/schema/article";
 import {
@@ -32,14 +35,17 @@ import {
   MCP_MODERN as MODERN,
   REPLY_INPUT,
   REVIEW_TOOLS,
+  WIKI_ARTICLE_INPUT,
+  WIKI_TOOLS,
 } from "@artifacts/schema/mcp";
 import { and, eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { GUIDES } from "../../../../skill/index.ts";
+import { toProject } from "../auth/access.ts";
 import type { Asker, Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { pages, versions } from "../db/schema.ts";
+import { pages, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
@@ -60,6 +66,7 @@ import type { Publisher } from "../publish/publisher.ts";
 import type { Review } from "../review/service.ts";
 import { VERSION } from "../version.ts";
 import { listVersions } from "../versions/list.ts";
+import { artifactLinks, createWiki, wikiSpace } from "../wiki/service.ts";
 
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 const MAX_REQUEST = 4 * 1024 * 1024;
@@ -72,6 +79,7 @@ const ARTICLES_PER_MINUTE = 30;
 
 const INSTRUCTIONS = [
   GUIDANCE.library,
+  GUIDANCE.wiki,
   `${GUIDANCE.searchFirst}, with your git remote as repo if you have one; this server can't see your repo.`,
   GUIDANCE.reading,
   GUIDANCE.untrusted,
@@ -184,6 +192,83 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
   }
 
   return [
+    {
+      ...WIKI_TOOLS.wiki,
+      scope: "read",
+      async run({ caller, orgId, input }) {
+        const slug = str(input.wiki, "wiki", 40);
+        const rows = await deps.db
+          .select()
+          .from(projects)
+          .where(
+            and(
+              eq(projects.orgId, orgId),
+              eq(projects.kind, "wiki"),
+              slug ? eq(projects.slug, slug) : undefined,
+            ),
+          );
+        const spaces = [];
+        for (const row of rows) {
+          const place = await toProject(deps, row);
+          if (!can(caller, "project.read", place)) continue;
+          spaces.push(await wikiSpace(deps, orgId, caller, place));
+        }
+        if (!slug)
+          return spaces.map((s) => ({
+            slug: s.project.slug,
+            name: s.project.name,
+            personal: s.project.personal,
+            pages: s.pages.length + (s.rules ? 1 : 0),
+            sources: s.sources.length,
+          }));
+        const space = spaces[0];
+        if (!space) throw new ApiError("not_found", "Not found.");
+        const rulesText = space.rules
+          ? await readArtifact(deps, await loadArtifact(deps, orgId, caller, slug, space.rules.slug), {})
+          : null;
+        return { ...space, log: space.log.slice(0, 20), rulesText };
+      },
+    },
+    {
+      ...WIKI_TOOLS.links,
+      scope: "read",
+      async run(context) {
+        return artifactLinks(deps, context.orgId, context.caller, await load(context, deps));
+      },
+    },
+    {
+      ...WIKI_TOOLS.create,
+      scope: "publish",
+      async run({ caller, orgId, input }) {
+        const parsed = CreateWiki.safeParse(input);
+        if (!parsed.success) throw new ToolError("The wiki details aren't valid.");
+        return (await createWiki(deps, orgId, caller, parsed.data)).body;
+      },
+    },
+    {
+      ...WIKI_TOOLS.comment,
+      scope: "comment",
+      async run(context) {
+        const loaded = await load(context, deps);
+        if (!can(context.caller, "artifact.comment", loaded)) throw new ToolError("You can't comment here.");
+        const [page] = await deps.db
+          .select({ key: pages.pageKey })
+          .from(pages)
+          .innerJoin(versions, eq(versions.id, pages.versionId))
+          .where(and(eq(versions.artifactId, loaded.id), eq(versions.n, loaded.row.latestVersion)))
+          .orderBy(pages.position);
+        const body = CreateThread.safeParse({
+          pageKey: str(context.input.page, "page", 60) ?? page?.key,
+          body: context.input.message,
+          version: loaded.row.latestVersion,
+          anchor: null,
+          agent: "Connector",
+        });
+        if (!body.success) throw new ToolError("The comment isn't valid.");
+        const thread = await review.startThread(context.asker, loaded, body.data);
+        return { id: thread.n };
+      },
+    },
     {
       ...library.search,
       scope: "read",
@@ -345,6 +430,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         tags: { type: "array", description: "Up to 8" },
         message: { type: "string", description: "What changed" },
         repo,
+        ...WIKI_ARTICLE_INPUT,
       },
       required: ["project", "slug", "title", "summary", "markdown"],
       async run({ asker, caller, orgId, input }) {
@@ -359,6 +445,14 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         if (Buffer.byteLength(markdown) > MAX_MARKDOWN) {
           throw new ApiError("too_large", "That article is too long.", { limit: MAX_MARKDOWN });
         }
+        const wikiFields = Object.fromEntries(
+          ["role", "sources", "origin", "untrusted"]
+            .filter((k) => input[k] !== undefined)
+            .map((k) => [k, input[k]]),
+        );
+        const wiki = Object.keys(wikiFields).length ? WikiMeta.safeParse(wikiFields) : null;
+        if (wiki && !wiki.success) throw new ToolError("The wiki metadata isn't valid.");
+        const wikiMeta = wiki?.success ? wiki.data : undefined;
         const { project, slug, title } = fields.data;
         // Before anything is stored: the permission check, and the same one prepare and commit run.
         const { row: existing } = await publisher.target(asker, project, slug);
@@ -377,6 +471,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         const who = "tokenId" in caller ? caller.tokenId : "none";
         deps.limits.hit(`article:${who}`, ARTICLES_PER_MINUTE, MINUTE_MS);
         const built = buildArticle({
+          project,
           path: "doc.md",
           source: markdown,
           readFile: () => "",
@@ -396,6 +491,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
             project,
             slug,
             title,
+            wiki: wikiMeta,
             summary: summary.data,
             ...(tags.data ? { tags: tags.data } : {}),
             pages: [{ id: ARTICLE_PAGE, kind: "article", src: "doc.md", title }],
@@ -437,6 +533,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           name: null,
           summary: summary.data,
           tags: tags.data ?? null,
+          wiki: wikiMeta,
           notes: {},
           agent: "Connector",
           files: Object.fromEntries(
