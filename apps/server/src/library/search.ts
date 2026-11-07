@@ -48,18 +48,26 @@ export async function searchHits(
     ? sql`phraseto_tsquery('english', ${phrase})`
     : sql`to_tsquery('english', ${terms.join(" | ")})`;
   const queries = phrase ? [query] : terms.map((term) => sql`to_tsquery('english', ${term})`);
+  const patterns = (phrase ? [phrase] : tokensOf(q)).map((term) => sql`${containing(term)}`);
   const vector = (text: unknown) => sql`to_tsvector('english', ${text})`;
   const matches = (text: unknown) => sql`(${vector(text)} @@ q.query)`;
   const rank = (text: unknown) => sql`ts_rank(${vector(text)}, q.query)`;
-  const matched = (text: unknown) =>
-    sql`array(select distinct term::text from unnest(q.terms) term where ${vector(text)} @@ term)`;
+  const matchedVector = (value: unknown) =>
+    sql`array(select distinct term::text from unnest(q.terms) term where ${value} @@ term)`;
+  // OFFSET prevents inlining: parse the text once, rather than once per query term.
+  const matched = (text: unknown, substring = false) =>
+    sql`array(select distinct term::text
+      from (select ${vector(text)} as vector offset 0) v,
+        unnest(q.terms, q.patterns) as t(term, pattern)
+      where v.vector @@ term ${substring ? sql`or ${text} ilike pattern` : sql``})`;
   const titleText = sql`concat_ws(' ', title, slug)`;
   const tagText = sql`array_to_string(tags, ', ')`;
   const noteText = sql.raw(
     `concat_ws(' ', latest.message, latest.name, (select string_agg(value, ' ') from jsonb_each_text(latest.notes)))`,
   );
   const rows = await deps.db.execute(sql`
-    with q as (select ${query} as query, array[${sql.join(queries, sql`, `)}]::tsquery[] as terms),
+    with q as (select ${query} as query, array[${sql.join(queries, sql`, `)}]::tsquery[] as terms,
+      array[${sql.join(patterns, sql`, `)}]::text[] as patterns),
     latest as (
       select a.id as artifact_id, a.title, a.slug, a.updated_at, v.id as version_id,
         v.summary, v.tags, v.message, v.name, v.notes
@@ -67,43 +75,48 @@ export async function searchHits(
       join versions v on v.artifact_id = a.id and v.n = a.latest_version
       where a.id = any(string_to_array(${ids.join(",")}, ',')::uuid[])
     ),
-    hits as (
-      select artifact_id, 'title' as source, null as page, null as ref, title as text,
-        5 + ${rank(sql`title`)} as score, ${matched(titleText)} as terms
-      from latest, q where title ilike ${like} or slug ilike ${like}
-        or ${matches(sql`title`)} or ${matches(sql`slug`)}
-      union all
-      select artifact_id, 'tag', null, null, ${tagText}, 4, ${matched(tagText)}
-      from latest, q where exists (select 1 from unnest(tags) tag where tag ilike ${like})
-        or ${matches(tagText)}
-      union all
-      select artifact_id, 'summary', null, null, summary, 3 + ${rank(sql`summary`)}, ${matched(sql`summary`)}
-      from latest, q where summary ilike ${like} or ${matches(sql`summary`)}
-      union all
-      select latest.artifact_id, 'page', p.page_key, null, p.title,
-        2 + ${rank(sql`p.title`)}, ${matched(sql`p.title`)}
-      from latest join pages p on p.version_id = latest.version_id, q
-      where p.title ilike ${like} or ${matches(sql`p.title`)}
-      union all
-      select latest.artifact_id, 'frame', f.page_key, f.frame_key, f.title,
-        2 + ${rank(sql`f.title`)}, ${matched(sql`f.title`)}
-      from latest join frames f on f.version_id = latest.version_id, q
-      where f.title ilike ${like} or ${matches(sql`f.title`)}
-      union all
-      select latest.artifact_id, 'block', b.page_key, b.block_key, left(b.text, ${MAX_TEXT}),
-        1 + ${rank(sql`b.text`)}, ${matched(sql`b.text`)}
+    -- Keep vectors for long matching text: rank and coverage must not parse it again.
+    body_matches as materialized (
+      select latest.artifact_id, 'block' as source, b.page_key as page, b.block_key as ref,
+        left(b.text, ${MAX_TEXT}) as text, ${vector(sql`b.text`)} as vector, 1 as weight
       from latest join blocks b on b.version_id = latest.version_id, q
       where ${matches(sql`b.text`)}
       union all
-      select latest.artifact_id, 'note', null, null, ${noteText}, 1 + ${rank(noteText)}, ${matched(noteText)}
-      from latest, q where ${matches(noteText)}
-      union all
-      select t.artifact_id, 'comment', t.page_key, t.n::text, c.body,
-        ${rank(sql`c.body`)}, ${matched(sql`c.body`)}
+      select t.artifact_id, 'comment', t.page_key, t.n::text, c.body, ${vector(sql`c.body`)}, 0
       from comments c
       join threads t on t.id = c.thread_id
       join latest on latest.artifact_id = t.artifact_id, q
       where ${matches(sql`c.body`)}
+    ),
+    hits as (
+      select artifact_id, 'title' as source, null as page, null as ref, title as text,
+        5 + ${rank(sql`title`)} as score, ${matched(titleText, true)} as terms
+      from latest, q where title ilike ${like} or slug ilike ${like}
+        or ${matches(sql`title`)} or ${matches(sql`slug`)}
+      union all
+      select artifact_id, 'tag', null, null, ${tagText}, 4, ${matched(tagText, true)}
+      from latest, q where exists (select 1 from unnest(tags) tag where tag ilike ${like})
+        or ${matches(tagText)}
+      union all
+      select artifact_id, 'summary', null, null, summary, 3 + ${rank(sql`summary`)}, ${matched(sql`summary`, true)}
+      from latest, q where summary ilike ${like} or ${matches(sql`summary`)}
+      union all
+      select latest.artifact_id, 'page', p.page_key, null, p.title,
+        2 + ${rank(sql`p.title`)}, ${matched(sql`p.title`, true)}
+      from latest join pages p on p.version_id = latest.version_id, q
+      where p.title ilike ${like} or ${matches(sql`p.title`)}
+      union all
+      select latest.artifact_id, 'frame', f.page_key, f.frame_key, f.title,
+        2 + ${rank(sql`f.title`)}, ${matched(sql`f.title`, true)}
+      from latest join frames f on f.version_id = latest.version_id, q
+      where f.title ilike ${like} or ${matches(sql`f.title`)}
+      union all
+      select artifact_id, source, page, ref, text, weight + ts_rank(vector, q.query),
+        ${matchedVector(sql`vector`)}
+      from body_matches, q
+      union all
+      select latest.artifact_id, 'note', null, null, ${noteText}, 1 + ${rank(noteText)}, ${matched(noteText)}
+      from latest, q where ${matches(noteText)}
     ),
     allowed as (
       select * from hits

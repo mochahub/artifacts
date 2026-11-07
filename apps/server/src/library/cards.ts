@@ -26,9 +26,9 @@ import type { Deps } from "../deps.ts";
 import { changes, frameHashes } from "../versions/diff.ts";
 import { visibleTo } from "./visible.ts";
 
-const clip = (text: string) => {
+const clip = (text: string, max = SUMMARY_MAX) => {
   const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length <= SUMMARY_MAX ? flat : `${flat.slice(0, SUMMARY_MAX - 1)}…`;
+  return flat.length <= max ? flat : `${flat.slice(0, Math.max(0, max - 1))}…`;
 };
 
 /** Versions from before `summary` stay valid: they show their first text instead (05). */
@@ -83,7 +83,7 @@ async function wikiMetadata(deps: Deps, caller: Caller, list: LoadedArtifact[]) 
     if (!wanted.has(a.id)) continue;
     result.set(a.id, {
       role: a.wiki?.role ?? "page",
-      origin: a.wiki?.origin ?? null,
+      origin: a.wiki?.origin ? clip(a.wiki.origin, 200) : null,
       untrusted:
         a.wiki?.role === "source"
           ? a.wiki.untrusted === true
@@ -144,26 +144,32 @@ export async function libraryCards(
     const version = head.get(row.id);
     if (!card || !version) return [];
     const decision = decisionRows.find((entry) => entry.artifactId === row.id);
-    return [
-      {
-        project: project.slug,
-        slug: row.slug,
-        title: row.title,
-        summary: version.summary ?? fallback.get(version.id) ?? "",
-        tags: version.tags ?? [],
-        status: card.status.kind,
-        outcome: {
-          decision: decision?.kind ?? null,
-          decisionVersion: decision?.version ?? null,
-          openComments: card.counts.open,
-          archived: row.archivedAt !== null,
-        },
-        latestVersion: row.latestVersion,
-        updatedAt: row.updatedAt.toISOString(),
-        match: matches.get(row.id) ?? null,
-        ...wiki.get(row.id),
+    const result: LibraryCard = {
+      project: project.slug,
+      slug: row.slug,
+      title: row.title,
+      summary: version.summary ?? fallback.get(version.id) ?? "",
+      tags: version.tags ?? [],
+      status: card.status.kind,
+      outcome: {
+        decision: decision?.kind ?? null,
+        decisionVersion: decision?.version ?? null,
+        openComments: card.counts.open,
+        archived: row.archivedAt !== null,
       },
-    ];
+      latestVersion: row.latestVersion,
+      updatedAt: row.updatedAt.toISOString(),
+      match: matches.get(row.id) ?? null,
+      ...wiki.get(row.id),
+    };
+    // Wiki metadata shares the card's JSON budget, including escaped characters.
+    const fit = (text: string) => {
+      const excess = JSON.stringify(result).length - 1800;
+      return excess > 0 ? clip(text, Math.max(1, text.length - excess)) : text;
+    };
+    result.summary = fit(result.summary);
+    if (result.match) result.match = { ...result.match, snippet: fit(result.match.snippet) };
+    return [result];
   });
 }
 

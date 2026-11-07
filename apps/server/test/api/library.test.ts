@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  ArtifactLinks,
   DecisionList,
   LibraryCard,
   LibraryFrames,
@@ -12,6 +13,7 @@ import {
   TAG_MAX,
   TAGS_MAX,
   VersionBundle,
+  WikiSpace,
 } from "@artifacts/schema";
 import {
   claim,
@@ -257,6 +259,27 @@ describe("the library", () => {
     expect((await get("/api/library/projects/game/art-styles/view?size=huge")).status).toBe(400);
   });
 
+  test("a substring title hit ranks before a weak body hit", async () => {
+    await publish(t, owner, {
+      project: "substring",
+      slug: "notes",
+      title: "Apigateway notes",
+      blocks: [],
+    });
+    await publish(t, owner, {
+      project: "substring",
+      slug: "body",
+      title: "Body notes",
+      blocks: [{ key: "intro/p1", text: "the gateway is here" }],
+    });
+    const found = await search("gateway", owner, "&project=substring");
+    expect(found.cards.map((card) => card.slug)).toEqual(["notes", "body"]);
+    expect(found.cards[0]?.match?.source).toBe("title");
+    const first = await search("gateway", owner, "&project=substring&limit=1");
+    const second = await search("gateway", owner, `&project=substring&limit=1&cursor=${first.nextCursor}`);
+    expect([...first.cards, ...second.cards]).toEqual(found.cards);
+  });
+
   test("a card has a fixed maximum size, whatever is in it", async () => {
     const worst = "\u{1F600}".repeat(SUMMARY_MAX / 2);
     const tags = Array.from({ length: TAGS_MAX }, (_, i) => `${i}`.padEnd(TAG_MAX, '"'));
@@ -273,6 +296,35 @@ describe("the library", () => {
     expect(card.match?.snippet.length).toBeLessThanOrEqual(200);
     // Quotes double when escaped, so this is the true worst case, not a typical card.
     expect(JSON.stringify(card).length).toBeLessThanOrEqual(1800);
+
+    const project = "budget-wiki-with-a-rather-long-name";
+    expect(
+      (await t.api("/api/wikis", { method: "POST", bearer: owner, json: { slug: project, name: "Budget" } }))
+        .status,
+    ).toBe(201);
+    const origin = `https://example.com/${'"'.repeat(1880)}`;
+    expect(
+      (
+        await publish(t, owner, {
+          project,
+          slug: "budget-source-with-a-rather-long-name",
+          title: '"'.repeat(120),
+          summary: '"'.repeat(SUMMARY_MAX),
+          tags,
+          wiki: { role: "source", sources: [], untrusted: true, origin },
+          blocks: [{ key: "intro/p1", text: `needle ${'"'.repeat(5000)}` }],
+        })
+      ).status,
+    ).toBe(200);
+    const source = LibraryCard.parse((await search("needle", owner, `&project=${project}`)).cards[0]);
+    expect(source.origin).toBe(`${origin.slice(0, 199)}…`);
+    expect(source.summary.endsWith("…")).toBe(true);
+    expect(JSON.stringify(source).length).toBeLessThanOrEqual(1800);
+    const wiki = WikiSpace.parse(await (await get(`/api/wikis/${project}`)).json());
+    expect(wiki.sources[0]?.origin).toBe(origin);
+    const { id } = await json<{ id: string }>(await get(`/api/artifacts/by-slug/${project}/${source.slug}`));
+    const links = ArtifactLinks.parse(await (await get(`/api/artifacts/${id}/links`)).json());
+    expect(links.origin).toBe(origin);
   });
 
   test("over-long frontmatter is refused at commit", async () => {
