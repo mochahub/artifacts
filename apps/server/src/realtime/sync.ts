@@ -44,6 +44,7 @@ import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { currentCaller } from "../auth/resolve.ts";
 import type { OrgRow } from "../db/index.ts";
+import { lockArtifact } from "../db/locks.ts";
 import { editAtoms, editDocs, editPresence, editUpdates, people } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { authorKey, editActor, editability, loadDoc, persistUpdate } from "../editing/store.ts";
@@ -97,7 +98,11 @@ type Conn = {
   saving: Promise<void>;
   flush: Timer | null;
   window: { start: number; count: number };
-  presence: { at: number; timer: Timer | null; written: string };
+  /**
+   * The presence row's last write, and the chain that keeps writes in order: each reads the connection's
+   * state when its turn comes, so a slow write never lands over a newer one.
+   */
+  presence: { at: number; timer: Timer | null; written: string; mode: EditMode; chain: Promise<void> };
   heartbeat: Timer | null;
   ready: boolean;
   /** Messages that arrived before `hello`: replayed once the document is held. */
@@ -580,7 +585,7 @@ export class DocHub {
       saving: Promise.resolve(),
       flush: null,
       window: { start: Date.now(), count: 0 },
-      presence: { at: 0, timer: null, written: "" },
+      presence: { at: 0, timer: null, written: "", mode: "write", chain: Promise.resolve() },
       heartbeat: null,
       ready: false,
       early: [],
@@ -607,19 +612,24 @@ export class DocHub {
       held.conns.add(conn);
       conn.author = await authorKey(deps, artifactId, editActor(caller, null), []);
       if (conn.closed || this.held.get(artifactId) !== held) return this.leave(held, conn);
-      await deps.db
-        .insert(editPresence)
-        .values({
-          artifactId,
-          connectionId: conn.id,
-          orgId: held.orgId,
-          personId: conn.personId,
-          mode: conn.mode,
-          blocks: [],
-          replica: this.replica,
-          seenAt: deps.clock.now(),
-        })
-        .onConflictDoNothing();
+      // In Write until the client says otherwise, and saved under the page's lock before `hello`: no agent's
+      // op lands once this person is in the editor (13, "Policy").
+      await deps.db.transaction(async (tx) => {
+        await lockArtifact(tx, artifactId, "content");
+        await tx
+          .insert(editPresence)
+          .values({
+            artifactId,
+            connectionId: conn.id,
+            orgId: held.orgId,
+            personId: conn.personId,
+            mode: conn.mode,
+            blocks: [],
+            replica: this.replica,
+            seenAt: deps.clock.now(),
+          })
+          .onConflictDoNothing();
+      });
       // Closed or reset while the row was written: leave() deletes it again.
       if (conn.closed || this.held.get(artifactId) !== held) return this.leave(held, conn);
       this.write(
@@ -673,25 +683,50 @@ export class DocHub {
     }
   }
 
-  private async writePresence(held: Held, conn: Conn, force = false) {
+  /** Writes the presence row, in order with this connection's other writes. */
+  private writePresence(held: Held, conn: Conn, force = false): Promise<void> {
+    const next = conn.presence.chain.catch(() => {}).then(() => this.savePresence(held, conn, force));
+    conn.presence.chain = next;
+    return next;
+  }
+
+  /**
+   * A caret or pending change is written at most once a second. A mode change is written at once, and a
+   * switch to Write or Pair under the page's lock, which an agent's op holds while it applies: an op that
+   * hasn't committed by then reads the new mode (13, "Policy").
+   */
+  private async savePresence(held: Held, conn: Conn, force: boolean) {
     if (conn.closed || this.held.get(held.artifactId) !== held) return;
     const blocks = [conn.block, ...conn.pending].filter((block): block is string => Boolean(block));
     const written = JSON.stringify([conn.mode, blocks]);
     if (!force && written === conn.presence.written) return;
+    const mode = conn.mode;
+    const moded = mode !== conn.presence.mode;
     const wait = conn.presence.at + PRESENCE_WRITE_MS - Date.now();
-    if (!force && wait > 0) {
+    if (!force && !moded && wait > 0) {
       conn.presence.timer ??= setTimeout(() => {
         conn.presence.timer = null;
-        void this.writePresence(held, conn);
+        void this.writePresence(held, conn).catch(() => {});
       }, wait);
       return;
     }
     conn.presence.at = Date.now();
     conn.presence.written = written;
-    await this.d.db
-      .update(editPresence)
-      .set({ mode: conn.mode, blocks: [...new Set(blocks)].slice(0, 51), seenAt: this.d.clock.now() })
-      .where(and(eq(editPresence.artifactId, held.artifactId), eq(editPresence.connectionId, conn.id)));
+    const row = and(eq(editPresence.artifactId, held.artifactId), eq(editPresence.connectionId, conn.id));
+    const values = { mode, blocks: [...new Set(blocks)].slice(0, 51), seenAt: this.d.clock.now() };
+    try {
+      if (moded && mode !== "delegate")
+        await this.d.db.transaction(async (tx) => {
+          await lockArtifact(tx, held.artifactId, "content");
+          await tx.update(editPresence).set(values).where(row);
+        });
+      else await this.d.db.update(editPresence).set(values).where(row);
+      conn.presence.mode = mode;
+    } catch (error) {
+      // Not written: the next change or heartbeat writes it again.
+      conn.presence.written = "";
+      throw error;
+    }
   }
 
   message(ws: ServerWebSocket<SyncData>, raw: string | Buffer | Uint8Array) {
