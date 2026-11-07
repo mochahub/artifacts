@@ -572,6 +572,7 @@ Rules: [SPEC.md §5.5](SPEC.md#55-archive-and-delete).
 | Deploying and releases | [09 Deploying](implementation/09-deploy.md) |
 | Wikis | [12 Wikis](implementation/12-wikis.md) |
 | Editing wiki pages, live sync, agent operations | [13 Editing](implementation/13-editing.md) |
+| Native boards, frame merge, browser captures and agent placement | [14 Boards](implementation/14-boards.md) |
 
 ## Agents: the library and the connector
 
@@ -610,3 +611,42 @@ flowchart LR
 - **Agents never touch the CRDT.** They read Markdown with block ids and send operations. `agentPolicy()` decides whether each applies, becomes a suggestion for a person to accept, or is refused because someone is writing. A replacement of a block someone is typing in becomes a suggestion; otherwise it applies as a text diff inside the block, so concurrent typing survives.
 - **Atoms.** Images, diagrams, charts and embeds stay as their exact Markdown, shown as cards in the editor, and are drawn at checkpoint from what the version they came from already drew.
 - **The CLI is another client of the same routes.** `artifacts page` reads blocks, sends operations, saves versions and runs Delegate jobs against `/api/artifacts/:id/doc/…`, and `artifacts wiki export` writes a wiki to a folder of Markdown from the same routes plus the version bundles. It sends `Artifacts-Features: editing` so the server answers it with the `edit` level and the editing activity kinds, and an older CLI with the values it knows. The local `artifacts mcp` runs the same commands for the six page tools, passing a model's operations on standard input.
+
+
+## Native boards
+
+Phase 3 extends the existing `CanvasEngine` with our own object renderer and a
+lazy Preact editor ([14 Boards](implementation/14-boards.md)). A board remains a
+canvas page. Legacy frame-only versions follow the existing renderer unchanged;
+first edit seeds rendered-frame objects with lasting ids. Native shapes, stickies,
+text, images, strokes, bound connectors and container frames share the canvas with
+CLI-rendered mocks. The native model does not import a third-party scene engine.
+
+The board draft uses Phase 2's `edit_docs`, `edit_updates`, `edit_authors`, runs,
+WebSocket and Postgres fan-out. `edit_docs.kind` selects the article or board model.
+Objects are individual Y.Maps in an id-keyed Y.Map; poses and attributed field
+values are atomic registers, text is Y.Text, and tombstones give deletion priority
+over concurrent edits. A shadow document validates authenticated attribution,
+references and limits before persistence and broadcast. Object holds in presence
+turn an agent batch touching a person's active object into a ghost suggestion.
+`board_suggestions` holds those atomic batches; policy and acceptance reuse Phase 2.
+
+A board checkpoint is a version with immutable serialized JSON in `board_versions`
+and the version bundle. Compatible CLI republish merges rendered source tuples into
+that same native scene, preserving ids/geometry and placing new frames beside it;
+it never replaces the scene or resets a live board. Object-id pins track native
+content, while rendered frames retain @1x pixel re-anchoring and @2x crops.
+
+The browser makes checkpoint thumbnails and native comment crops from a fenced
+snapshot. Capture tickets bind epoch/seq/hash and exact anchor sets. The server
+validates content-addressed raster uploads, dimensions, byte limits and ownership;
+it never runs WebKit. Agent/quiet JSON checkpoints can have pending derived pictures,
+filled later by an authorized browser without a new content version. CLI frames
+and their live content remain isolated on the content host. `board_assets`,
+`board_captures` and idempotent `board_requests` complete the added storage.
+
+Agents read structured objects/bases and send atomic batches through HTTP, MCP or
+the CLI, including `place_frame` beside a sketch. They never send raw CRDT updates.
+Readers see checkpoints, editors see drafts; all derived search/wiki/link metadata
+uses checkpoints. Reading retains the 80 KB budget. The board editor and sync
+dependencies load only on Edit, within a separate 160 KB incremental gzip budget.

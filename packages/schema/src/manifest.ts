@@ -135,17 +135,24 @@ export const ManifestPage = z.discriminatedUnion("kind", [
     title: z.string().optional(),
     group: z.string().optional(),
   }),
-  z.object({
-    id: PageId,
-    kind: z.literal("canvas"),
-    title: z.string().optional(),
-    group: z.string().optional(),
-    boards: z
-      .array(z.object({ id: Key, title: z.string(), subtitle: z.string().optional(), src: RelPath }))
-      .min(1),
-    styles: z.array(RelPath).default([]),
-    scripts: z.array(RelPath).default([]),
-  }),
+  z
+    .object({
+      id: PageId,
+      kind: z.literal("canvas"),
+      /** Server-owned native board source, in __boards/<id>.json (14). */
+      native: z.literal(1).optional(),
+      title: z.string().optional(),
+      group: z.string().optional(),
+      boards: z.array(
+        z.object({ id: Key, title: z.string(), subtitle: z.string().optional(), src: RelPath }),
+      ),
+      styles: z.array(RelPath).default([]),
+      scripts: z.array(RelPath).default([]),
+    })
+    .refine(
+      (page) => page.native === 1 || page.boards.length > 0,
+      "a canvas needs boards or a native source",
+    ),
   z.object({
     id: PageId,
     kind: z.literal("prototype"),

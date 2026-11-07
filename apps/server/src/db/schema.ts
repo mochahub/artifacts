@@ -3,6 +3,12 @@ import {
   ANCHOR_STATES,
   type Anchor,
   ATOM_KINDS,
+  type BoardCaptureThread,
+  type BoardEditRequest,
+  type BoardEditResult,
+  type BoardImage,
+  type BoardRenders,
+  type BoardSnapshot,
   type Brand,
   CHECKPOINT_KINDS,
   COMMENT_MAX,
@@ -976,7 +982,7 @@ export const pushSubscriptions = pgTable(
 
 // Editing (13-editing.md owns these)
 
-/** The live draft of an editable article page: a Yjs document, as a snapshot and the updates after it. */
+/** The live draft of an editable article or board page: a Yjs document, as a snapshot and the updates after it. */
 export const editDocs = pgTable("edit_docs", {
   artifactId: uuid("artifact_id")
     .primaryKey()
@@ -985,6 +991,8 @@ export const editDocs = pgTable("edit_docs", {
     .notNull()
     .references(() => org.id),
   pageKey: text("page_key").notNull(),
+  /** Phase 3 dispatches validation/seeding/checkpoints without changing the sync transport. */
+  kind: text("kind").$type<"article" | "board">().notNull().default("article"),
   /** Starts at 1, and goes up each time the draft is started again from a version. */
   epoch: integer("epoch").notNull().default(1),
   /** The version this lineage was seeded from, and the latest checkpoint made from it. */
@@ -1055,6 +1063,8 @@ export const editPresence = pgTable(
     mode: editMode("mode").notNull(),
     /** The caret's block first, then blocks with changes not yet sent. */
     blocks: text("blocks").array().notNull().default(sql`'{}'::text[]`),
+    /** Board holds: selected/dragged/edited objects and unsent local object changes (14). */
+    objects: text("objects").array().notNull().default(sql`'{}'::text[]`),
     replica: text("replica").notNull(),
     seenAt: time("seen_at").notNull(),
   },
@@ -1196,4 +1206,139 @@ export const suggestions = pgTable(
     index("suggestions_artifact_status_idx").on(t.artifactId, t.status),
     index("suggestions_run_idx").on(t.runId),
   ],
+);
+
+// Boards (14-boards.md owns these; add-only migration).
+
+/** Immutable board content for a version. Pictures are derived and attached once by a browser. */
+export const boardVersions = pgTable(
+  "board_versions",
+  {
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => versions.id),
+    pageKey: text("page_key").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    snapshot: jsonb("snapshot").$type<BoardSnapshot>().notNull(),
+    hash: text("hash").notNull(),
+    /** Null means pending, never reuse a previous version's thumbnail as this version's picture. */
+    renders: jsonb("renders").$type<BoardRenders>(),
+    renderedAt: time("rendered_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.versionId, t.pageKey] }),
+    index("board_versions_artifact_idx").on(t.artifactId),
+  ],
+);
+
+/** An artifact-scoped capability to a validated content-addressed raster, not a global hash oracle. */
+export const boardAssets = pgTable(
+  "board_assets",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    hash: text("hash").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    image: jsonb("image").$type<BoardImage>().notNull(),
+    uploadedBy: uuid("uploaded_by").references(() => people.id),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    validatedAt: time("validated_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.artifactId, t.hash] })],
+);
+
+/** Short-lived render fence. A draft ticket cannot checkpoint a different epoch/seq/hash. */
+export const boardCaptures = pgTable(
+  "board_captures",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    pageKey: text("page_key").notNull(),
+    /** Null: draft checkpoint; non-null: pictures for this existing immutable version. */
+    versionId: uuid("version_id").references(() => versions.id),
+    epoch: integer("epoch").notNull(),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    hash: text("hash").notNull(),
+    /** The exact eligible anchor set returned by this ticket, fenced independently of later comments. */
+    threads: jsonb("threads").$type<BoardCaptureThread[]>().notNull().default([]),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => people.id),
+    expiresAt: time("expires_at").notNull(),
+    consumedAt: time("consumed_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("board_captures_expires_idx").on(t.expiresAt)],
+);
+
+/** Uses Phase 2 policy, authors, runs and decision lifecycle; payloads are atomic board batches. */
+export const boardSuggestions = pgTable(
+  "board_suggestions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    pageKey: text("page_key").notNull(),
+    epoch: integer("epoch").notNull(),
+    request: jsonb("request").$type<BoardEditRequest>().notNull(),
+    ids: jsonb("ids").$type<Record<string, string>>().notNull(),
+    status: suggestionStatus("status").notNull().default("open"),
+    runId: uuid("run_id").references(() => editRuns.id),
+    authorKey: text("author_key").notNull(),
+    authorPersonId: uuid("author_person_id").references(() => people.id),
+    agent: text("agent"),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    note: text("note"),
+    sources: text("sources").array().notNull().default(sql`'{}'::text[]`),
+    fixes: integer("fixes").array().notNull().default(sql`'{}'::integer[]`),
+    createdAt: createdAt(),
+    expiresAt: time("expires_at").notNull(),
+    decidedAt: time("decided_at"),
+    decidedBy: uuid("decided_by").references(() => people.id),
+    decisionNote: text("decision_note"),
+    version: integer("version"),
+  },
+  (t) => [
+    index("board_suggestions_artifact_status_idx").on(t.artifactId, t.status),
+    index("board_suggestions_run_idx").on(t.runId),
+  ],
+);
+
+/** Retry receipts survive update-log compaction and remain for the draft's epoch. */
+export const boardRequests = pgTable(
+  "board_requests",
+  {
+    artifactId: uuid("artifact_id")
+      .notNull()
+      .references(() => artifacts.id),
+    requestId: uuid("request_id").notNull(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    epoch: integer("epoch").notNull(),
+    callerKey: text("caller_key").notNull(),
+    hash: text("hash").notNull(),
+    result: jsonb("result").$type<BoardEditResult>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.artifactId, t.callerKey, t.requestId] })],
 );

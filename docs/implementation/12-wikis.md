@@ -143,3 +143,8 @@ Creation accepts `onlyMe: true` or `team: <slug>` (mutually exclusive), defaults
 `guidance: { edits: "direct" | "suggestion", text: string }` accompanies wiki payloads. Direct applies only when the editor owns an only-me wiki; other audiences use suggestions. `text` names the readers, then says how agent edits land (the editing policy in 13): "Only you can read this wiki: agent edits apply directly, except on pages you share…", "Only the owner can read this wiki: agent edits arrive as suggestions, except on pages an owner marked agent-maintained…" for an administrator, "Everyone in <organization> can read this wiki: …", "<Team> team can read this wiki: …", and "Others can read this wiki: …" when the team names are hidden from the caller. Each ends with the presence rules: a Delegate run follows the same rule, someone writing keeps agents out, and someone pairing turns agent edits into suggestions.
 
 Responses retain deprecated `personal` (true only for audience me) because released CLIs require a boolean when parsing creation and detail responses. The schema descriptions mark it deprecated, and the current CLI leaves it out of its own output. New clients use audience exclusively.
+
+
+### Native boards (Phase 3)
+
+Eligible single-canvas wiki pages also hold native board objects. Their checkpoint text supplies wiki links, search, cards and the garden under the same visibility/source rules as articles. Drafts and ghost suggestions never enter these derived results. [14 Boards](14-boards.md) owns object operations, anchors, frame republish merge and browser-made checkpoint pictures; [13 Editing](13-editing.md) still owns the audience and mode policy.

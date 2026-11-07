@@ -1,0 +1,1 @@
+ALTER TABLE "board_captures" ADD COLUMN "threads" jsonb DEFAULT '[]'::jsonb NOT NULL;

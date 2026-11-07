@@ -13,7 +13,8 @@
     "./article": "./src/article.ts",
     "./mcp": "./src/mcp.ts",
     "./wiki": "./src/wiki.ts",
-    "./editing": "./src/editing.ts"
+    "./editing": "./src/editing.ts",
+    "./boards": "./src/boards.ts"
   },
   "dependencies": {
     "hast-util-sanitize": "^5.0.2",

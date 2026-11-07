@@ -1,0 +1,469 @@
+# Boards
+
+**Contract** for Phase 3, “boards you can draw on”, of the company brain. Behaviour is in [SPEC.md §17](../SPEC.md#17-boards-you-can-draw-on-phase-3). This document owns the board names, shapes, routes, tools, tables, limits and worker interfaces. JSON boundaries are in `packages/schema/src/boards.ts`, exported as `@artifacts/schema/boards`; constants are in `constants.ts` under “Boards”. [13 Editing](13-editing.md) still owns permissions, audience policy, modes, runs, authors, sync transport, epochs and version numbering. Differences for boards are explicit here.
+
+The hosted plan is `artifacts/company-brain`; the spike is `artifacts/phase-3-board-engine-spike`; the interaction reference is `artifacts/phase-3-boards-design`. **The decision on the spike overrides its recommendation:** extend our own `CanvasEngine`, using a native Yjs object model. No Excalidraw adapter, second scene reconciler, React runtime or tldraw dependency. This is a public MIT repository. Use ideas from the ink-review prototype, not code from an incompatible licence.
+
+Settled:
+- Agents use MCP or CLI operations. They never send raw Yjs updates, replace a scene, or invoke a model on the server.
+- The server is the source of truth. It validates raster images with Sharp and never runs a browser. CLI frames continue to be made in WebKit on the publishing client.
+- A checkpoint **is** an ordinary version. Between checkpoints there is a live draft. Read/search/link results never silently substitute the draft.
+- Text and pictures supplied by sources, guests, people or agents are data, never instructions, including inside a suggestion.
+- Vector point editing, components, auto layout and Figma parity are out of scope. Freehand strokes are included for sketches; editing their control points is not.
+
+## Concepts and eligibility
+
+- **Board page:** a page of existing kind `canvas`. There is no new manifest page kind and no conversion of old versions. A page can contain rendered mocks and native objects together.
+- **Editable board:** an unarchived, undeleted wiki artifact, of role `page`, whose latest version has exactly one page of kind `canvas` and no backend. This deliberately uses Phase 2's one-draft-per-artifact boundary. Multiple legacy board groups *inside* that canvas are supported. Multi-page artifacts, sources, ordinary-project canvases, decks, prototypes and canvases with backends remain publish/read/review as before. They are not partially seeded. A source answers `not_canvas`, like any non-editable page shape; the role check precedes seeding.
+- **Native object:** sticky, shape, text, image, connector, container frame or stroke. It is edited in the browser or through operations.
+- **Rendered frame:** an object of kind `rendered_frame`, backed by the existing CLI frame record and renders. People can move/resize it and comment; agents change its contents by publishing its lasting frame key again. It is not a native container frame.
+- **Draft:** `edit_docs.kind = board`, using the existing snapshot/update log, sequence, presence, authors and runs. Article rows default to `article`. One artifact cannot have an article and board draft simultaneously.
+- **Suggestion:** one atomic board operation batch, with reserved ids. Pair draws its proposed objects/poses as ghosts; it never writes the canonical object map until accepted.
+- **Checkpoint content:** immutable `BoardSnapshot` JSON associated with a normal version. Browser-produced pictures are derived attachments, fenced to that exact snapshot. Pending pictures do not prevent a JSON checkpoint.
+
+`BoardState.reason` is `not_wiki`, `not_canvas`, `has_backend` or `archived`. A visible but ineligible page returns `conflict`, `details: { reason: "not_editable", editable: <reason> }` on edit routes. Read-only legacy canvases still have structured checkpoint reads by projecting their frame records without creating a draft.
+
+## Permissions, audience and visibility
+
+Reuse `artifact.edit`, `artifact.accept`, `artifact.maintain` and the `edit` token scope, with no new scope or permission level. Extend editability, not `can()`'s grant rules. Edit allows native object changes, board metadata, validated board image uploads and checkpoints; it does not allow arbitrary bundle files, HTML, backend changes, publishing frame contents, visibility changes or access grants. Rendered-frame publish still requires `publish`.
+
+- Sessions edit directly. Tokens go through the same `agentPolicy()` as articles: no edit → refuse; fresh Write presence → refuse; Pair → suggest; an owned active run → its fixed policy; otherwise only-reader/agent-maintained → direct, shared audience → suggest. Explicit `suggest` can only narrow direct to suggestion.
+- A run never upgrades its own trust. Shared-page grants and active share links count when deciding the audience, as in 13. Reviewer/outside caps, human-only grants, no edit share links, OAuth re-consent and old-token login guidance remain unchanged.
+- Fresh **object holds** supplement policy: even in Delegate, a destructive/change operation on an object a person is dragging, resizing, text-editing or has unsent changes for becomes a suggestion. This applies to the entire atomic batch. Holds include containment mutations described below. A new standalone add does not overwrite a held object; adding to a held container or changing its membership does.
+- Draft object data, draft asset references, presence, holds, suggestions, runs and draft attribution require `artifact.edit`. A read-only caller's `BoardState` has `canAccept/canMaintain: false`, `dirty: false`, `seq/epoch: 0`, `updatedAt: null`, `agents/audience: null`, `present/runs: []`, `openSuggestions: 0`. It reveals only eligibility, latest version, `canEdit: false` and the published agent-maintained setting. No seed or draft query is performed for it.
+- `board_read` defaults to a checkpoint. `draft=1` requires edit; it never falls back to a checkpoint on a failed edit check. Hidden artifact/version/source/asset: `not_found`. Visible artifact without edit: `forbidden`. Existing socket HTTP checks and close codes in 13 apply, including same-origin session-only upgrade and revocation heartbeat.
+- An image hash is not authority. Authorize its artifact and version, or edit access to that artifact's draft, before issuing a GET/PUT capability. A guessed hash from another artifact cannot be attached or fetched. Every source/author reference is resolved and filtered in the caller's wiki. Omit hidden names and counts; hidden and missing link targets look alike.
+- Search, wiki cards, backlinks, garden, open-thread counts, cover thumbnails and link previews are derived from checkpoints only and filtered through existing visibility rules. No draft-only titles, source names, ghost text, upload status or author names leak into public events or cards. `draft` SSE remains `{ seq }` and editor-only.
+
+## Objects and stable ids
+
+`BoardObjectId` uses the Phase 2 `BLOCK_ID_PATTERN`: `~` and ten base-36 characters, e.g. `~k3j9x0a1b2`. Reuse the unbiased crypto generator, exposed from a dependency-light board subpath as `mintBoardObjectId()`. Ids are unique within the artifact, including reserved suggestion ids and retired ids. The server mints seed/agent ids; a browser mints ids for new human objects. Retry a collision before insertion; refuse an attempted replacement of another object's map. Copy/paste always mints fresh ids and remaps internal bindings/parents. Move, resize, rotate, text edit, grouping and republish keep ids. Deleted ids are not reused; an explicit local undo can restore that object's identity.
+
+Every serialized object has these fields, exactly as `BoardObject` defines them:
+
+| Field | Shape and meaning |
+|---|---|
+| `id`, `kind` | Stable id, immutable kind |
+| `pose` | `{ x, y, w, h, angle }`, **one atomic register**, never five Y.Map scalars. Coordinates in board CSS pixels at 1×; angle in radians clockwise around the centre; width/height at least 1 |
+| `parent` | Container-frame id or null; only native `frame` can be a parent |
+| `order` | Fractional ordering key, case-sensitive base-62 digits (`0–9A–Za–z`), at most 64 characters |
+| `label` | Plain accessible name, at most 280 characters |
+| `style` | `{ fill, stroke, strokeWidth, opacity, fontSize, align }`; fill is transparent or lowercase six-digit hex; no arbitrary CSS/HTML/fonts/URLs |
+| `attribution` | `created: { a, t }`, required field stamps for pose/parent/order/style/label/data (including unused data), and UTF-16 text author runs `{ s, e, a, t }`; author keys resolve through Phase 2 `edit_authors` |
+
+`BoardStyle` is fully specified on creation. Browser/CLI defaults are fill `transparent`, stroke `#242424`, strokeWidth `2`, opacity `1`, fontSize `20`, align `left`; a sticky defaults fill `#fff2a8`. These are object content, independent of viewer dark mode. Reading never rewrites stored colours.
+
+| `kind` | Additional fields |
+|---|---|
+| `sticky` | `text`: plain Unicode, ≤16,000 UTF-16 code units; line breaks preserved |
+| `text` | `text`, same rules |
+| `shape` | `shape: rect | ellipse | diamond | line`, and `text` (possibly empty). A line runs from local `(0,0)` to `(w,h)`; horizontal/vertical lines use the minimum 1px extent |
+| `image` | `asset`: validated SHA-256 raster hash, `alt`: plain text ≤280 characters |
+| `connector` | `data: { start, end, route: straight | elbow, startArrow, endArrow }`; each endpoint is `{ point: {x,y}, binding: {object,u,v} | null }` |
+| `frame` | Container label/pose/style. No rendered HTML. Angle must be zero |
+| `rendered_frame` | `data: { source: {page,board,frame}, version, contentHash, renders: {1x,2x,3x,thumb}, intrinsic: {w,h}, livePath, missing }`. This data is server-owned and only publish merge changes it |
+| `stroke` | Immutable `points: [{u,v,pressure}]` (2–2,048), normalized to its pose. Complete a stroke in one mutation; move/resize/delete are allowed, point editing is not |
+
+An object's base is the first 12 lowercase hex digits of SHA-256 of canonical JSON containing its visible authored fields: id, kind, pose, parent, order, label, style and its kind fields, **excluding attribution**. Connector pose is derived, so its base excludes pose; its endpoint/binding data is included. Rendered-frame base includes source and current rendered content hash. JSON object keys sort by Unicode code point; arrays retain order; strings are not whitespace-normalized; finite numbers use JSON number encoding with negative zero normalized to zero. This canonicalizer is shared by server/model/tests. Full snapshot hash includes attribution, the `deleted` tombstone array (sorted by id) and asset metadata, sorted objects by id and assets by hash. `BoardSnapshot` is `{schema:1,page,objects,deleted,assets}`; deleted defaults to empty for fixture/initial JSON, and canonical serialization always includes it. Tombstones carry id, deleting author/time, local pose, parent, worldPose and optional rendered source tuple. Active ids and deleted ids are disjoint. Deleted/history growth is bounded by the same JSON/Yjs byte ceilings; do not erase markers to evade those limits. No locale-sensitive sorting.
+
+### Z-order and containment
+
+Fractional keys follow the base-62 variable-length fractional-indexing algorithm (integer head plus fractional tail, initial key `a0`, generate a key strictly between neighbours). `BoardOrder` is the wire alphabet/length check; `validateBoard` enforces canonical keys. Compare ASCII/code-point order, then id as a deterministic tie-break for concurrent equal keys. Never use array position or numeric increments. Only the server rebalances an exhausted 64-character interval, preserving current `(order,id)` order in one persisted repair transaction; concurrent clients can keep equal keys until that repair.
+
+`parent` is the sole containment authority; there is no duplicated children array. Siblings draw in `(order,id)` order. A container draws its background first, then descendants, then its selection chrome. Parent/child coordinates are **parent-local translations**: add ancestor frame x/y to obtain board coordinates. Containers do not rotate or scale children; resizing a container changes its boundary only, moving it translates descendants, and children are not clipped. A native child can rotate about its own centre. Moving into/out of a group converts local coordinates to preserve board geometry.
+
+- Max container depth: 8. No cycles, self-parenting, missing parents, cross-page parents or rendered-frame parents.
+- Group requires distinct sibling targets with the same current parent; it makes a native frame around their axis-aligned rotated bounds plus 24px padding. It reparents targets and adjusts their local x/y in the same transaction. Children need not geometrically fit a resized frame; membership is explicit, not inferred from overlap.
+- Ungroup removes just the container and reparents its direct children to its parent, preserving board geometry. Deleting a non-empty frame has the same ungroup behaviour; it never implicitly deletes a person's children. A deliberate subtree deletion enumerates the ids in an atomic batch.
+- Moving a group changes only its own pose. Membership changes and group deletion affect the container and direct children for holds and stale checks. Moving a group also checks holds on every descendant; a child being dragged is not indirectly moved by an agent.
+- On concurrent parent-cycle formation, the deterministic projection detaches the lexicographically greatest child id in each cycle to root, using the board pose frozen in that placement register. Invalid offline parent references project as root using the same frozen fallback. Server repair persists that projection with server origin. Intentional API inputs with cycles/missing targets are refused, not repaired into a different command.
+
+### Connectors and deletion
+
+A bound endpoint uses target-local `(u,v)` in [0,1], transformed by the target's pose and ancestor translations; both ends may bind, including to the same object. Connectors cannot bind to connectors or container descendants across pages. Connectors live at root (`parent: null`), with angle zero. Their pose is a derived axis-aligned endpoint bound (minimum 1px extent), never independently editable or an authority over endpoints. Moving/resizing a connector means `bind` with unbound or rebound endpoints; `move` on a connector is invalid.
+
+The `point` is the board-coordinate fallback when unbound. For a bound endpoint the visible point is derived from the current target, not from that fallback; do not churn connector fields on every target drag. Straight routing joins points; elbow routing bends at `(end.x,start.y)`, deterministically. Arrowheads use the endpoint tangent. This is not an obstacle router.
+
+Deleting a target leaves the connector, detaches that endpoint, and freezes it at the target's last **persisted** board position. The deleting server transaction persists unbindings too; no held connector is overwritten directly (the batch becomes a suggestion). Two offline writers can delete/move or delete/bind concurrently: the visible projection first removes deleted targets, then unbinds at the persisted delete fallback; deleting wins over edits to the removed object. It must never resurrect a target or produce NaN. The model retains a tombstone with the target's last persisted pose/ancestor transform, rendered source tuple (when applicable) and delete author in the snapshot and Yjs deletion map; this makes the repair independent of update delivery order. Deleting a container also repairs affected endpoint world positions after children are reparented. Undo of deletion restores the id; connectors detached by that deletion rebind only as part of that same local undo when neither endpoint has since been edited.
+
+## Yjs mapping and concurrency (`packages/doc`)
+
+Add **browser-safe** `@artifacts/doc/board` and `@artifacts/doc/board-ids` subpaths. They import Yjs and board constants/types, not the article barrel, ProseMirror, remark, `node:crypto` or the DOM. Hashing can use a shared pure implementation or injected hash function; server-only hash convenience belongs in `board-hash.ts`. Agent operations are JSON, not CRDT binary.
+
+The document has:
+- `ydoc.getMap("board")`: `schema: 1`, `page`.
+- `ydoc.getMap("objects")`: id → `Y.Map` for that object; never one whole-scene JSON value.
+- `ydoc.getMap("deleted")`: id → atomic `{ a, t, pose, parent, worldPose, source? }` tombstone (`source` is a rendered frame source tuple). The tombstone is an application-level remove-wins marker, checked before exposing `objects`; it survives compaction and checkpoint reseeding through `BoardSnapshot.deleted`. Epoch reset restores the target version's deletion set instead of discarding deleted frame ownership. Concurrent edits to a hidden object do not remove it. Restoring a deletion requires an explicit authorized undo transaction clearing the tombstone, with undo provenance validated on the server.
+
+Each object map has immutable `id` and `kind`, and field registers:
+- `placement` is one atomic `{ value: { pose, parent, worldPose }, a, t }` register. Pose's five numbers and its parent coordinate basis travel together; `worldPose` freezes the valid board pose at that authored placement for deterministic invalid-parent/cycle repair. This prevents a concurrent group operation and move from mixing parent-local and world coordinates. JSON exposes `pose` and `parent`, with the same stamp in both attribution slots.
+- `order`, `style`, `label`, `data` are individually atomic `{ value, a, t }` registers. Kind-specific nontext fields (`shape`, `asset/alt`, `points`, rendered-frame source/renders) live together in `data.value`; there is no per-coordinate merge.
+- `created` is immutable `{ a,t }`.
+- `text` is a **Y.Text**, for sticky/text/shape only. No replacing that shared type after creation. Each inserted range has `author: { a,t }` attributes; JSON's `attribution.text` serializes those ranges. Plain text rendering uses text nodes, never innerHTML. No executable Markdown, inline embeds, rich-text markup or Y.Text embeds.
+- The serialized `BoardObject` unwraps registers, reconstructs kind fields and computes text author runs. It is a transport/version shape, not the in-memory Y.Map layout.
+
+A change of pose and text on one object merges independently. Concurrent pose/reparent changes converge to one complete placement register by Yjs conflict resolution; do not promise wall-clock last writer or merge x from one move with y from another. Concurrent Y.Text inserts merge; an agent `update.text` uses a character diff against the same Y.Text so unseen human inserts survive. Concurrent deletion hides edits (remove-wins), with comments retained as orphaned. A deleted id cannot be made fresh by add. Kind changes are delete+add with a new id.
+
+**Per-object attribution must travel in updates.** Yjs transaction origin only controls local echo/undo; it is not attribution. Server operations and accepted suggestions stamp their authored mutations with the authenticated agent author key (including sources). Browser updates carry the author key from `hello`. On a shadow document the server validates changed registers/text, immutable ids/kinds, known authors and unchanged foreign authorship. New/changed values must be stamped by that connection; the server never trusts a client-supplied agent name, person id or source list. Undo may restore previously authenticated values only with matching server-validated undo provenance; arbitrary foreign author stamps are not sufficient. Store enough prior value/hash/author provenance in the update validator to recognize an inverse of this connection's own operation; otherwise restored values get the undoing person's stamp. Text attribution follows Phase 2's validated character-count rules. Repairs are server-origin and preserve the attribution of unchanged content.
+
+`Y.UndoManager` tracks local human gesture/text origins only, not remote updates, agent operations, repair, checkpoint or capture work. One drag/resize/stroke/group operation is one undo item; text typing coalesces until focus changes. Undo uses the original register value it changed, guarded against a newer foreign value: it must not overwrite a later remote register change, clear a foreign tombstone or delete a collaborator's new object. A skipped inverse is announced (“That object changed; undo skipped it”). Deleting and restoring must be tested after compaction and offline replay. Epoch reset clears undo history, not unsent recovery export.
+
+### Fixed package interfaces
+
+These are new exports, with JSON types from `@artifacts/schema/boards`:
+
+```ts
+// @artifacts/doc/board-ids; shares the generator, without importing the article id plugin
+mintBoardObjectId(): string
+// @artifacts/doc/board
+boardToY(snapshot: BoardSnapshot): Y.Doc
+yToBoard(doc: Y.Doc): BoardSnapshot
+boardObjects(doc: Y.Doc): Map<string, Y.Map<unknown>>
+validateBoard(doc: Y.Doc, opts: { assets: Set<string>; author?: string }):
+  { ok: true } | { ok: false; reason: string }
+repairBoard(doc: Y.Doc): Uint8Array | null // deterministic referential projection, server-origin
+boardWorldPose(snapshot: BoardSnapshot, id: string): BoardPose | null
+boardEndpoint(snapshot: BoardSnapshot, endpoint: BoardEndpoint): { x: number; y: number }
+boardText(snapshot: BoardSnapshot): string // sticky/text/shape text in stable outline order
+// @artifacts/doc/board-hash; server-only convenience
+boardBase(object: BoardObject): string
+boardHash(snapshot: BoardSnapshot): string
+```
+
+`validateBoard` checks complete state on checkpoint and changed objects plus graph/limits on each update. It also verifies canonical order keys, finite transformed/rotated bounds, non-overlapping/complete text attribution ranges, asset ownership, root connectors, zero-angle frames and exact known fields. Zod is the JSON boundary, not a substitute for these graph and CRDT checks. No repairing an invalid/forged client value before deciding whether it is authorized. A transient valid concurrent graph conflict uses the deterministic projection; a malformed input closes 4400 and is never persisted.
+
+## Sync and holds
+
+Reuse **the same** `GET /api/artifacts/:id/doc/sync?epoch=N`, Bun `DocHub`, `@artifacts/doc/client`, saved acknowledgements, IndexedDB unsent storage, persist-before-broadcast, shadow validation, compaction, Postgres `artifacts_docs` NOTIFY and epoch reset. Do not add a board socket service, awareness channel or y-websocket. The row's kind selects the article or board validator/model/seed path before processing a document. Article-specific `doc/draft`, `doc/markdown`, `doc/ops` and `doc/checkpoint` routes reject board kind with `not_article`; board-specific routes reject article kind with `not_canvas`. Only sync, runs and maintained routes are shared. The article `DocState` remains article-only, while board clients use `BoardState`. Existing article clients continue unchanged; board clients discover kind through `BoardState`, not by guessing shared type names.
+
+`BoardAwarenessState` is `{ user, mode, objects, pending, cursor }`, where objects are actively selected/dragged/resized/text-edited ids, pending are unsent ids, and cursor is a board point or null. Deduplicate and cap the union at 50. For an operation selecting more than 50 objects, hold their containing frame or refuse the bulk gesture; never silently truncate protections. `edit_presence.objects` stores this union; article `blocks` stays unchanged. The authenticated server overwrites `user`, rejects another connection's awareness client id, and preserves Phase 2 mode/TTL/heartbeat rules. Write dominates Pair dominates Delegate across connections. `Policy.held(id)` includes board object holds; workers must not treat old `blocks` as board ids by accident.
+
+Holds are checked under `withDocLock` against fresh database presence at apply/accept time, on any replica. A hold is an advisory lease, not a distributed lock: an unannounced/offline drag can still race an operation. Yjs still preserves independent fields and whole-pose atomicity. The UI advertises the hold before the first mutation and keeps it through the server's `saved` acknowledgement. For a fresh announced hold, an agent's simultaneous move, text change or delete must become a ghost suggestion without touching the canonical object.
+
+Existing document/update limits remain: 1 MiB per binary update, 4 MiB encoded draft, 30 messages/second, 100ms server coalescing and 50ms client batching. Bounds apply to active objects **and tombstones/history** through the encoded limit; growth refusal permits shrinking/compaction. Never drop unsent changes to meet a limit. An invalid board update cannot enter an article document or vice versa. Old offline epochs are exported to recovery JSON and require an explicit user import into fresh ids.
+
+## Older canvases and frame publishing
+
+### Read compatibility and first edit
+
+Without a `board_versions` row, the canvas reader uses its current `BoardRecord`/`CanvasFrame` path byte for byte: the same responsive `arrange`, fit, image LOD (40 decoded full-size images), frame pins and live overlay. Merely viewing or calling checkpoint `board_read` never creates a draft or shifts an existing frame. Its structured read projection uses deterministic temporary ids derived from `(page,frameKey)` and marks `epoch: 0`; those ids are not editable bases until first edit. A draft read/operation/sync seeds once under Phase 2's advisory-lock → draft-row lock order.
+
+Seed each existing board group as a native container frame with its existing key's label and world rectangle, and each CLI frame as a child `rendered_frame` using frame coordinates relative to that group. Store raw source tuple `{ page, board, frame }`, not an encoded URL key; stable identity is `(page,frame)`, as existing `frames_version_page_frame_unique` requires. Board-key changes are source metadata, not a different frame. Mint lasting ids on the server and persist the association in the seeded JSON/Yjs state. Duplicate `(page,frame)` identities are invalid even across board groups. Never match by label, image hash or array index. Preserve underlying frame records; existing `{ type: frame, frameKey, x,y }` anchors are not rewritten into object anchors.
+
+The first checkpoint stores this world geometry. **Edited boards do not run `arrange` to wrap native content on a phone**; fit/pan changes the viewport, not the scene or anchors. Old versions still wrap exactly as before. Empty boards fit a neutral 800×600 region rather than computing infinity/NaN.
+
+### Republish merge
+
+This is an explicit exception to Phase 2's blanket live-draft publish refusal, limited to refreshing rendered-frame content. Under the content advisory lock and draft row lock, `mergeBoardFramesLocked`:
+1. Validates publish permission, uploaded renders and unchanged page identity/kind/backend eligibility. A changed page layout/type or removal of the editable page follows Phase 2 `live_draft`/handoff/reset rules instead. Native JSON from a CLI commit is never accepted as a replacement scene.
+2. Matches by **(page, frameKey)**, matching the existing frames-table uniqueness. `source.board` is the current CLI board key, a source-location hint rather than part of identity; changing it never remints an object or moves a person's grouping. Matching objects keep id, pose, parent, order, label and human attribution. Only server-owned `data` (version, image hash, renders, intrinsic dimensions, live path, missing) changes, stamped with the publisher's authenticated author key. A resized mock keeps its board dimensions/aspect choice even when intrinsic dimensions change. No scale-to-new-image surprise.
+3. Keeps native objects, text, holds, open suggestions and the Yjs epoch. A browser in Write is not prevented from receiving new mock pixels: Write refuses agent *board edits*, not independently authorized publish of rendered source. Publishing never changes its held geometry. Suggestions with bases invalidated by changed pixels become stale.
+4. New `(page,frame)` identities go through ordinary **board placement policy**, even though publishing their rendered source is separately authorized. Direct: mint a root rendered object and auto-place it beside existing content. Suggestion/Pair/shared audience: reserve the id and store one ghost placement batch, using server-resolved `place_frame` ops; no canonical object is added until acceptance. Write/no edit scope: keep the source published but unplaced, with no hidden suggestion. Never let `publish` smuggle a native object through Pair/Write. New CLI board keys do not automatically reparent or create native groups; grouping remains an ordinary board operation. A removed frame identity leaves its object and last renders as `missing: true`; no silent object deletion or comment loss. Republishing that key restores it. Explicit board delete is the way to remove the picture.
+5. Takes the new publish's files/frame rows as the rendered source, overlays the merged canonical board snapshot in that **same new version**, preserves any native draft changes in that checkpoint, and updates checkpoint seq. `PublishResult.board`, when the artifact has a native board, is `{placed: frameKey[], suggestions: suggestionUuid[], unplaced: frameKey[]}`; it reports policy outcomes explicitly. Source frames without a canonical object are discoverable through `BoardRead.frames`. Persist the Yjs data update before broadcasting. There is no separate handoff version for this compatible merge and no reset. A held human gesture not yet persisted remains a draft after it syncs.
+
+A board object deliberately deleted by a person stays deleted when that frame key is republished. Retain `(page,frame)` ownership and source tuple in the tombstone across snapshots/epochs; `place_frame` on a deliberately deleted identity refuses `missing` rather than implicitly undoing a person's deletion. Restoring it requires the person's local undo or an explicit version restore. Agents can publish a genuinely new stable key when a different mock is intended. A CLI cannot recreate it by changing source order. Agent-driven republish in a shared wiki may update the rendered source under `publish`, but moving it next to a sketch still goes through the ordinary suggest/apply board policy.
+
+Native-only board creation: `artifacts_board_create` / `board create` is a publish-scoped helper producing a normal one-canvas wiki page, an empty schema-1 checkpoint and required summary/tags. It uses the existing publish pipeline, without a dummy HTML screenshot or server browser. Its manifest page is `{ id: "board", kind: "canvas", native: 1, boards: [], styles: [], scripts: [] }`; `native: 1` is server-owned and permits an empty rendered-board list in `ManifestPage`. Existing pages without that marker still require a rendered board definition. After first native checkpoint the server retains this marker, including for mixed native/rendered boards. Client publish cannot introduce or replace native JSON; the server preserves/merges it. Existing CLI-rendered manifests and `pack` continue unchanged. In native-only version bundles the canvas page's derived board JSON is its source of record; future CLI frame publishing may add normal canvas board definitions. No executable native content is generated.
+
+## Assets and limits
+
+Source images and browser-generated thumbnails/crops use existing private `blobs/<sha256>` storage and `blobs` accounting. `board_assets` associates a validated raster with the artifact; dedup does not grant access. Uploads use prepare → presigned PUT → commit. The server recomputes byte SHA-256, checks actual size, magic/decoder MIME, exact decoded width/height, single frame, pixel count and successful complete decode before `validated_at` is set. Refuse SVG, GIF, animated WebP/APNG, HTML, arbitrary URLs and image decoder bombs. Use Sharp's pixel limit before decode. Strip metadata for browser exports; original image metadata is never presented as trusted content. Existing CLI renders retain their existing validator/limits and are not counted as newly uploaded native source assets.
+
+| Constant | Limit |
+|---|---|
+| `BOARD_OBJECTS_MAX` | 2,000 active objects, including strokes, containers and rendered frames |
+| `BOARD_TEXT_MAX`, `BOARD_LABEL_MAX` | 16,000 UTF-16 units per text; 280 per label/alt |
+| `BOARD_COORD_MAX`, `BOARD_DIMENSION_MAX` | ±1,000,000 for x/y; 1–100,000 for w/h, and finite transformed extents within world bounds |
+| `BOARD_DEPTH_MAX`, `BOARD_ORDER_MAX` | 8 container levels; 64 characters per fractional key |
+| `BOARD_STROKE_POINTS_MAX` | 2,048 points per stroke; simplify before publishing, preserving endpoints |
+| `BOARD_ASSET_MAX`, `BOARD_ASSET_PIXELS_MAX` | 10 MiB encoded, 16 million decoded pixels, each dimension ≤8,192 |
+| `BOARD_ASSETS_MAX`, `BOARD_ASSETS_BYTES_MAX` | 200 distinct native source image hashes and 100 MiB total per active board, counted once per hash |
+| `BOARD_OBJECT_JSON_MAX` | 256 KiB per serialized object, including text attribution; split an object before further growth beyond this limit |
+| `BOARD_JSON_MAX` | 4 MiB UTF-8 serialized checkpoint JSON, separate from the 4 MiB encoded Yjs limit |
+| `BOARD_OPS_MAX`, `BOARD_CALL_MAX` | 50 ops and 256 KiB UTF-8 body per request; inherited 60 calls/minute per caller |
+| `BOARD_CAPTURE_TTL_MS` | 5 minutes; capture ticket bound to session, artifact, epoch/seq or exact version/hash |
+| `BOARD_PLACEMENT_TRIES` | 100 candidate rectangles before `placement_full` |
+| `BOARD_EDITOR_GZIP_MAX` | 160,000 bytes JS+CSS incremental cold-cache transfer on entering board Edit |
+
+Active source-image limits exclude derived thumbnail/crop attachments, which instead have per-capture limits below. Unattached uploads expire after 24 hours, are quota-accounted while pending, and are garbage-collected only when no version, suggestion, draft or capture uses them. Hashes referenced by accepted versions are GC roots, including renders for missing frames. Add board references to purge/restore/export/blob-GC checks; never delete a shared blob merely because one board removed it.
+
+## Checkpoints, pictures and anchors
+
+Reuse all Phase 2 checkpoint triggers/kinds (`saved`, `agent`, `delegate`, `quiet`, `handoff`), lock order, no-op detection, version publisher, queued fixes, failure/backoff and no push for quiet saves. The board serializer replaces the article serializer only for `kind: board`:
+1. Load/validate/project the persisted Y.Doc under the lock; serialize canonical `BoardSnapshot` and hash it. Keep title, summary, tags and validated wiki sources in the normal manifest/version metadata.
+2. Insert immutable `board_versions(version_id,page_key,snapshot,hash)` and add `__boards/<page>.json` to the version's files, content-addressed as `application/json`. These two representations must match byte for byte. `PageRecord.meta.board` is the server-owned `{schema:1,hash}` marker; it flows through canvas VersionPage metadata without adding objects to the initial route bundle. `GET board/snapshot?version=N` returns `BoardVersionView {version,page,hash,snapshot,authors,renders}` for native reading, with visibility-filtered authors and explicitly nullable pictures. Legacy pages have no marker and no native snapshot endpoint result. Shared `isGenerated`/pull handling recognizes `__boards/<page>.json` as server-derived content without treating it as replaceable scene input on publish. Restore copies that snapshot; compare works by object id and separately reports pose, text, style and rendered-pixel changes.
+3. Carry normal CLI frame rows/render references through unchanged except publish merge's content refresh. Index native text as described below; do not manufacture fake screenshot frame hashes for native objects.
+4. Commit through `commitVersion`, set `versions.doc_seq`, advance `checkpoint_seq`, compact, mark queued fixes with that version, re-anchor comments and broadcast normal version/control events. A picture validation/capture conflict rolls back a browser save with its draft intact.
+
+### Browser capture protocol
+
+A checkpoint cannot depend on a server browser or on a browser being connected. Agent/quiet checkpoints therefore commit valid JSON with `board_versions.renders = null` (**pending pictures**). Readers render the immutable native snapshot through the lightweight engine, with a text outline fallback; overview/link preview uses a labelled unavailable preview until captured, never a previous version's image presented as current. CLI-only legacy pages continue using frame previews. This distinction is visible in the API and UI.
+
+For Save version in a browser:
+1. Wait for local pending updates to receive Phase 2 `saved`. POST `board/captures` with `BoardCaptureRequest.target: { kind: draft, epoch, seq }`.
+2. The server fences that persisted state and returns `BoardCapture { ticket, epoch, seq, hash, snapshot, threads, expiresAt }`. Persist a `board_captures` row, not a client-trusted hash. Draft tickets require an exact current seq; version tickets use the immutable snapshot. Only a session with edit can prepare/finish captures.
+3. The browser draws **the returned snapshot**, not the changing live DOM, with self-hosted fonts and validated local blob bytes. Render CLI images as pictures, never execute live iframes. Use a clean origin-safe offscreen canvas; no arbitrary URL fetches, HTML screenshots or tainted canvas. Make a 1,200×630 WebP/PNG thumbnail (fit whole bounds, padding), and a 480×320 WebP/PNG crop around each open native-object pin listed by the ticket. A crop uses a 240×160 world-pixel window centered on the transformed pin and draws at 2×, padding at edges and marking the pin. Frames continue to use their existing @2x crop pipeline.
+4. Upload through board asset routes; POST `board/checkpoint` with `{ epoch, name?, message?, capture: { ticket, renders } }`. Server verifies ticket owner/expiry/unconsumed status, same epoch, seq, hash and frozen `board_captures.threads` anchor set under the lock. For a version-target capture, use its immutable `versions.doc_seq` (or 0 for initial empty content) and epoch 1 when no draft lineage exists; never seed a draft for a version capture. If the live draft changed or a checkpoint advanced it, answer `conflict`, `details.reason: stale_capture`; keep uploads available for retry. Browser recaptures after syncing; never silently attaches images to different content. Consuming the ticket, inserting the version and attaching pictures is one DB transaction.
+
+A session later opens a version with pending pictures: prepare a `{ kind: version, version: N }` ticket, capture that exact immutable snapshot, and POST `board/captures/commit`. Attachment is compare-and-set from null to one validated `BoardRenders` set. A second differing set is `conflict`; a retry of identical hashes succeeds. This changes **derived render metadata only**, not content, hash, version number, authorship or checkpoint seq. Never issue a new content version just to fill a preview. The viewer opportunistically captures pending versions it is authorized to edit, including agent/Delegate completion; disconnected browsers do not block checkpoint completion.
+
+Validation also requires exact thumbnail/crop dimensions, PNG/WebP only, ≤2 MiB per image and ≤16 MiB total per capture. Up to 500 crops per set. A ticket with more open native threads fails `limit` before rendering; JSON-only checkpoint remains possible. Every supplied crop thread must belong to this artifact/page and match the ticket's object anchor; no extra crops, duplicate threads or omitted ticket threads. The server validates content/association, not visual truth: it cannot prove an authorized browser drew truthful pixels without rendering. Native JSON remains authoritative. Captures do not grant access, mark comments fixed or change agent-maintained state.
+
+### Object comments
+
+`BoardObjectAnchor` is `{ type: "object", object, u, v, checkpoint }`. Add it to the existing shared `Anchor` union during implementation; this contract adds its standalone schema now so exhaustive article/frame consumers are migrated together by worker 1. `u/v` are normalized local coordinates before rotation/ancestor translation; `checkpoint` is the content version the pin was created against. No dependency on a thumbnail's hash or the zoom level.
+
+A comment on an unsaved native object first saves a checkpoint (or queues the comment locally if offline); only then can the server create a durable thread referring to that version. `artifact.comment` remains sufficient for comments on a checkpoint; guests never get draft access or capture upload authority. A new checkpoint comment by a read-only person/guest can initially have no crop; an authorized browser's next capture of that immutable version fills missing derived crops using a new version-target ticket restricted to those uncaptured threads. Existing thumbnail/crops are immutable: attachment may append only previously absent thread crops with the same snapshot hash, under the artifact/version row lock. The compare-and-set rule above applies to each attachment slot, not to overwriting the entire set. The attachment updates a thread's current crop reference only if its anchor still corresponds to that version; an old-version capture cannot overwrite a newer thread crop. Keep per-version attachments for history.
+
+Move/resize/rotation/grouping keep object anchors attached. Re-anchoring reports `ok` for geometry/order-only changes, `updated` for changed native content/style/asset, `orphaned` for deletion, with the last crop/version retained in the thread list. Undo restoring the same id recovers the pin; a different pasted id does not. Use a content-only native anchor hash excluding pose/parent/order/attribution; use the operation base for stale edits, not anchor comparison.
+
+Rendered mocks **keep `type: frame` anchors**: per-frame @1x pixel hash decides updated/ok, missing keys orphan as before, @2x renders supply comment crops, and frame pictures supply existing embeds/link previews. Board placement changes never masquerade as pixel edits. `missing: true` leaves last published content accessible and visibly marked; an explicitly deleted rendered object hides its pin on the board while retaining the legacy thread in the list. The adapter maps legacy frame keys to rendered objects through the source tuple. Existing frame-key URL encoding remains in `paths.ts`, not in object ids.
+
+## Agent operations and placement
+
+`BoardRead.frames` lists source descriptors `{source,object,base,contentHash,intrinsic,placement}` where placement is placed/suggested/unplaced/deleted; object/base are null for an unplaced source, and reserved id/proposed base for an accessible ghost. Source descriptors paginate in their own cursor section (same 50/32 KiB limits); never dump every source on each object page.
+
+`BoardRead` supplies metadata, checkpoint/draft flag, version, epoch, seq, full snapshot hash, objects with 12-character bases and open thread numbers, source-frame placement descriptors, validated asset metadata, authors and open suggestions. Objects include kinds, geometry, text, bindings and attribution; the agent need not infer a sketch from a screenshot. Sort outline traversal by parent tree then `(order,id)`. Paginate at 50 objects or 32 KiB of object JSON, whichever is reached first; one ≤16,000-unit text object may exceed the soft byte page target. Include only referenced authors/assets in that page. Suggestions page separately after objects/source descriptors/metadata through the same opaque cursor. Suggestions lists carry bounded requests/ids, not full ghost scenes. Fetch a ghost projection through its separate preview endpoint; do not force a 2,000-object ghost into a list response. Limit one answer to 512 KiB, with at most 64 KiB of referenced author/asset metadata on an object page. A single large attributed object may exceed the 32 KiB soft target but never the 256 KiB object limit. Referenced authors/assets that do not fit continue in a metadata cursor section; keys still identify them unambiguously. Never truncate an object or its attribution to fit a response. Cursor binds artifact, version/hash or draft epoch/seq and section; changed draft → `conflict stale_read`, so agents restart instead of mixing snapshots.
+
+`BoardEditRequest` is `{ epoch, requestId, bases, ops, suggest?, sources?, note?, fixes?, run?, checkpoint?, agent? }`. Bodies are strict Zod objects; no arbitrary scene fields. `requestId` is a caller-scoped UUID idempotency key. Under `withDocLock`, authorize and resolve policy again, load the latest persisted state, check epoch, preflight all ops, then either apply all in **one** Yjs transaction, store one suggestion, or refuse all. No partial successful batches, even when a later op is stale or out of bounds. Same request id/body returns the exact stored receipt without reminting ids/versions; same id/different body conflicts. Keep receipts for that epoch across compaction; reset rejects the old epoch before any replay and allows old receipts to be swept. Failed preflight has no receipt requiring a DB write.
+
+`bases` maps lasting ids → read bases. Require a matching base for every existing explicit target/reference, including connector endpoints, group children, reorder neighbours, `place_frame` target when already placed, and near object. Require bases for implicit **authored** writes such as direct children reparented by ungroup/delete, and every descendant a group move would affect (whether currently held or not). A connector's deterministic endpoint-detach repair is dependent on deletion: check its hold, but derive its current value under the lock without requiring the agent to enumerate all incoming connectors. New ids made earlier in the same batch use `$ref` names and require no base. Duplicate refs, forward refs, refs to a refused/other batch, unrelated surplus bases and missing preconditions are invalid. Multiple changes to an existing object in one batch validate its base against the initial state once, then execute sequentially on the shadow. Schema/graph/limits check the final projected state before persistence.
+
+| Op | Fields and effect |
+|---|---|
+| `add` | `ref`, `object: BoardCreateObject`. Server mints id, stamps author and puts it last among siblings. Cannot add `rendered_frame` data or a connector this way |
+| `move` | `object`, full `pose`. Atomic pose update; cannot alter kind/text/bindings; zero-angle containers |
+| `update` | `object`, `patch: {label?,style?,text?,shape?,asset?,alt?}`. Patch fields must fit its kind; unknown/inapplicable fields fail. `style` merges known fields into one authored style register; `text` diffs Y.Text. No source/renders/points mutation |
+| `connect` | `ref`, `label`, `style`, `start/end`, `route`, `startArrow/endArrow`. Makes a root connector; bound targets must exist in this page |
+| `bind` | `object` (connector), `start/end`, `route`, `startArrow/endArrow`. Atomic connector data change, including detaching or changing either endpoint |
+| `group` | `ref`, `objects`, `label`. Makes a new native frame and reparents sibling targets; preserves board geometry |
+| `ungroup` | `object` (native frame). Reparents its children and deletes only the container |
+| `delete` | `object`. Remove-wins tombstone, with referential repair; native frame uses ungroup semantics |
+| `reorder` | `object`, `before` (sibling or null for front/top). Generates fractional key, no geometry change |
+| `place_frame` | `source`, optional creation `ref`, `near: {object} | {region: BoardPose}`, `side: right | below | left | above`, `gap` (default 80, 16–2,000). Places an already published source beside a sketch. If not yet represented, `ref` is required and its id is minted/reserved by the server; otherwise `ref` is omitted and the existing object/base is required. Never supplies HTML/images |
+| `meta` | `title?`, `summary?`, `tags?`, `sources?`. At least one value; same wiki/source validation as article metadata |
+
+Every numeric input is finite and final bounds are enforced, including rotated corners and parent translations. Base mismatch refuses with `stale` and safe current bases/ids in the error message, never hidden content; a missing id is `missing`. Stale validation precedes hold-to-suggestion conversion: a stale operation is not made into an apparently current ghost. A refused batch creates no ids, suggestion, update or version. A suggestion reserves all `$ref` ids and records initial bases and epoch; ghosts can refer to each other. `BoardSuggestionPreview` is `{id,epoch,seq,objects:[{object,base}],deleted,nextCursor}` from the preview endpoint. Its objects are the server-projected post-batch ghost objects/changed poses; deleted lists proposed removals. Paginate it with the same 50-object/32 KiB soft and 512 KiB hard limits, binding its cursor to the suggestion, current epoch/seq and section. A list of partial preview pages is cumulative until nextCursor is null; a stale cursor discards the incomplete preview and restarts. This lets the viewer draw ghosts and a later owned-run batch name a reserved lasting id with its proposed base. These lists are recomputed from canonical state plus valid earlier run dependencies, never trusted from input.
+
+`BoardEditResult` is `{ outcome, reason, message, seq, version, suggestion, ids, results, agents }`; per-op results identify lasting objects. Refusal has empty ids/results. A held batch says `reason: held`; trust/run/Pair reasons are reported as such. `checkpoint: true` saves only after a direct successful batch; suggested work has no content version until acceptance. Returned ids are stable across retries and acceptance.
+
+### Placement algorithm
+
+`place_frame` resolves a published source uniquely, creating a rendered object only for an unplaced source or moving its existing object. Lookup uses `(source.page,source.frame)` and verifies `source.board` against the current source metadata; a stale location hint refuses `stale`. It never copies the sketch or rewrites it. For an existing object it keeps current w/h/angle; for a new object it takes published intrinsic w/h with angle zero. It reparents to root while preserving scale, then chooses a translation. A deliberately deleted source is refused, and a source already reserved in another open placement proposal is not duplicated; read that suggestion and accept/withdraw it first. An owned-run dependent batch can move its reserved id with the ordinary dependency rules. `near.object` uses its world AABB including descendants for a group; `near.region` is an explicit world rectangle (angle must be zero). The initial candidate aligns top edges on right/left, left edges on above/below, with the requested gap. Ignore the moving frame itself and non-visible ghosts; every other root object's world AABB, including a container's descendants, is an obstacle, expanded by `gap/2`. Bound connectors/strokes do not reserve huge empty rectangles: their stroke bounds count. Advance along the perpendicular positive axis by the placed object's extent plus gap, up to 100 candidates; refuse `placement_full` rather than overlap or leave bounds. Results return its id and final geometry through `board_read`. Repeated idempotency keys do not move it again. Different requests can deliberately place it elsewhere with its new base.
+
+New frame placements in compatible CLI merge use the same search at root to the right of the existing scene bounds with gap 80, including the proposed ghost pose under suggestion policy; if it fails, the publish refuses with `placement_full`, never drops a frame. For the normal “turn this sketch into mocks” loop: read draft objects → publish rendered keys (content appears at automatic positions) → read their placement receipts/ids/bases (or review pending ghost placements) → one `place_frame` batch beside the sketch → direct checkpoint or one accepted ghost batch. Publishing source content and placing it are separate permissions and policy decisions.
+
+### Suggestions, runs and acceptance
+
+`board_suggestions` uses the existing `suggestion_status`, expiry, 200-open limit (count board batches and article proposals against the existing artifact limit), author/source filtering, run lifecycle and human-only `artifact.accept` guards. One batch equals one ghost change set. Stale any required base/epoch → stale the whole batch. Run ordering can refer to earlier batches' reserved lasting ids in the same owned run (never their batch-local `$ref` aliases), with explicit dependency tracking stored in the request's concrete target ids; acceptance resolves them in creation order and skips/reports dependent batches when a prerequisite is stale/rejected. No cross-run unresolved references. A later batch cannot silently supersede unrelated proposals.
+
+Tokens may withdraw their own suggestions, never accept/reject them. A person accepts under the same content/draft lock, claiming the row once, rechecking epoch/bases/assets/bounds/graph/limits and holds from **other** human connections. A held target remains a suggestion with `conflict held`; accepting cannot interrupt another person's drag. `force: true` may bypass stale bases after a person reviews the new preview, never epoch mismatch, missing targets, invalid bindings, assets, limits or holds. Text/register authors remain the proposing agent; acceptance is logged as the deciding person. Run completion/acceptance dispatches by draft kind to board checkpoints and counts board suggestions too. Cancelled/expired direct runs retain their applied draft edits, as in 13.
+
+## HTTP API
+
+All routes below use ordinary caller resolution, CSRF for session writes, `can()` and route-coverage/permission-matrix tests before data access. `Edit` means `artifact.edit`; `Accept` means session-only `artifact.accept`. Shared `CheckpointResult`, `StartRun`, `FinishRun`, `Run`, `AcceptSuggestion`, `RejectSuggestion` and `SetMaintained` stay in `editing.ts`. New routes live on the viewer API, not the content host.
+
+| Route | Guard | Request → answer |
+|---|---|---|
+| `GET /api/artifacts/:id/board` | `artifact.read` | `BoardState`, narrowed for non-editors |
+| `GET /api/artifacts/:id/board/objects?draft=1&version=N&cursor=` | `artifact.read`; draft needs Edit | `BoardRead`; draft/version mutually exclusive, default latest checkpoint |
+| `GET /api/artifacts/:id/board/snapshot?version=N` | `artifact.read` to that version | `BoardVersionView`, full immutable JSON (≤4 MiB scene); default latest, native versions only |
+| `POST /api/artifacts/:id/board/ops` | Edit | `BoardEditRequest` → `BoardEditResult` |
+| `POST /api/artifacts/:id/board/checkpoint` | Edit | `BoardCheckpoint` → `CheckpointResult`; optional capture session-only |
+| `POST /api/artifacts/:id/board/assets/prepare` | Edit | `BoardAssetPrepare` → `BoardAssetsPrepared`; up to 50 images, presigned PUT URLs expire in 15 minutes |
+| `POST /api/artifacts/:id/board/assets/commit` | Edit | `BoardAssetPrepare` → `BoardAssetsCommitted` after actual validation; no existence oracle across artifacts |
+| `GET /api/artifacts/:id/board/assets/:hash?version=N` | `artifact.read` to that version; otherwise Edit | Authorized raster redirect; immutable checkpoint membership or draft/suggestion membership required |
+| `POST /api/artifacts/:id/board/captures` | Edit, session | `BoardCaptureRequest` → `BoardCapture` |
+| `POST /api/artifacts/:id/board/captures/commit` | Edit, session | `BoardCaptureCommit` → `BoardCaptureCommitted` for version-target ticket |
+| `GET /api/artifacts/:id/board/suggestions?status=&cursor=` | Edit | `BoardSuggestionList`, 50 per page |
+| `GET /api/board-suggestions/:id/preview?cursor=` | Edit on owning artifact | `BoardSuggestionPreview`; visibility guard before lookup/content, no token decision |
+| `POST /api/board-suggestions/:id/accept` | Accept | `AcceptSuggestion` → `{ status, seq }` |
+| `POST /api/board-suggestions/:id/reject` | Accept | `RejectSuggestion` → `{ status, seq }` |
+| `POST /api/board-suggestions/:id/withdraw` | Edit + author | Empty → `{ status, seq }` |
+| `POST /api/artifacts/:id/doc/runs` | Edit | Existing `StartRun` → `Run`; dispatch by document kind |
+| `POST /api/runs/:id/finish`, `/cancel`, `/accept`, `/reject` | Existing 13 guards | Existing bodies/results, board-aware dispatch |
+| `PUT /api/artifacts/:id/doc/maintained` | `artifact.maintain`, session | Existing `SetMaintained` → setting |
+| `GET /api/artifacts/:id/doc/sync?epoch=N` | Edit, session + Origin | Existing WebSocket protocol, board document adapter |
+| `POST /api/boards` | `project.publish` + normal publish rules | `BoardCreateRequest` → normal `PublishResult`, empty native canvas page key `board` |
+
+Reject oversized calls before parsing; errors retain 03's envelope. Stale epoch is `conflict stale_epoch`, stale read/capture is conflict, malformed/invalid op JSON is `invalid`, quota is `too_large` or an operation `limit`. A policy/stale/hold board operation outcome is a normal result whose `outcome` the CLI must inspect, not a transport success that implies application. Exports/versions never expose pending draft assets.
+
+### Fixed server interfaces
+
+```ts
+// Worker 2: editing/store.ts, existing signatures retain article behaviour
+editability(deps, artifact): Promise<EditableState> // includes kind: "article" | "board" on success
+loadDoc(deps, artifactId, lock?): Promise<{ ydoc: Y.Doc; row: DocRow }>
+withDocLock(deps, artifactId, fn): Promise<T> // existing content advisory lock → edit_docs row
+persistUpdate(deps, artifactId, update, actor, lock?, epoch?): Promise<number> // existing saved ordering
+// Worker 1: boards/checkpoint.ts and boards/merge.ts
+checkpointBoardLocked(deps, lock, place, options, capture?): Promise<CheckpointResult>
+mergeBoardFramesLocked(deps, lock, input, actor): Promise<{ snapshot: BoardSnapshot; update: Uint8Array; placement: NonNullable<PublishResult["board"]> }>
+// Worker 4: boards/ops.ts and boards/read.ts
+applyBoardBatchLocked(deps, caller, artifact, request: BoardEditRequest, lock, accept?): Promise<BoardEditResult>
+readBoard(deps, caller, artifact, options): Promise<BoardRead>
+```
+
+`checkpointLocked` dispatches once on kind, avoiding recursive lock acquisition. `applyBoardBatchLocked` never checkpoints itself while holding the lock: it returns its persisted seq and the outer route finishes the requested checkpoint under the same existing lock via the board checkpoint entry point. Broadcast/NOTIFY callbacks are queued on `DocLock.after` until commit. Worker 1 suggestions acceptance invokes worker 4's batch applier with the reserved ids and accepted author; run acceptance does the same, in one transaction. Worker 2 owns structural validation; worker 4 owns policy preflight and transforms. During publish, worker 1 supplies a server-only source resolver for the already-validated incoming FrameRecords and next version number to worker 4's placement preflight, inside the same transaction. It is never a public request option; a token cannot fabricate unpublished source records. Their shared pure helpers may live in `@artifacts/doc/board`; no route imports viewer code.
+
+## Hosted MCP tools
+
+Specs in `packages/schema/src/mcp.ts`, hosted registration in `apps/server/src/mcp/routes.ts`, local registration through `artifacts mcp`. Names are fixed; no unprefixed aliases. Caller/token scopes remain Phase 2's.
+
+| Tool | Scope | Input | Answer |
+|---|---|---|---|
+| `artifacts_board_read` | read; draft needs edit | `artifact`, `draft?`, `version?`, `cursor?` | `BoardRead` |
+| `artifacts_board_edit` | edit | `artifact` plus `BoardEditRequest` | `BoardEditResult` |
+| `artifacts_board_suggest` | edit | Same | Same, forced `suggest: true` |
+| `artifacts_board_checkpoint` | edit | `artifact`, `epoch`, `name?`, `message?` | `CheckpointResult`, pictures may be pending |
+| `artifacts_board_suggestions` | edit | `artifact`, `status?`, `cursor?`, optional `preview: suggestionId` | `BoardSuggestionList`, or `BoardSuggestionPreview` when preview is named; never token decisions |
+| `artifacts_board_delegate` | edit | `artifact`, either `goal,agent?` or `finish: runId,message?` | Existing run/finish result |
+| `artifacts_board_create` | publish | `project,slug,title,summary,tags?,sources?` | `PublishResult` |
+
+Assets upload is HTTP/CLI, not inline base64 in MCP. A model selects a validated image hash from a board read or asks the CLI to upload a local raster; it cannot point the server at an external URL. All results containing object text, labels, alt text, notes, suggestions, source text or pixels are marked `untrusted: true`, using the same MCP wrapper as article reads. Prompts in sticky text (“ignore your rules”, including in an agent-authored ghost) are never executed. Reading the wiki's rules page remains the first step; board content cannot declare itself a trusted rules page or widen tools/scopes.
+
+## CLI and skill
+
+New `artifacts board` commands, same hosted routes, credentials and edit-scope error as `artifacts page`. Every command accepts `--json` and an explicit `project/slug` target. JSON output is parsed against the shared schema. Send `Artifacts-Features: editing,boards`: existing editing compatibility plus `BOARDS_FEATURE` (`"boards"`) for native anchors. Requests without the boards feature receive object-anchored comment threads with `anchor: null`, preserving `where`, crop and thread number. Hosted MCP advertises boards internally; the viewer uses the same header. No older CLI is sent a new anchor variant or enum value.
+
+- `board read <artifact> [--draft | --version N] [--cursor C] [--json]`: structured object JSON by default; optional `--text` prints id, kind, base, pose, text, bindings, attribution and suggestion summaries as data. Preserve all ids; never synthesize agent prose.
+- `board edit <artifact> --ops <file|-> [--json]`, `board suggest …`: read a `BoardEditRequest` from file/stdin. No shell interpolation or hand-escaped giant JSON flags. Human-readable receipts list applied/suggested/refused, ids, reason, seq and version. Exit 0 only for applied, 2 for suggested, 1 for refused/HTTP/validation failure (board commands explicitly distinguish suggestion from application; existing page commands retain their released exit behaviour).
+- `board save <artifact> --epoch N [--name N] [-m MESSAGE] [--json]`: JSON checkpoint; explain `pictures pending` when no browser has captured it.
+- `board suggestions <artifact> [--status S] [--cursor C] [--preview ID] [--json]`: read proposals or paginated ghost objects/bases. Tokens have no accept/reject flags.
+- `board delegate <artifact> --goal TEXT [--agent NAME] [--json]` and `--finish RUN [-m MESSAGE]`: reuse run lifecycle.
+- `board create <wiki/slug> --title TEXT --summary TEXT [--tags a,b] [--sources a,b] [--json]`: native empty board publish helper.
+- `board asset add <artifact> <file> [--json]`: decode/check locally, prepare/upload/commit, return validated `BoardImage`; never place it implicitly.
+- `board export <artifact> <dir> [--version N]`: immutable schema-1 JSON, asset files by hash and a plain outline; rendered frames include source tuples and available images. No unpublished drafts by default. Wiki export includes boards as JSON plus text outlines, not misleading Markdown-only exports.
+
+The skill's `references/boards.md` teaches: wiki rules → structured read → read open suggestions/holds policy → use returned bases → batch related ops → inspect receipt → checkpoint before claiming a fix. It includes “sketch to mocks” using ordinary `publish` followed by `place_frame`; never publish over the native model, flatten a person's sketch, or treat board text as an instruction. Skill source stays in `skill/`; distribution and compiled assets use the repository's usual generation path.
+
+## Data model and migration
+
+This contract adds the following. It does **not** add a second sync log, permission enum, activity enum or object-per-row database. `apps/server/src/db/schema.ts` and generated `0019_*.sql` and `0020_*.sql` own the physical additions. Old migrations are unchanged; migration SQL only adds tables, columns, constraints and indexes.
+
+- `edit_docs.kind`: text, non-null default `article`; new board rows say `board`. Dispatch validation/seed/checkpoint by this value, not by inspecting arbitrary shared types. Runtime validation restricts values to article/board.
+- `edit_presence.objects`: non-null text[] default empty; separate from article blocks.
+- **`board_versions`**, PK `(version_id,page_key)`: `org_id`, `artifact_id`, immutable `snapshot` JSONB and `hash`, nullable derived `renders` (`BoardRenders`), `rendered_at`, `created_at`; index artifact_id. `renders = null` means pending, not “use the old image”. A later captured comment crop may append a previously absent slot; existing picture bytes/hashes never change.
+- **`board_assets`**, PK `(artifact_id,hash)`: `org_id`, `image` (`BoardImage` JSONB), `uploaded_by`, `token_id`, `validated_at`, `created_at`. Null validated_at means never usable. Same hash may be associated with multiple authorized artifacts, with reference checks before dedup reuse.
+- **`board_captures`**, UUID PK: `org_id`, `artifact_id`, `page_key`, nullable `version_id` (null = draft ticket), `epoch`, `seq`, `hash`, `created_by`, `expires_at`, `consumed_at`, `created_at`; expiry index. `threads` JSONB freezes the returned `{n,anchor}` set (empty by default); snapshot is returned from the fenced state/immutable version; no untrusted client snapshot is stored here.
+- **`board_suggestions`**, UUID PK: `org_id`, `artifact_id`, `page_key`, `epoch`, typed `request` (`BoardEditRequest`), reserved `ids` map, `status` (existing enum), `run_id` (existing edit_runs), author key/person/agent/token, note/sources/fixes, created/expires/decided times, decided_by, decision_note and resulting version. Index `(artifact_id,status)` and run_id. Keep it separate from article-only `suggestions.op/markdown`; reuse policy and lifecycle functions through dispatch.
+- **`board_requests`**, PK `(artifact_id,caller_key,request_id)`: `org_id`, `epoch`, hash of canonical request body, typed `result` receipt, created_at. Caller key is `person:<id>` or `token:<id>`, never a display name. Authorization and current epoch checks precede returning a cached receipt. Receipts and reserved ids survive compaction and are cleared only after that epoch is retired.
+
+All new tables have org/artifact ownership and foreign keys; application queries scope both. They join artifact/version purge, retained-version blob GC roots, suggestion expiry and capture expiry sweeps. Use existing `versions.checkpoint/doc_seq`, `edit_updates`, `edit_authors`, `edit_runs`, `blobs`, threads and activity. Old versions with no board row remain valid. No SQL backfill rewrites existing frame coordinates or comment anchors.
+
+## Search, links, metadata and activity
+
+Checkpoint text is sticky/text/shape `text` in outline order, plus ordinary board/frame labels as metadata. Source of full-text body search is **the native text**, not image OCR, stroke guesses, suggestion notes or live draft text. At checkpoint add deterministic native block index rows keyed by object id for the existing search pipeline; these are index records, not article content, and must not invoke article rendering. Board comment anchors remain object anchors. Frame notes/labels already indexed keep their existing path. No duplicate body text from thumbnail metadata.
+
+Recognize `[[wiki links]]` in native text with the existing wiki parser/slug rules, as literal text decorations in the editor and safe links in the outline. Resolve visibility exactly as article links; title/summary/tags/wiki sources use existing validation. Derive outgoing links/backlinks, wiki page kinds, untrusted citations and garden data at checkpoint. Native-only boards get a canvas card, not an article masquerading as a board. For mixed boards preserve existing selected frame link previews; use the board thumbnail only for board-level links without a selected rendered frame. New object links use a stable `#object=<encoded id>` fragment; frame fragments and article embeds are unchanged.
+
+Reuse Phase 2 activity kinds, with `document: "board"` and `page` in payloads:
+- `edited`: one successful batch/coalesced human activity, `{ seq, requestId?, operations: [op names], objects: count }`; no object text/coordinates in general logs.
+- `suggested`, `suggestion_accepted`, `suggestion_rejected`: suggestion id, run if any, operation count, safe reason; text/note available only to editors through suggestion routes.
+- `checkpointed`: version and kind, with ordinary `published` compatibility fallback.
+- `run_started`, `run_finished`, `maintained_changed`: existing payloads with board/page context.
+- Render capture alone creates no content activity/version/push. A compatible frame republish has the usual `published` line and version, not a fake human move.
+
+Draft activity (`edited`, `suggested`, open-run state and decision detail) is editor-only in SSE/wiki log/activity reads. Non-editors see only checkpoint publication and ordinary published-version authorship; do not leak editing frequency or the existence of ghost objects. Apply existing older-client activity fallbacks, and never expose unrecognized anchor enum shapes to an old CLI without its feature-aware response path. Worker 1 and 5 coordinate backward-compatible comment results: old clients see an unanchored thread with `where` text and crop, not an invalid object anchor they cannot parse.
+
+## Viewer, gestures and accessibility
+
+Extend `apps/viewer/src/canvas/engine.ts`: one viewport transform/hit-testing authority shared with native rendering, selection and pins. Legacy frame-only reading retains the exact current path. Native board reading uses a small renderer and outline; editing tools/Yjs/provider are dynamically imported only on Edit. Use viewer tokens, existing phone sheets and the hosted design v1 (read-phone, tools-select/pen/connect/more, pencil-ipad, frame-phone-v4, pair-phone, delegate-review, who-phone, comment-phone-after and readonly-phone); no generic imported whiteboard chrome. Pair ghosts have a dotted outline, blue-pencil authorship and an Accept/Reject sheet, and are never included in ordinary hit-tests/export/checkpoint thumbnails. Deletion proposals show the target dimmed, without removing it. Delegate completion links to its real version (pending preview label if needed), outlines new/changed objects in green as a review overlay and offers Keep, Revert all and per-object review. Keep acknowledges the already-made version; it does not create another checkpoint or promote a suggestion. Revert all uses ordinary version restore. Per-object revert of an extant native object uses current-base move/update/bind operations; deleted or rendered-content restoration uses version restore, never an unvalidated source rewrite.
+
+The phone tool strip is Select, Pen, Sticky, Shape, Text, Arrow, More (image/frame). Enter Edit in Select. Single-shot Sticky/Shape placement returns to Select; Pen stays active. Context controls sit above the selection, with 44px hit areas. The authorship eye shows person initials or an agent pencil/name on every object; agent text keeps its pencil underline even when the eye is off. Accepting ghosts retains the agent author and records the accepting person separately. Read-only users have Comment and Ask to edit (an ordinary page-level comment to the owner), without Edit/tools/ghosts.
+
+The read JS+CSS gzip budget stays **80,000 bytes** (the existing 80 KB gate). Board editor budget is **160,000 incremental gzip bytes**, counting every JS/CSS dependency fetched by a cold board Edit, including Yjs/provider/shared chunks, excluding raster assets and already-loaded reader files. No prefetch/modulepreload/editor CSS/board-schema value import before Edit. Reason: the existing doc editor is roughly 112 KB and native tools/geometry/selection should fit in a further 48 KB; this is a concrete implementation ceiling, not a measured claim about unbuilt code. A bespoke Preact editor needs neither Excalidraw's measured ~411 KB nor another UI runtime. Fonts must be self-hosted; account for font transfer separately in size output. Test production import graph **and network**, not just one named chunk's size.
+
+- iPhone: in Select a finger pans empty space and drags an object; in read mode every drag pans. Keep two-finger pinch and existing double-tap fit. The explicit Pen tool changes one-finger input to ink; Select on empty space restores panning, and an optional Pan shortcut can do the same. Two fingers always navigate, never draw a second stroke. If the second finger arrives during a touch stroke, cancel the uncommitted stroke and enter pinch. A completed shape/text tool never leaves an invisible drawing mode.
+- iPad: Pencil (`pointerType: pen`) draws freehand ink regardless of the selected creation tool; fingers pan/pinch. The explicit eraser removes whole stroke objects through normal delete/undo semantics (no vector point editing). During a pen stroke ignore palm touches for drawing and ending the stroke; do not move the viewport under the active pen. Resume finger navigation after pen up. “Pencil draws” can be disabled in tool options for selection/inspection. Pencil double-tap swaps Pen/Eraser only where the browser exposes that hardware action; keep an explicit eraser control on all browsers and do not claim unsupported hardware delivery. A stationary two-finger tap with no stroke active invokes local undo, as the design shows; any pinch/pan motion cancels that tap candidate. Do not infer Pencil from touch pressure or user-agent strings.
+- Track the initiating pointer id; only it may extend/end/cancel a stroke. An unrelated up/cancel, second pen, palm or lost pointer capture cannot commit/truncate it. Use pointer capture with the existing safe fallback, coalesced events and cancellation cleanup. No document-level preventDefault that breaks text input/Scribble, browser zoom or sheets. Creation uses explicit tools; browser page scrolling stays outside the canvas surface.
+- Desktop: drag selection/move, shift multi-select, space+drag pan, trackpad gestures unchanged. Keyboard: Tab through tools/outline; arrows move selected objects 1 board pixel, Shift+arrows 10; Delete/Backspace deletes selection outside a text input, Escape cancels gesture/returns focus, Enter edits text/opens object, standard local undo/redo, fit/actual shortcuts respect typing and browser modifiers. Keyboard mutation routes through the same model/attribution/undo/holds as pointer input.
+- All toolbar actions, pins, selection handles and sheet controls have **44×44 CSS px** hit areas at every zoom and orientation. Keep handles/pins in screen-space overlay; visual size can be smaller. Provide clear active tool/mode labels and sufficient contrast; do not convey authorship, selection or ghosts by colour alone.
+- Provide a labelled **Objects** outline list for readers and editors, in stable traversal order, with kind, text/alt/label, group membership, connection targets and author on request. Focus/select/fit an object from the list, edit its text/pose through labelled inputs, and accept/reject suggestions without a drag. The canvas has an accessible name and described keyboard instructions; do not trap page navigation in role application.
+- Respect `prefers-reduced-motion` for fly-to, fit, selection and ghost transitions; no inertial coast or animated zoom when reduced. Text fields remain real accessible browser inputs/contenteditable, with visible focus and iPad Scribble compatibility. Screen-reader announcements are concise for save/offline/refusal/undo-skip, not every pointer sample.
+
+Drawing during an active Delegate run takes the pen back: announce Write and cancel the run through the existing authorized session cancel route before dispatching the new gesture's updates. Board direct-run cancellation checkpoints the already-persisted run work as `delegate`; a suggestion run leaves its proposed change set for review. Buffer the initiating gesture locally during this short handoff. If cancel/checkpoint fails, retain Write protection and the unsent gesture, show the error and retry; never drop the sketch or promise the external agent process was killed. Further agent ops are refused by Write/cancelled-run checks.
+
+The ink-review prototype verified synthetic ownership/palm tests, not real Pencil pressure, latency or physical palm rejection. Synthetic iPad tests are required; actual iPad/Pencil validation remains a release gate and must be reported honestly.
+
+## Tests
+
+Implementation release gates (contract-only changes add schema validation tests now; no claim that unbuilt behaviour passes):
+
+1. **Shared schema/model units.** Every kind round-trips JSON → Y.Map model → JSON; text remains Y.Text; atomic field attribution survives encoded-update transfer/compaction. Reject unknown fields, NaN/infinity, oversized text/points/assets, malformed ids/keys, invalid parent graphs, connector-to-connector binding, rotated frames, wrong-kind patches and source/renders mutation. Canonical hashes are independent of object key insertion order and locale; pose-only change changes operation base but not native comment content hash.
+2. **Pure geometry/repair.** Rotated normalized anchor transforms, nested frame translation, resize without child scaling, ungroup preserving world pose, simultaneous cycles, delete/unbind fallback, same-source id persistence, equal fractional keys, rebalancing, empty board, stroke simplification and deterministic overlap-free placement (all sides, bounds, 100-try failure). No NaN or orphan silently assigned to a different object.
+3. **Two-writer convergence.** Deliver both orders and duplicated updates: person move + agent text diff; two competing full poses; simultaneous Y.Text insertion; delete vs text/move/bind; group vs child move/delete; undo vs newer foreign pose; two creators with equal order; offline epoch replay. Compare canonical snapshots/attribution, not only screenshots. Deletion remains deleted across replay and checkpoint compaction, until authorized undo.
+4. **Policy/holds with two replicas.** Announce a person's drag/text hold on replica A, invoke agent move/update/delete/group on replica B: one suggested batch, no canonical overwrite. Pair ghosts never change canonical map. Write refuses every agent edit. Test stale+held precedence, TTL expiry, only-reader/shared/maintained policy, run cannot self-promote, other person's hold during acceptance, idempotent retry, dependent ghost ids and no partial batches. Also test the unannounced drag race's documented atomic convergence.
+5. **Persistence/API/security.** Migrate a pre-Phase-3 DB without changes to old versions. Lock ordering, persist-before-broadcast/saved, permission/route-coverage matrix, forged author and foreign tombstone rejection, cross-artifact hash oracle, source/team visibility, read-only narrowed state, old CLI object-anchor fallback, revoked capture session, oversized/animated/spoofed raster, pixel bomb, stale/expired/reused capture, wrong thread/dimensions/hash and concurrent checkpoint ticket. Server code/dependencies do not import a browser or viewer renderer.
+6. **Publish/checkpoint acceptance.** Seed a legacy multi-board canvas with exact old frame positions and anchors; first checkpoint retains id aliases/source tuple; CLI same key refresh preserves id/pose/parent/order; new key avoids sketch in direct policy, is a ghost in Pair/shared policy, and remains explicitly unplaced in Write; deleted key stays deleted; removed key marks missing; backend/kind/multi-page transition uses live-draft refusal. Native JSON in version bundle matches DB hash; agent/quiet no-browser checkpoint succeeds pending, later browser attachment changes no content version; native comment pin survives move/rotate/group and orphans on delete; rendered @1x re-anchoring/@2x crop/frame embed remain unchanged. Search/wiki metadata advance only on checkpoint. Restore/export include native objects/assets and omit hidden/draft data.
+7. **Playwright WebKit desktop + iPhone + iPad profiles.** Legacy frame-only regression screenshots; create all kinds; select/type/move/resize/connect/group/undo; two-session live collaboration; Pair ghost accept/reject and Delegate version review; keyboard/outline-only operation, screen reader labels, reduced motion, narrow landscape and 44px hit bounds. iPhone one-finger Draw vs pan, pinch cancellation, double-tap fit. iPad synthetic `pen` plus independent touch/palm pointers: only initiating id extends/ends stroke, palm up/cancel ignored, no stray dots, fingers navigate after pen; test pointer-capture fallback without weakening production pointer ownership. Report real-device Pencil work separately.
+8. **Production size/network.** Existing read `size` gate ≤80,000 gzip bytes; a new board-editor gate ≤160,000 incremental JS+CSS bytes and no editor request before Edit. Include cold shared dependencies, no accidental article/remark/node crypto imports. Smoke memory/LOD with 2,000 objects, 200 assets and 40 decoded full frame images; opening many frames never decodes all at once.
+
+Run focused suites, not the repository-wide `bun run test`/`bun run e2e` wrappers. Integration work uses a private compose project as directed in the implementation brief; never attach to a shared test database. Long-running commands have timeouts and are waited for before handoff.
+
+Contract-author verification (2026-11-07): the 52 focused schema/data-model/migration tests pass, including a populated Phase 2 upgrade preserving draft bytes, seqs, frame geometry/pixels and a legacy anchor. Full `tsc -b`, changed-TypeScript Biome checks, production viewer build and current size gates pass (initial route 37.21 KB gzip; existing doc editor/provider 112.19 KB). `db:generate` reports no further drift. The board editor and its device/convergence suites are implementation work; the 160 KB ceiling is a contract, not a measurement of code that exists yet. The private migration stack is torn down with volumes after verification.
+
+## Work split
+
+Five parallel implementation workers; **the contract author has already added shared board schemas, constants, DB definitions and migration**. These are the starting interface, not five competing schema designs. Worker 1 owns subsequent shared shape/migration amendments and announces them before landing. Every path below is owned by exactly one worker; ask its owner for an interface change rather than editing their file. New tests belong to their listed owner. Existing unrelated functionality stays with the named file owner.
+
+### 1. Server + docs: permissions, assets, checkpoints, merge and decisions
+
+**Owns:**
+- `apps/server/src/boards/routes.ts`, `assets.ts`, `checkpoint.ts`, `captures.ts`, `merge.ts`, `suggestions.ts` (new files).
+- `apps/server/src/editing/policy.ts`, `checkpoint.ts`, `suggestions.ts`, `runs.ts`, `routes.ts` (kind-aware routing/lifecycle; article ops remain worker 4's file).
+- `apps/server/src/auth/can.ts`, `access.ts`; `apps/server/src/http/routes.ts`; `apps/server/src/index.ts`, `server.ts`, `deps.ts`, `layout.ts` as needed for route wiring.
+- `apps/server/src/publish/` (all files), `review/` (all files, including anchor/crop), `versions/` (all files), `wiki/` (all files), `library/cards.ts`, `library/search.ts`, `library/read.ts`, `jobs/` (all files), `apps/server/src/http/compat.ts`, `unfurl.ts`, `viewer.ts`, `resources.ts`, and `apps/server/src/api/files.ts`, `versions.ts`, `lists.ts`, `lifecycle.ts`, `projects.ts` for existing integrations. `scripts/route-coverage.ts` is also worker 1's.
+- `apps/server/src/db/schema.ts`, `apps/server/drizzle/` (new generated migrations only), `packages/schema/src/boards.ts`, `constants.ts`, `api.ts`, `manifest.ts`, `bundle.ts`, `index.ts`, `packages/schema/package.json`, `packages/schema/src/boards.test.ts` after contract handoff. Worker 4 exclusively owns MCP schema/registration. `apps/server/test/boards-migration.test.ts` also belongs to worker 1.
+- `apps/server/test/boards-api.test.ts`, `boards-assets.test.ts`, `boards-checkpoint.test.ts`, `boards-publish.test.ts` plus `apps/server/test/permissions.test.ts`, `routes.test.ts`, `data-model.test.ts`, `migrations.test.ts`, `crop.test.ts`, `apps/server/src/review/reanchor.test.ts`, and `apps/server/test/api/publish.test.ts`, `review.test.ts`, `lifecycle.test.ts`, `wikis.test.ts`, `wiki-validation.test.ts`, `editing-checkpoints.test.ts`, `editing.test.ts`, `library.test.ts`, `events.test.ts`, and `apps/server/test/editing/policy.test.ts`. Other existing tests are left untouched until their owner is reassigned.
+- `docs/implementation/02-data-model.md`, `03-api.md`, `04-auth-and-permissions.md`, `05-publish-and-storage.md`, `12-wikis.md`, and 13 (all sections); 14's remaining sections, including Work split. Workers 2–5 send proposed contract-section amendments to worker 1; they do not edit 14 concurrently.
+
+**Provides:** `checkpointBoardLocked`, `mergeBoardFramesLocked`, board asset/capture/decision routes, updated shared Anchor union plus every exhaustive consumer, and `agentPolicy().held` over object presence. **Uses:** worker 2 store/model; worker 4 read/batch applier. Existing public route handlers continue to be registered in one place; no second API app.
+
+### 2. Realtime/sync + board document model package
+
+**Owns:**
+- `packages/doc/package.json`, `packages/doc/src/board.ts`, `board-ids.ts`, `board-hash.ts`, `board-geometry.ts`, `board-order.ts`, `board-undo.ts` and matching `board*.test.ts` (new); `packages/doc/src/ids.ts`, `client.ts`, `sync.ts`, `index.ts` only for shared extraction/transport changes.
+- `apps/server/src/realtime/sync.ts`, `apps/server/src/editing/store.ts`, `model.ts` (kind dispatch, seed, persist/repair; do not change checkpoint/routes).
+- `apps/server/test/boards-sync.test.ts`, `boards-convergence.test.ts`, `apps/server/test/editing/sync-route.test.ts`, `replicas.test.ts`, `convergence.test.ts`, and `fixtures/boards/`.
+- Send document-model/persistence/sync contract amendments for 13–14 to worker 1; no concurrent edits to those files.
+
+**Provides first:** model/geometry/hash/id exports above; `editability` success with kind; kind-aware `loadDoc` and shadow validation; object-hold presence plumbing; unchanged saved/epoch protocol. **Uses:** worker 1 schema/policy and capture-free checkpoint boundary. Work with worker 3 on guarded local undo and register wrappers before the editor starts mutating Y.Maps.
+
+### 3. Viewer: native engine, reader and editor
+
+**Owns:**
+- `apps/viewer/src/canvas/` (all files), `apps/viewer/src/boards/` (new editor, renderer, capture, toolbar, outline, gestures, ghost UI and tests).
+- `apps/viewer/src/editing/provider.ts`, `provider.d.ts`, `entry.tsx`, `entry.css` (reuse existing provider; coordinate any transport export with worker 2), `apps/viewer/src/api.ts`, `api.test.ts`, `paths.ts`, `paths.test.ts`, `events.ts`, `events.test.ts`, `routes/page.tsx`, `artifact.tsx`, `compare.tsx`, `compare.css`, `project.tsx`, `components/shell.tsx`, `shell.css`, `version-sheet.tsx`, `cards.tsx`, and `apps/viewer/src/review/` (all files) for entry/review/version integration.
+- `apps/viewer/e2e/boards.spec.ts`, `boards-pointers.spec.ts`, `boards-accessibility.spec.ts`, `apps/viewer/package.json`, `vite.config.ts`, `playwright.config.ts`, and `apps/viewer/scripts/board-size.ts` (new) for size/build tests.
+- `docs/implementation/06-viewer.md`. Send 14 amendments to worker 1.
+
+**Provides:** preserved legacy read path, lightweight native checkpoint renderer/outline, lazy editor, Yjs client integration, browser thumbnails/crops, and desktop/iPhone/iPad interaction coverage. **Uses:** worker 2's register/undo/geometry model; worker 1 capture/asset/decision routes; worker 4 operation/suggestion schemas. Never include ghost objects in captured canonical scenes. The hosted design owns visual arrangement, while this contract owns state and gestures.
+
+### 4. MCP + agent operations + skill
+
+**Owns:**
+- `apps/server/src/boards/ops.ts`, `read.ts`, `create.ts` (new); `apps/server/src/editing/ops.ts` only for extracting shared helpers/dispatch without changing article behaviour.
+- `apps/server/src/mcp/` (all files), `packages/schema/src/mcp.ts`, `apps/server/test/boards-mcp.test.ts`, and `apps/server/test/boards-ops.test.ts`, `boards-read.test.ts`.
+- `skill/` source, especially new `skill/references/boards.md` and index/README registration, plus generated skill files through the usual script.
+- `apps/server/test/editing/ops.test.ts`. Send MCP/operation contract amendments to worker 1, including any shared-schema changes.
+
+**Provides first:** `readBoard`, `applyBoardBatchLocked`, creation helper, JSON receipts/reserved ids and deterministic placement. **Uses:** worker 2 model/validation/hash; worker 1 `agentPolicy`, asset validation and checkpoint/decision lifecycle. Hosted/local MCP and CLI must call the same functions/routes; no tool-specific permission policy. For CLI command invocation, agree stdin/result contracts with worker 5 before registering local tools.
+
+### 5. CLI + SPEC + docs
+
+**Owns:**
+- `packages/cli/src/commands/board.ts` (new), `page.ts`, `wiki.ts`, `mcp.ts`, `packages/cli/src/index.ts`, `client.ts`, `render/` and `packages/cli/test/board.test.ts`, `board.e2e.test.ts`, `page.test.ts`, `wiki.test.ts`, `mcp.test.ts`, plus new `fixtures/boards-cli/`. The CLI owns all publish/render-client changes; server publish merge stays worker 1.
+- `docs/SPEC.md`, `docs/ARCHITECTURE.md`, `docs/implementation/README.md`, `07-cli-and-skill.md`, `10-testing-and-acceptance.md`, root `README.md`, `CONTRIBUTING.md`, and no sections of 14 directly (send CLI amendments to worker 1).
+
+**Provides:** command parsing, shared-schema output validation, batch stdin, exit codes, upload/export, compatibility feature headers, documentation and frame publish→place examples. **Uses:** worker 1 routes, worker 4 object read/batch receipts and local MCP specs. No browser is added to the server to support CLI saves.
+
+### Order and interfaces
+
+1. Freeze this contract, the exported schemas and additive migration. Worker 2 exposes the board model and seeded rendered tuples; worker 1 exposes the policy/asset/checkpoint entry points; worker 4 exposes the preflight/batch/read interfaces. Other workers can build against those interfaces with fixtures.
+2. Build concurrently: worker 1 checkpoint/merge/capture, worker 2 sync/validation, worker 3 engine/editor, worker 4 ops/tools/skill, worker 5 CLI/docs. One owner per integration file; shared schema changes go through worker 1 with announcements.
+3. Integrate in order: model+store → operations+policy → checkpoint/publish/capture → viewer+CLI+MCP, then two-replica and WebKit suites on a private stack, production size and physical Pencil sign-off. A checkpoint response is sufficient for agents even while images are pending.
+
+## Open questions
+
+1. **Physical Pencil sign-off:** which iPad/Pencil combination should be the release device, and who will run pressure/latency/palm/Scribble checks? Synthetic pointer tests cannot settle the feel. No implementation shape depends on the answer.

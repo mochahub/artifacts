@@ -579,6 +579,9 @@ export const BoardRecord = z.object({
   w: z.number(),
   h: z.number(),
 });
+/** Server-owned native board checkpoint metadata (14); absent on legacy frame-only versions. */
+export const BoardPageMeta = z.object({ schema: z.literal(1), hash: Sha256 });
+export type BoardPageMeta = z.infer<typeof BoardPageMeta>;
 export const OutlineEntry = z.object({ id: z.string(), title: z.string(), level: z.number().int() });
 export type BoardRecord = z.infer<typeof BoardRecord>;
 export type OutlineEntry = z.infer<typeof OutlineEntry>;
@@ -594,6 +597,7 @@ export const PageRecord = z.object({
     theme: ArticleTheme.optional(),
     outline: z.array(OutlineEntry).optional(),
     boards: z.array(BoardRecord).optional(),
+    board: BoardPageMeta.optional(),
     device: z.string().optional(),
     livePath: z.string().optional(),
     items: z
@@ -670,6 +674,14 @@ export const PublishResult = z.object({
   reused: z.number().int(),
   /** Who can see it, in words. Agents publish more than people do, so this is where a wrong default gets caught. */
   audience: z.string().optional(),
+  /** Phase 3 native placement policy is independent of permission to refresh rendered source. */
+  board: z
+    .object({
+      placed: z.array(z.string()),
+      suggestions: z.array(Id),
+      unplaced: z.array(z.string()),
+    })
+    .optional(),
 });
 export type PublishResult = z.infer<typeof PublishResult>;
 

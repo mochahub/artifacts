@@ -2,6 +2,8 @@
 
 **Contract** for Phase 2 Part B of the company brain: people edit wiki pages in the browser, together and live, and agents edit the same pages by operation. The behaviour is in [SPEC.md §16](../SPEC.md#16-wikis). The plan behind it is the hosted artifact `artifacts/company-brain`, and the editor choice is the spike `artifacts/phase-2b-editor-spike`. This document owns the names, shapes, routes, tools, tables and limits below. Shared shapes are in `packages/schema/src/editing.ts`, and constants are in `packages/schema/src/constants.ts` under "Editing".
 
+Phase 3 extends these mechanisms to eligible wiki boards in [14 Boards](14-boards.md). That contract owns the board object model, board-specific JSON/routes and the compatible frame-publish merge exception; article behaviour below is unchanged.
+
 Settled before this contract, and not reopened here:
 - Agents connect over the MCP or the CLI. The server runs no model.
 - The server is the source of truth, and it never runs a browser. Article HTML is sanitized on the server by the one sanitizer, `@artifacts/schema/sanitize`.

@@ -20,6 +20,7 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 | 11 | [Build order](11-milestones.md) | Guide | Spikes S1–S8, milestones M0–M16 |
 | 12 | [Wikis](12-wikis.md) | **Contract** | Wiki projects, roles, wiki links, the wiki API and MCP tools, the viewer's wiki screens |
 | 13 | [Editing](13-editing.md) | **Contract** | Editing wiki articles: the `edit` level and scope, drafts and checkpoints, lasting block ids, atoms, the sync socket, agent operations and their policy, suggestions, runs, attribution, the editing tables, routes, MCP tools and limits, and the work split |
+| 14 | [Boards](14-boards.md) | **Contract** | Native board objects and ids, Yjs mapping, frame republish merge, browser checkpoint pictures, object anchors, assets/limits, agent batches and placement, board routes/tools/CLI, accessibility, tests and five-worker ownership |
 | — | [Spike results](spikes.md) | Record | What each M0 spike found, and the design changes it caused |
 | — | [Load notes](load-notes.md) | Record | Local measurements of the app under load |
 | — | [HANDOFF.md](HANDOFF.md) | Prompt | The brief for the building agent |
@@ -50,13 +51,14 @@ Fix the losing document in the same change, so the docs never drift.
 | Artifact | One link, one manifest, versioned; has pages; may have a backend and a data folder |
 | Version | An immutable publish of an artifact (`v5`) |
 | Page | A part of an artifact: `canvas`, `article`, `prototype`, `gallery` (later `deck`) |
-| Board | A canvas page's group of frames |
-| Frame | One screen on a board, with a stable `data-frame` key |
+| Board | A canvas page with rendered frames and, when edited, native objects (14). Legacy board groups remain container frames |
+| Frame | A rendered mock with a stable `data-frame` key; distinct from a native container frame (14) |
+| Board object | A sticky, shape, text, image, connector, native frame, stroke or rendered frame with a lasting id (14) |
 | Block | A paragraph-level piece of an article, with a stable key. On an edited page, a lasting id like `~k3j9x0a1b2` (13) |
-| Draft | An editable page's live document between checkpoints, seen by people who can edit (13) |
-| Checkpoint | A version made from a draft: Save version, the end of a Delegate run, or a quiet spell (13) |
+| Draft | An editable page's live document between checkpoints, seen by people who can edit (13–14) |
+| Checkpoint | A version made from a draft: Save version, the end of a Delegate run, or a quiet spell (13–14) |
 | Suggestion | An agent's proposed change to a page, which a person accepts or rejects (13) |
-| Thread | A comment and its replies, anchored to a frame point, a block or a quote |
+| Thread | A comment and its replies, anchored to a frame point, a native object, a block or a quote |
 | Fixed / resolved | An agent marks a thread fixed; only a person resolves it |
 | Decision | Approve or Request changes, per version |
 | Live previews | The content domain, where artifact code runs in sandboxed iframes |

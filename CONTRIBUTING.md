@@ -95,7 +95,7 @@ Don't edit version numbers. They are stamped at build time, and `package.json` s
 
 ## Keep the contract documents in step
 
-[docs/implementation/](docs/implementation/README.md) holds the documents the code is built from. Nine of them are contracts, which own names and shapes:
+[docs/implementation/](docs/implementation/README.md) holds the documents the code is built from. Ten of them are contracts, which own names and shapes:
 
 | Document                                                                     | Owns                                                                 |
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -108,6 +108,7 @@ Don't edit version numbers. They are stamped at build time, and `package.json` s
 | [09 Deploying](docs/implementation/09-deploy.md)                             | Images, environment variables, the template, releases                |
 | [12 Wikis](docs/implementation/12-wikis.md)                                  | Wiki projects, roles, wiki links, the wiki API and tools             |
 | [13 Editing](docs/implementation/13-editing.md)                              | Drafts, checkpoints, block ids, sync, agent operations, suggestions  |
+| [14 Boards](docs/implementation/14-boards.md)                                | Native objects, Yjs mapping, frame merge, browser captures, board operations and limits |
 
 **A change to code that a contract describes changes the contract in the same commit.** That covers a route, a flag, an environment variable, a table or a column, a lint rule id or a limit. If the two disagree, a reader can't tell which is right. [SPEC.md](docs/SPEC.md) wins on behaviour, and the contract wins on names. If you need to change behaviour that the spec states, say so in the pull request.
 
