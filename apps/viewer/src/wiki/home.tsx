@@ -9,7 +9,6 @@ import { Shell } from "../components/shell.tsx";
 import { agentShort, ago, plural } from "../format.ts";
 import { artifactHref } from "../paths.ts";
 import { usePoll } from "../poll.ts";
-import { meta } from "../session.ts";
 import { useTitle } from "../title.ts";
 import "./wiki.css";
 
@@ -98,8 +97,8 @@ export function WikiHome({ slug }: { slug: string }) {
                     </button>
                   )}
                 </div>
-                <div class="ss">
-                  {wiki.project.personal ? "Only you" : `Everyone in ${meta.value?.orgName}`}
+                <div class="ss" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                  {wiki.project.audience.label}
                 </div>
               </div>
               <section class="wiki-section">

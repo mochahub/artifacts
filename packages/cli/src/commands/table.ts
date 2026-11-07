@@ -17,17 +17,23 @@ const COMMANDS: Command[] = [
   command({
     name: "wiki",
     usage: [
-      "wiki create <slug> [--name <name>] [--personal]",
+      "wiki create <slug> [--name <name>] [--only-me | --team <slug>]",
       "wiki show <slug> [--json]",
       "wiki links <project/slug> [--json]",
     ],
     help: [
-      "artifacts wiki create <slug> [--name <name>] [--personal]",
+      "artifacts wiki create <slug> [--name <name>] [--only-me | --team <slug>]",
       "artifacts wiki show <slug> [--json]",
       "artifacts wiki links <project/slug> [--json]",
     ],
     args: ["sub", "target"],
-    options: { name: { type: "string" }, personal: { type: "boolean" }, ...server },
+    options: {
+      name: { type: "string" },
+      personal: { type: "boolean" },
+      "only-me": { type: "boolean" },
+      team: { type: "string" },
+      ...server,
+    },
     run: async (input, out) => (await import("./wiki.ts")).wikiCommand(input, out),
   }),
   command({

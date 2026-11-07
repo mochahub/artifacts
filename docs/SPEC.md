@@ -846,10 +846,9 @@ Defaults the builder uses until the user says otherwise:
 
 ## 16. Wikis
 
-A wiki is a project of kind `wiki`. Its artifacts are pages. A company wiki is
-open to the organization. A personal wiki starts restricted to its creator,
-with a manage grant; admins retain their normal access. Personal content moves
-to a company wiki only when the person asks.
+A wiki is a project of kind `wiki`. Its artifacts are pages. A wiki has an audience through ordinary sharing: only me, a team, or everyone in Mochahub. Admins retain their normal access. Content moves to a wider audience only when its owner asks. The server derives audience labels from actual project access and reveals no hidden team names or counts.
+
+Agent edits apply directly where only the editor can read and arrive as suggestions where others can. An owner can mark a page as maintained by agents. Editing ships in Part B.
 
 Artifacts have role `page` (the default) or `source`. Sources preserve raw inputs;
 new input versions are republished, never rewritten into maintained pages.
@@ -870,8 +869,7 @@ pages, orphan pages and unsourced pages. Agents fix findings by republishing;
 questions for people become page-level threads. People resolve threads.
 
 Existing project and artifact permissions govern reading, publishing, commenting
-and sharing. Creating a wiki requires project creation permission. A personal
-wiki requires a person, so an organization token cannot create one. A manager
+and sharing. Creating a wiki requires project creation permission. An only-me or team starting audience requires a person; organization tokens use the default organization audience. A manager
 can convert an ordinary project to a wiki while preserving its access. Readers
 see only content they can access; publishers maintain pages and sources; access
 managers control sharing. Agents use the CLI or hosted MCP tools.

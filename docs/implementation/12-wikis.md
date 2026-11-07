@@ -5,7 +5,7 @@
 ## Concepts
 
 - **A wiki** is a project whose `kind` is `wiki`. Its artifacts are the wiki's pages.
-- **The company brain** is a wiki open to the organization. **A personal wiki** is a restricted wiki: only the person who made it holds a grant (`manage`), and admins see it as they see every project.
+- A wiki has an audience through ordinary project sharing: only me, a team, or everyone in the organization. Admins keep their normal access.
 - **Roles.** Each artifact in a wiki is a `page` (the default) or a `source`. A source is what came in: a document, a transcript or a web clip. Sources are only ever republished, never edited into pages.
 - **The rules page** is the artifact with the slug `rules` (`WIKI_RULES_SLUG`). It tells agents how this wiki is organized. Agents read it before they write anything.
 - **The index and the log** aren't pages. The server derives them: the index from the wiki's artifacts, and the log from `activity`.
@@ -51,11 +51,11 @@ Shapes are in `packages/schema/src/api.ts` under "Wikis".
 
 ### `POST /api/wikis`
 
-Body `CreateWiki` `{ slug, name, personal }`. Guard `{ action: "project.create" }`. Answers `WikiCreated` `{ slug, name, personal, url }`: 201 when it makes the wiki, and 200 when the wiki already exists.
+Body `CreateWiki` `{ slug, name, onlyMe?, team?, personal? }`. Guard `{ action: "project.create" }`. Answers `WikiCreated` `{ slug, name, audience, guidance, url }`: 201 when it makes the wiki, and 200 when the wiki already exists.
 
 | The slug | What happens |
 |---|---|
-| Free | Insert `projects` with `kind: "wiki"` and `restricted: personal`. A person caller gets a `manage` grant, as the first publish gives one. `personal` from an organization token is `invalid`: a token has no person to keep it private to |
+| Free | Insert `projects` with `kind: "wiki"` and `restricted: onlyMe || team`. A person caller gets a `manage` grant, as the first publish gives one. A restricted starting audience from an organization token is `invalid`: a token has no person to keep it private to |
 | A wiki the caller sees | Nothing changes. Answers 200 with its current values |
 | An ordinary project the caller manages (admin, or a `manage` grant) | Becomes a wiki and keeps its access. Answers 200 |
 | Anything else, including a restricted project the caller can't see | `conflict`, "That name is taken." |
@@ -65,7 +65,7 @@ Body `CreateWiki` `{ slug, name, personal }`. Guard `{ action: "project.create" 
 Guard `{ action: "project.read", resource: projectParam }`. A project that isn't a wiki is `not_found`. Answers `WikiSpace`:
 
 - `project`:
-  - `personal` is `restricted`;
+  - `audience` and `guidance` are derived from real project access;
   - `canPublish` is `can(caller, "project.publish", project)`;
   - `canShare` is `can(caller, "project.access.read", project)`.
 - `rules`, `pages` and `sources`:
@@ -107,9 +107,9 @@ These are in `apps/server/src/mcp/routes.ts`, and their specs are in `packages/s
 
 | Tool | Scope | Input | Answer |
 |---|---|---|---|
-| `artifacts_wiki` | read | `wiki?` | Without `wiki`: the wikis the caller sees, as `{ slug, name, personal, pages, sources }`. With `wiki`: the `WikiSpace`, with the log cut to 20 entries, plus `rulesText`, the first chunk of the rules page as `artifacts_read` returns it (null if there's no rules page) |
+| `artifacts_wiki` | read | `wiki?` | Without `wiki`: the wikis the caller sees, as `{ slug, name, audience, guidance, pages, sources }`. With `wiki`: the `WikiSpace`, with the log cut to 20 entries, plus `rulesText`, the first chunk of the rules page as `artifacts_read` returns it (null if there's no rules page) |
 | `artifacts_wiki_links` | read | `artifact` (`project/slug`) | `ArtifactLinks` |
-| `artifacts_wiki_create` | publish | `slug`, `name`, `personal?` | `WikiCreated` |
+| `artifacts_wiki_create` | publish | `slug`, `name`, `onlyMe?`, `team?` | `WikiCreated` |
 | `artifacts_comment` | comment | `artifact`, `message`, `page?` | Opens a page-level thread (no anchor) on the latest version, as agent "Connector", and answers `{ id }` with the thread's number. For findings from a garden pass |
 | `artifacts_publish_article` | publish | Adds `role?`, `sources?`, `origin?`, `untrusted?` | As before. The fields are checked with `WikiMeta`, written to the manifest's `wiki` and the commit's `wiki`, and wiki links resolve against `project` |
 
@@ -120,7 +120,7 @@ The server instructions add one sentence: in a wiki, call `artifacts_wiki` first
 ## CLI
 
 - `artifacts publish` and `artifacts pack` pass `project` to `buildArticle`, and `wiki` (from the manifest) in the commit body.
-- `artifacts wiki create <slug> [--name <name>] [--personal]` calls `POST /api/wikis`.
+- `artifacts wiki create <slug> [--name <name>] [--only-me | --team <slug>]` calls `POST /api/wikis`.
 - `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources and the findings. Empty Pages, Sources and Garden sections say `none`.
 - `artifacts wiki links <project/slug> [--json]` prints the artifact's role, untrusted mark and origin, then the links, backlinks and sources with origins when present. Empty sections say `none`.
 - The skill's `references/wiki.md` holds the agent's workflows: ingest, ask, garden, and a starter rules page. The hosted MCP serves it as `artifacts://guides/wiki`.
@@ -130,4 +130,14 @@ The server instructions add one sentence: in a wiki, call `artifacts_wiki` first
 - **A wiki's home.** `/:project`, when the project is a wiki, shows the wiki instead of the artifact grid. It has the rules page, the pages and sources (each with its summary), what needs attention (the garden findings), and recent changes (the log). It loads lazily, outside the 80 KB budget.
 - **A page.** `/:project/:slug`, for an artifact in a wiki with exactly one page, replaces itself with that page's route.
 - **An article in a wiki** ends with its sources (untrusted ones marked, with their origin) and "Linked from" (its backlinks). Links in the body to pages that don't exist yet are drawn as wanted: a dashed underline, titled "Not written yet".
-- **Projects list.** A wiki is labelled as a wiki, or as a personal wiki.
+- **Projects list.** A wiki is labelled Wiki with its server-derived audience.
+
+### Audience contract (Phase 2 Part A)
+
+`WikiAudience` in packages/schema is `{ kind: "me" | "team" | "org", label: string, teams?: { slug, name }[] }`. Wiki creation, detail, MCP list and project list return it. Unrestricted projects have audience org, labelled “Everyone in” plus the organization name. Restricted projects with team grants or other readers have audience team; otherwise me. The creator sees “Only you”; administrators viewing another owner’s wiki see “Only the owner”. Shared projects without visible teams say “Shared wiki”. Team names are returned only when `can(team.read)` allows the caller to see the directory; hidden names and counts are never returned. Artifact-level visibility continues to govern individual pages.
+
+Creation accepts `onlyMe: true` or `team: <slug>` (mutually exclusive), defaults to org, and quietly accepts deprecated `personal: true` as onlyMe. The CLI accepts `--only-me`, `--team <slug>`, and deprecated `--personal`. A team audience creates a restricted project with a publish grant for that team and a manage grant for the creator. Repeated creation returns existing access without changing it.
+
+`guidance: { edits: "direct" | "suggestion", text: string }` accompanies wiki payloads. Direct applies only when the editor owns an only-me wiki; other audiences use suggestions. Owners may mark pages as maintained by agents. These fields describe Part B editing policy; this phase adds no editor or enforcement of suggestions.
+
+Responses retain deprecated `personal` (true only for audience me) because released CLIs require a boolean when parsing creation and detail responses. New clients use audience exclusively.

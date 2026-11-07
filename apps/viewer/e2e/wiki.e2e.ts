@@ -1,18 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { auth, overflowsSideways, shot, watchErrors } from "./helpers.ts";
 
-test("wiki home, direct reading, sources, backlinks and personal labels", async ({ page, request }, info) => {
+test("wiki home, direct reading, sources, backlinks and audience labels", async ({ page, request }, info) => {
   const wiki = `brain-${info.project.name}-${info.repeatEachIndex}`;
-  const personal = `personal-${info.project.name}-${info.repeatEachIndex}`;
+  const onlyMe = `only-me-${info.project.name}-${info.repeatEachIndex}`;
   const errors = watchErrors(page);
   await page.emulateMedia({ colorScheme: "light" });
   for (const [slug, name, privateWiki] of [
     [wiki, "Company brain", false],
-    [personal, "My notebook", true],
+    [onlyMe, "My notebook", true],
   ] as const) {
     const response = await request.post("/api/wikis", {
       headers: auth(),
-      data: { slug, name, personal: privateWiki },
+      data: { slug, name, onlyMe: privateWiki },
     });
     expect(response.ok()).toBe(true);
   }
@@ -29,7 +29,7 @@ test("wiki home, direct reading, sources, backlinks and personal labels", async 
             project: wiki,
             slug,
             title,
-            summary: `${title} for the company wiki.`,
+            summary: `${title} for the wiki.`,
             markdown,
             ...meta,
           },
@@ -108,6 +108,37 @@ test("wiki home, direct reading, sources, backlinks and personal labels", async 
   expect(await overflowsSideways(page)).toBe(false);
   await shot(page, "16-3-wiki-footer");
   await page.goto("/projects");
-  await expect(page.locator(`a.li[href="/${personal}"]`)).toContainText("Personal wiki");
+  await expect(page.locator(`a.li[href="/${onlyMe}"]`)).toContainText("Only you");
   expect(errors).toEqual([]);
+});
+
+// The service worker answers /api reads itself, and page.route cannot see those: block it so the mocks apply.
+test.describe("long audience labels", () => {
+  test.use({ serviceWorkers: "block" });
+  test("long unbroken audience labels wrap on wiki home and project rows at 375px", async ({
+    page,
+    request,
+  }, info) => {
+    const slug = `wrap-${info.project.name}`;
+    await request.post("/api/wikis", { headers: auth(), data: { slug, name: "Wrapping" } });
+    const label = "Audience".repeat(50);
+    await page.route("**/api/wikis/*", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.project.audience.label = label;
+      await route.fulfill({ response, body: JSON.stringify(body), contentType: "application/json" });
+    });
+    await page.route("**/api/projects*", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const project of body) if (project.slug === slug) project.audience.label = label;
+      await route.fulfill({ response, body: JSON.stringify(body), contentType: "application/json" });
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    for (const path of [`/${slug}`, "/projects"]) {
+      await page.goto(path);
+      await expect(page.getByText(label, { exact: path !== "/projects" })).toBeVisible();
+      expect(await overflowsSideways(page)).toBe(false);
+    }
+  });
 });

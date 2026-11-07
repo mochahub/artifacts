@@ -7,12 +7,23 @@ import type {
   WikiPage,
   WikiSpace,
 } from "@artifacts/schema";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { type LoadedArtifact, type LoadedProject, toProject } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can, seesProject } from "../auth/can.ts";
-import { activity, artifacts, people, projectAccess, projects, threads, versions } from "../db/schema.ts";
+import {
+  activity,
+  artifacts,
+  org,
+  people,
+  projectAccess,
+  projects,
+  teams,
+  threads,
+  tokens,
+  versions,
+} from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { requireCan } from "../http/routes.ts";
@@ -25,35 +36,63 @@ export async function createWiki(
   body: z.infer<typeof CreateWiki>,
 ) {
   requireCan(caller, "project.create", { type: "org" });
-  if (body.personal && caller.kind === "orgToken")
-    throw new ApiError("invalid", "A personal wiki needs a person to own it.");
-  const made = await deps.db.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(projects)
-      .values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        slug: body.slug,
-        name: body.name,
-        kind: "wiki",
-        restricted: body.personal,
-        createdBy: caller.kind === "orgToken" ? null : caller.person.id,
-        createdByToken: caller.kind === "orgToken" ? caller.tokenId : null,
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (row && caller.kind !== "orgToken")
-      await tx.insert(projectAccess).values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        projectId: row.id,
-        personId: caller.person.id,
-        permission: "manage",
-        grantedBy: caller.person.id,
-        createdAt: deps.clock.now(),
+  const [existing] = await deps.db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.orgId, orgId), eq(projects.slug, body.slug)));
+  const onlyMe = body.onlyMe || body.personal;
+  let team: typeof teams.$inferSelect | undefined;
+  if (!existing) {
+    if ((onlyMe || body.team) && caller.kind === "orgToken")
+      throw new ApiError("invalid", "A restricted starting audience needs a person to own it.");
+    [team] = body.team
+      ? await deps.db
+          .select()
+          .from(teams)
+          .where(and(eq(teams.orgId, orgId), eq(teams.slug, body.team)))
+      : [];
+    if (body.team && (!team || !can(caller, "team.read", { type: "team", id: team.id, leadIds: [] })))
+      throw new ApiError("invalid", "Choose a team you can see.");
+  }
+  const made = existing
+    ? undefined
+    : await deps.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(projects)
+          .values({
+            id: Bun.randomUUIDv7(),
+            orgId,
+            slug: body.slug,
+            name: body.name,
+            kind: "wiki",
+            restricted: !!(onlyMe || body.team),
+            createdBy: caller.kind === "orgToken" ? null : caller.person.id,
+            createdByToken: caller.kind === "orgToken" ? caller.tokenId : null,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (row && caller.kind !== "orgToken")
+          await tx.insert(projectAccess).values({
+            id: Bun.randomUUIDv7(),
+            orgId,
+            projectId: row.id,
+            personId: caller.person.id,
+            permission: "manage",
+            grantedBy: caller.person.id,
+            createdAt: deps.clock.now(),
+          });
+        if (row && team && caller.kind !== "orgToken")
+          await tx.insert(projectAccess).values({
+            id: Bun.randomUUIDv7(),
+            orgId,
+            projectId: row.id,
+            teamId: team.id,
+            permission: "publish",
+            grantedBy: caller.person.id,
+            createdAt: deps.clock.now(),
+          });
+        return row;
       });
-    return row;
-  });
   let row = made;
   if (!row) {
     [row] = await deps.db
@@ -76,8 +115,66 @@ export async function createWiki(
     body: {
       slug: row.slug,
       name: row.name,
-      personal: row.restricted,
+      ...(await wikiAudience(deps, caller, await toProject(deps, row))),
       url: `${deps.env.publicUrl}/${row.slug}`,
+    },
+  };
+}
+
+/** Audience uses actual grants; directory visibility controls which team names leave the server. */
+export async function wikiAudience(deps: Deps, caller: Caller, place: LoadedProject) {
+  const grants = await deps.db
+    .select({ team: teams })
+    .from(projectAccess)
+    .leftJoin(teams, eq(teams.id, projectAccess.teamId))
+    .where(eq(projectAccess.projectId, place.id));
+  const [readerToken] = await deps.db
+    .select({ id: tokens.id })
+    .from(tokens)
+    .where(
+      and(
+        eq(tokens.orgId, place.row.orgId),
+        eq(tokens.kind, "org"),
+        sql`${place.id} = any(${tokens.projectIds})`,
+        sql`'read' = any(${tokens.scopes})`,
+        isNull(tokens.revokedAt),
+        or(isNull(tokens.expiresAt), gt(tokens.expiresAt, deps.clock.now())),
+      ),
+    )
+    .limit(1);
+  const [home] = await deps.db.select({ name: org.name }).from(org).where(eq(org.id, place.row.orgId));
+  const shared =
+    !!readerToken ||
+    grants.some((g) => g.team) ||
+    place.grants.some((g) => g.personId !== place.row.createdBy);
+  const visibleTeams = grants.flatMap((g) =>
+    g.team && can(caller, "team.read", { type: "team", id: g.team.id, leadIds: [] })
+      ? [{ slug: g.team.slug, name: g.team.name }]
+      : [],
+  );
+  const kind = !place.restricted ? ("org" as const) : shared ? ("team" as const) : ("me" as const);
+  const isSelf = caller.kind !== "orgToken" && "person" in caller && caller.person.id === place.row.createdBy;
+  const direct = kind === "me" && isSelf;
+  return {
+    // Older released CLIs require this boolean when parsing wiki responses.
+    personal: kind === "me",
+    audience: {
+      kind,
+      label:
+        kind === "org"
+          ? `Everyone in ${home?.name ?? "the organization"}`
+          : kind === "me"
+            ? isSelf
+              ? "Only you"
+              : "Only the owner"
+            : visibleTeams.length
+              ? visibleTeams.map((t) => `${t.name} team`).join(", ")
+              : "Shared wiki",
+      ...(visibleTeams.length ? { teams: visibleTeams } : {}),
+    },
+    guidance: {
+      edits: direct ? ("direct" as const) : ("suggestion" as const),
+      text: "Edits apply directly where only the editor can read; where others can read, propose suggestions. An owner can mark a page as maintained by agents. Editing ships in Part B.",
     },
   };
 }
@@ -254,7 +351,19 @@ export async function wikiSpace(
       .select({ event: activity, by: people.name })
       .from(activity)
       .leftJoin(people, eq(people.id, activity.actorPersonId))
-      .where(eq(activity.projectId, place.id))
+      .where(
+        or(
+          eq(activity.projectId, place.id),
+          ...(visibleProject.length
+            ? [
+                inArray(
+                  activity.artifactId,
+                  visibleProject.map((a) => a.id),
+                ),
+              ]
+            : []),
+        ),
+      )
       .orderBy(desc(activity.createdAt))
       // Hidden artifacts' rows are dropped after this, so read past the 50 that are shown.
       .limit(500),
@@ -342,7 +451,7 @@ export async function wikiSpace(
     project: {
       slug: place.row.slug,
       name: place.row.name,
-      personal: place.row.restricted,
+      ...(await wikiAudience(deps, caller, place)),
       canPublish: can(caller, "project.publish", place),
       canShare: can(caller, "project.access.read", place),
     },

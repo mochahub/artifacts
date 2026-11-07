@@ -398,7 +398,7 @@ export function createReview(deps: Deps) {
     return {
       // For whoever answers for the work: anyone else needn't learn who else was let in.
       ...(can(caller, "artifact.share", resource) || caller.kind === "orgToken"
-        ? { audience: await audienceOf(deps, org.name, resource) }
+        ? { audience: await audienceOf(deps, org.name, resource, caller) }
         : {}),
       version: resource.row.latestVersion,
       decision: latest?.kind ?? null,

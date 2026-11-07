@@ -395,6 +395,7 @@ export const ProjectRow = z.object({
   slug: z.string(),
   name: z.string(),
   repo: z.string().nullable(),
+  audience: z.lazy(() => WikiAudience).optional(),
   artifactCount: z.number().int(),
   openCount: z.number().int(),
   updatedAt: Time,
@@ -1230,16 +1231,33 @@ export const DataFiles = z.object({
 export type DataFiles = z.infer<typeof DataFiles>;
 
 // Wikis (SPEC 16)
-export const CreateWiki = z.object({
-  slug: Slug,
-  name: z.string().trim().min(1).max(80),
-  /** Only the person who makes it, and admins, can see a personal wiki. */
-  personal: z.boolean().default(false),
+export const WikiAudience = z.object({
+  kind: z.enum(["me", "team", "org"]),
+  label: z.string(),
+  teams: z.array(z.object({ slug: z.string(), name: z.string() })).optional(),
 });
+export type WikiAudience = z.infer<typeof WikiAudience>;
+export const WikiGuidance = z.object({
+  edits: z.enum(["direct", "suggestion"]),
+  text: z.string(),
+});
+export const CreateWiki = z
+  .object({
+    slug: Slug,
+    name: z.string().trim().min(1).max(80),
+    /** Deprecated input alias for onlyMe. */
+    personal: z.boolean().optional(),
+    onlyMe: z.boolean().optional(),
+    team: TeamSlug.optional(),
+  })
+  .refine((v) => !(v.team && (v.onlyMe || v.personal)), "Choose onlyMe or team, not both.");
 export const WikiCreated = z.object({
   slug: z.string(),
   name: z.string(),
-  personal: z.boolean(),
+  /** Deprecated compatibility alias; use audience. */
+  personal: z.boolean().optional(),
+  audience: WikiAudience,
+  guidance: WikiGuidance,
   url: z.string(),
 });
 export type WikiCreated = z.infer<typeof WikiCreated>;
@@ -1286,7 +1304,10 @@ export const WikiSpace = z.object({
   project: z.object({
     slug: z.string(),
     name: z.string(),
-    personal: z.boolean(),
+    /** Deprecated compatibility alias; use audience. */
+    personal: z.boolean().optional(),
+    audience: WikiAudience,
+    guidance: WikiGuidance,
     canPublish: z.boolean(),
     canShare: z.boolean(),
   }),

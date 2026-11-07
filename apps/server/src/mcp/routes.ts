@@ -222,7 +222,8 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
           return spaces.map((s) => ({
             slug: s.project.slug,
             name: s.project.name,
-            personal: s.project.personal,
+            audience: s.project.audience,
+            guidance: s.project.guidance,
             pages: s.pages.length,
             sources: s.sources.length,
           }));

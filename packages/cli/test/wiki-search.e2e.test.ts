@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { LibraryPage, WikiSpace } from "@artifacts/schema";
 import { and, eq } from "drizzle-orm";
-import { artifacts } from "../../../apps/server/src/db/schema.ts";
+import { artifacts, teams } from "../../../apps/server/src/db/schema.ts";
 import { mcp, type TestServer } from "../../../apps/server/test/helpers.ts";
 import { makePerson } from "../../../apps/server/test/publish-helper.ts";
 import { cliJson, hostedServer, sandbox } from "./sandbox.ts";
@@ -73,6 +73,31 @@ describe("wiki search", () => {
   }, 30_000);
   afterAll(() => t.stop());
 
+  test("CLI creates each starting audience and accepts the legacy flag", async () => {
+    const env = { ...box.env, ARTIFACTS_TOKEN: token };
+    const mine = await cliJson(["wiki", "create", "cli-mine", "--only-me", "--server", url], env);
+    expect(mine.audience).toEqual({ kind: "me", label: "Only you" });
+    const legacy = await cliJson(["wiki", "create", "cli-legacy", "--personal", "--server", url], env);
+    expect(legacy.audience).toEqual(mine.audience);
+    const [org] = await t.server.db
+      .select({ orgId: artifacts.orgId, publisherId: artifacts.publisherId })
+      .from(artifacts)
+      .limit(1);
+    if (!org) throw new Error("Missing artifact");
+    await t.server.db.insert(teams).values({
+      id: Bun.randomUUIDv7(),
+      orgId: org.orgId,
+      slug: "settings",
+      name: "CLI team",
+      createdBy: org.publisherId,
+    });
+    const shared = await cliJson(
+      ["wiki", "create", "cli-shared", "--team", "settings", "--server", url],
+      env,
+    );
+    expect(shared.audience.kind).toBe("team");
+    expect(shared.audience.teams).toEqual([{ slug: "settings", name: "CLI team" }]);
+  });
   test("natural-language queries rank distinct matching terms across fields before source weights", async () => {
     const expected = ["split", "all", "three", "two", "one"];
     expect((await search("Q3 goals pricing risks")).cards.map((c) => c.slug)).toEqual(expected);
