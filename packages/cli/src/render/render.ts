@@ -353,6 +353,7 @@ ${definition.scripts.map((path) => `<script src="${up}${path}"></script>`).join(
     const group = "group" in page ? (page.group ?? null) : null;
     if (page.kind === "article") {
       const built = buildArticle({
+        project: manifest.project,
         path: page.src,
         source: readFileSync(join(root, page.src), "utf8"),
         readFile: (path) => readFileSync(join(root, path), "utf8"),

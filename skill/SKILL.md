@@ -111,3 +111,7 @@ Run `artifacts teams` to see the teams. Run `artifacts share --team <slug> --com
 ## 12. Report back
 
 Say the URL, the version, what changed, and which threads you marked fixed.
+
+## 13. Wikis
+
+For a growing knowledge base, read [references/wiki.md](references/wiki.md) (MCP: `artifacts://guides/wiki`). Orient with `artifacts_wiki` or `artifacts wiki show` and read the rules page first. The guide covers ingest, ask and garden.

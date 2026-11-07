@@ -14,6 +14,7 @@ import templatesResearchReport from "./references/templates/research-report.md" 
 import templatesRfc from "./references/templates/rfc.md" with { type: "text" };
 import templatesWeeklyStatus from "./references/templates/weekly-status.md" with { type: "text" };
 import theme from "./references/theme.md" with { type: "text" };
+import wiki from "./references/wiki.md" with { type: "text" };
 import writing from "./references/writing.md" with { type: "text" };
 import skill from "./SKILL.md" with { type: "text" };
 
@@ -35,6 +36,7 @@ export const SKILL_FILES: Record<string, string> = {
   "references/templates/weekly-status.md": templatesWeeklyStatus,
   "references/theme.md": theme,
   "references/writing.md": writing,
+  "references/wiki.md": wiki,
 };
 
 /** The references, by name (`templates/prd`), as the MCP lists them for an agent with no skill installed. */

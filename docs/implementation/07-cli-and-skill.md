@@ -74,6 +74,19 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 10. **Save:** write the server to config, and the token to the keychain.
 11. **Finish:** offer to install the skill; print the passkey QR code (a terminal QR of `<url>/settings/sign-in`), the invite and domain hints.
 
+### Wikis
+
+| Command | Does |
+|---|---|
+| `artifacts wiki create <slug> [--name <name>] [--personal]` | Calls `POST /api/wikis`. Name defaults to the slug. Prints the wiki name and URL. Personal wikis require a person. |
+| `artifacts wiki show <slug> [--json]` | Calls `GET /api/wikis/:slug`. Prints the rules summary, pages and sources with summaries and untrusted marks, then garden findings as `kind slug: message`. |
+| `artifacts wiki links <project/slug> [--json]` | Resolves the artifact, then calls `GET /api/artifacts/:id/links`. Prints outgoing links, backlinks and sources, marking wanted and untrusted targets. |
+
+Publishing and packing pass the manifest's `project` into article rendering and
+its `wiki` field (or null) into the commit. See [Wikis](12-wikis.md).
+The skill ships `references/wiki.md`, served as `artifacts://guides/wiki`, for
+ingest, ask, garden and a starter rules page.
+
 ### Writing and publishing
 
 | Command | Does |

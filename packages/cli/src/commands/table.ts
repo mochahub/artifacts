@@ -15,6 +15,22 @@ const where = { repo: { type: "string" }, here: { type: "boolean" } } as const;
 /** The commands (07), in the order `artifacts --help` lists them. */
 const COMMANDS: Command[] = [
   command({
+    name: "wiki",
+    usage: [
+      "wiki create <slug> [--name <name>] [--personal]",
+      "wiki show <slug> [--json]",
+      "wiki links <project/slug> [--json]",
+    ],
+    help: [
+      "artifacts wiki create <slug> [--name <name>] [--personal]",
+      "artifacts wiki show <slug> [--json]",
+      "artifacts wiki links <project/slug> [--json]",
+    ],
+    args: ["sub", "target"],
+    options: { name: { type: "string" }, personal: { type: "boolean" }, ...server },
+    run: async (input, out) => (await import("./wiki.ts")).wikiCommand(input, out),
+  }),
+  command({
     name: "setup",
     usage:
       "setup [<url>] [--docker [--dir <path>] [--image <ref>] [--port <n>]] [--org <name>] [--name <you>] [--email <you>] [--no-skill] [--stageshow]",

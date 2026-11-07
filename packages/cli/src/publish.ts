@@ -99,6 +99,7 @@ export function publishBody(
     message: flags.message ?? null,
     name: flags.name ?? null,
     summary: manifest.summary,
+    wiki: manifest.wiki ?? null,
     tags: manifest.tags,
     notes: flags.notes,
     agent: detectAgent(),
