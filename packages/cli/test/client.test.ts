@@ -78,3 +78,29 @@ describe("a picture from the API", () => {
     }
   });
 });
+
+describe("the editing header", () => {
+  test("every kind of request says this CLI knows the editing values, and a text route comes back as text", async () => {
+    const seen: (string | null)[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        seen.push(request.headers.get("artifacts-features"));
+        return new URL(request.url).pathname === "/text"
+          ? new Response("# Hi\n", { headers: { "Content-Type": "text/markdown" } })
+          : Response.json({ ok: true });
+      },
+    });
+    try {
+      const client = new Client(`http://127.0.0.1:${server.port}`, "t");
+      await client.get("/json");
+      await client.post("/json", { a: 1 });
+      await client.bytes("/bytes");
+      expect(await client.text("/text")).toBe("# Hi\n");
+      expect(seen).toEqual(["editing", "editing", "editing", "editing"]);
+    } finally {
+      server.stop(true);
+    }
+  });
+});

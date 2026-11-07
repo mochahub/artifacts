@@ -1,6 +1,7 @@
 import { readFileSync, rmSync } from "node:fs";
-import { LibraryProjects, UNTRUSTED_NOTICE } from "@artifacts/schema";
+import { EditRequest, LibraryProjects, UNTRUSTED_NOTICE } from "@artifacts/schema";
 import {
+  EDIT_TOOLS,
   MCP_GUIDANCE as GUIDANCE,
   libraryTools,
   MCP_LEGACY,
@@ -22,7 +23,16 @@ import { commandNamed } from "./table.ts";
 type Flag = (name: string, value: unknown, form: RegExp, label: string) => string[];
 
 /** A tool here is one CLI command, and the arguments a model gave it become that command's arguments. */
-type Tool = McpToolSpec & { command: string; args(input: Record<string, unknown>, flag: Flag): string[] };
+type Tool = McpToolSpec & {
+  command: string;
+  args(input: Record<string, unknown>, flag: Flag): string[];
+  /** Page text for the command's standard input, so a model's Markdown or operations never sit in an argument. */
+  stdin?(input: Record<string, unknown>): string;
+  /** The command's own text form is what a model should read, so it runs without --json. */
+  plain?: boolean;
+  /** The command prints its whole answer even when it exits 1 (a refused operation), as the hosted tool returns it. */
+  answersOnRefusal?: boolean;
+};
 
 const target: McpProperty = {
   type: "string",
@@ -65,6 +75,7 @@ const flagFor =
     return [`--${name}=${text}`];
   };
 const KEY = /^[a-z0-9][a-z0-9-]{0,59}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CURSOR = /^[A-Za-z0-9:_-]{1,40}$/;
 const NUMBER = /^\d{1,9}$/;
 const REPO = /^[\w@:/.+%~-]{1,300}$/;
@@ -77,6 +88,36 @@ const library = libraryTools({
   type: "string",
   description: "A git remote, to look only at that repo's project",
 });
+
+/** What a model sent as operations, checked here so a bad call fails before a process starts. */
+const editOps = (input: Record<string, unknown>, suggest: boolean) => {
+  const request = EditRequest.safeParse({ ops: input.ops, suggest: suggest || undefined });
+  if (!request.success) {
+    throw new BadArguments(
+      request.error.issues.map((issue) => `ops.${issue.path.join(".")}: ${issue.message}`).join("; "),
+    );
+  }
+  return JSON.stringify({ ops: request.data.ops });
+};
+const slugList = (flag: Flag, name: string, value: unknown, label: string) => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 50) throw new BadArguments(`${label} must be a list of slugs.`);
+  return value.flatMap((item) => flag(name, item, KEY, label));
+};
+/** Everything `page edit` and `page suggest` take besides the operations. */
+const editArgs = (input: Record<string, unknown>, flag: Flag) => [
+  "--ops=-",
+  ...flag("note", input.note, /^[^\0]{1,2000}$/s, "note"),
+  ...slugList(flag, "source", input.sources, "sources"),
+  ...(Array.isArray(input.fixes)
+    ? (() => {
+        if (!input.fixes.every((n) => Number.isInteger(n) && (n as number) > 0))
+          throw new BadArguments("fixes must be comment numbers.");
+        return input.fixes.length > 0 ? [`--fixes=${input.fixes.join(",")}`] : [];
+      })()
+    : []),
+  ...flag("run", input.run, UUID, "run"),
+];
 
 /** Each tool is one CLI command with --json, so tools without a shell behave the same as those with one. */
 const TOOLS: Tool[] = [
@@ -146,6 +187,92 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    ...EDIT_TOOLS.read,
+    command: "page",
+    plain: true,
+    args: (input, flag) => [
+      "read",
+      ...(input.draft === true ? ["--draft"] : input.draft === false ? ["--latest"] : []),
+      ...flag("cursor", input.cursor, CURSOR, "cursor"),
+      ...requiredArtifact(input.artifact),
+    ],
+  },
+  {
+    ...EDIT_TOOLS.edit,
+    command: "page",
+    answersOnRefusal: true,
+    args: (input, flag) => [
+      "edit",
+      ...editArgs(input, flag),
+      ...(input.checkpoint === true ? ["--checkpoint"] : []),
+      ...requiredArtifact(input.artifact),
+    ],
+    stdin: (input) => editOps(input, false),
+  },
+  {
+    ...EDIT_TOOLS.suggest,
+    command: "page",
+    answersOnRefusal: true,
+    args: (input, flag) => ["suggest", ...editArgs(input, flag), ...requiredArtifact(input.artifact)],
+    stdin: (input) => editOps(input, true),
+  },
+  {
+    ...EDIT_TOOLS.create,
+    command: "page",
+    args: (input, flag) => {
+      const wikiSlug = `${text(input.wiki, "wiki")}/${text(input.slug, "slug")}`;
+      if (!/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/.test(wikiSlug))
+        throw new BadArguments("wiki and slug must be slugs.");
+      return [
+        "create",
+        "--file=-",
+        ...flag("title", text(input.title, "title"), /^[^\0]{1,120}$/s, "title"),
+        ...flag("summary", text(input.summary, "summary"), /^[^\0]{1,280}$/s, "summary"),
+        ...(Array.isArray(input.tags)
+          ? input.tags.flatMap((tag) => flag("tag", tag, /^[^\0]{1,32}$/s, "tag"))
+          : []),
+        ...flag("role", input.role, /^(page|source)$/, "role"),
+        ...slugList(flag, "source", input.sources, "sources"),
+        ...flag("origin", input.origin, /^https?:\/\/\S{1,2000}$/, "origin"),
+        ...(input.untrusted === true ? ["--untrusted"] : []),
+        ...flag("message", input.message, /^[^\0]{1,2000}$/s, "message"),
+        wikiSlug,
+      ];
+    },
+    stdin: (input) => text(input.markdown, "markdown"),
+  },
+  {
+    ...EDIT_TOOLS.suggestions,
+    command: "page",
+    args: (input, flag) => [
+      "suggestions",
+      ...flag("status", input.status, /^(open|accepted|rejected|stale|expired|withdrawn|all)$/, "status"),
+      ...flag("run", input.run, UUID, "run"),
+      ...requiredArtifact(input.artifact),
+    ],
+  },
+  {
+    ...EDIT_TOOLS.delegate,
+    command: "page",
+    args: (input, flag) => {
+      const artifact = requiredArtifact(input.artifact);
+      if (input.action === "start")
+        return [
+          "delegate",
+          ...flag("goal", text(input.goal, "goal"), /^[^\0]{1,500}$/s, "goal"),
+          ...artifact,
+        ];
+      if (input.action !== "finish" && input.action !== "cancel")
+        throw new BadArguments("action is start, finish or cancel.");
+      return [
+        "delegate",
+        ...flag(input.action, text(input.run, "run"), UUID, "run"),
+        ...(input.action === "finish" ? flag("message", input.message, /^[^\0]{1,2000}$/s, "message") : []),
+        ...artifact,
+      ];
+    },
+  },
+  {
     name: "artifacts_publish",
     description: "Lint, render and publish the artifact in the working folder.",
     command: "publish",
@@ -174,7 +301,12 @@ const TOOLS: Tool[] = [
 export function toolCommand(name: string, input: Record<string, unknown>) {
   const tool = TOOLS.find((entry) => entry.name === name);
   if (!tool) return null;
-  return ["--json", tool.command, ...tool.args(input, flagFor(tool.command))];
+  return [...(tool.plain ? [] : ["--json"]), tool.command, ...tool.args(input, flagFor(tool.command))];
+}
+
+/** What a tool's command reads on standard input, if anything. */
+export function toolStdin(name: string, input: Record<string, unknown>) {
+  return TOOLS.find((entry) => entry.name === name)?.stdin?.(input);
 }
 
 /** A model reads everything a tool prints, so one big answer (a data export) can't fill its context. */
@@ -206,7 +338,7 @@ function imageResult(output: string) {
   }
 }
 
-async function callTool(name: string, args: string[]) {
+async function callTool(name: string, args: string[], stdin?: string) {
   // Run from a script, this needs Bun and the script; a compiled binary is the whole command.
   const script = process.argv[1] ?? "";
   const self =
@@ -214,7 +346,7 @@ async function callTool(name: string, args: string[]) {
       ? [process.execPath, script]
       : [process.execPath];
   const child = Bun.spawn([...self, ...args], {
-    stdin: "ignore",
+    stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -224,13 +356,16 @@ async function callTool(name: string, args: string[]) {
     child.exited,
   ]);
   if (name === "artifacts_view" && code === 0) return imageResult(out);
-  const untrusted = TOOLS.find((tool) => tool.name === name)?.untrusted && code === 0;
+  const tool = TOOLS.find((entry) => entry.name === name);
+  // A refused edit is an answer, not a failure of the tool: it holds the block's current text, which is data.
+  const answered =
+    code === 0 || (tool?.answersOnRefusal === true && code === 1 && out.trimStart().startsWith("{"));
   return {
     content: [
-      ...(untrusted ? [{ type: "text", text: UNTRUSTED_NOTICE }] : []),
+      ...(tool?.untrusted && answered ? [{ type: "text", text: UNTRUSTED_NOTICE }] : []),
       { type: "text", text: capOutput((out || err).trim()) },
     ],
-    ...(code === 0 ? {} : { isError: true }),
+    ...(answered ? {} : { isError: true }),
   };
 }
 
@@ -300,12 +435,14 @@ async function answer(request: { id?: unknown; method: string; params?: Record<s
       };
     case "tools/call": {
       try {
-        const args = toolCommand(
-          String(request.params?.name),
-          (request.params?.arguments ?? {}) as Record<string, unknown>,
-        );
+        const input = (request.params?.arguments ?? {}) as Record<string, unknown>;
+        const args = toolCommand(String(request.params?.name), input);
         if (!args) throw Object.assign(new Error("No such tool."), { code: -32602 });
-        return await callTool(String(request.params?.name), args);
+        return await callTool(
+          String(request.params?.name),
+          args,
+          toolStdin(String(request.params?.name), input),
+        );
       } catch (error) {
         if (!(error instanceof BadArguments)) throw error;
         return { content: [{ type: "text", text: error.message }], isError: true };
