@@ -114,4 +114,4 @@ Say the URL, the version, what changed, and which threads you marked fixed.
 
 ## 13. Wikis
 
-For a growing knowledge base, read [references/wiki.md](references/wiki.md) (MCP: `artifacts://guides/wiki`). Orient with `artifacts_wiki` or `artifacts wiki show` and read the rules page first. The guide covers ingest, ask and garden.
+For a growing knowledge base, read [references/wiki.md](references/wiki.md) (MCP: `artifacts://guides/wiki`). Orient with `artifacts_wiki` or `artifacts wiki show` and read the rules page first. The guide covers ingest, ask, garden and edit. Change a wiki page by operation (`artifacts_page_read`, then `artifacts_page_edit`, or `artifacts page read` and `artifacts page edit`), never by republishing it, and report whether each edit was applied, suggested or refused.

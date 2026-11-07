@@ -195,6 +195,27 @@ A wiki artifact with one page replaces its overview route with that page. Wiki a
 - **Reading position:** per page, sent with `POST /seen` at most every 10 seconds.
 - **Settings:** size, theme and typeface in `localStorage` per device.
 
+## The editor (`apps/viewer/src/editing/`)
+
+Editing wiki pages in the browser (Phase 2 Part B). The contract is [13-editing.md](13-editing.md#viewer), and the design is the hosted canvas `artifacts/phase-2b-editing-design`.
+
+- **Two chunks:**
+  - `entry.tsx` sits in the article chunk. It fetches `DocState`, draws the yellow Edit key at the end of the reader's bar, Ask to edit for people who can only comment, and the draft line for editors. It also draws the blue pencil in the reader.
+  - `editor.tsx` is the lazy `editor` chunk, fetched on the first tap on Edit or with `?edit=1`. It holds ProseMirror, y-prosemirror, Yjs, `@artifacts/doc` (the schema and the id plugin, by subpath, never the Markdown converters) and the provider. `bun run size` checks it against its own 120 KB budget, beside the reader's 80 KB.
+- **Sync:** `sync.ts` is the one door to `provider.ts` (`connect(artifactId, epoch, ydoc, awareness)`). Without a connection the editor still edits locally and says "Offline. Your changes will sync."
+- **Plugins** (`plugins.ts`):
+  - **Author:** marks what the person types with the author key from `hello`. Text never carries the mark of the words beside the caret, which may be an agent's. While an IME composes, it waits until the composition ends.
+  - **Presence:** the caret's block and the blocks changed in the last two seconds go into awareness as `block` and `pending`. The server holds those blocks against agent replaces.
+  - **Pencil:** an underline on text whose author key is an agent's, from `GET …/authors?draft=1`.
+  - **Suggestions:** a card under the block each one changes. It shows the old words struck and the new ones in the blue pencil, then the note, then Reject and Accept, 44 pt tall and 12 pt apart. A suggestion's HTML is parsed for its words only, and is never put on the page.
+- **The screen:**
+  - **Phone:** Done, who is here, Saved, and More. The mode switch (Write, Pair, Delegate) sits under the bar, with the current mode underlined and the audience on the right. While the keyboard is up, the mode folds into the toolbar's first key.
+  - **Desktop:** the modes are centred in the bar, beside Save version. The tools sit in a row under the bar, with the audience line on the right.
+- **Toolbar:** heading, bold, italic, list, `[[` and link, then undo. Every key is at least 44 pt (40 pt on a desktop). On a phone it is fixed above the keyboard: `visualViewport` gives the covered height as `--kb`.
+- **Delegate:** Start sends `POST …/doc/runs` with the goal. A strip at the foot says "Claude is working on this page", with Stop. When a suggestion run finishes, its review lists each change as a word diff with its sources. Each change can be reverted (that rejects it), or all of them can be reverted, or they can be kept (`…/runs/:id/accept`). A direct run links to compare its checkpoint.
+- **Attribution:** `wiki/attribution.tsx` maps `blocks.authors` offsets (the block's text, whitespace collapsed) onto the DOM, the way quote highlights are mapped. It wraps agents' passages in the pencil. Tapping or clicking a passage shows who wrote it, for whom, when, which version, and its sources, with untrusted ones marked. That is a sheet on a phone and a popover on a desktop.
+- **Keys:** ⌘B, ⌘I, ⌘S (Save version), ⌥↑ and ⌥↓ (move a block), ⌘⌥Y and ⌘⌥N (accept or reject the suggestion at the caret), and Esc (leave). The page is `role="textbox"` with `aria-multiline` and a label. The toolbar is `role="toolbar"` and arrow keys move along it. New suggestions are announced in a polite live region.
+
 ## Live frames and the bridge
 
 See [08-micro-apps.md](08-micro-apps.md#try-it). Phase 2.

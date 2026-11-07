@@ -12,6 +12,10 @@ An agent runs `artifacts publish`. The CLI checks the work, renders each screen 
 
 ![Four phone screens from one review: a new version waiting in the inbox, a comment pinned to a screen, a quoted passage in a research page, and a compare view outlining the two regions that changed.](docs/images/review-loop.jpg)
 
+## Wikis
+
+A wiki is a project of articles that agents and people keep together. Pages link with `[[Target]]`, cite sources, and are edited in the browser: tap Edit, and several people type in the same page at once. Agents edit the same page one block at a time with `artifacts page read` and `artifacts page edit`, or the hosted tools. The server applies an agent's edit or files it as a suggestion, by who can read the page and who is editing now. Every save is an ordinary version, so comments, compare and restore work as before, and `artifacts wiki export <wiki> <dir>` writes the whole wiki out as Markdown.
+
 ## Connect an agent from anywhere
 
 The skill and the CLI cover agents on a machine with them installed. For remote boxes, Artifacts is also a hosted MCP server at `<your server>/api/mcp`, which signs in with your Artifacts account:

@@ -39,6 +39,7 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 7. **Quality gates.** Lint, render and size budgets run before anything is published.
 8. **People and teams.** Each deployment is one organization, and people can belong to any number of teams inside it. A publisher is a person or the organization: artifacts are private to their publisher or visible to the whole organization, depending on an organization setting, and any single artifact can be shared with a team or with people outside. A project is open to the organization, or restricted to chosen people and teams.
 9. **Micro apps when needed.** An artifact can be just pages, or a small app: a frontend, an optional backend that ships in the same bundle, and an optional data folder (§7.9). Most artifacts use none of the extras.
+10. **Edit together.** A wiki article is edited in the browser, live, by several people at once, and by agents through the CLI or the hosted tools. A person picks whether agents stay out, suggest or work on their own, and every passage shows who wrote it (§16).
 
 ### Non-goals (for now)
 - Editing anything but wiki articles in the browser. Canvases, prototypes, galleries and multi-page artifacts are written by agents and repos; the viewer reads and reviews them. Wiki articles are edited in the browser, live, by people and agents together (§16).
@@ -224,6 +225,10 @@ Two ways to clear an artifact away: **archive** when it's done and worth keeping
   - "Copy prompt for your agent" gives people who can decide a prompt to paste into their agent, so a review can start the next run by hand. It appears with open comments and after "Request changes". It names the artifact and never carries comment text.
   - **Later, optional:** a webhook per project that fires on "Request changes", so a team can start an agent run from it (a CI job, or a remote Claude Code session).
 - **Version history:** every publish is kept. Like a docs app, a person can name a version ("Real photos"), preview any version, compare it with the current one, and **restore** it. Restoring publishes a copy of the old version as the next one, so nothing is lost and open threads re-anchor as usual. CLI: `artifacts versions`, `artifacts versions name 4 "Real photos"`, `artifacts restore 4`. Agents can name the version they publish with `artifacts publish --name`.
+- **Editing in a wiki** (§16) leaves this model as it is, because every checkpoint of a live draft is an ordinary version.
+  - A thread follows the block's lasting id across checkpoints, with its quote as the fallback, and is re-anchored at each checkpoint by the rules above.
+  - An agent that edits a page to answer a thread names it and asks for a checkpoint: `artifacts page edit <project/slug> … --fixes <n> --checkpoint`. The thread is marked fixed in the version that makes, with no separate `reply`. Accepting a suggestion that lists the thread marks it fixed at the next checkpoint.
+  - Comments made on the draft view anchor to the latest checkpoint.
 - **Notifications (Phase 2):** your own server sends Web Push to devices that allowed it, when an agent publishes or someone replies, plus a daily digest.
   - No outside provider or account: the server signs messages with a VAPID key pair it generates on first boot and keeps in Postgres, and the browser's push service delivers them (Apple's, for Safari).
   - On iPhone, Safari only allows web notifications for sites added to the Home Screen, so the viewer asks once, after your first comment.
@@ -725,9 +730,12 @@ artifacts open [--version N]
 artifacts comments [--open] [--json] [--page mocks]
 artifacts status                  # latest decision, note and open comment count
 artifacts reply <id> "<text>" [--fixed]
+artifacts wiki create <slug> | show <slug> | links <project/slug> | export <wiki> <dir>   # wikis (§16); export writes Markdown files
+artifacts page read | edit | suggest | save | suggestions | delegate | export <project/slug>   # a wiki page by block ids and operations (§16)
+artifacts page create <wiki>/<slug> --title <t> --summary <s> --file <md>   # a new wiki page, text only
 artifacts visibility org|me       # who inside the organization can see it
 artifacts share --link [--comment] [--expires 7d]          # external link
-artifacts share --invite sam@example.com [--comment]       # external person; prints their link
+artifacts share --invite sam@example.com [--comment]       # external person; prints their link (--edit is for people to give in the viewer)
 artifacts org invite <email> [--role member|reviewer]      # admins only; prints the invite link
 artifacts org reset-link <email>                           # admins only; prints a one-hour reset link
 artifacts versions | diff v3 v4
@@ -875,7 +883,8 @@ see only content they can access; publishers maintain pages and sources; access
 managers control sharing. Agents use the CLI or hosted MCP tools.
 
 Phase 1 lets agents write and people read and comment. It does not maintain
-hand-written index or log pages. See the [wiki contract](implementation/12-wikis.md)
+hand-written index or log pages. Part B below adds editing in the browser and
+agent edits by operation. See the [wiki contract](implementation/12-wikis.md)
 for names and shapes, and the hosted plan artifact `artifacts/company-brain` for
 the plan.
 
@@ -910,7 +919,18 @@ whole page while someone is in it.
 - **Blocks have lasting ids,** so comments and agents point at the same paragraph
   however the page grows. Images, diagrams and charts stay as written, shown as
   cards in the editor.
-- **Export.** Any page, or a whole wiki, exports as Markdown.
+- **Agents use the CLI as well as the tools.** `artifacts page read` shows a page
+  as blocks with their ids; `page edit` and `page suggest` send operations and
+  print, for each, whether it was applied, became a suggestion or was refused, and
+  why; `page save`, `page suggestions` and `page delegate` make a version, list
+  decisions and run a Delegate job; `page create` writes a new page. An edit
+  needs the `edit` scope, which a new `artifacts login` has; an older token is
+  told to sign in again. A refused operation is a failure the script sees.
+- **Export.** Any page exports as Markdown with its front matter (`artifacts page
+  export`), and a whole wiki exports to a folder: one file per page and source,
+  with the images and data a page links to beside it, so the folder reads on its own
+  (`artifacts wiki export <wiki> <dir>`). The export comes from the server, so it
+  holds the latest saved version of what the caller can see.
 
 Only wiki articles with one page and no backend can be edited in the browser.
 Everything else is published as before. Text in pages, sources and suggestions
