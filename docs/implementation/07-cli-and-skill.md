@@ -78,7 +78,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 
 | Command | Does |
 |---|---|
-| `artifacts wiki create <slug> [--name <name>] [--personal]` | Calls `POST /api/wikis`. Name defaults to the slug. Prints the wiki name and URL. Personal wikis require a person. |
+| `artifacts wiki create <slug> [--name <name>] [--only-me | --team <slug>]` | Calls `POST /api/wikis`. Name defaults to the slug. Prints the wiki name and URL. Restricted starting audiences require a person. |
 | `artifacts wiki show <slug> [--json]` | Calls `GET /api/wikis/:slug`. Prints the rules summary, pages and sources with summaries and untrusted marks, then garden findings as `kind slug: message`. Empty Pages, Sources and Garden sections say `none`. |
 | `artifacts wiki links <project/slug> [--json]` | Resolves the artifact, then calls `GET /api/artifacts/:id/links`. Prints the artifact's role, untrusted mark and origin, then outgoing links, backlinks and sources, marking wanted and untrusted targets and showing origins when present. Empty sections say `none`. Non-wiki artifacts print no wiki sections. |
 
