@@ -13,7 +13,7 @@ import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { articleLinks } from "@artifacts/schema/wiki";
 import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
-import { type ArtifactRow, findArtifact, toProject, toResource } from "../auth/access.ts";
+import { type ArtifactRow, findArtifact, type ProjectRow, toProject, toResource } from "../auth/access.ts";
 import { type Asker, actorOf, agentOf } from "../auth/caller.ts";
 import { type CallerFor, can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
@@ -29,6 +29,7 @@ import { notifyPublished } from "../push/notify.ts";
 import { reanchorThreads } from "../review/reanchor.ts";
 import { writeContent } from "../versions/content.ts";
 import { blockHashes, type Changes, changes, frameHashes, hashesOf, NOTHING } from "../versions/diff.ts";
+import { validateWikiSources } from "../wiki/service.ts";
 import { IMMUTABLE, knownBlobs, putBlob, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
@@ -80,7 +81,11 @@ export function createPublisher(deps: Deps) {
     { org, caller }: Asker,
     projectSlug: string,
     slug: string,
-  ): Promise<{ row: ArtifactRow | null; caller: CallerFor<"artifact.publish"> }> {
+  ): Promise<{
+    row: ArtifactRow | null;
+    project: ProjectRow | undefined;
+    caller: CallerFor<"artifact.publish">;
+  }> {
     const orgId = org.id;
     const [project] = await db
       .select()
@@ -110,7 +115,7 @@ export function createPublisher(deps: Deps) {
             : "You can't add to that project.",
         );
       }
-      return { row: null, caller };
+      return { row: null, project, caller };
     }
     if (!seesArtifact(caller, resource)) throw new ApiError("conflict", "That slug is taken.");
     if (row.deletedAt) {
@@ -126,7 +131,7 @@ export function createPublisher(deps: Deps) {
       );
     }
     requireCan(caller, "artifact.publish", resource);
-    return { row, caller };
+    return { row, project, caller };
   }
 
   async function prepare(asker: Asker, body: z.infer<typeof PublishPrepare>, payload: string | null = null) {
@@ -185,8 +190,15 @@ export function createPublisher(deps: Deps) {
     if ((ticket.payload ?? null) !== payload) {
       throw new ApiError("invalid", "This upload was made for another payload.");
     }
-    const { row: existing, caller } = await target(asker, ticket.project, ticket.slug);
+    const {
+      row: existing,
+      project: targetProject,
+      caller,
+    } = await target(asker, ticket.project, ticket.slug);
     if (existing && existing.id !== ticket.artifactId) throw new ApiError("conflict", "That slug is taken.");
+    // Library reads use the pool; finish them before holding a transaction's connection.
+    if (targetProject?.kind === "wiki" && body.wiki)
+      await validateWikiSources(deps, org.id, caller, targetProject.id, ticket.slug, body.wiki);
 
     // Every hash the version will use must be proved before anything is written.
     const wanted = new Map<string, number | null>();

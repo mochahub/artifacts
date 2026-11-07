@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Artifact, PublishPrepared, PublishResult } from "@artifacts/schema";
+import { Artifact, PublishPrepared, PublishResult, type WikiMeta } from "@artifacts/schema";
 import { randomSecret, sha256 } from "../src/auth/secrets.ts";
 import { SESSION_DAYS } from "../src/auth/sessions.ts";
 import { people, sessions, tokens } from "../src/db/schema.ts";
@@ -35,6 +35,7 @@ type PublishOptions = {
   notes?: Record<string, string>;
   repo?: string;
   projectName?: string;
+  wiki?: WikiMeta;
 };
 
 /** The render a publish uploads for a frame, unless `renderBytes` gives one. */
@@ -102,6 +103,7 @@ export async function publish(t: TestServer, bearer: string, options: PublishOpt
       summary: options.summary,
       tags: options.tags,
       notes: options.notes,
+      wiki: options.wiki,
       backendHash: module?.sha256 ?? null,
       files: bundle,
       pages: [

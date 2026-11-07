@@ -29,6 +29,10 @@
 
 The CLI sends it as `wiki` in the commit body, and the MCP article tool accepts the same fields. The server stores it in `versions.wiki`. It means nothing outside a wiki.
 
+Publishing to a wiki refuses a `sources` entry unless it names an existing source in that wiki that the publisher can read. A role `page` target is refused; link to pages in the article body instead. An artifact cannot cite its own slug, even if its role is `source`. These checks run in the shared publisher for CLI/API and MCP commits. Missing and unreadable targets produce the same error. MCP metadata errors name each invalid field and its validation reason.
+
+Both wiki read views retain the declared citation slugs, including old broken citations and citations whose targets are no longer visible. The links view resolves unavailable targets with `exists: false` and no private metadata. The garden reports these citations as `wanted`, with the citing pages in `refs`; an `unsourced` finding for such a page explains that none of its citations resolve to a source.
+
 ### Wiki links
 
 In an article, `[[Target]]`, `[[Target|label]]` and `[[other-wiki/Target]]` become links to `/<wiki>/<slug>`. Here `<wiki>` is the article's own project unless the link names another, and `<slug>` is `wikiSlug(Target)`: lowercase ASCII, with runs of anything else made into `-`, capped at 40 characters. So `[[Pricing & Plans]]` links to `/<wiki>/pricing-plans`.
@@ -81,7 +85,7 @@ Guard `{ action: "project.read", resource: projectParam }`. A project that isn't
 |---|---|---|---|
 | `untrusted` | A page cites an untrusted source | the page | those sources |
 | `stale` | A source a page cites was published after the page's latest version | the page | those sources |
-| `wanted` | Pages here link to `<wiki>/<x>`, and no artifact `x` here is visible | `x` | the linking pages |
+| `wanted` | Pages here link to or cite `<wiki>/<x>`, and the target is unavailable | `x` | the linking or citing pages |
 | `orphan` | A page (not `rules`) that nothing visible links to | the page | none |
 | `unsourced` | A page (not `rules`) citing no sources, in a wiki that has at least one source | the page | none |
 
@@ -109,14 +113,16 @@ These are in `apps/server/src/mcp/routes.ts`, and their specs are in `packages/s
 | `artifacts_comment` | comment | `artifact`, `message`, `page?` | Opens a page-level thread (no anchor) on the latest version, as agent "Connector", and answers `{ id }` with the thread's number. For findings from a garden pass |
 | `artifacts_publish_article` | publish | Adds `role?`, `sources?`, `origin?`, `untrusted?` | As before. The fields are checked with `WikiMeta`, written to the manifest's `wiki` and the commit's `wiki`, and wiki links resolve against `project` |
 
+The list's `pages` count excludes `rules`, matching `WikiSpace.pages`; `sources` counts `WikiSpace.sources`.
+
 The server instructions add one sentence: in a wiki, call `artifacts_wiki` first and follow its rules page.
 
 ## CLI
 
 - `artifacts publish` and `artifacts pack` pass `project` to `buildArticle`, and `wiki` (from the manifest) in the commit body.
 - `artifacts wiki create <slug> [--name <name>] [--personal]` calls `POST /api/wikis`.
-- `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources and the findings.
-- `artifacts wiki links <project/slug> [--json]` prints the links, backlinks and sources.
+- `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources and the findings. Empty Pages, Sources and Garden sections say `none`.
+- `artifacts wiki links <project/slug> [--json]` prints the artifact's role, untrusted mark and origin, then the links, backlinks and sources with origins when present. Empty sections say `none`.
 - The skill's `references/wiki.md` holds the agent's workflows: ingest, ask, garden, and a starter rules page. The hosted MCP serves it as `artifacts://guides/wiki`.
 
 ## Viewer

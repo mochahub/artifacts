@@ -3,6 +3,7 @@ import type {
   CreateWiki,
   WikiFinding,
   WikiLink,
+  WikiMeta,
   WikiPage,
   WikiSpace,
 } from "@artifacts/schema";
@@ -82,8 +83,8 @@ export async function createWiki(
 }
 
 // One latest-version join for the visible library keeps every derived count and reference private.
-async function library(deps: Deps, orgId: string, caller: Caller) {
-  const visible = await visibleTo(deps, orgId, caller);
+async function library(deps: Deps, orgId: string, caller: Caller, projectId?: string) {
+  const visible = await visibleTo(deps, orgId, caller, { projectId });
   if (!visible.length) return [];
   // Only the columns a wiki reads: `files` alone can be large, and this runs over the whole library.
   const latest = await deps.db
@@ -125,6 +126,32 @@ async function library(deps: Deps, orgId: string, caller: Caller) {
   });
 }
 type Entry = Awaited<ReturnType<typeof library>>[number];
+
+/** A citation must name a readable source in this wiki; hidden and missing targets look the same. */
+export async function validateWikiSources(
+  deps: Deps,
+  orgId: string,
+  caller: Caller,
+  projectId: string,
+  slug: string,
+  wiki: WikiMeta,
+) {
+  if (!wiki.sources.length) return;
+  if (wiki.sources.includes(slug))
+    throw new ApiError("invalid", `wiki.sources: an artifact cannot cite itself ("${slug}").`);
+  const all = await library(deps, orgId, caller, projectId);
+  for (const source of wiki.sources) {
+    const target = all.find((a) => a.row.slug === source);
+    if (!target)
+      throw new ApiError(
+        "invalid",
+        `wiki.sources: "${source}" must name an existing source you can read in this wiki.`,
+      );
+    if (target.version.wiki?.role !== "source")
+      throw new ApiError("invalid", `wiki.sources: "${source}" has role page; cite a source.`);
+  }
+}
+
 const cited = (a: Entry, all: Entry[]) =>
   all.filter(
     (s) =>
@@ -239,7 +266,7 @@ export async function wikiSpace(
     tags: a.version.tags ?? [],
     role: a.version.wiki?.role ?? "page",
     untrusted: untrusted(a, all),
-    sources: (a.version.wiki?.sources ?? []).filter((s) => own.some((b) => b.row.slug === s)),
+    sources: a.version.wiki?.sources ?? [],
     origin: a.version.wiki?.origin ?? null,
     version: a.version.n,
     updatedAt: a.version.publishedAt.toISOString(),
@@ -276,8 +303,22 @@ export async function wikiSpace(
         const slug = key.slice(place.row.slug.length + 1);
         wanted.set(slug, [...(wanted.get(slug) ?? []), a.row.slug]);
       }
+  const missingSources = new Set<string>();
+  for (const a of pages)
+    for (const slug of a.version.wiki?.sources ?? [])
+      if (!all.some((b) => b.project.id === place.id && b.row.slug === slug)) {
+        missingSources.add(slug);
+        wanted.set(slug, [...new Set([...(wanted.get(slug) ?? []), a.row.slug])]);
+      }
   for (const [slug, refs] of wanted)
-    garden.push({ kind: "wanted", slug, refs, message: "This page has not been written yet." });
+    garden.push({
+      kind: "wanted",
+      slug,
+      refs,
+      message: missingSources.has(slug)
+        ? "A cited source is missing or unavailable."
+        : "This page has not been written yet.",
+    });
   for (const kind of ["orphan", "unsourced"] as const)
     for (const a of pages.filter((a) => a.row.slug !== "rules"))
       if (
@@ -289,7 +330,12 @@ export async function wikiSpace(
           kind,
           slug: a.row.slug,
           refs: [],
-          message: kind === "orphan" ? "No pages link to this page." : "This page cites no sources.",
+          message:
+            kind === "orphan"
+              ? "No pages link to this page."
+              : a.version.wiki?.sources.length
+                ? "None of this page's citations resolve to a source."
+                : "This page cites no sources.",
         });
   const rules = own.find((a) => a.row.slug === "rules");
   return {

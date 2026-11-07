@@ -807,6 +807,10 @@ export const LibraryCard = z.object({
   latestVersion: z.number().int(),
   updatedAt: Time,
   match: LibraryMatch.nullable(),
+  /** Present only for artifacts in wiki projects. */
+  role: z.enum(["page", "source"]).optional(),
+  untrusted: z.boolean().optional(),
+  origin: z.string().nullable().optional(),
 });
 export type LibraryCard = z.infer<typeof LibraryCard>;
 export const LibraryPage = z.object({ cards: z.array(LibraryCard), nextCursor: z.string().nullable() });
