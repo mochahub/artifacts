@@ -58,6 +58,8 @@ The bundle is:
 
 The first four are what `artifacts pull` gives back. Files nothing references aren't uploaded, so they aren't restored either.
 
+The generated outputs have fixed names, in `packages/schema/src/bundle.ts`: `__og.webp` and `__backend.js` at the root, `__articles/<page>.html`, `__renders/<hash>.webp`, and `__board-<id>.html` and `__live-<frame>.html` beside a board's file. Only those count as generated. `artifacts pull` leaves them out, and so does a manifest rebuilt for an old version, so an author's own file whose name starts with `__` is kept.
+
 Files are collected by a crawler that parses HTML (htmlparser2), CSS (postcss) and JS (es-module-lexer). Anything unreferenced isn't uploaded. Absolute URLs and paths outside the manifest's folder are lint errors.
 
 | Output | Made by | Stored as |
@@ -175,7 +177,7 @@ A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_adviso
    - Delete the `crops/<thread id>.webp` objects and every object under `data/<artifact id>/`.
 2. **Collect garbage.**
    - **`blobs` rows** are deleted with their objects.
-   - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders` and `pages.meta.htmlHash` of non-purged versions.
+   - **Referenced set:** every hash in `versions.files`, `versions.backend_hash`, `frames.renders`, `pages.meta.htmlHash` and a gallery's `pages.meta.items` of non-purged versions, and every font in `org.brand` and in `brand_proposals`, which outlive the sample that brought them.
    - **Sweep:** list `blobs/` (paginated `ListObjectsV2`) and delete objects not in the set whose `LastModified` is more than 24 hours old. The age check protects uploads from a publish that hasn't committed yet.
    - **Orphans:** objects under `crops/` and `data/` whose thread or artifact row no longer exists, and are more than 24 hours old, are deleted too. That catches a purge whose bucket step failed after its rows were gone.
    - **Log:** record counts and bytes freed.

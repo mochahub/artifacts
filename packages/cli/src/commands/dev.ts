@@ -10,31 +10,98 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { isDataKey } from "@artifacts/schema";
+import {
+  type Artifact,
+  type ArtifactCard,
+  type ContentToken,
+  type DataFiles,
+  type DataList,
+  type DataValue,
+  DEFAULT_ORG_SETTINGS,
+  type Home,
+  isDataKey,
+  type Me,
+  type Meta,
+  type Person,
+  type ProjectArtifacts,
+  type ProjectRow,
+  type UrlResponse,
+  type VersionDetail,
+  type VersionRow,
+} from "@artifacts/schema";
+import type { z } from "zod";
+import type { Caller, LocalStore } from "../../../sandbox/src/index.js";
+import { BACKEND_BUNDLE, DATA_DIR, LOCAL } from "../bundle/layout.ts";
 import { findRoot, loadManifest } from "../bundle/manifest.ts";
+import { type Input, portOption } from "../command.ts";
 import { viewerAssets } from "../dev/assets.ts";
 import { staticLint } from "../lint/static.ts";
 import { CliError, type Output } from "../output.ts";
-import { ensureHelper } from "../render/install.ts";
+import { sandboxHost } from "../render/install.ts";
 import { type RenderResult, render } from "../render/render.ts";
 
 const ID = "00000000-0000-7000-8000-00000000d0d0";
-const PERSON = {
+const PERSON: z.input<typeof Person> = {
   id: "00000000-0000-7000-8000-00000000d0d1",
   name: "You",
   email: "you@localhost",
   role: "owner",
 };
 
-/** What the server lets a backend set; the rest never reaches the browser. */
-const SAFE_HEADERS = new Set(["content-type", "etag", "last-modified"]);
+/** The one person a local backend serves. */
+const LOCAL_CALLER: Caller = { id: "local", name: "You", kind: "owner", canComment: true, isPublisher: true };
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "content-type",
-};
+const etagOf = (path: string) => String(Math.floor(statSync(path).mtimeMs * 1000));
+
+/** .artifacts/data, laid out like the bucket's data prefix (08). A key can't name a place outside it. */
+function fileStore(dir: string): LocalStore {
+  const at = (key: string) => {
+    const full = resolve(dir, key);
+    if (!full.startsWith(resolve(dir) + sep)) throw new CliError("Keys stay in the data folder.");
+    return full;
+  };
+  return {
+    valid: isDataKey,
+    keys: () => (existsSync(dir) ? [...new Bun.Glob("**/*").scanSync(dir)] : []),
+    get(key) {
+      const path = at(key);
+      return existsSync(path)
+        ? { value: JSON.parse(readFileSync(path, "utf8")), etag: etagOf(path) }
+        : undefined;
+    },
+    etag: (key) => (existsSync(at(key)) ? etagOf(at(key)) : null),
+    put(key, value) {
+      const path = at(key);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(value));
+      return etagOf(path);
+    },
+    delete: (key) => rmSync(at(key), { force: true }),
+  };
+}
+
+/** The local API answers in the server's shapes (03), so a change to one fails to compile here. */
+type Shape<T extends z.ZodType> = z.input<T>;
+/** `work`, one run at a time. A call while it runs means one more run after, so the last change is built. */
+export function coalesced(work: () => Promise<unknown>) {
+  let running = false;
+  let again = false;
+  return async () => {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    do {
+      again = false;
+      await work();
+    } while (again);
+    running = false;
+  };
+}
+
 const json = (body: unknown, status = 200) => Response.json(body, { status });
+const answer = <T extends z.ZodType>(body: Shape<T>) => json(body);
 const fail = (status: number, code: string, message: string) =>
   json({ error: { code, message, details: {} } }, status);
 
@@ -43,7 +110,8 @@ const fail = (status: number, code: string, message: string) =>
  * machine, comments are off, and saved data lives in .artifacts/data/. Each change renders again as
  * the next version, so an open viewer picks it up on its next poll.
  */
-export async function devCommand(flags: { port: number }, out: Output) {
+export async function devCommand({ flags: given }: Input<never, { port?: string }>, out: Output) {
+  const flags = { port: portOption(given.port) ?? 4321 };
   const root = findRoot();
   const assets = await viewerAssets();
   if (assets.size === 0) throw new CliError("The viewer isn't built. Run: bun run build");
@@ -59,7 +127,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
   const contentHosts = hostsOf(flags.port + 1);
   const wrongHost = (request: Request, allowed: Set<string>) =>
     allowed.has(request.headers.get("host") ?? "") ? null : new Response("Wrong host", { status: 403 });
-  const dataDir = join(root, ".artifacts/data");
+  const dataDir = join(root, DATA_DIR);
   let version = 0;
   let built: RenderResult | null = null;
   let title = "";
@@ -98,7 +166,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
       open: 0,
     })) ?? [];
 
-  const card = () => ({
+  const card = (): Shape<typeof ArtifactCard> => ({
     id: ID,
     project,
     slug,
@@ -114,38 +182,44 @@ export async function devCommand(flags: { port: number }, out: Output) {
     archivedAt: null,
   });
 
-  const artifact = () => ({
+  const artifact = (): Shape<typeof Artifact> => ({
     ...card(),
+    projectName: project,
     visibility: "me",
     publisherId: PERSON.id,
     hasBackend: false,
     pages: pages(),
     decision: null,
     // Comments need a server, so the local viewer is read-only for review.
-    permissions: { comment: false, manage: false, share: false, delete: false, purge: false },
+    permissions: { comment: false, decide: false, manage: false, share: false, delete: false, purge: false },
   });
 
-  const versionBody = () => ({
+  const versionBody = (): Shape<typeof VersionDetail> => ({
     n: version,
+    previous: null,
     notes: {},
-    pages: built?.pages.map((page) => {
-      const base = { key: page.key, kind: page.kind, title: page.title, group: page.group };
+    message: null,
+    pages: (built?.pages ?? []).map((page) => {
+      const base = { key: page.key, title: page.title, group: page.group };
       if (page.kind === "article") {
         return {
           ...base,
+          kind: page.kind,
           htmlHash: page.meta.htmlHash,
           outline: page.meta.outline,
           readingMinutes: page.meta.readingMinutes,
-          blocks: built?.blocks
+          theme: null,
+          blocks: (built?.blocks ?? [])
             .filter((block) => block.pageKey === page.key)
             .map((block) => ({ key: block.blockKey, contentHash: block.contentHash, changed: false })),
         };
       }
       return {
         ...base,
+        kind: page.kind,
         boards: page.meta.boards ?? [],
         meta: page.meta,
-        frames: built?.frames
+        frames: (built?.frames ?? [])
           .filter((frame) => frame.pageKey === page.key)
           .map((frame) => ({
             key: frame.frameKey,
@@ -193,13 +267,20 @@ export async function devCommand(flags: { port: number }, out: Output) {
           updatedAt: new Date().toISOString(),
         }));
       return kind === "files"
-        ? json({ files: entries.map(({ key: name, ...rest }) => ({ name, ...rest })), nextCursor: null })
-        : json({ keys: entries, nextCursor: null });
+        ? answer<typeof DataFiles>({
+            files: entries.map(({ key: name, ...rest }) => ({ name, ...rest })),
+            nextCursor: null,
+          })
+        : answer<typeof DataList>({ keys: entries, nextCursor: null });
     }
     if (request.method === "GET") {
       if (!existsSync(path)) return fail(404, "not_found", "Not found.");
-      if (kind === "files") return json({ url: `${viewerOrigin}/__data/${scope}/${key}` });
-      return json({ value: JSON.parse(readFileSync(path, "utf8")), etag: etagOf(path) });
+      if (kind === "files")
+        return answer<typeof UrlResponse>({ url: `${viewerOrigin}/__data/${scope}/${key}` });
+      return answer<typeof DataValue>({
+        value: JSON.parse(readFileSync(path, "utf8")),
+        etag: etagIfAny(path),
+      });
     }
     if (request.method === "DELETE") {
       rmSync(path, { force: true });
@@ -208,28 +289,21 @@ export async function devCommand(flags: { port: number }, out: Output) {
     return null;
   }
 
-  const etagOf = (path: string) =>
-    existsSync(path) ? String(Math.floor(statSync(path).mtimeMs * 1000)) : "";
-
-  /** A key names a place in the data folder, so a bundle someone else wrote can't leave it. */
-  const inData = (path: string) => {
-    const full = resolve(path);
-    if (!full.startsWith(resolve(dataDir) + sep)) throw new CliError("Keys stay in the data folder.");
-    return full;
-  };
+  const etagIfAny = (path: string) => (existsSync(path) ? etagOf(path) : "");
 
   async function putData(request: Request, kind: string, scope: string, key: string) {
     if (!isDataKey(key)) return fail(400, "invalid", "That isn't a valid key.");
     const path = join(dataDir, kind === "files" ? "files" : "", scope, key);
     const ifMatch = request.headers.get("if-match");
-    if (ifMatch && etagOf(path) !== ifMatch) return fail(412, "precondition_failed", "Someone wrote first.");
+    if (ifMatch && etagIfAny(path) !== ifMatch)
+      return fail(412, "precondition_failed", "Someone wrote first.");
     if (request.headers.get("if-none-match") === "*" && existsSync(path)) {
       return fail(412, "precondition_failed", "Someone wrote first.");
     }
     mkdirSync(dirname(path), { recursive: true });
     if (kind === "files") writeFileSync(path, new Uint8Array(await request.arrayBuffer()));
     else writeFileSync(path, JSON.stringify(((await request.json()) as { value: unknown }).value));
-    return json({ etag: etagOf(path), name: key });
+    return json({ etag: etagIfAny(path), name: key });
   }
 
   async function handle(request: Request) {
@@ -239,7 +313,7 @@ export async function devCommand(flags: { port: number }, out: Output) {
     const path = url.pathname;
     const inArtifact = `/api/artifacts/${ID}`;
     if (path === "/api/meta") {
-      return json({
+      return answer<typeof Meta>({
         version: "dev",
         minCliVersion: "0.0.0",
         orgName: "Local",
@@ -247,12 +321,14 @@ export async function devCommand(flags: { port: number }, out: Output) {
         publicUrl: viewerOrigin,
         contentUrl: contentOrigin,
         viewerOrigins: [viewerOrigin],
+        google: false,
       });
     }
-    if (path === "/api/me") return json({ person: PERSON, org: { name: "Local" }, recentAuth: false });
-    if (path === "/api/home") return json({ waiting: [card()], recent: [] });
+    if (path === "/api/me")
+      return answer<typeof Me>({ person: PERSON, org: { name: "Local" }, recentAuth: false });
+    if (path === "/api/home") return answer<typeof Home>({ waiting: [card()], recent: [] });
     if (path === "/api/projects") {
-      return json([
+      return answer<z.ZodArray<typeof ProjectRow>>([
         {
           id: ID,
           slug: project,
@@ -265,13 +341,16 @@ export async function devCommand(flags: { port: number }, out: Output) {
       ]);
     }
     if (path === `/api/projects/${project}/artifacts`) {
-      return json({ project: { slug: project, name: project, repo: null }, artifacts: [card()] });
+      return answer<typeof ProjectArtifacts>({
+        project: { slug: project, name: project, repo: null },
+        artifacts: [card()],
+      });
     }
     if (path === `/api/artifacts/by-slug/${project}/${slug}` || path === inArtifact) return json(artifact());
     if (path === `${inArtifact}/threads`) return json([]);
     if (path === `${inArtifact}/seen`) return json({ ok: true });
     if (path === `${inArtifact}/versions`) {
-      return json([
+      return answer<z.ZodArray<typeof VersionRow>>([
         {
           n: version,
           name: null,
@@ -284,9 +363,9 @@ export async function devCommand(flags: { port: number }, out: Output) {
         },
       ]);
     }
-    if (path === `${inArtifact}/versions/${version}`) return json(versionBody());
+    if (path === `${inArtifact}/versions/${version}`) return answer<typeof VersionDetail>(versionBody());
     if (path === `${inArtifact}/content-token`) {
-      return json({
+      return answer<typeof ContentToken>({
         base: `${contentOrigin}/${secret}/v${version}/`,
         expiresAt: new Date(Date.now() + 7200_000).toISOString(),
       });
@@ -324,106 +403,42 @@ export async function devCommand(flags: { port: number }, out: Output) {
     return new Response(asset.body, { headers: { "Content-Type": asset.type } });
   }
 
-  /** The same sandbox as the server, with env.DATA on .artifacts/data (08). */
-  type Child = {
-    up: Promise<void>;
-    run(
-      options: unknown,
-    ): Promise<{ response?: SandboxResponse; logs?: { level: string; message: string }[] }>;
-  };
-  type SandboxResponse = { status: number; headers: [string, string][]; body: string };
-  let sandbox: Child | null = null;
-  let requests = 0;
-  async function backend(request: Request, path: string) {
-    const source = built?.files.get("__backend.js");
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-    if (!source) return new Response("No backend", { status: 404, headers: CORS });
-    const dir = ensureHelper(out);
-    // From the helper folder, not bundled: the binary embeds this file as text for that folder (07).
-    const { startChild } = await import(join(dir, "sandbox-host.js"));
-    sandbox ??= startChild({
-      childPath: join(dir, "sandbox-child.js"),
-      prelude: readFileSync(join(dir, "sandbox-prelude.js"), "utf8"),
-      onExit: () => {
-        sandbox = null;
-      },
-    });
-    const child = sandbox as Child;
-    await child.up;
+  /** The same sandbox and answers as the server, with env.DATA on .artifacts/data (08). */
+  const data = fileStore(dataDir);
+  let sandbox: ReturnType<Awaited<ReturnType<typeof sandboxHost>>["localSandbox"]> | null = null;
+  async function backend(request: Request, path: string, search: string) {
+    const host = await sandboxHost(out);
+    if (request.method === "OPTIONS") return host.preflight();
+    const source = built?.files.get(BACKEND_BUNDLE);
+    if (!source) return new Response("No backend", { status: 404, headers: host.CORS });
+    sandbox ??= host.localSandbox();
     const code = readFileSync(source.source, "utf8");
-    const { response, logs } = await child.run({
-      id: ++requests,
+    const { response, logs } = await host.runBackend({
+      run: sandbox.run,
       hash: source.hash,
       code: () => code,
-      limits: { timeoutMs: 10_000, memoryMb: 64 },
+      limits: DEFAULT_ORG_SETTINGS.limits,
+      caller: LOCAL_CALLER,
       request: {
-        url: `https://backend.invalid/api/${path}`,
         method: request.method,
-        headers: {
-          "content-type": request.headers.get("content-type") ?? "",
-          "x-caller": JSON.stringify({
-            id: "local",
-            name: "You",
-            kind: "owner",
-            canComment: true,
-            isPublisher: true,
-          }),
-        },
+        path,
+        search,
+        contentType: request.headers.get("content-type"),
         body: await request.text(),
       },
-      onData: async (raw: string) => {
-        const op = JSON.parse(raw) as {
-          op: string;
-          key?: string;
-          prefix?: string;
-          value?: unknown;
-          ifMatch?: string;
-        };
-        const named = op.op === "list" ? op.prefix || "shared/" : (op.key ?? "");
-        if (!isDataKey(named)) return { error: { code: "invalid", message: "That isn't a valid key." } };
-        const key = /^(shared|me|files)\//.test(named) ? named : `shared/${named}`;
-        const file = inData(join(dataDir, key));
-        if (op.op === "list") {
-          const bare = !op.prefix || key !== named;
-          const stored = existsSync(dataDir) ? [...new Bun.Glob("**/*").scanSync(dataDir)] : [];
-          const keys = stored
-            .filter((name) => name.startsWith(key))
-            .map((name) => (bare ? name.slice("shared/".length) : name));
-          return { value: { keys, nextCursor: null } };
-        }
-        if (op.op === "get") {
-          if (!existsSync(file)) return { value: null };
-          return { value: { value: JSON.parse(readFileSync(file, "utf8")), etag: etagOf(file) } };
-        }
-        if (op.ifMatch && (op.ifMatch === "*" ? existsSync(file) : etagOf(file) !== op.ifMatch)) {
-          return { error: { code: "precondition_failed", message: "Someone wrote first." } };
-        }
-        if (op.op === "put") {
-          mkdirSync(dirname(file), { recursive: true });
-          writeFileSync(file, JSON.stringify(op.value));
-          return { value: { etag: etagOf(file) } };
-        }
-        if (op.op === "delete") rmSync(file, { force: true });
-        return { value: true };
-      },
+      onData: host.localData(data),
     });
-    for (const line of logs ?? []) out.say(`backend ${line.level}: ${line.message}`);
-    if (!response) return new Response('{"error":"The sandbox stopped."}', { status: 502, headers: CORS });
-    const safe = (response.headers as [string, string][]).filter(([name]) =>
-      SAFE_HEADERS.has(name.toLowerCase()),
-    );
-    return new Response(response.body, {
-      status: response.status,
-      headers: { ...CORS, "Cache-Control": "no-store", ...Object.fromEntries(safe) },
-    });
+    for (const line of logs) out.say(`backend ${line.level}: ${line.message}`);
+    return response;
   }
 
   /** Bundle files, under the same CSP the content host uses, so what works here works published. */
   function content(request: Request) {
     const refused = wrongHost(request, contentHosts);
     if (refused) return refused;
-    const api = new RegExp(`^/${secret}/v\\d+/api/(.*)$`).exec(new URL(request.url).pathname);
-    if (api) return backend(request, api[1] as string);
+    const url = new URL(request.url);
+    const api = new RegExp(`^/${secret}/v\\d+/api/(.*)$`).exec(url.pathname);
+    if (api) return backend(request, api[1] as string, url.search);
     const match = new RegExp(`^/${secret}/v\\d+/(.*)$`).exec(new URL(request.url).pathname);
     const file = match ? built?.files.get(decodeURIComponent(match[1] as string)) : undefined;
     if (!file) return new Response("Not found", { status: 404 });
@@ -442,17 +457,12 @@ export async function devCommand(flags: { port: number }, out: Output) {
   Bun.serve({ port: flags.port + 1, hostname: "127.0.0.1", fetch: content });
 
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let busy = false;
+  const build = coalesced(() => rebuild().catch((error) => out.warn((error as Error).message)));
   watch(root, { recursive: true }, (_event, name) => {
     const path = String(name ?? "");
-    if (path.startsWith(".artifacts") || path.startsWith(".git") || path.startsWith("node_modules")) return;
+    if (path.startsWith(LOCAL) || path.startsWith(".git") || path.startsWith("node_modules")) return;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(async () => {
-      if (busy) return;
-      busy = true;
-      await rebuild().catch((error) => out.warn((error as Error).message));
-      busy = false;
-    }, 200);
+    timer = setTimeout(build, 200);
   });
   await new Promise(() => {});
 }

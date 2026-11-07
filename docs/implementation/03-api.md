@@ -85,7 +85,7 @@ Requests to the viewer port with a `Host` that isn't a viewer domain get 421, ex
 | `POST /api/auth/reauth` | session | `{ password }` or a passkey assertion → refreshes `auth_at`. |
 | `POST /api/auth/reauth/check` | session, recent auth | `{ ok: true }`, or 401 `recent_auth_required`. It lets the viewer confirm someone before a redirect, which it can't retry. |
 | `GET /api/auth/google/start?intent=&next=&invite=` | none | 302 to Google, with a cookie for this round trip. `intent` is `signin` (the default), `invite`, `link`, `reauth` or `test`; the last three need a session, and refuse a request from another site. 404 while Google is off, except `test`. A link, not a form, because of CSP `form-action 'self'`. Viewer origins only. 60 per IP per 15 minutes. |
-| `GET /api/auth/google/callback?state=&code=` | none | Finishes it, then 302 to the viewer with `?google=<result>`: `expired`, `off`, `cancelled`, `failed`, `unverified`, `link-first`, `no-account`, `invite-mismatch`, `invite-gone`, `in-use`, `recent`, `mismatch`, `linked`, `confirmed` or `tested`. The redirect URI is this path on each viewer origin. 60 per IP per 15 minutes. |
+| `GET /api/auth/google/callback?state=&code=` | none | Finishes it, then 302 to the viewer with `?google=<result>`: `expired`, `off`, `cancelled`, `failed`, `unverified`, `link-first`, `not-linked`, `no-account`, `invite-mismatch`, `invite-gone`, `in-use`, `recent`, `mismatch`, `linked`, `confirmed` or `tested`. The redirect URI is this path on each viewer origin. 60 per IP per 15 minutes. |
 | `GET /api/me/identities` | session | `{ identities: [{ id, provider, email, lastUsedAt }], passkeys, password, google }`: what the person can confirm themselves with, for the re-auth sheet. |
 | `DELETE /api/me/identities/:id` | session, recent auth | Refused if it's the person's only way in. |
 
@@ -382,3 +382,11 @@ Both are on viewer origins only, never the Live-preview origin. Issuer, resource
 | `GET /api/events?artifact=<id>` | `artifact.read`. Server-sent events: `thread`, `comment`, `version`, `decision`, `data` (`{ scope, key, etag }`, `shared` only). They say something changed and hold no content. Fan-out across replicas with Postgres `LISTEN/NOTIFY`. Access is checked again on each 25-second heartbeat, with the caller as they are now, so a stream closes within one heartbeat of a removed person, an ended session, a revoked token or a lost team. A stream also closes after 5 minutes and the browser reconnects. 10 streams per caller. |
 | `POST /api/push/subscribe` | `{ endpoint, keys }`; `GET /api/push/key` → `{ key }`, the VAPID public key. Only the HTTPS endpoints of Apple's, Google's, Mozilla's and Microsoft's push services are accepted, because the server POSTs to them. `keys.p256dh` must be an uncompressed P-256 point (65 bytes) and `keys.auth` 16 bytes, base64url. 10 devices per person; ended sessions' devices are removed daily. |
 | `DELETE /api/push/subscribe` | `{ endpoint }` |
+
+## Wikis
+
+- `POST /api/wikis` (`project.create`): CreateWiki → WikiCreated, 201 when created, 200 when already visible or converted from a managed project. Conflicts answer 409.
+- `GET /api/wikis/:slug` (`project.read`): WikiSpace with visible rules, pages, sources, log and garden findings. Ordinary projects answer 404.
+- `GET /api/artifacts/:id/links` (`artifact.read`): ArtifactLinks with outgoing targets, backlinks and sources. Hidden targets look missing.
+
+See [12-wikis.md](12-wikis.md) for the wiki contract.

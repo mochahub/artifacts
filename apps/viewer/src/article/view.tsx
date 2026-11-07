@@ -1,33 +1,22 @@
-import type { Artifact, Thread } from "@artifacts/schema";
-import { type ArticleThemeValues, articleStyle } from "@artifacts/schema/theme-css";
+import type { Artifact, ArtifactLinks, Thread, VersionPageOf } from "@artifacts/schema";
+import { articleStyle } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
-import { Diff, List, Menu, MessageCircle, MessagesSquare } from "lucide-preact";
+import { Diff, List, MessageCircle, MessagesSquare, ShieldAlert } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { api, post } from "../api.ts";
-import {
-  CommentSheet,
-  CommentsPanel,
-  CommentsSheet,
-  type Draft,
-  ThreadSheet,
-} from "../components/review.tsx";
-import { Sheet } from "../components/sheets.tsx";
-import { plural } from "../format.ts";
-import { tapped } from "../notify.ts";
+import { LoadFailed } from "../components/placeholder.tsx";
+import { Sheet } from "../components/sheet.tsx";
+import { PageCapsule } from "../components/shell.tsx";
+import { capitalize, plural } from "../format.ts";
+import { articleUrl, artifactHref, renderUrl } from "../paths.ts";
 import type { Remote } from "../poll.ts";
+import { useReview } from "../review/use-review.tsx";
 import { readStored, writeStored } from "../storage.ts";
 import { firstChange, markChanges } from "./diff.ts";
 import { useLiquidChrome, usePool } from "./liquid.ts";
 import { decorate, quoteFromSelection } from "./marks.ts";
 
-export type ArticlePage = {
-  key: string;
-  title: string | null;
-  readingMinutes: number;
-  theme?: ArticleThemeValues | null;
-  outline: { id: string; title: string; level: number }[];
-  blocks: { key: string; contentHash: string; changed: boolean }[];
-};
+export type ArticlePage = VersionPageOf<"article">;
 
 type Props = {
   artifact: Artifact;
@@ -44,6 +33,15 @@ type Props = {
 const SIZES = [17, 19, 21];
 const stored = (key: string, fallback: string) => readStored(`artifacts.read.${key}`) ?? fallback;
 
+/** "example.com" for a source's address: the whole URL is too long for one line on a phone. */
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
 export function ArticleView({
   artifact,
   page,
@@ -54,6 +52,25 @@ export function ArticleView({
   onPages,
   onVersions,
 }: Props) {
+  const links = useSignal<ArtifactLinks | null>(null);
+  const linksFailed = useSignal(false);
+  useEffect(() => {
+    let live = true;
+    links.value = null;
+    linksFailed.value = false;
+    if (artifact.projectKind === "wiki")
+      api<ArtifactLinks>(`/api/artifacts/${artifact.id}/links`).then(
+        (value) => {
+          if (live) links.value = value;
+        },
+        () => {
+          if (live) linksFailed.value = true;
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [artifact.id, artifact.projectKind, version]);
   const body = useRef<HTMLDivElement>(null);
   const capsule = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -61,6 +78,27 @@ export function ArticleView({
   const contents = useSignal(false);
   const settings = useSignal(false);
   const changes = useSignal(false);
+  const size = useSignal(Number(stored("size", "19")));
+  // "theme" until the reader picks: an artifact's own font, and a choice of theirs that isn't stored.
+  const font = useSignal(stored("font", page.theme?.font ? "theme" : "serif"));
+  const theme = useSignal(stored("theme", "auto"));
+  // Places changed since `previous`, once both versions are in; "new" when the page wasn't in it.
+  const changed = useSignal<number | "new" | null>(null);
+  const loaded = useSignal(0);
+  const failed = useSignal(false);
+  const attempt = useSignal(0);
+  useLiquidChrome({ capsule, bar, body, loaded: loaded.value });
+  const picking = useSignal(false);
+  usePool(bar, pool, [changes.value, picking.value]);
+  const review = useReview({
+    artifact,
+    page: page.key,
+    version,
+    threads,
+    where: () => page.title ?? page.key,
+  });
+  const { all, draft, openId, listOpen } = review;
+  const selection = useSignal<{ draft: NonNullable<typeof draft.value>; x: number; y: number } | null>(null);
   const pick = (event: MouseEvent) => {
     if (!picking.value) return;
     const block = (event.target as HTMLElement).closest<HTMLElement>("[data-block]");
@@ -69,46 +107,29 @@ export function ArticleView({
     picking.value = false;
     draft.value = { pageKey: page.key, anchor: { type: "block", blockKey: key }, where: where(key) };
   };
-  const size = useSignal(Number(stored("size", "19")));
-  // "theme" until the reader picks: an artifact's own font, and a choice of theirs that isn't stored.
-  const font = useSignal(stored("font", page.theme?.font ? "theme" : "serif"));
-  const theme = useSignal(stored("theme", "auto"));
-  // Places changed since `previous`, once both versions are in; "new" when the page wasn't in it.
-  const changed = useSignal<number | "new" | null>(null);
-  const loaded = useSignal(0);
-  useLiquidChrome({ capsule, bar, body, loaded: loaded.value });
-  const draft = useSignal<Draft | null>(null);
-  const picking = useSignal(false);
-  usePool(bar, pool, [changes.value, picking.value]);
-  const selection = useSignal<{ draft: Draft; x: number; y: number } | null>(null);
-  const openId = useSignal<string | null>(null);
-  const listOpen = useSignal(false);
-  const all = (threads.data.value ?? []).filter((thread) => thread.pageKey === page.key);
-  const openThread = all.find((thread) => thread.id === openId.value) ?? null;
-
-  // ?c=<n> opens a thread, once for each link or tapped notification.
-  const deepLinked = useRef("");
-  const link = `${location.search}/${tapped.value}`;
-  useEffect(() => {
-    const n = Number(new URLSearchParams(location.search).get("c"));
-    if (deepLinked.current === link || !n || all.length === 0) return;
-    const thread = all.find((entry) => entry.n === n);
-    if (!thread) return;
-    deepLinked.current = link;
-    openId.value = thread.id;
-  });
   const toggleChanges = () => {
     changes.value = !changes.value;
     // Marks below the fold look like nothing changed on a phone: bring the first one into view.
     const first = changes.value && body.current ? firstChange(body.current) : null;
     if (first) requestAnimationFrame(() => first.scrollIntoView({ block: "center", behavior: "smooth" }));
   };
-  const openCount = all.filter((thread) => thread.status === "open").length;
   const canComment = artifact.permissions.comment && latest;
   const where = (key: string) =>
-    `${page.title ?? page.key} / ${page.outline.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
+    `${page.title ?? page.key} / ${page.outline?.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
 
   // Only when the marks change: redrawing them on every poll would disturb a selection in progress.
+  useEffect(() => {
+    if (!body.current || !links.value) return;
+    const wanted = new Set(
+      links.value.outgoing.filter((link) => !link.exists).map((link) => artifactHref(link)),
+    );
+    for (const anchor of body.current.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+      if (wanted.has(anchor.getAttribute("href") ?? "")) {
+        anchor.classList.add("wanted");
+        anchor.title = "Not written yet";
+      }
+    }
+  }, [links.value, loaded.value]);
   const marks = JSON.stringify(all.map((t) => [t.id, t.n, t.status, t.anchorState, t.anchor]));
   useEffect(() => {
     if (body.current && loaded.value > 0) {
@@ -163,26 +184,32 @@ export function ArticleView({
   useEffect(() => {
     let live = true;
     const article = (n: number) =>
-      api<string>(`/api/artifacts/${artifact.id}/v/${n}/article/${page.key}`, { text: true }).then(
+      api<string>(articleUrl(artifact.id, n, page.key), { text: true }).then(
         // Sanitized by the server at commit (05); only `artifacts:blob/` needs mapping.
-        (html) => html.replaceAll("artifacts:blob/", `/api/artifacts/${artifact.id}/r/`),
+        (html) => html.replaceAll("artifacts:blob/", renderUrl(artifact.id, "")),
       );
     // A page the version before didn't have answers 404: all of it is new.
     const before = previous ? article(previous).catch(() => null) : Promise.resolve(undefined);
-    Promise.all([article(version), before]).then(([html, old]) => {
-      if (!live || !body.current) return;
-      // The publisher's theme stops at this element: the review UI around it keeps its own look.
-      for (const [name, value] of Object.entries(articleStyle(page.theme))) {
-        body.current.style.setProperty(name, value);
-      }
-      body.current.innerHTML = html;
-      changed.value = old === undefined ? null : old === null ? "new" : markChanges(body.current, old);
-      loaded.value += 1;
-    });
+    failed.value = false;
+    Promise.all([article(version), before]).then(
+      ([html, old]) => {
+        if (!live || !body.current) return;
+        // The publisher's theme stops at this element: the review UI around it keeps its own look.
+        for (const [name, value] of Object.entries(articleStyle(page.theme))) {
+          body.current.style.setProperty(name, value);
+        }
+        body.current.innerHTML = html;
+        changed.value = old === undefined ? null : old === null ? "new" : markChanges(body.current, old);
+        loaded.value += 1;
+      },
+      () => {
+        if (live) failed.value = true;
+      },
+    );
     return () => {
       live = false;
     };
-  }, [artifact.id, version, previous, page]);
+  }, [artifact.id, version, previous, page, attempt.value]);
   useEffect(() => {
     let sent = 0;
     const onScroll = () => {
@@ -242,19 +269,67 @@ export function ArticleView({
           <span>{page.readingMinutes} min read</span>
           <span class="word agent">v{version}</span>
         </div>
+        {failed.value && (
+          <LoadFailed
+            retry={() => {
+              attempt.value += 1;
+            }}
+          />
+        )}
+        {links.value?.untrusted && (
+          <p class="wiki-trust word">
+            <ShieldAlert />
+            {links.value.role === "source" ? "Untrusted source" : "Written from untrusted sources"}
+            {links.value.origin && `, ${hostOf(links.value.origin)}`}
+          </p>
+        )}
         <div ref={body} />
+        {linksFailed.value && <p class="ss">Sources and links could not be loaded.</p>}
+        {links.value && (
+          <footer class="wiki-footer">
+            {(
+              [
+                ["Sources", links.value.sources],
+                ["Linked from", links.value.backlinks],
+              ] as const
+            )
+              // A source is where pages come from; it cites nothing itself.
+              .filter(([title]) => title !== "Sources" || links.value?.role !== "source")
+              .map(([title, items]) => (
+                <section key={title}>
+                  <h2>{title}</h2>
+                  {items.length === 0 ? (
+                    <p class="ss">{title === "Sources" ? "No sources cited." : "No pages link here yet."}</p>
+                  ) : (
+                    items.map((link) => (
+                      <a class="li" href={artifactHref(link)} key={`${link.project}/${link.slug}`}>
+                        <div class="grow">
+                          <div class="tt">{link.title ?? link.slug}</div>
+                          {link.summary && <div class="ss">{link.summary}</div>}
+                          {link.untrusted && (
+                            <span class="word">
+                              <ShieldAlert />
+                              Untrusted source{link.origin ? `, ${hostOf(link.origin)}` : ""}
+                            </span>
+                          )}
+                        </div>
+                      </a>
+                    ))
+                  )}
+                </section>
+              ))}
+          </footer>
+        )}
       </article>
-      <div ref={capsule} class="capsule glass liquid">
-        <button type="button" class="icon-btn" aria-label="Pages" onClick={onPages}>
-          <Menu />
-        </button>
-        <button type="button" class="where" onClick={onPages}>
-          <b>{page.title ?? page.key}</b>
-          <span>{artifact.title}</span>
-        </button>
-        <button type="button" class="vchip" aria-label="Version history" onClick={onVersions}>
-          v{version}
-        </button>
+      <PageCapsule
+        box={capsule}
+        liquid
+        title={page.title ?? page.key}
+        subtitle={artifact.title}
+        version={version}
+        onPages={onPages}
+        onVersions={onVersions}
+      >
         <button
           type="button"
           class="round"
@@ -266,7 +341,7 @@ export function ArticleView({
         >
           Aa
         </button>
-      </div>
+      </PageCapsule>
       {settings.value && (
         <div class="popover glass liquid thick">
           <span class="gh">Text size</span>
@@ -295,8 +370,7 @@ export function ArticleView({
                   theme.value = value;
                 }}
               >
-                {value[0]?.toUpperCase()}
-                {value.slice(1)}
+                {capitalize(value)}
               </button>
             ))}
           </div>
@@ -356,7 +430,7 @@ export function ArticleView({
         >
           <MessagesSquare />
           <span class="l">Comments</span>
-          {openCount > 0 && <b class="count">{openCount}</b>}
+          {review.openCount > 0 && <b class="count">{review.openCount}</b>}
         </button>
       </div>
       {picking.value && <div class="hint glass liquid thick">Tap a paragraph</div>}
@@ -378,52 +452,7 @@ export function ArticleView({
           Comment
         </button>
       )}
-      <CommentsPanel
-        artifact={artifact}
-        threads={all}
-        onOpen={(thread) => {
-          openId.value = thread.id;
-        }}
-      />
-      {draft.value && (
-        <CommentSheet
-          artifact={artifact}
-          version={version}
-          draft={draft.value}
-          onClose={() => {
-            draft.value = null;
-          }}
-          onPosted={() => {
-            draft.value = null;
-            threads.refresh();
-          }}
-        />
-      )}
-      {openThread && (
-        <ThreadSheet
-          artifact={artifact}
-          thread={openThread}
-          subtitle={page.title ?? page.key}
-          base={`/${artifact.project}/${artifact.slug}`}
-          threads={threads}
-          onClose={() => {
-            openId.value = null;
-          }}
-        />
-      )}
-      {listOpen.value && (
-        <CommentsSheet
-          artifact={artifact}
-          threads={all}
-          onOpen={(thread) => {
-            listOpen.value = false;
-            openId.value = thread.id;
-          }}
-          onClose={() => {
-            listOpen.value = false;
-          }}
-        />
-      )}
+      {review.sheets}
       {contents.value && (
         <Sheet
           title="Contents"
@@ -432,7 +461,7 @@ export function ArticleView({
           }}
         >
           <div class="group">
-            {page.outline.map((entry) => (
+            {page.outline?.map((entry) => (
               <button
                 type="button"
                 class="li btn-li"

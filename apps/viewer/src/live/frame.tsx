@@ -1,7 +1,7 @@
-import type { Artifact } from "@artifacts/schema";
+import type { Artifact, ContentToken, DataScope } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import { ApiFailure, post } from "../api.ts";
+import { message, post } from "../api.ts";
 import { startBridge } from "./bridge.ts";
 
 type Props = {
@@ -10,7 +10,7 @@ type Props = {
   path: string;
   width?: number;
   height?: number;
-  onUse?(scope: "shared" | "me"): void;
+  onUse?(scope: DataScope): void;
 };
 
 /** A live page in its sandbox: only allow-scripts, never allow-same-origin (04). */
@@ -18,14 +18,17 @@ export function LiveFrame({ artifact, version, path, width, height, onUse }: Pro
   const iframe = useRef<HTMLIFrameElement>(null);
   const src = useSignal<string | null>(null);
   const error = useSignal<string | null>(null);
+  // Read when a frame first saves, so a new callback each render doesn't restart the bridge.
+  const used = useRef(onUse);
+  used.current = onUse;
 
   useEffect(() => {
-    post<{ base: string }>(`/api/artifacts/${artifact.id}/content-token`, { version })
+    post<ContentToken>(`/api/artifacts/${artifact.id}/content-token`, { version })
       .then(({ base }) => {
         src.value = `${base}${path.split("/").map(encodeURIComponent).join("/")}`;
       })
       .catch((failure) => {
-        error.value = failure instanceof ApiFailure ? failure.message : "Live previews aren't available.";
+        error.value = message(failure, "Live previews aren't available.");
       });
   }, [artifact.id, version, path, src, error]);
 
@@ -37,9 +40,9 @@ export function LiveFrame({ artifact, version, path, width, height, onUse }: Pro
       iframe: iframe.current,
       artifactId: artifact.id,
       canWrite: artifact.permissions.comment,
-      onUse,
+      onUse: (scope) => used.current?.(scope),
     });
-  }, [src.value, artifact.id, artifact.permissions.comment, onUse]);
+  }, [src.value, artifact.id, artifact.permissions.comment]);
 
   if (error.value) return <p class="err">{error.value}</p>;
   if (!src.value) return null;
@@ -57,5 +60,12 @@ export function LiveFrame({ artifact, version, path, width, height, onUse }: Pro
   );
 }
 
-export const savedNotice = (scope: "shared" | "me") =>
-  scope === "shared" ? "Saved for everyone" : "Saved for you";
+/** Where a frame's saves go, once it first saves or reads. */
+export function SavedNotice({ scope, place }: { scope: DataScope | null; place: "hint" | "notice" }) {
+  if (!scope) return null;
+  return (
+    <div class={`${place} glass`}>
+      {scope === "shared" ? "Saved for everyone" : "Saved for you"}. Its author can see what's saved.
+    </div>
+  );
+}

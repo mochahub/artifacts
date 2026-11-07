@@ -1,14 +1,5 @@
-import type { CanvasFrame } from "@artifacts/schema";
+import type { BoardRecord, CanvasFrame } from "@artifacts/schema";
 
-export type Board = {
-  key: string;
-  title: string;
-  subtitle?: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
 export type Pin = {
   id: string;
   n: number;
@@ -61,7 +52,7 @@ export function fitScale(
  * Boards come left to right (06). A tall screen wraps them into two columns, as board 02 draws it,
  * or four boards in a row come out tiny on a phone. Only positions on screen change, never anchors.
  */
-export function arrange(boards: Board[], frames: CanvasFrame[], columns: number) {
+export function arrange(boards: BoardRecord[], frames: CanvasFrame[], columns: number) {
   const GAP_X = 120;
   const GAP_Y = 180;
   const widths = Array.from({ length: columns }, (_, column) =>
@@ -95,7 +86,7 @@ export class CanvasEngine {
   y = 0;
   s = 1;
   private readonly frames: CanvasFrame[];
-  private readonly boards: Board[];
+  private readonly boards: BoardRecord[];
   private readonly imgs = new Map<string, { el: HTMLImageElement; level: string; box: HTMLElement }>();
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pins: Pin[] = [];
@@ -115,7 +106,7 @@ export class CanvasEngine {
     private readonly world: HTMLElement,
     private readonly overlay: HTMLElement,
     allFrames: CanvasFrame[],
-    allBoards: Board[],
+    allBoards: BoardRecord[],
     private readonly options: Options,
   ) {
     const tall = root.clientHeight > root.clientWidth;
@@ -325,6 +316,8 @@ export class CanvasEngine {
 
   private apply() {
     this.world.style.transform = `translate(${this.x}px, ${this.y}px) scale(${this.s})`;
+    // The transform as numbers, for tests and tools to read without parsing a matrix.
+    Object.assign(this.world.dataset, { x: String(this.x), y: String(this.y), s: String(this.s) });
     this.placePins();
     if (!this.lodTimer) {
       this.lodTimer = setTimeout(() => {

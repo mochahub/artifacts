@@ -162,6 +162,21 @@ export class Bucket {
     };
   }
 
+  async *listAll(prefix: string): AsyncGenerator<ObjectInfo[]> {
+    let cursor: string | undefined;
+    do {
+      const page = await this.list(prefix, { cursor });
+      yield page.objects;
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+  }
+
+  async deletePrefix(prefix: string): Promise<void> {
+    for await (const objects of this.listAll(prefix)) {
+      await Promise.all(objects.map((object) => this.delete(object.key)));
+    }
+  }
+
   async delete(key: string, options: { ifMatch?: string } = {}): Promise<void> {
     await this.conditional(async () => {
       await this.s3.send(new DeleteObjectCommand({ Bucket: this.name, Key: key, IfMatch: options.ifMatch }));

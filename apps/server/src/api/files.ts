@@ -1,15 +1,17 @@
-import { ContentTokenRequest } from "@artifacts/schema";
+import type { ContentToken } from "@artifacts/schema";
+import { ContentTokenRequest, HOUR_MS, SHA256_HEX } from "@artifacts/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { can } from "../auth/can.ts";
 import { signContentToken } from "../content/token.ts";
 import { frames, pages, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { blobKey } from "../publish/blobs.ts";
-import { artifactParam } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import { parseBody, type Routes } from "./routes.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { Routes } from "../http/routes.ts";
+import { blobKey } from "../layout.ts";
 
-const CONTENT_TOKEN_MS = 2 * 3600_000;
+const CONTENT_TOKEN_MS = 2 * HOUR_MS;
 const IMAGE = /^image\//;
 /** A picture bigger than this goes by the redirect, rather than through the app's memory. */
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
@@ -21,7 +23,7 @@ export function fileRoutes(routes: Routes, deps: Deps) {
   routes.get("/api/artifacts/:id/r/:hash", { action: "artifact.read", resource: artifact }, async (c) => {
     const id = c.req.param("id") as string;
     const hash = c.req.param("hash") as string;
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new ApiError("not_found", "Not found.");
+    if (!SHA256_HEX.test(hash)) throw new ApiError("not_found", "Not found.");
     // Only hashes a live version of this artifact uses, or any artifact's file could be read by hash.
     const hashJson = JSON.stringify({ h: hash });
     const [found] = await db
@@ -85,7 +87,7 @@ export function fileRoutes(routes: Routes, deps: Deps) {
             )
             .limit(1)
         : [];
-      const hash = (row?.meta as { htmlHash?: string } | undefined)?.htmlHash;
+      const hash = row?.meta.htmlHash;
       const object = hash ? await bucket.get(blobKey(hash)) : null;
       if (!object) throw new ApiError("not_found", "Not found.");
       // Never rendered on the viewer's origin, even if someone opens this URL directly (03).
@@ -105,9 +107,8 @@ export function fileRoutes(routes: Routes, deps: Deps) {
     async (c) => {
       if (!env.contentUrl) throw new ApiError("conflict", "Live previews aren't set up on this deployment.");
       const { version } = await parseBody(c, ContentTokenRequest);
-      const id = c.req.param("id") as string;
-      const caller = c.get("caller");
-      const resource = await artifact(c);
+      const { caller, resource } = c.var;
+      const { id } = resource;
       const [row] = await db
         .select({ n: versions.n })
         .from(versions)
@@ -137,7 +138,7 @@ export function fileRoutes(routes: Routes, deps: Deps) {
       return c.json({
         base: `${env.contentUrl}/t/${token}/v${version}/`,
         expiresAt: new Date(exp).toISOString(),
-      });
+      } satisfies ContentToken);
     },
   );
 }

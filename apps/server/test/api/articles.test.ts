@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { VersionBundle } from "@artifacts/schema";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { claim, mcp, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { makePerson, publish } from "../publish-helper.ts";
 
 const XSS = `# Report
@@ -18,13 +18,9 @@ describe("articles with no CLI", () => {
   let t: TestServer;
   let token: string;
   let cookie: string;
-  let id = 1;
+  let orgId: string;
   const call = async (name: string, args: object, bearer = token) => {
-    const response = await t.api("/api/mcp", {
-      method: "POST",
-      bearer,
-      json: { jsonrpc: "2.0", id: id++, method: "tools/call", params: { name, arguments: args } },
-    });
+    const response = await mcp(t, bearer, "tools/call", { name, arguments: args });
     const body = (await response.json()) as { result: { content: { text: string }[]; isError?: boolean } };
     return body.result;
   };
@@ -40,7 +36,7 @@ describe("articles with no CLI", () => {
 
   beforeAll(async () => {
     t = await startTestServer();
-    token = (await claim(t)).token;
+    ({ token, orgId } = await claim(t));
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
@@ -88,9 +84,7 @@ describe("articles with no CLI", () => {
     const html = await (await t.api(`/api/artifacts/${artifact}/v/1/article/doc`, { cookie })).text();
     for (const bad of ["<script", "onerror", "javascript:", "evil.test"]) expect(html).not.toContain(bad);
     expect(html).toContain("Hello");
-    // The stored Markdown keeps what was typed: it's source, and the viewer never renders it.
-    const { sanitizeArticle } = await import("@artifacts/schema/sanitize");
-    expect(sanitizeArticle(html)).toBe(html);
+    expect(html).toContain("click");
   });
 
   test("a new version re-anchors comments, like any publish", async () => {
@@ -144,10 +138,8 @@ describe("articles with no CLI", () => {
   });
 
   test("the usual permission applies", async () => {
-    const [org] = await t.server.db.query.org.findMany();
-    const orgId = (org as { id: string }).id;
-    const reviewer = await makePerson(t, orgId, "reviewer");
-    const other = await makePerson(t, orgId, "member");
+    const reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    const other = (await makePerson(t, orgId, "member")).token;
     const args = { project: "notes", title: "T", summary: "S", markdown: "# T\n" };
     expect(
       (await call("artifacts_publish_article", { ...args, slug: "by-reviewer" }, reviewer)).isError,

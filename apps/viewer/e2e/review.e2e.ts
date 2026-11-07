@@ -1,34 +1,30 @@
 import { expect, type Page, test } from "@playwright/test";
-import { box, watchErrors } from "./helpers.ts";
+import { here, settle, shot, tap, token, watchErrors } from "./helpers.ts";
+import { publishCopy } from "./seed.ts";
 
-const shot = async (page: Page, project: string, name: string) => {
-  if (project === "iphone")
-    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/${name}.png` });
-  if (project === "desktop")
-    await page.screenshot({ animations: "disabled", path: `../../docs/mocks/shots/desktop-${name}.png` });
-};
+const desktop = { desktop: true };
 
-/** Taps the canvas at the middle of a frame, as a pointer would. */
+/** Taps the canvas at the middle of the first frame, as a pointer would. */
 async function tapFrame(page: Page) {
-  const box = await page
-    .locator(".fr")
-    .first()
-    .evaluate((el) => {
-      const rect = el.getBoundingClientRect();
-      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-    });
-  for (const type of ["pointerdown", "pointerup"]) {
-    await page
-      .locator(".cv")
-      .dispatchEvent(type, { pointerId: 1, clientX: box.x, clientY: box.y, bubbles: true, isPrimary: true });
-  }
+  const frame = (await page.getByRole("img").first().boundingBox()) as {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  await tap(page, frame.x + frame.width / 2, frame.y + frame.height / 2);
+}
+
+/** Opens the welcome frame and waits for the canvas to finish moving there. */
+async function openWelcome(page: Page) {
+  await page.goto("/camerabuddy/roadmap/mocks#frame=welcome");
+  await expect(here(page, "Welcome")).toBeVisible();
+  await settle(page);
 }
 
 /** Tests run in parallel, so each one that needs an open thread pins its own. */
 async function pinComment(page: Page, text: string) {
-  await page.goto("/camerabuddy/roadmap/mocks#frame=welcome");
-  await expect(page.locator(".capsule b")).toHaveText("Welcome");
-  await page.waitForTimeout(350);
+  await openWelcome(page);
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   await tapFrame(page);
   const sheet = page.getByRole("dialog", { name: "New comment" });
@@ -41,9 +37,7 @@ async function pinComment(page: Page, text: string) {
 test("pin a comment, read it, reply and resolve", async ({ page }, info) => {
   const errors = watchErrors(page);
   const text = `Move this up ${info.project.name}`;
-  await page.goto("/camerabuddy/roadmap/mocks#frame=welcome");
-  await expect(page.locator(".capsule b")).toHaveText("Welcome");
-  await page.waitForTimeout(350);
+  await openWelcome(page);
 
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   await expect(page.getByText("Tap a spot to comment")).toBeVisible();
@@ -55,20 +49,19 @@ test("pin a comment, read it, reply and resolve", async ({ page }, info) => {
   // The toolbar steps aside, so its labels don't show through the sheet under Cancel and Post.
   await expect(page.locator(".vbar")).toBeHidden();
   await sheet.getByLabel("Comment").fill(text);
-  await shot(page, info.project.name, "02-3-comment");
+  await shot(page, "02-3-comment", desktop);
   await sheet.getByRole("button", { name: "Post" }).click();
 
   const dialog = page.getByRole("dialog").filter({ hasText: text });
   await expect(dialog).toBeVisible();
   await expect(page.locator(".vbar")).toBeVisible();
   // The same title as an article thread, with the frame underneath it.
-  await expect(dialog.locator(".shead .t")).toContainText(/^Comment \d+/);
-  await expect(dialog.locator(".shead .fn")).toHaveText("Welcome");
-  await expect(dialog.locator(".crop")).toBeVisible();
-  await expect
-    .poll(() => dialog.locator(".crop").evaluate((img: HTMLImageElement) => img.naturalWidth))
-    .toBeGreaterThan(0);
-  await shot(page, info.project.name, "02-4-thread");
+  await expect(dialog).toHaveAccessibleName(/^Comment \d+$/);
+  await expect(dialog.getByText("Welcome", { exact: true })).toBeVisible();
+  const crop = dialog.getByRole("img", { name: "The area this comment points at" });
+  await expect(crop).toBeVisible();
+  await expect.poll(() => crop.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  await shot(page, "02-4-thread", desktop);
 
   await dialog.getByLabel("Reply").fill("Second thought");
   await dialog.getByRole("button", { name: "Send" }).click();
@@ -135,32 +128,37 @@ test("if the copy fails, the prompt is there to select", async ({ page }, info) 
   const sheet = page.getByRole("dialog", { name: "Comments" });
   await sheet.getByRole("button", { name: "Copy prompt for your agent" }).click();
   await expect(sheet.getByText("Couldn't copy.")).toBeVisible();
-  await expect(sheet.locator(".copy-prompt-text")).toContainText("artifacts pull camerabuddy/roadmap");
+  await expect(sheet.getByText("artifacts pull camerabuddy/roadmap")).toBeVisible();
 });
 
-test("the comment sheet sits on the keyboard, and a thread opens from ?c=", async ({ page }, info) => {
+test("the comment sheet sits on the keyboard", async ({ page }, info) => {
   test.skip(info.project.name !== "iphone", "phone only");
   await page.goto("/camerabuddy/roadmap/mocks#frame=timer");
-  await expect(page.locator(".capsule b")).toHaveText("Timer");
-  await page.waitForTimeout(350);
+  await expect(here(page, "Timer")).toBeVisible();
+  await settle(page);
   // A simulated keyboard: visualViewport shrinks by 336 pt, as on an iPhone.
-  await page.evaluate(() => {
+  const keyboard = 336;
+  await page.evaluate((keyboard) => {
     const viewport = window.visualViewport as VisualViewport;
-    Object.defineProperty(viewport, "height", { get: () => innerHeight - 336 });
-  });
+    Object.defineProperty(viewport, "height", { get: () => innerHeight - keyboard });
+  }, keyboard);
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   await tapFrame(page);
   const sheet = page.getByRole("dialog", { name: "New comment" });
   await expect(sheet).toBeVisible();
   await expect
     .poll(() => sheet.evaluate((el) => el.getBoundingClientRect().bottom))
-    .toBeLessThanOrEqual(852 - 336);
+    .toBeLessThanOrEqual((page.viewportSize() as { height: number }).height - keyboard);
   await sheet.getByRole("button", { name: "Close" }).click();
 });
 
 test("comment on a passage: select text, then the quote travels and highlights", async ({ page }, info) => {
+  test.setTimeout(120_000);
   const errors = watchErrors(page);
-  await page.goto(`/camerabuddy/roadmap/research-0${info.project.name === "iphone" ? 3 : 4}`);
+  // Its own copy: the other run's highlight on the same words would be the first one here.
+  const slug = `quote-${info.project.name}${info.repeatEachIndex}`;
+  publishCopy(slug, token());
+  await page.goto(`/camerabuddy/${slug}/research-03`);
   const paragraph = page.locator('[data-block="findings/p1"]');
   await expect(paragraph).toBeVisible();
   await paragraph.evaluate((el) => {
@@ -178,23 +176,24 @@ test("comment on a passage: select text, then the quote travels and highlights",
   await sheet.getByLabel("Comment").fill(`Source? ${info.project.name}`);
   await sheet.getByRole("button", { name: "Post" }).click();
   await expect(sheet).toHaveCount(0);
-  await expect(page.locator("mark.hl").first()).toHaveText("first finding");
-  await shot(page, info.project.name, "03-4-quote");
+  await expect(page.locator("mark.hl")).toHaveText("first finding");
+  await shot(page, "03-4-quote", desktop);
   // The margin tab is whole on a phone: inside the gutter, not past the edge of the screen.
-  const tab = await box(page, ".mm");
+  const mark = paragraph.getByRole("button", { name: /^Comment \d+$/ });
+  const tab = (await mark.boundingBox()) as { x: number; width: number };
   expect(tab.x).toBeGreaterThanOrEqual(0);
-  expect(tab.right).toBeLessThanOrEqual((page.viewportSize() as { width: number }).width);
-  expect(tab.w).toBeGreaterThanOrEqual(24);
-  await page.locator(".mm").first().click();
+  expect(tab.x + tab.width).toBeLessThanOrEqual((page.viewportSize() as { width: number }).width);
+  expect(tab.width).toBeGreaterThanOrEqual(24);
+  await mark.click();
   const thread = page.getByRole("dialog");
   await expect(thread.locator(".quote")).toHaveText("first finding");
-  await expect(thread.locator(".shead .t")).toContainText(/^Comment \d+/);
-  await expect(thread.locator(".shead .fn")).toHaveText(/metering|peaking/);
+  await expect(thread).toHaveAccessibleName(/^Comment \d+$/);
+  await expect(thread.getByText(/metering|peaking/)).toBeVisible();
   expect(errors).toEqual([]);
 });
 
-test("comment on a whole paragraph: the selection ends in the next block", async ({ page }, info) => {
-  await page.goto(`/camerabuddy/roadmap/research-0${info.project.name === "iphone" ? 3 : 4}`);
+test("comment on a whole paragraph: the selection ends in the next block", async ({ page }) => {
+  await page.goto("/camerabuddy/roadmap/research-03");
   const paragraph = page.locator('[data-block="findings/p1"]');
   await expect(paragraph).toBeVisible();
   // What a triple-click leaves: from the paragraph's first word to offset 0 of the block after it.
@@ -220,7 +219,12 @@ test("comment on a block: tap Comment, then a paragraph", async ({ page }, info)
   const sheet = page.getByRole("dialog", { name: "New comment" });
   await sheet.getByLabel("Comment").fill(`Whole paragraph ${info.project.name}`);
   await sheet.getByRole("button", { name: "Post" }).click();
-  await expect(page.locator('[data-block="findings/p2"] .mm').first()).toBeVisible();
+  await expect(
+    page
+      .locator('[data-block="findings/p2"]')
+      .getByRole("button", { name: /^Comment \d+$/ })
+      .first(),
+  ).toBeVisible();
 });
 
 test("request changes, and the artifact says so", async ({ page }, info) => {
@@ -230,7 +234,7 @@ test("request changes, and the artifact says so", async ({ page }, info) => {
   await sheet.getByRole("button", { name: "Request changes" }).first().click();
   await sheet.getByLabel("Note").fill(`Tighten it ${info.project.name}`);
   await expect(sheet.getByText("artifacts status")).toBeVisible();
-  await shot(page, info.project.name, "05-3-decide");
+  await shot(page, "05-3-decide", desktop);
   await sheet.getByRole("button", { name: "Request changes" }).last().click();
   const next = page.getByRole("dialog", { name: "Changes requested" });
   await expect(next.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();

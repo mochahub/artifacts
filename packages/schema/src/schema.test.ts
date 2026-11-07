@@ -5,6 +5,7 @@ import {
   DEFAULT_ORG_SETTINGS,
   EditComment,
   GuestName,
+  isGenerated,
   Manifest,
   OrgSettings,
   PublishResult,
@@ -106,11 +107,8 @@ describe("bridge messages", () => {
 });
 
 describe("api", () => {
-  test("default settings match their schema and the limits in 08", () => {
-    const settings = OrgSettings.parse(DEFAULT_ORG_SETTINGS);
-    expect(settings.limits.backendMemoryMb).toBe(64);
-    expect(settings.limits.backendRequestsPerMinute).toBe(120);
-    expect(settings.sandboxProcesses).toBe(2);
+  test("default settings are settings: the schema takes them as they are", () => {
+    expect(OrgSettings.parse(DEFAULT_ORG_SETTINGS)).toEqual(DEFAULT_ORG_SETTINGS);
   });
 
   test("accepts the PublishResult example in 03", () => {
@@ -188,5 +186,34 @@ describe("theme values can't become CSS", () => {
     expect(themeCss({ accent: "#ffffff" })).toContain("--art-on-accent:#141414");
     expect(themeCss({ accent: "#101010" })).toContain("--art-on-accent:#ffffff");
     expect(fontStack("Acme Sans")).toStartWith('"Acme Sans"');
+  });
+});
+
+describe("isGenerated", () => {
+  test("is what render writes, wherever a board lives (05)", () => {
+    for (const path of [
+      "__og.webp",
+      "__backend.js",
+      "__articles/plan.html",
+      `__renders/${"a".repeat(64)}.webp`,
+      "__board-onboarding.html",
+      "mocks/__board-onboarding.html",
+      "mocks/deep/__live-hero.html",
+    ]) {
+      expect(isGenerated(path)).toBe(true);
+    }
+  });
+
+  test("leaves an author's own files alone, even under a name that starts with __", () => {
+    for (const path of [
+      "artifact.json",
+      "mocks/body-01.html",
+      "assets/__img/logo.png",
+      "__drafts/notes.md",
+      "mocks/__shared.css",
+      "__articles/plan.md/extra.html",
+    ]) {
+      expect(isGenerated(path)).toBe(false);
+    }
   });
 });

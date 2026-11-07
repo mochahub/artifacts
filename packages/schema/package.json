@@ -5,11 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./constants": "./src/constants.ts",
+    "./bundle": "./src/bundle.ts",
     "./sanitize": "./src/sanitize.ts",
-    "./templates": "./src/templates.ts",
     "./brand-prompt": "./src/brand-prompt.ts",
     "./theme-css": "./src/theme-css.ts",
-    "./article": "./src/article.ts"
+    "./article": "./src/article.ts",
+    "./mcp": "./src/mcp.ts",
+    "./wiki": "./src/wiki.ts"
   },
   "dependencies": {
     "hast-util-sanitize": "^5.0.2",
@@ -27,6 +30,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/hast": "^3.0.5"
+    "@types/hast": "^3.0.5",
+    "@types/mdast": "^4.0.4"
   }
 }

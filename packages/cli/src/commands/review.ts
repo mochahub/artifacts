@@ -1,36 +1,19 @@
-import { Artifact, ArtifactReviewStatus, type Thread, Thread as ThreadSchema } from "@artifacts/schema";
+import {
+  ArtifactReviewStatus,
+  type Compare,
+  type DeletedList,
+  type DeleteResult,
+  type RestoreResult,
+  type Thread,
+  Thread as ThreadSchema,
+  type VersionRow,
+} from "@artifacts/schema";
 import { z } from "zod";
 import { detectAgent } from "../agent.ts";
-import { findRoot, loadManifest } from "../bundle/manifest.ts";
-import type { Client } from "../client.ts";
-import { CliError, type Output, UsageError } from "../output.ts";
-import { signedIn } from "./account.ts";
-
-/** A `<project>/<slug>` argument, or the nearest artifact.json (07). */
-export function artifactRef(target: string | undefined) {
-  if (target) {
-    const [project, slug, extra] = target.split("/");
-    // Slugs are a-z, 0-9 and -, so ".." can't climb out of /api/artifacts/by-slug/ in the URL below.
-    if (!project || !slug || extra || ![project, slug].every((part) => /^[a-z0-9-]{1,40}$/.test(part))) {
-      throw new UsageError(`Use <project>/<slug>, not "${target}".`);
-    }
-    return { project, slug };
-  }
-  const { manifest } = loadManifest(findRoot());
-  if (!manifest) throw new CliError("artifact.json isn't valid. Run artifacts lint.");
-  return { project: manifest.project, slug: manifest.slug };
-}
-
-/** A version number from the command line. It lands in a URL, so only digits pass. */
-export function versionNumber(value: string, what = "A version") {
-  if (!/^\d+$/.test(value)) throw new UsageError(`${what} must be a number, not "${value}".`);
-  return value;
-}
-
-export async function resolveArtifact(client: Client, target: string | undefined) {
-  const { project, slug } = artifactRef(target);
-  return Artifact.parse(await client.get(`/api/artifacts/by-slug/${project}/${slug}`));
-}
+import type { Input } from "../command.ts";
+import { CliError, type Output } from "../output.ts";
+import { signedIn } from "../session.ts";
+import { artifactRef, resolveArtifact, versionNumber } from "../target.ts";
 
 /** The agent-facing shape in 07: flat, with the anchor spread out. */
 function threadJson(thread: Thread) {
@@ -61,8 +44,11 @@ function threadJson(thread: Thread) {
   };
 }
 
-export async function statusCommand(target: string | undefined, server: string | undefined, out: Output) {
-  const client = await signedIn(server);
+type Server = { server?: string };
+type Target = Input<"target", Server>;
+
+export async function statusCommand({ args: { target }, flags }: Target, out: Output) {
+  const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, target);
   const status = ArtifactReviewStatus.parse(await client.get(`/api/artifacts/${artifact.id}/status`));
   out.result(
@@ -94,8 +80,10 @@ export async function statusCommand(target: string | undefined, server: string |
 }
 
 export async function commentsCommand(
-  target: string | undefined,
-  flags: { open?: boolean; fixed?: boolean; all?: boolean; page?: string; server?: string },
+  {
+    args: { target },
+    flags,
+  }: Input<"target", Server & { open?: boolean; fixed?: boolean; all?: boolean; page?: string }>,
   out: Output,
 ) {
   const client = await signedIn(flags.server);
@@ -119,14 +107,12 @@ export async function commentsCommand(
 }
 
 export async function replyCommand(
-  n: string | undefined,
-  text: string | undefined,
-  flags: { fixed?: boolean; target?: string; server?: string },
+  { args: { n, text }, flags, usage }: Input<"n" | "text", Server & { fixed?: boolean }>,
   out: Output,
 ) {
-  if (!n || !text || !/^\d+$/.test(n)) throw new UsageError('Usage: artifacts reply <n> "<text>" [--fixed]');
+  if (!n || !text || !/^\d+$/.test(n)) throw usage();
   const client = await signedIn(flags.server);
-  const artifact = await resolveArtifact(client, flags.target);
+  const artifact = await resolveArtifact(client, undefined);
   const threads = z.array(ThreadSchema).parse(await client.get(`/api/artifacts/${artifact.id}/threads`));
   const thread = threads.find((entry) => entry.n === Number(n));
   if (!thread) throw new CliError(`There's no thread #${n}.`);
@@ -140,79 +126,20 @@ export async function replyCommand(
   );
 }
 
-/** Frames or blocks that vanished since the latest version, for `frames/renamed` (07). */
-export async function renamedProblems(
-  client: Client,
-  project: string,
-  slug: string,
-  current: { frames: Set<string>; blocks: Set<string> },
-) {
-  type Version = { pages: { key: string; frames?: { key: string }[]; blocks?: { key: string }[] }[] };
-  let artifact: Artifact;
-  try {
-    artifact = Artifact.parse(await client.get(`/api/artifacts/by-slug/${project}/${slug}`));
-  } catch {
-    return []; // Nothing published yet, or not visible to this caller: prepare reports that.
-  }
-  const version = await client.get<Version>(
-    `/api/artifacts/${artifact.id}/versions/${artifact.latestVersion}`,
-  );
-  const threads = z
-    .array(ThreadSchema)
-    .parse(await client.get(`/api/artifacts/${artifact.id}/threads?status=open`));
-  const commented = new Set(
-    threads.flatMap((thread) => {
-      const anchor = thread.anchor;
-      if (!anchor) return [];
-      return [anchor.type === "frame" ? anchor.frameKey : `${thread.pageKey}/${anchor.blockKey}`];
-    }),
-  );
-  const problems: { rule: string; severity: "error" | "warning"; message: string }[] = [];
-  const check = (key: string, kind: string) => {
-    const open = commented.has(key);
-    problems.push({
-      rule: "frames/renamed",
-      severity: open ? "error" : "warning",
-      message: `${kind} "${key}" was in v${artifact.latestVersion} and is gone${open ? ", and it has open comments. Put the id back" : ""}.`,
-    });
-  };
-  for (const page of version.pages) {
-    for (const frame of page.frames ?? []) if (!current.frames.has(frame.key)) check(frame.key, "Frame");
-    for (const block of page.blocks ?? []) {
-      const key = `${page.key}/${block.key}`;
-      if (!current.blocks.has(key) && commented.has(key)) check(key, "Block");
-    }
-  }
-  return problems;
-}
-
-type VersionList = {
-  n: number;
-  name: string | null;
-  message: string | null;
-  publishedBy: string;
-  agent: string | null;
-  publishedAt: string;
-  restoredFrom: number | null;
-}[];
-
 export async function versionsCommand(
-  sub: string | undefined,
-  args: (string | undefined)[],
-  flags: { server?: string },
+  { args: { sub, n, label }, flags, usage }: Input<"sub" | "n" | "label", Server>,
   out: Output,
 ) {
-  if (sub === "name" && args[0]) versionNumber(args[0]);
+  if (sub === "name" && n) versionNumber(n);
   const client = await signedIn(flags.server);
   if (sub === "name") {
-    const [n, label] = args;
-    if (!n || !label) throw new UsageError('Usage: artifacts versions name <n> "<label>"');
+    if (!n || !label) throw usage(1);
     const artifact = await resolveArtifact(client, undefined);
     await client.request("PATCH", `/api/artifacts/${artifact.id}/versions/${n}`, { name: label });
     return out.result({ n: Number(n), name: label }, () => out.say(`✓ v${n} is "${label}".`));
   }
   const artifact = await resolveArtifact(client, sub);
-  const list = await client.get<VersionList>(`/api/artifacts/${artifact.id}/versions`);
+  const list = await client.get<VersionRow[]>(`/api/artifacts/${artifact.id}/versions`);
   out.result(list, () => {
     for (const version of list) {
       const label = version.name ? ` "${version.name}"` : "";
@@ -223,20 +150,14 @@ export async function versionsCommand(
   });
 }
 
-export async function diffCommand(
-  a: string | undefined,
-  b: string | undefined,
-  flags: { server?: string },
-  out: Output,
-) {
+export async function diffCommand({ args: { a, b }, flags, usage }: Input<"a" | "b", Server>, out: Output) {
   const number = (value: string | undefined) => value?.replace(/^v/, "");
-  if (!number(a) || !number(b)) throw new UsageError("Usage: artifacts diff <a> <b>");
+  if (!number(a) || !number(b)) throw usage();
   versionNumber(number(a) as string);
   versionNumber(number(b) as string);
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
-  type Change = { added: string[]; removed: string[]; changed: string[] };
-  const result = await client.get<{ frames: Change; blocks: Change }>(
+  const result = await client.get<Compare>(
     `/api/artifacts/${artifact.id}/compare?from=${number(a)}&to=${number(b)}`,
   );
   out.result(result, () => {
@@ -250,17 +171,16 @@ export async function diffCommand(
   });
 }
 
-export async function restoreCommand(n: string | undefined, flags: { server?: string }, out: Output) {
-  if (!n || !/^\d+$/.test(n)) throw new UsageError("Usage: artifacts restore <n>");
+export async function restoreCommand({ args: { n }, flags, usage }: Input<"n", Server>, out: Output) {
+  if (!n || !/^\d+$/.test(n)) throw usage();
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, undefined);
-  const result = await client.post<{ n: number }>(`/api/artifacts/${artifact.id}/versions/${n}/restore`);
+  const result = await client.post<RestoreResult>(`/api/artifacts/${artifact.id}/versions/${n}/restore`);
   out.result(result, () => out.say(`✓ v${n} is now v${result.n}.`));
 }
 
 export async function archiveCommand(
-  target: string | undefined,
-  flags: { undo?: boolean; server?: string },
+  { args: { target }, flags }: Input<"target", Server & { undo?: boolean }>,
   out: Output,
 ) {
   const client = await signedIn(flags.server);
@@ -275,15 +195,8 @@ export async function archiveCommand(
   );
 }
 
-type DeletedRow = {
-  kind: string;
-  artifact: { id: string; project: string; slug: string; title: string };
-  version?: number;
-};
-
 export async function deleteCommand(
-  target: string | undefined,
-  flags: { version?: string; server?: string },
+  { args: { target }, flags }: Input<"target", Server & { version?: string }>,
   out: Output,
 ) {
   if (flags.version) versionNumber(flags.version, "--version");
@@ -292,7 +205,7 @@ export async function deleteCommand(
   const path = flags.version
     ? `/api/artifacts/${artifact.id}/versions/${flags.version}/delete`
     : `/api/artifacts/${artifact.id}/delete`;
-  const { purgeAfter } = await client.post<{ purgeAfter: string }>(path);
+  const { purgeAfter } = await client.post<DeleteResult>(path);
   const undo = `artifacts undelete ${artifact.project}/${artifact.slug}${flags.version ? ` --version ${flags.version}` : ""}`;
   out.result({ purgeAfter, undo }, () => {
     out.say(`✓ Moved to Recently deleted, until ${purgeAfter.slice(0, 10)}.`);
@@ -301,19 +214,20 @@ export async function deleteCommand(
 }
 
 export async function undeleteCommand(
-  target: string | undefined,
-  flags: { version?: string; server?: string },
+  { args: { target }, flags }: Input<"target", Server & { version?: string }>,
   out: Output,
 ) {
   if (flags.version) versionNumber(flags.version, "--version");
   const client = await signedIn(flags.server);
   const { project, slug } = artifactRef(target);
-  const list = await client.get<DeletedRow[]>("/api/deleted");
+  const list = await client.get<DeletedList>("/api/deleted");
   const entry = list.find(
     (row) =>
       row.artifact.project === project &&
       row.artifact.slug === slug &&
-      (flags.version ? row.version === Number(flags.version) : row.kind === "artifact"),
+      (flags.version
+        ? row.kind === "version" && row.version === Number(flags.version)
+        : row.kind === "artifact"),
   );
   if (!entry) throw new CliError(`Nothing of yours called ${project}/${slug} is in Recently deleted.`);
   const path = flags.version

@@ -1,12 +1,19 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { artifacts, people } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
-
-const code = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
-const cookieOf = (response: Response) => (response.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
+import { RECHECK_MS } from "../../src/content/app.ts";
+import {
+  acceptInvite,
+  claim,
+  code,
+  contentFor,
+  cookieOf,
+  inviteSecret,
+  json,
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount, makePerson, publish, published } from "../publish-helper.ts";
 
 describe("sharing", () => {
   let t: TestServer;
@@ -14,6 +21,7 @@ describe("sharing", () => {
   let owner: string;
   let id: string;
   let orgId: string;
+  let other: string;
 
   const access = (json: unknown, bearer = token) =>
     t.api(`/api/artifacts/${id}/access`, { method: "POST", bearer, json });
@@ -36,16 +44,15 @@ describe("sharing", () => {
     t = await startTestServer();
     const made = await claim(t);
     token = made.token;
+    orgId = made.orgId;
     owner = await signIn(t, OWNER.email, OWNER.password);
-    await publish(t, token, { visibility: "me" });
-    const [row] = await t.server.db.select().from(artifacts);
-    id = row?.id as string;
-    orgId = row?.orgId as string;
+    id = (await published(t, token, { visibility: "me" })).id;
+    other = (await published(t, token, { slug: "other" })).id;
   });
   afterAll(() => t.stop());
 
   test("visibility: a member can't see a private artifact until it's org-wide", async () => {
-    const member = await makePerson(t, orgId, "member");
+    const member = (await makePerson(t, orgId, "member")).token;
     expect((await t.api(`/api/artifacts/${id}`, { bearer: member })).status).toBe(404);
     expect(
       (await t.api(`/api/artifacts/${id}`, { method: "PATCH", bearer: member, json: { visibility: "org" } }))
@@ -65,41 +72,38 @@ describe("sharing", () => {
   });
 
   test("adding a member gives access at once, and removing takes it away", async () => {
-    await makePerson(t, orgId, "member");
-    const person = (await t.server.db.select().from(people)).at(-1);
-    const added = await access({ email: person?.email, permission: "comment" });
+    const person = await makePerson(t, orgId, "member");
+    const added = await access({ email: person.email, permission: "comment" });
     expect(added.status).toBe(200);
     const list = (await (await t.api(`/api/artifacts/${id}/access`, { bearer: token })).json()) as {
       people: { id: string }[];
     };
-    expect(list.people.map((p) => p.id)).toContain(person?.id as string);
+    expect(list.people.map((p) => p.id)).toContain(person.id);
+    expect((await t.api(`/api/artifacts/${id}`, { bearer: person.token })).status).toBe(200);
     expect(
-      (await t.api(`/api/artifacts/${id}/access/${person?.id}`, { method: "DELETE", bearer: token })).status,
+      (await t.api(`/api/artifacts/${id}/access/${person.id}`, { method: "DELETE", bearer: token })).status,
     ).toBe(200);
+    expect((await t.api(`/api/artifacts/${id}`, { bearer: person.token })).status).toBe(404);
     expect(
-      (await t.api(`/api/artifacts/${id}/access/${person?.id}`, { method: "DELETE", bearer: token })).status,
+      (await t.api(`/api/artifacts/${id}/access/${person.id}`, { method: "DELETE", bearer: token })).status,
     ).toBe(404);
   });
 
   test("publish goes only to members, and lets them publish", async () => {
     const member = await makePerson(t, orgId, "member");
-    const person = (await t.server.db.select().from(people)).at(-1);
     expect(await code(await access({ email: "stranger@example.com", permission: "publish" }))).toBe(
       "invalid",
     );
-    expect((await publish(t, member)).status).toBe(409);
-    expect((await access({ email: person?.email, permission: "publish" })).status).toBe(200);
-    expect((await publish(t, member)).status).toBe(200);
+    expect((await publish(t, member.token)).status).toBe(409);
+    expect((await access({ email: member.email, permission: "publish" })).status).toBe(200);
+    expect((await publish(t, member.token)).status).toBe(200);
     const reviewer = await makePerson(t, orgId, "reviewer");
-    expect(reviewer).toBeTruthy();
-    const them = (await t.server.db.select().from(people)).at(-1);
-    expect(await code(await access({ email: them?.email, permission: "publish" }))).toBe("invalid");
+    expect(await code(await access({ email: reviewer.email, permission: "publish" }))).toBe("invalid");
   });
 
   test("only the publisher or an admin shares", async () => {
-    const member = await makePerson(t, orgId, "member");
-    const person = (await t.server.db.select().from(people)).at(-1);
-    await access({ email: person?.email, permission: "comment" });
+    const { email, token: member } = await makePerson(t, orgId, "member");
+    expect((await access({ email, permission: "comment" })).status).toBe(200);
     expect((await access({ email: "x@example.com", permission: "view" }, member)).status).toBe(403);
     expect(
       (
@@ -117,20 +121,14 @@ describe("sharing", () => {
     const { url } = (await (await access({ email: "out@example.com", permission: "comment" })).json()) as {
       url: string;
     };
-    const secret = url.split("/join/")[1];
+    const secret = inviteSecret(url);
     expect(await (await t.api(`/api/invites/${secret}`)).json()).toMatchObject({
       role: "outside",
       artifact: { title: "Roadmap" },
     });
-    const accepted = await t.api(`/api/invites/${secret}/accept`, {
-      method: "POST",
-      json: { name: "Out", password: "a perfectly long password" },
-    });
-    const cookie = cookieOf(accepted);
+    const { cookie } = await acceptInvite(t, url, "Out");
     expect((await t.api(`/api/artifacts/${id}`, { cookie })).status).toBe(200);
-    await publish(t, token, { slug: "other" });
-    const [other] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "other"));
-    expect((await t.api(`/api/artifacts/${other?.id}`, { cookie })).status).toBe(404);
+    expect((await t.api(`/api/artifacts/${other}`, { cookie })).status).toBe(404);
     const made = await t.api(`/api/artifacts/${id}/threads`, {
       method: "POST",
       cookie,
@@ -149,14 +147,6 @@ describe("sharing", () => {
   });
 
   describe("access a token granted can comment but not decide or resolve (04)", () => {
-    const join = async (url: string, name: string) => {
-      const accepted = await t.api(`/api/invites/${url.split("/join/")[1]}/accept`, {
-        method: "POST",
-        json: { name, password: "a perfectly long password" },
-      });
-      expect(accepted.status).toBe(200);
-      return cookieOf(accepted);
-    };
     const invitedBy = async (auth: { bearer?: string; cookie?: string }, email: string) => {
       const response = await t.api(`/api/artifacts/${id}/access`, {
         method: "POST",
@@ -164,7 +154,8 @@ describe("sharing", () => {
         ...auth,
       });
       expect(response.status).toBe(200);
-      return join(((await response.json()) as { url: string }).url, email.split("@")[0] as string);
+      const { url } = await json<{ url: string }>(response);
+      return (await acceptInvite(t, url, email.split("@")[0] as string)).cookie;
     };
     const comment = async (cookie: string) => {
       const made = await t.api(`/api/artifacts/${id}/threads`, {
@@ -316,8 +307,7 @@ describe("sharing", () => {
   test("a guest's rights stop at their artifact", async () => {
     const { url } = await link("comment");
     const cookie = await guestOn(url);
-    const [other] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "other"));
-    expect((await t.api(`/api/artifacts/${other?.id}`, { cookie })).status).toBe(404);
+    expect((await t.api(`/api/artifacts/${other}`, { cookie })).status).toBe(404);
   });
 
   test("an admin can turn link sharing off", async () => {
@@ -339,7 +329,7 @@ describe("sharing", () => {
   });
 
   test("archived: sharing is read-only", async () => {
-    await t.server.db.update(artifacts).set({ archivedAt: t.clock.now() }).where(eq(artifacts.id, id));
+    expect((await t.api(`/api/artifacts/${id}/archive`, { method: "POST", bearer: token })).status).toBe(200);
     expect(await code(await access({ email: "x@example.com", permission: "view" }))).toBe("read_only");
     expect(
       await code(
@@ -350,7 +340,10 @@ describe("sharing", () => {
         }),
       ),
     ).toBe("read_only");
-    await t.server.db.update(artifacts).set({ archivedAt: null }).where(eq(artifacts.id, id));
+    expect((await t.api(`/api/artifacts/${id}/unarchive`, { method: "POST", bearer: token })).status).toBe(
+      200,
+    );
+    expect((await link("view")).url).toContain("/s/");
   });
 
   test("the guest name limit, and 20 guests per IP per hour", async () => {
@@ -359,6 +352,7 @@ describe("sharing", () => {
       (await t.api(`/api/s/${secretOf(url)}/guest`, { method: "POST", json: { name: "x".repeat(61) } }))
         .status,
     ).toBe(400);
+    // A new hour, so the guests earlier tests made don't count.
     t.clock.advance(3601_000);
     const statuses: number[] = [];
     for (let i = 0; i < 21; i++) {
@@ -366,27 +360,51 @@ describe("sharing", () => {
         (await t.api(`/api/s/${secretOf(url)}/guest`, { method: "POST", json: { name: "x" } })).status,
       );
     }
-    expect(statuses.at(-1)).toBe(429);
+    expect(statuses).toEqual([...Array(20).fill(200), 429]);
   });
 
-  test("the content host cuts a guest off when the link is revoked", async () => {
-    t.clock.advance(3601_000);
-    const { url, link: created } = await link("comment");
-    const cookie = await guestOn(url);
-    const base = (
-      (await (
-        await t.api(`/api/artifacts/${id}/content-token`, { method: "POST", cookie, json: { version: 1 } })
-      ).json()) as { base: string }
-    ).base;
-    const get = () =>
-      fetch(`http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}index.html`, {
-        headers: { Host: "content.test", "Sec-Fetch-Dest": "iframe" },
+  // Each way of losing access, then the frame already open: the content host checks again within RECHECK_MS.
+  const losses = {
+    "a guest's link is revoked": async () => {
+      const { url, link: created } = await link("comment");
+      const cookie = await guestOn(url);
+      const lose = () =>
+        t.api(`/api/artifacts/${id}/links/${created.id}`, { method: "DELETE", bearer: token });
+      return { auth: { cookie }, lose };
+    },
+    "a member is taken off the team it was shared with": async () => {
+      const member = await makeAccount(t, orgId, "member");
+      const made = await t.api("/api/teams", { method: "POST", cookie: owner, json: { name: "Frames" } });
+      const { team } = await json<{ team: { id: string; slug: string } }>(made);
+      const added = await t.api(`/api/teams/${team.slug}/members/${member.id}`, {
+        method: "PUT",
+        cookie: owner,
+        json: { role: "member" },
       });
-    expect((await get()).status).toBe(200);
-    await t.api(`/api/artifacts/${id}/links/${created.id}`, { method: "DELETE", bearer: token });
-    t.clock.advance(5001);
-    expect((await get()).status).toBe(404);
-  });
+      expect(added.status).toBe(200);
+      const shared = await t.api(`/api/artifacts/${id}/teams/${team.id}`, {
+        method: "PUT",
+        cookie: owner,
+        json: { permission: "view" },
+      });
+      expect(shared.status).toBe(200);
+      const lose = () =>
+        t.api(`/api/teams/${team.slug}/members/${member.id}`, { method: "DELETE", cookie: owner });
+      return { auth: { cookie: member.cookie }, lose };
+    },
+  };
+  for (const [name, setUp] of Object.entries(losses)) {
+    test(`an open frame stops within seconds when ${name}`, async () => {
+      t.clock.advance(3601_000); // Past the guest limit earlier tests reached.
+      owner = await signIn(t, OWNER.email, OWNER.password);
+      const { auth, lose } = await setUp();
+      const frame = await contentFor(t, id, auth);
+      expect((await frame.fetch("index.html")).status).toBe(200);
+      expect((await lose()).status).toBe(200);
+      t.clock.advance(RECHECK_MS + 1);
+      expect((await frame.fetch("index.html")).status).toBe(404);
+    });
+  }
 });
 
 describe("well-known webauthn", () => {

@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Client } from "../src/client.ts";
-import { normalizeUrl } from "../src/config.ts";
 
 describe("the API client", () => {
   const seen: { host: string; authorization: string | null }[] = [];
@@ -56,11 +55,26 @@ describe("the API client", () => {
   });
 });
 
-describe("server addresses", () => {
-  test("only web addresses are servers", () => {
-    expect(normalizeUrl("art.example.com/path")).toBe("https://art.example.com");
-    expect(normalizeUrl("http://localhost:8080/")).toBe("http://localhost:8080");
-    expect(() => normalizeUrl("file:///etc/passwd")).toThrow("web address");
-    expect(() => normalizeUrl("ftp://example.com")).toThrow("web address");
+describe("a picture from the API", () => {
+  test("says which agent asked, as every other request does", async () => {
+    let agent = null as string | null;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        agent = request.headers.get("artifacts-agent");
+        return new Response(new Uint8Array([1, 2, 3]));
+      },
+    });
+    process.env.ARTIFACTS_AGENT = "Test agent";
+    try {
+      expect(await new Client(`http://127.0.0.1:${server.port}`, "t").bytes("/r/x")).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      expect(agent).toBe("Test agent");
+    } finally {
+      delete process.env.ARTIFACTS_AGENT;
+      server.stop(true);
+    }
   });
 });

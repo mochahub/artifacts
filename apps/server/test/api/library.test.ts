@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  DecisionList,
   LibraryCard,
   LibraryFrames,
   LibraryPage,
@@ -12,10 +13,17 @@ import {
   TAGS_MAX,
   VersionBundle,
 } from "@artifacts/schema";
-import { sha256 } from "../../src/auth/secrets.ts";
-import { guestLinks, guests, shareLinks, tokens } from "../../src/db/schema.ts";
-import { claim, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import {
+  claim,
+  joinAsGuest,
+  json,
+  orgToken as makeOrgToken,
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { file, makePerson, publish } from "../publish-helper.ts";
 
 describe("the library", () => {
   let t: TestServer;
@@ -25,6 +33,7 @@ describe("the library", () => {
   let outside: string;
   let orgToken: string;
   let orgId: string;
+  let cookie: string;
   const get = (path: string, bearer = owner) => t.api(path, { bearer });
   const search = async (q: string, bearer = owner, more = "") =>
     LibraryPage.parse(
@@ -35,21 +44,12 @@ describe("the library", () => {
     t = await startTestServer();
     const claimed = await claim(t);
     owner = claimed.token;
-    const [org] = await t.server.db.query.org.findMany();
-    orgId = (org as { id: string }).id;
-    member = await makePerson(t, orgId, "member");
-    reviewer = await makePerson(t, orgId, "reviewer");
-    outside = await makePerson(t, orgId, "outside");
-    orgToken = `art_org${Bun.randomUUIDv7()}`;
-    await t.server.db.insert(tokens).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      kind: "org",
-      name: "ci",
-      tokenHash: sha256(orgToken),
-      scopes: ["read"],
-      createdBy: claimed.person.id,
-    });
+    orgId = claimed.orgId;
+    cookie = await signIn(t, OWNER.email, OWNER.password);
+    member = (await makePerson(t, orgId, "member")).token;
+    reviewer = (await makePerson(t, orgId, "reviewer")).token;
+    outside = (await makePerson(t, orgId, "outside")).token;
+    orgToken = (await makeOrgToken(t, cookie, { scopes: ["read"] })).token;
     await publish(t, owner, {
       project: "game",
       slug: "art-styles",
@@ -138,30 +138,13 @@ describe("the library", () => {
   });
 
   test("a guest and anonymous callers can't search or list", async () => {
-    const guestId = Bun.randomUUIDv7();
-    const secret = "guest-secret";
-    await t.server.db
-      .insert(guests)
-      .values({ id: guestId, orgId, tokenHash: sha256(secret), lastSeenAt: t.clock.now() });
     const { id } = (await (await get("/api/artifacts/by-slug/game/economy")).json()) as { id: string };
-    const linkId = Bun.randomUUIDv7();
-    const person = (await (await get("/api/me")).json()) as { person: { id: string } };
-    await t.server.db.insert(shareLinks).values({
-      id: linkId,
-      orgId,
-      artifactId: id,
-      tokenHash: sha256("link"),
-      permission: "view",
-      createdBy: person.person.id,
+    const made = await t.api(`/api/artifacts/${id}/links`, {
+      method: "POST",
+      bearer: owner,
+      json: { permission: "view" },
     });
-    await t.server.db.insert(guestLinks).values({
-      guestId,
-      shareLinkId: linkId,
-      orgId,
-      name: "Sam",
-      expiresAt: new Date(t.clock.now().getTime() + 86_400_000),
-    });
-    const cookie = `art_guest=${secret}`;
+    const cookie = await joinAsGuest(t, (await json<{ url: string }>(made)).url, "Sam");
     expect((await t.api("/api/library/search?q=coins", { cookie })).status).toBe(403);
     expect((await t.api("/api/library/projects", { cookie })).status).toBe(403);
     expect((await t.api("/api/search?q=coins", { cookie })).status).toBe(403);
@@ -334,9 +317,11 @@ describe("the library", () => {
   }, 120_000);
 
   test("search's limit counts for an agent's cards too", async () => {
-    const flood = await makePerson(t, orgId, "member");
-    for (let i = 0; i < 60; i++) await get("/api/library/search?q=lantern&limit=1", flood);
-    expect((await get("/api/library/search?q=lantern", flood)).status).toBe(429);
+    const flood = (await makePerson(t, orgId, "member")).token;
+    const statuses: number[] = [];
+    for (let i = 0; i < 61; i++)
+      statuses.push((await get("/api/library/search?q=lantern&limit=1", flood)).status);
+    expect(statuses).toEqual([...Array(60).fill(200), 429]);
   }, 60_000);
 
   test("a bundle lists a version's files, with links that need no token", async () => {
@@ -349,7 +334,6 @@ describe("the library", () => {
   });
 
   test("a path that could climb out of a folder is refused at commit", async () => {
-    const { file } = await import("../publish-helper.ts");
     for (const path of ["../evil.sh", "/etc/passwd", "a/../../b", ".git/hooks/pre-commit", "a\\b"]) {
       const response = await publish(t, owner, {
         project: "game",
@@ -360,9 +344,18 @@ describe("the library", () => {
     }
   });
 
-  test("decisions list every decision on an artifact", async () => {
-    const { id } = (await (await get("/api/artifacts/by-slug/game/economy")).json()) as { id: string };
-    const list = await get(`/api/artifacts/${id}/decisions`);
-    expect(await list.json()).toEqual([]);
+  test("decisions list every decision on an artifact, newest first", async () => {
+    const { id } = (await (await get("/api/artifacts/by-slug/legacy/old")).json()) as { id: string };
+    const list = async () => DecisionList.parse(await json(await get(`/api/artifacts/${id}/decisions`)));
+    expect(await list()).toEqual([]);
+    const decide = (kind: string, note?: string) =>
+      t.api(`/api/artifacts/${id}/decisions`, { method: "POST", cookie, json: { version: 1, kind, note } });
+    expect((await decide("changes_requested", "Not yet")).status).toBe(200);
+    t.clock.advance(1000);
+    expect((await decide("approved")).status).toBe(200);
+    expect((await list()).map(({ kind, note, by, version }) => ({ kind, note, by, version }))).toEqual([
+      { kind: "approved", note: null, by: "Zahin", version: 1 },
+      { kind: "changes_requested", note: "Not yet", by: "Zahin", version: 1 },
+    ]);
   });
 });

@@ -88,6 +88,11 @@ In setup mode, every route renders the "Almost ready" page (06·1).
 5. **Page switcher.** Opened from the title bar on any page: a sheet listing every page grouped as in the manifest, with changed dots and open counts.
 6. **Version history.** A sheet listing versions: number, name or date, who. Tapping a row expands it to Restore, Compare and Name. The current version is marked; approved ones say "Approved".
 
+### Wikis
+A project whose kind is `wiki` opens a lazy wiki home, outside the initial JS budget. It polls `GET /api/wikis/:slug` every minute: rules, title and summary search, pages, sources newest first, findings grouped by kind, and recent changes. Rows use the existing type, agent words and comment counts. Personal wikis say “Only you”; sharing uses the project share sheet.
+
+A wiki artifact with one page replaces its overview route with that page. Wiki articles fetch their links once per version, show a plain untrusted line near the top, and end with Sources and Linked from. Missing outgoing pages have dashed underlines and “Not written yet” titles. Wanted findings name the missing slug and link to the pages asking for it. The projects list labels wikis in its secondary text.
+
 ### 02 · Canvas review
 1. **Overview.**
    - **Layout:** all boards on the canvas; board titles above each; frames as images.

@@ -1,17 +1,16 @@
+import { CLI_SCOPES, DAY_MS, MINUTE_MS } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
-import type { Deps } from "../api/deps.ts";
 import type { Db } from "../db/index.ts";
-import { type people, sessions, tokens } from "../db/schema.ts";
+import { identities, passkeys, passwords, type people, sessions, tokens } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { newApiToken, randomSecret, sha256 } from "./secrets.ts";
 
 export const SESSION_COOKIE = "art_session";
 export const GUEST_COOKIE = "art_guest";
-const DAY = 24 * 3600_000;
 export const SESSION_DAYS = 30;
-export const RECENT_AUTH_MS = 10 * 60_000;
-export const DEFAULT_CLI_SCOPES = ["publish", "comment", "read", "manage", "data"];
+export const RECENT_AUTH_MS = 10 * MINUTE_MS;
 
 /** `Secure` everywhere except plain-http origins, where a browser would drop it (local Compose, dev, e2e). */
 export function isSecureRequest(c: Context, origins: string[]): boolean {
@@ -44,7 +43,7 @@ export async function startSession(c: Context, deps: Deps, orgId: string, person
     domain: (c.req.header("host") ?? "").split(":")[0] ?? "",
     authAt: now,
     lastSeenAt: now,
-    expiresAt: new Date(now.getTime() + SESSION_DAYS * DAY),
+    expiresAt: new Date(now.getTime() + SESSION_DAYS * DAY_MS),
     userAgent: c.req.header("user-agent") ?? null,
     ip: deps.clientIp(c),
   });
@@ -64,7 +63,7 @@ export async function createCliToken(
     personId: values.personId,
     name: values.name,
     tokenHash: sha256(secret),
-    scopes: DEFAULT_CLI_SCOPES,
+    scopes: [...CLI_SCOPES],
     createdBy: values.personId,
     createdAt: values.now,
   });
@@ -78,5 +77,20 @@ export const personView = (row: typeof people.$inferSelect) => ({
   role: row.role,
 });
 
-export const endSessions = (db: Db, personId: string) =>
-  db.delete(sessions).where(eq(sessions.personId, personId));
+/** A sign-in proved again just now: what "recent" means for the actions that ask for it (04). */
+export const markReauthed = (deps: Pick<Deps, "db" | "clock">, sessionId: string) =>
+  deps.db.update(sessions).set({ authAt: deps.clock.now() }).where(eq(sessions.id, sessionId));
+
+/** The ways a person can prove it's them: passkeys, a password, and linked Google accounts. */
+export async function signInMethods(deps: Pick<Deps, "db">, personId: string) {
+  const [keys, password, google] = await Promise.all([
+    deps.db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, personId)),
+    deps.db
+      .select({ id: passwords.personId })
+      .from(passwords)
+      .where(eq(passwords.personId, personId))
+      .limit(1),
+    deps.db.select({ id: identities.id }).from(identities).where(eq(identities.personId, personId)),
+  ]);
+  return { passkeys: keys.length, password: password.length > 0, google: google.length };
+}

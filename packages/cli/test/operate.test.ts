@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
+import { findOrg } from "../../../apps/server/src/db/index.ts";
 import { org } from "../../../apps/server/src/db/schema.ts";
 import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
 import { checksumFor } from "../src/commands/operate.ts";
@@ -57,6 +59,23 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect(readFileSync(log, "utf8")).toContain("delete --project proj-1 --yes");
   });
 
+  test("an answer setup doesn't know is asked again, not taken for Railway", async () => {
+    const { env: e, log } = env();
+    const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {
+      env: e,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    child.stdin.write("dokcer\n");
+    child.stdin.end();
+    expect(await child.exited).toBe(1);
+    const stderr = await new Response(child.stderr).text();
+    expect(stderr).toContain("That isn't one of railway, docker, existing.");
+    expect(stderr).toContain('Stopped at "Where should your Artifacts server run?');
+    expect(readFileSync(log, "utf8")).toBe("");
+  });
+
   test("a deploy that fails stops the wait, rather than sitting out the timeout", async () => {
     const { env: e } = env({}, false, "FAILED");
     const child = Bun.spawn(["bun", join(import.meta.dir, "../src/index.ts"), "setup", "--no-skill"], {
@@ -73,8 +92,6 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
 
   test("the whole path: project, template, domains, CONTENT_URL, claim", async () => {
     const { env: e, log } = env();
-    const { setupRailway } = await import("../src/railway/setup.ts");
-    expect(setupRailway).toBeFunction();
     // Health checks go to https://<domain>, which this fake can't serve, so this stops after the variables.
     const child = Bun.spawn(
       [
@@ -103,9 +120,12 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     const calls = readFileSync(log, "utf8").split("\n");
     expect(await new Response(child.stderr).text()).not.toContain("failed");
     expect(code).toBe(0);
+    // The template's own values are its business; the one the server needs is path-style S3 off.
+    const deploy = calls.find((call) => call.startsWith("deploy --template abc123 "));
+    expect(deploy).toContain("--variable artifacts.S3_FORCE_PATH_STYLE=false");
     const expected = [
       "init --name artifacts --workspace w1 --json",
-      "deploy --template abc123 --variable artifacts.S3_FORCE_PATH_STYLE=false --variable Postgres.PGDATA=/var/lib/postgresql/data/pgdata --variable Postgres.PGPORT=5432 --variable Postgres.POSTGRES_DB=railway --variable Postgres.POSTGRES_USER=postgres --variable Postgres.RAILWAY_DEPLOYMENT_DRAINING_SECONDS=60 --variable Postgres.SSL_CERT_DAYS=820",
+      deploy,
       "service status --service artifacts --json",
       "domain list --service artifacts --json",
       `variable set PUBLIC_URL=https://${new URL(url).host} CONTENT_URL=https://content.up.railway.app --service artifacts --skip-deploys`,
@@ -138,13 +158,23 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     expect((await cli(["domain", "nonsense"], e)).code).toBe(2);
     expect(JSON.parse(result.stdout).googleRedirectUri).toBeNull();
 
-    // With Google on, a new domain needs its own redirect, or sign-in there fails.
-    await t.server.db.update(org).set({ googleClientId: "client", googleEnabled: true });
-    const withGoogle = await cli(["domain", "add", "art.example.com", "--json"], e);
-    expect(JSON.parse(withGoogle.stdout).googleRedirectUri).toBe(
-      "https://art.example.com/api/auth/google/callback",
-    );
-    await t.server.db.update(org).set({ googleClientId: null, googleEnabled: false });
+    // With Google on, a new domain needs its own redirect, or sign-in there fails. Turning it on through
+    // the API takes a test sign-in with Google, which is the server's to test; this only needs it on.
+    const orgId = (await findOrg(t.server.db))?.id as string;
+    const google = (on: boolean) =>
+      t.server.db
+        .update(org)
+        .set({ googleClientId: on ? "client" : null, googleEnabled: on })
+        .where(eq(org.id, orgId));
+    await google(true);
+    try {
+      const withGoogle = await cli(["domain", "add", "art.example.com", "--json"], e);
+      expect(JSON.parse(withGoogle.stdout).googleRedirectUri).toBe(
+        "https://art.example.com/api/auth/google/callback",
+      );
+    } finally {
+      await google(false);
+    }
   });
 
   test("upgrade --server moves the service to the release's image", async () => {
@@ -166,23 +196,19 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
 
   test("a domain that is really a flag or a list of origins is refused", async () => {
     const { env: e, log } = env();
-    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length : 0);
-    const before = calls();
     for (const bad of ["art.example.com,https://evil.test", "https://art.example.com", "a b.com"]) {
       expect((await cli(["domain", "add", bad], e)).code).toBe(2);
     }
     // After "--", a value that starts with a dash is still a value.
     expect((await cli(["domain", "add", "--", "--help"], e)).code).toBe(2);
-    expect(calls()).toBe(before);
+    expect(readFileSync(log, "utf8")).toBe("");
   });
 
   test("upgrade refuses a version that isn't a number, and a release site that isn't https", async () => {
     const { env: e, log } = env();
-    const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length : 0);
-    const before = calls();
     expect((await cli(["upgrade", "--server", "--to", "1.0.0\nSESSION_SECRET=x"], e)).code).toBe(2);
     expect((await cli(["upgrade", "--server", "--to", "../../x"], e)).code).toBe(2);
-    expect(calls()).toBe(before);
+    expect(readFileSync(log, "utf8")).toBe("");
 
     const insecure = await cli(["upgrade"], {
       ...e,

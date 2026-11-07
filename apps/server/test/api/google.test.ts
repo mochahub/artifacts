@@ -1,32 +1,43 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import {
+  ActivityPage,
+  GoogleSettings,
+  IdentityList,
+  type OrgSettings,
+  PasskeyList,
+  PeopleList,
+  ResetLinkCreated,
+  TeamCreated,
+  TeamDetail,
+} from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import type { GoogleExchange } from "../../src/auth/google.ts";
 import { sha256 } from "../../src/auth/secrets.ts";
+import { RECENT_AUTH_MS } from "../../src/auth/sessions.ts";
 import { findOrg } from "../../src/db/index.ts";
+import { googleStates, invites, org } from "../../src/db/schema.ts";
+import { softAuthenticator } from "../authenticator.ts";
 import {
-  activity,
-  googleStates,
-  identities,
-  invites,
-  org,
-  passwords,
-  people,
-  resetLinks,
-  sessions,
-  teamMembers,
-} from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+  addPasskey,
+  claim,
+  cookieOf,
+  inviteSecret,
+  invite as inviteTo,
+  json,
+  OWNER,
+  PASSWORD,
+  SETUP_TOKEN,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
 import { makeAccount } from "../publish-helper.ts";
 
 const CLIENT = "client.apps.googleusercontent.com";
-const json = async <T = Record<string, unknown>>(response: Response) => (await response.json()) as T;
-const cookieNamed = (response: Response, name: string) =>
-  response.headers
-    .getSetCookie()
-    .find((cookie) => cookie.startsWith(`${name}=`))
-    ?.split(";")[0];
 const SITE = { "Sec-Fetch-Site": "same-origin" };
+/** PKCE's S256, which Google checks the verifier against. */
+const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
 type Claims = Record<string, unknown>;
 
@@ -38,8 +49,13 @@ class FakeGoogle {
   fail = false;
   during: (() => Promise<void>) | null = null;
   calls: GoogleExchange[] = [];
-  /** By verifier, because two round trips can be under way at once. */
+  /** By code challenge, as Google keeps them: two round trips can be under way at once. */
   nonces = new Map<string, string>();
+
+  /** What Google sees when the browser arrives: the authorize URL's challenge and nonce. */
+  authorize(url: URL) {
+    this.nonces.set(url.searchParams.get("code_challenge") ?? "", url.searchParams.get("nonce") ?? "");
+  }
 
   reset() {
     this.claims = {};
@@ -53,12 +69,15 @@ class FakeGoogle {
     this.calls.push(input);
     await this.during?.();
     if (this.fail) throw new Error("no");
+    // Google refuses a code whose verifier doesn't match the challenge it was asked with.
+    const nonce = this.nonces.get(s256(input.verifier));
+    if (nonce === undefined) throw new Error("invalid_grant");
     if (this.raw !== null) return this.raw;
     const body = {
       iss: "https://accounts.google.com",
       aud: CLIENT,
       exp: Math.floor(this.now() / 1000) + 3600,
-      nonce: this.nonces.get(input.verifier),
+      nonce,
       email_verified: true,
       ...this.claims,
     };
@@ -75,6 +94,7 @@ describe("Google sign-in", () => {
   let orgId: string;
   let ownerToken: string;
 
+  // Turning it on through the API takes an admin's test round trip; "settings" below does that.
   const turnOn = () =>
     t.server.db
       .update(org)
@@ -90,15 +110,9 @@ describe("Google sign-in", () => {
     });
     const location = response.headers.get("location") ?? "";
     const url = location.startsWith("http") ? new URL(location) : null;
-    const browser = cookieNamed(response, "art_google");
-    const [row] = browser
-      ? await t.server.db
-          .select()
-          .from(googleStates)
-          .where(eq(googleStates.browserHash, sha256(browser.split("=")[1] as string)))
-      : [];
-    if (row) google.nonces.set(row.codeVerifier, row.nonce);
-    return { response, url, state: url?.searchParams.get("state") ?? "", browser, row };
+    if (url) google.authorize(url);
+    const browser = cookieOf(response, "art_google");
+    return { response, url, state: url?.searchParams.get("state") ?? "", browser };
   }
   const finish = (state: string, cookie: string, extra = "code=abc") =>
     t.api(`/api/auth/google/callback?state=${encodeURIComponent(state)}&${extra}`, {
@@ -117,36 +131,65 @@ describe("Google sign-in", () => {
     return `g-${n}`;
   };
   const account = (email: string, more: Claims = {}) => ({ sub: sub(), email, name: "Someone", ...more });
-  const linkOf = async (personId: string, subject: string) =>
-    t.server.db.insert(identities).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      personId,
-      provider: "google",
-      subject,
-      email: "linked@example.com",
-    });
+  /** Links a Google account the way a person does: a link round trip from their recent session. */
+  const linkOf = async (person: { cookie: string }, subject: string) => {
+    const response = await roundTrip(
+      "intent=link",
+      { sub: subject, email: "linked@example.com" },
+      person.cookie,
+    );
+    expect(landed(response)).toBe("/settings/sign-in?google=linked");
+    google.calls = [];
+  };
+  const identitiesOf = async (cookie: string) =>
+    IdentityList.parse(await (await t.api("/api/me/identities", { cookie })).json());
+  const peopleList = async () =>
+    PeopleList.parse(await (await t.api("/api/people", { cookie: owner })).json()).people;
+  const hasGoogle = async (personId: string) =>
+    (await peopleList()).find((row) => row.id === personId)?.google;
+  const setPassword = async (cookie: string) =>
+    expect(
+      (await t.api("/api/me/password", { method: "POST", cookie, json: { password: PASSWORD } })).status,
+    ).toBe(200);
+  /** Ages every sign-in past the recent window; the owner's is refreshed before the next test. */
+  const ageSignIns = () => t.clock.advance(RECENT_AUTH_MS + 1000);
+  const membersOf = async (slug: string) =>
+    TeamDetail.parse(await (await t.api(`/api/teams/${slug}`, { cookie: owner })).json()).members.map(
+      (member) => member.id,
+    );
+  const newTeam = async (name: string) =>
+    TeamCreated.parse(
+      await (await t.api("/api/teams", { method: "POST", cookie: owner, json: { name } })).json(),
+    ).team;
 
   beforeAll(async () => {
     t = await startTestServer({}, { google });
-    ownerToken = (await claim(t)).token;
+    // Tokens expire by the server's clock, which tests move.
+    google.now = () => t.clock.now().getTime();
+    const claimed = await claim(t);
+    ownerToken = claimed.token;
+    orgId = claimed.orgId;
     owner = await signIn(t, OWNER.email, OWNER.password);
-    orgId = ((await findOrg(t.server.db)) as { id: string }).id;
   });
   afterAll(() => t.stop());
   beforeEach(async () => {
     google.reset();
     await turnOn();
-    // Tests move the clock, and the owner's own sign-in shouldn't age with it.
-    await t.server.db.update(sessions).set({ authAt: t.clock.now() });
+    // Tests move the clock; the owner confirms again rather than act with a stale sign-in.
+    const me = await json<{ recentAuth: boolean }>(await t.api("/api/me", { cookie: owner }));
+    if (!me.recentAuth) {
+      const reauth = await t.api("/api/auth/reauth", {
+        method: "POST",
+        cookie: owner,
+        json: { password: OWNER.password },
+      });
+      expect(reauth.status).toBe(200);
+    }
   });
 
   describe("turned off", () => {
     test("nothing answers, and the sign-in page has nothing to show", async () => {
-      await t.server.db
-        .update(org)
-        .set({ googleEnabled: false, googleClientId: null, googleClientSecret: null })
-        .where(eq(org.id, orgId));
+      expect((await t.api("/api/org/google", { method: "DELETE", cookie: owner })).status).toBe(200);
       expect((await t.api("/api/auth/google/start", { redirect: "manual" })).status).toBe(404);
       expect(await t.api("/api/meta").then(json)).toMatchObject({ google: false });
       expect(landed(await finish("anything", "art_google=x"))).toBe("/sign-in?google=expired");
@@ -154,35 +197,43 @@ describe("Google sign-in", () => {
 
     test("a round trip started while it was on stops at the callback", async () => {
       const { state, browser } = await begin("intent=signin");
-      await t.server.db.update(org).set({ googleEnabled: false }).where(eq(org.id, orgId));
-      expect(landed(await finish(state, browser as string))).toBe("/sign-in?google=off");
+      const off = await t.api("/api/org/google", {
+        method: "PATCH",
+        cookie: owner,
+        json: { enabled: false },
+      });
+      expect(off.status).toBe(200);
+      expect(landed(await finish(state, browser))).toBe("/sign-in?google=off");
     });
   });
 
   describe("starting", () => {
     test("asks for a code with PKCE, state and nonce, and sends the browser a host-only cookie", async () => {
-      const { url, state, browser, row, response } = await begin("intent=signin&next=/camerabuddy");
+      const { url, state, browser, response } = await begin("intent=signin&next=/camerabuddy");
       expect(url?.origin + (url?.pathname ?? "")).toBe(google.authorizeUrl);
       const params = url?.searchParams as URLSearchParams;
       expect(params.get("client_id")).toBe(CLIENT);
       expect(params.get("response_type")).toBe("code");
       expect(params.get("scope")).toBe("openid email profile");
       expect(params.get("code_challenge_method")).toBe("S256");
-      expect(params.get("nonce")).toBe(row?.nonce as string);
+      expect(params.get("code_challenge")).toMatch(/^[\w-]{43}$/);
+      expect(params.get("nonce")).toBeTruthy();
       expect(params.has("hd")).toBe(false);
-      expect(params.get("code_challenge")).toBe(
-        createHash("sha256")
-          .update(row?.codeVerifier as string)
-          .digest("base64url"),
-      );
       expect(params.get("redirect_uri")).toBe("http://viewer.test/api/auth/google/callback");
-      expect(row?.stateHash).toBe(sha256(state));
+      // Only hashes of the state and the browser's cookie are stored.
+      const rows = await t.server.db
+        .select()
+        .from(googleStates)
+        .where(eq(googleStates.stateHash, sha256(state)));
+      expect(rows).toHaveLength(1);
+      expect(JSON.stringify(rows)).not.toContain(state);
+      expect(JSON.stringify(rows)).not.toContain(browser.split("=")[1] as string);
       const set = response.headers.getSetCookie().find((cookie) => cookie.startsWith("art_google="));
       expect(set).toContain("HttpOnly");
       expect(set).toContain("SameSite=Lax");
       expect(set).toContain("Path=/api/auth/google");
       expect(set).not.toContain("Domain=");
-      expect(browser).toBeString();
+      expect(browser).toStartWith("art_google=");
     });
 
     test("each viewer origin gets its own redirect", async () => {
@@ -203,19 +254,30 @@ describe("Google sign-in", () => {
     });
 
     test("next stays on this site", async () => {
+      const person = await makeAccount(t, orgId, "member");
+      const subject = sub();
+      await linkOf(person, subject);
+      google.claims = { sub: subject, email: person.email };
       for (const next of [
         "https://evil.test",
         "//evil.test",
         "/\\evil.test",
         "/%09/evil.test".replace("%09", "\t"),
       ]) {
-        const { row } = await begin(`next=${encodeURIComponent(next)}`);
-        expect(row?.next).toBe("/");
+        const { state, browser } = await begin(`intent=signin&next=${encodeURIComponent(next)}`);
+        expect(landed(await finish(state, browser))).toBe("/");
       }
     });
 
     test("an unknown intent is refused, and starting is rate limited", async () => {
       expect((await t.api("/api/auth/google/start?intent=nonsense")).status).toBe(400);
+      const start = () => t.api("/api/auth/google/start", { redirect: "manual" });
+      const statuses: number[] = [];
+      for (let i = 0; i < 61 && statuses.at(-1) !== 429; i++) statuses.push((await start()).status);
+      expect(statuses.at(-1)).toBe(429);
+      expect(statuses.slice(0, -1).every((status) => status === 302)).toBe(true);
+      t.clock.advance(15 * 60_000 + 1000);
+      expect((await start()).status).toBe(302);
     });
 
     test("anything tied to a session can't be started from another site", async () => {
@@ -232,30 +294,28 @@ describe("Google sign-in", () => {
     test("a known sub signs in, even if the email has changed", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
+      await linkOf(person, subject);
       const response = await roundTrip("intent=signin&next=/camerabuddy", {
         sub: subject,
         email: "new-address@elsewhere.test",
       });
       expect(landed(response)).toBe("/camerabuddy");
-      const cookie = cookieNamed(response, "art_session") as string;
+      const cookie = cookieOf(response, "art_session");
       expect(await t.api("/api/me", { cookie }).then(json)).toMatchObject({
         person: { id: person.id },
         recentAuth: true,
       });
-      const [row] = await t.server.db.select().from(identities).where(eq(identities.subject, subject));
-      expect(row).toMatchObject({ email: "new-address@elsewhere.test" });
-      expect(row?.lastUsedAt).not.toBeNull();
+      const [identity] = (await identitiesOf(cookie)).identities;
+      expect(identity).toMatchObject({ email: "new-address@elsewhere.test" });
+      expect(identity?.lastUsedAt).not.toBeNull();
     });
 
     test("an email that matches someone never links: they're told to sign in the usual way", async () => {
       const person = await makeAccount(t, orgId, "member");
       const response = await roundTrip("intent=signin", account(person.email));
       expect(landed(response)).toBe("/sign-in?google=link-first&next=%2Fsettings%2Fsign-in");
-      expect(cookieNamed(response, "art_session")).toBeUndefined();
-      expect(await t.server.db.select().from(identities).where(eq(identities.personId, person.id))).toEqual(
-        [],
-      );
+      expect(cookieOf(response, "art_session")).toBe("");
+      expect((await identitiesOf(person.cookie)).identities).toEqual([]);
     });
 
     test("the same goes for an account with a different capital letter", async () => {
@@ -267,39 +327,38 @@ describe("Google sign-in", () => {
     test("nobody here: refused", async () => {
       const response = await roundTrip("intent=signin", account("stranger@elsewhere.test"));
       expect(landed(response)).toBe("/sign-in?google=no-account");
-      expect(cookieNamed(response, "art_session")).toBeUndefined();
+      expect(cookieOf(response, "art_session")).toBe("");
     });
 
-    const invite = async (email: string, role = "member") => {
-      const made = await json<{ url: string }>(
-        await t.api("/api/invites", { method: "POST", cookie: owner, json: { email, role } }),
-      );
-      return made.url.split("/join/")[1] as string;
-    };
+    const invite = async (email: string) => inviteSecret(await inviteTo(t, { cookie: owner }, email));
 
     test("on an invite, with the same email: the account is made and linked", async () => {
       const secret = await invite("Invited@Example.com");
       const details = account("invited@example.com", { name: "Invited Person" });
       const response = await roundTrip(`intent=invite&invite=${secret}`, details);
       expect(landed(response)).toBe("/");
-      const cookie = cookieNamed(response, "art_session") as string;
+      const cookie = cookieOf(response, "art_session");
       const me = await json<{ person: { id: string; name: string; role: string } }>(
         await t.api("/api/me", { cookie }),
       );
       expect(me.person).toMatchObject({ name: "Invited Person", role: "member" });
-      const [row] = await t.server.db.select().from(identities).where(eq(identities.personId, me.person.id));
-      expect(row?.subject).toBe(details.sub as string);
-      expect(await t.server.db.select().from(passwords).where(eq(passwords.personId, me.person.id))).toEqual(
-        [],
-      );
+      expect(await identitiesOf(cookie)).toMatchObject({
+        identities: [{ provider: "google", email: "invited@example.com" }],
+        password: false,
+      });
       expect((await t.api(`/api/invites/${secret}`)).status).toBe(410);
+      // Linked to this Google account: the next sign-in with it comes back to this person.
+      const again = await roundTrip("intent=signin", { sub: details.sub, email: "invited@example.com" });
+      expect(await t.api("/api/me", { cookie: cookieOf(again, "art_session") }).then(json)).toMatchObject({
+        person: { id: me.person.id },
+      });
     });
 
     test("on an invite, with a different email: refused, and the invite still works", async () => {
       const secret = await invite("expected@example.com");
       const response = await roundTrip(`intent=invite&invite=${secret}`, account("someone-else@example.com"));
       expect(landed(response)).toBe("/sign-in?google=invite-mismatch");
-      expect(cookieNamed(response, "art_session")).toBeUndefined();
+      expect(cookieOf(response, "art_session")).toBe("");
       expect((await t.api(`/api/invites/${secret}`)).status).toBe(200);
     });
 
@@ -313,7 +372,7 @@ describe("Google sign-in", () => {
     test("a Google account already linked can't take an invite too", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
+      await linkOf(person, subject);
       const secret = await invite("second@example.com");
       const response = await roundTrip(`intent=invite&invite=${secret}`, {
         sub: subject,
@@ -323,25 +382,22 @@ describe("Google sign-in", () => {
     });
 
     test("an invite's grants come with Google too", async () => {
-      const team = await json<{ team: { id: string } }>(
-        await t.api("/api/teams", { method: "POST", cookie: owner, json: { name: `With invite ${sub()}` } }),
-      );
+      const team = await newTeam(`With invite ${sub()}`);
       const made = await json<{ url: string }>(
         await t.api("/api/invites", {
           method: "POST",
           cookie: owner,
-          json: { email: "team@example.com", role: "reviewer", teamIds: [team.team.id] },
+          json: { email: "team@example.com", role: "reviewer", teamIds: [team.id] },
         }),
       );
       const response = await roundTrip(
-        `intent=invite&invite=${made.url.split("/join/")[1]}`,
+        `intent=invite&invite=${inviteSecret(made.url)}`,
         account("team@example.com"),
       );
       const { person } = await json<{ person: { id: string } }>(
-        await t.api("/api/me", { cookie: cookieNamed(response, "art_session") as string }),
+        await t.api("/api/me", { cookie: cookieOf(response, "art_session") }),
       );
-      const rows = await t.server.db.select().from(teamMembers).where(eq(teamMembers.personId, person.id));
-      expect(rows.map((row) => row.teamId)).toEqual([team.team.id]);
+      expect(await membersOf(team.slug)).toEqual([person.id]);
     });
   });
 
@@ -349,15 +405,15 @@ describe("Google sign-in", () => {
     const signedInWith = async (claims: Claims) => {
       const subject = sub();
       const person = await makeAccount(t, orgId, "member");
-      await linkOf(person.id, subject);
+      await linkOf(person, subject);
       google.claims = { sub: subject, email: person.email, ...claims };
       const { state, browser } = await begin("intent=signin");
-      return finish(state, browser as string);
+      return finish(state, browser);
     };
 
     test("a wrong state", async () => {
       const { browser } = await begin("intent=signin");
-      const response = await finish("not-the-state", browser as string);
+      const response = await finish("not-the-state", browser);
       expect(landed(response)).toBe("/sign-in?google=expired");
       expect(google.calls).toEqual([]);
     });
@@ -365,24 +421,24 @@ describe("Google sign-in", () => {
     test("a state used twice", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
+      await linkOf(person, subject);
       google.claims = { sub: subject, email: person.email };
       const { state, browser } = await begin("intent=signin");
-      expect(landed(await finish(state, browser as string))).toBe("/");
-      expect(landed(await finish(state, browser as string))).toBe("/sign-in?google=expired");
+      expect(landed(await finish(state, browser))).toBe("/");
+      expect(landed(await finish(state, browser))).toBe("/sign-in?google=expired");
       expect(google.calls).toHaveLength(1);
     });
 
     test("a state from another browser: a sent callback link signs nobody in", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
+      await linkOf(person, subject);
       google.claims = { sub: subject, email: person.email };
       const attacker = await begin("intent=signin");
       const victim = await begin("intent=signin");
-      const response = await finish(attacker.state, victim.browser as string);
+      const response = await finish(attacker.state, victim.browser);
       expect(landed(response)).toBe("/sign-in?google=expired");
-      expect(cookieNamed(response, "art_session")).toBeUndefined();
+      expect(cookieOf(response, "art_session")).toBe("");
       expect(google.calls).toEqual([]);
     });
 
@@ -399,7 +455,8 @@ describe("Google sign-in", () => {
           json: { email: `abandoned-${sub()}@example.com`, role: "member" },
         }),
       );
-      await begin(`intent=invite&invite=${made.url.split("/join/")[1]}`);
+      await begin(`intent=invite&invite=${inviteSecret(made.url)}`);
+      // Invites are only ever deleted by a cleanup job; this checks the state row goes with them.
       await t.server.db.delete(invites).where(eq(invites.id, made.invite.id));
       expect(
         await t.server.db.select().from(googleStates).where(eq(googleStates.inviteId, made.invite.id)),
@@ -409,19 +466,19 @@ describe("Google sign-in", () => {
     test("a state past 10 minutes", async () => {
       const { state, browser } = await begin("intent=signin");
       t.clock.advance(10 * 60_000 + 1);
-      expect(landed(await finish(state, browser as string))).toBe("/sign-in?google=expired");
+      expect(landed(await finish(state, browser))).toBe("/sign-in?google=expired");
     });
 
     test("Google sending the person back with no code", async () => {
       const { state, browser } = await begin("intent=signin");
-      const response = await finish(state, browser as string, "error=access_denied");
+      const response = await finish(state, browser, "error=access_denied");
       expect(landed(response)).toBe("/sign-in?google=cancelled");
     });
 
     test("a wrong nonce", async () => {
       const response = await signedInWith({ nonce: "not-the-nonce" });
       expect(landed(response)).toBe("/sign-in?google=failed");
-      expect(cookieNamed(response, "art_session")).toBeUndefined();
+      expect(cookieOf(response, "art_session")).toBe("");
     });
 
     test("email_verified false", async () => {
@@ -466,23 +523,24 @@ describe("Google sign-in", () => {
     test("nonsense from the token endpoint, or a failure", async () => {
       google.raw = "not a token";
       const { state, browser } = await begin("intent=signin");
-      expect(landed(await finish(state, browser as string))).toBe("/sign-in?google=failed");
+      expect(landed(await finish(state, browser))).toBe("/sign-in?google=failed");
       google.raw = null;
       google.fail = true;
       const again = await begin("intent=signin");
-      expect(landed(await finish(again.state, again.browser as string))).toBe("/sign-in?google=failed");
+      expect(landed(await finish(again.state, again.browser))).toBe("/sign-in?google=failed");
     });
 
     test("the code goes back with its verifier and redirect, and the secret stays server-side", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
+      await linkOf(person, subject);
       google.claims = { sub: subject, email: person.email };
-      const { state, browser, row, url } = await begin("intent=signin");
-      await finish(state, browser as string);
+      const { state, browser, url } = await begin("intent=signin");
+      // The fake refuses a verifier that doesn't match the challenge in the URL, as Google does.
+      expect(landed(await finish(state, browser))).toBe("/");
       expect(google.calls[0]).toEqual({
         code: "abc",
-        verifier: row?.codeVerifier as string,
+        verifier: expect.any(String),
         redirectUri: "http://viewer.test/api/auth/google/callback",
         clientId: CLIENT,
         clientSecret: "shh",
@@ -497,18 +555,20 @@ describe("Google sign-in", () => {
       const details = account("any-google-address@example.com");
       const response = await roundTrip("intent=link", details, person.cookie);
       expect(landed(response)).toBe("/settings/sign-in?google=linked");
-      const [row] = await t.server.db.select().from(identities).where(eq(identities.personId, person.id));
-      expect(row?.subject).toBe(details.sub as string);
-      const kinds = await t.server.db.select({ kind: activity.kind }).from(activity);
-      expect(kinds.map((entry) => entry.kind)).toContain("identity_linked");
+      expect((await identitiesOf(person.cookie)).identities).toMatchObject([{ email: details.email }]);
+      const signedIn = await roundTrip("intent=signin", { sub: details.sub, email: details.email });
+      expect(await t.api("/api/me", { cookie: cookieOf(signedIn, "art_session") }).then(json)).toMatchObject({
+        person: { id: person.id },
+      });
+      const activity = ActivityPage.parse(await (await t.api("/api/activity", { cookie: owner })).json());
+      expect(activity.items).toContainEqual(
+        expect.objectContaining({ kind: "identity_linked", actor: person.name }),
+      );
     });
 
     test("not without a recent sign-in", async () => {
       const person = await makeAccount(t, orgId, "member");
-      await t.server.db
-        .update(sessions)
-        .set({ authAt: new Date(t.clock.now().getTime() - 3600_000) })
-        .where(eq(sessions.personId, person.id));
+      ageSignIns();
       const { response } = await begin("intent=link&next=/settings/sign-in", person.cookie, SITE);
       expect(landed(response)).toBe("/settings/sign-in?google=recent");
     });
@@ -516,10 +576,15 @@ describe("Google sign-in", () => {
     test("a recent sign-in that ran out on the way back stops there", async () => {
       const person = await makeAccount(t, orgId, "member");
       google.claims = account("late@example.com");
+      // Starts with half a minute of the recent window left, and comes back a minute later: the state
+      // is still good, the sign-in no longer recent.
+      t.clock.advance(RECENT_AUTH_MS - 30_000);
       const { state, browser } = await begin("intent=link", person.cookie, SITE);
-      t.clock.advance(11 * 60_000);
-      await t.server.db.delete(googleStates);
-      expect(landed(await finish(state, `${browser}; ${person.cookie}`))).toBe("/sign-in?google=expired");
+      t.clock.advance(60_000);
+      expect(landed(await finish(state, `${browser}; ${person.cookie}`))).toBe(
+        "/settings/sign-in?google=recent",
+      );
+      expect((await identitiesOf(person.cookie)).identities).toEqual([]);
     });
 
     test("it stays with the session that started it", async () => {
@@ -529,9 +594,8 @@ describe("Google sign-in", () => {
       const { state, browser } = await begin("intent=link", person.cookie, SITE);
       const response = await finish(state, `${browser}; ${other.cookie}`);
       expect(landed(response)).toBe("/settings/sign-in?google=recent");
-      expect(await t.server.db.select().from(identities).where(eq(identities.personId, other.id))).toEqual(
-        [],
-      );
+      expect((await identitiesOf(other.cookie)).identities).toEqual([]);
+      expect((await identitiesOf(person.cookie)).identities).toEqual([]);
     });
 
     test("two people racing for one Google account get an answer, not a 500", async () => {
@@ -556,11 +620,9 @@ describe("Google sign-in", () => {
       const person = await makeAccount(t, orgId, "member");
       google.claims = account("after-reset@example.com");
       const { state, browser } = await begin("intent=link", person.cookie, SITE);
-      await t.server.db.delete(sessions).where(eq(sessions.personId, person.id));
+      expect((await t.api("/api/auth/logout", { method: "POST", cookie: person.cookie })).status).toBe(200);
       expect(landed(await finish(state, `${browser}; ${person.cookie}`))).toBe("/sign-in?google=expired");
-      expect(await t.server.db.select().from(identities).where(eq(identities.personId, person.id))).toEqual(
-        [],
-      );
+      expect(await hasGoogle(person.id)).toBe(false);
     });
 
     test("not without a session: it goes to sign in", async () => {
@@ -583,19 +645,16 @@ describe("Google sign-in", () => {
   });
 
   describe("re-authentication", () => {
-    const stale = async (cookie: string, personId: string) => {
-      await t.server.db
-        .update(sessions)
-        .set({ authAt: new Date(t.clock.now().getTime() - 3600_000) })
-        .where(eq(sessions.personId, personId));
+    const stale = async (cookie: string) => {
+      ageSignIns();
       expect(await t.api("/api/me", { cookie }).then(json)).toMatchObject({ recentAuth: false });
     };
 
     test("a round trip with the same sub counts as a recent sign-in, and goes back where it started", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
-      await stale(person.cookie, person.id);
+      await linkOf(person, subject);
+      await stale(person.cookie);
       google.claims = { sub: subject, email: person.email };
       const { state, browser, url } = await begin("intent=reauth&next=/device?x=1", person.cookie, SITE);
       expect(url?.searchParams.get("login_hint")).toBe(subject);
@@ -609,8 +668,8 @@ describe("Google sign-in", () => {
 
     test("a different sub doesn't", async () => {
       const person = await makeAccount(t, orgId, "member");
-      await linkOf(person.id, sub());
-      await stale(person.cookie, person.id);
+      await linkOf(person, sub());
+      await stale(person.cookie);
       const response = await roundTrip("intent=reauth&next=/x", account(person.email), person.cookie);
       expect(landed(response)).toBe("/x?google=mismatch");
       expect(await t.api("/api/me", { cookie: person.cookie }).then(json)).toMatchObject({
@@ -621,21 +680,12 @@ describe("Google sign-in", () => {
     test("another session of the same person doesn't", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
-      await stale(person.cookie, person.id);
+      await linkOf(person, subject);
+      await setPassword(person.cookie);
+      await stale(person.cookie);
       google.claims = { sub: subject, email: person.email };
       const { state, browser } = await begin("intent=reauth&next=/x", person.cookie, SITE);
-      const elsewhere = `art_session=${Bun.randomUUIDv7()}`;
-      await t.server.db.insert(sessions).values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        tokenHash: sha256(elsewhere.split("=")[1] as string),
-        personId: person.id,
-        domain: "viewer.test",
-        authAt: t.clock.now(),
-        lastSeenAt: t.clock.now(),
-        expiresAt: new Date(t.clock.now().getTime() + 3600_000),
-      });
+      const elsewhere = await signIn(t, person.email, PASSWORD);
       const response = await finish(state, `${browser}; ${elsewhere}`);
       expect(landed(response)).toBe("/x?google=expired");
       expect(await t.api("/api/me", { cookie: person.cookie }).then(json)).toMatchObject({
@@ -654,7 +704,7 @@ describe("Google sign-in", () => {
       const check = () =>
         t.api("/api/auth/reauth/check", { method: "POST", cookie: person.cookie, json: {} });
       expect((await check()).status).toBe(200);
-      await stale(person.cookie, person.id);
+      await stale(person.cookie);
       expect((await check()).status).toBe(401);
     });
   });
@@ -663,44 +713,37 @@ describe("Google sign-in", () => {
     test("a password reset deletes it: it's the way back from a takeover", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
-      const secret = "reset-secret";
-      await t.server.db.insert(resetLinks).values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        personId: person.id,
-        tokenHash: sha256(secret),
-        createdAt: t.clock.now(),
-        expiresAt: new Date(t.clock.now().getTime() + 3600_000),
-      });
-      const response = await t.api(`/api/reset/${secret}`, {
+      await linkOf(person, subject);
+      const link = ResetLinkCreated.parse(
+        await (await t.api(`/api/people/${person.id}/reset-link`, { method: "POST", cookie: owner })).json(),
+      );
+      const response = await t.api(`/api/reset/${link.url.split("/reset/")[1]}`, {
         method: "POST",
-        json: { password: "a perfectly long password" },
+        json: { password: PASSWORD },
       });
       expect(response.status).toBe(200);
-      expect(await t.server.db.select().from(identities).where(eq(identities.personId, person.id))).toEqual(
-        [],
-      );
+      expect((await identitiesOf(cookieOf(response))).identities).toEqual([]);
       const back = await roundTrip("intent=signin", { sub: subject, email: person.email });
       expect(landed(back)).toContain("link-first");
     });
 
-    test("removing someone deletes it, and that Google account can't sign in again", async () => {
+    test("removing someone deletes it: that Google account can't sign in, but can take a new invite", async () => {
       const person = await makeAccount(t, orgId, "member");
       const subject = sub();
-      await linkOf(person.id, subject);
-      await t.api(`/api/people/${person.id}`, { method: "DELETE", cookie: owner });
-      expect(await t.server.db.select().from(identities).where(eq(identities.personId, person.id))).toEqual(
-        [],
-      );
+      await linkOf(person, subject);
+      expect((await t.api(`/api/people/${person.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
       expect(landed(await roundTrip("intent=signin", { sub: subject, email: person.email }))).toBe(
         "/sign-in?google=no-account",
       );
+      // A Google account still linked to anyone is "in use" for an invite.
+      const secret = inviteSecret(await inviteTo(t, { cookie: owner }, person.email));
+      const joined = await roundTrip(`intent=invite&invite=${secret}`, { sub: subject, email: person.email });
+      expect(landed(joined)).toBe("/");
     });
 
     test("a person can remove theirs, unless it's the last way in", async () => {
       const person = await makeAccount(t, orgId, "member");
-      await linkOf(person.id, sub());
+      await linkOf(person, sub());
       const list = await json<{ identities: { id: string }[]; password: boolean; google: boolean }>(
         await t.api("/api/me/identities", { cookie: person.cookie }),
       );
@@ -708,7 +751,7 @@ describe("Google sign-in", () => {
       const id = list.identities[0]?.id as string;
       const remove = () => t.api(`/api/me/identities/${id}`, { method: "DELETE", cookie: person.cookie });
       expect((await remove()).status).toBe(409);
-      await t.server.db.insert(passwords).values({ personId: person.id, orgId, hash: "x" });
+      await setPassword(person.cookie);
       expect((await remove()).status).toBe(200);
       expect((await remove()).status).toBe(404);
     });
@@ -716,24 +759,24 @@ describe("Google sign-in", () => {
     test("nobody else can remove it", async () => {
       const person = await makeAccount(t, orgId, "member");
       const other = await makeAccount(t, orgId, "member");
-      await linkOf(person.id, sub());
-      const [row] = await t.server.db.select().from(identities).where(eq(identities.personId, person.id));
-      const response = await t.api(`/api/me/identities/${row?.id}`, {
+      await linkOf(person, sub());
+      const [identity] = (await identitiesOf(person.cookie)).identities;
+      const response = await t.api(`/api/me/identities/${identity?.id}`, {
         method: "DELETE",
         cookie: other.cookie,
       });
       expect(response.status).toBe(404);
+      expect((await identitiesOf(person.cookie)).identities).toHaveLength(1);
     });
   });
 
   describe("workspace auto-join", () => {
     const setJoin = async (autoJoin: unknown) => {
-      const current = (await findOrg(t.server.db))?.settings;
-      await t.server.db
-        .update(org)
-        .set({ settings: { ...current, googleAutoJoin: autoJoin } })
-        .where(eq(org.id, orgId));
+      const response = await t.api("/api/org/google", { method: "PATCH", cookie: owner, json: { autoJoin } });
+      expect(response.status).toBe(200);
     };
+    const autoJoin = async () =>
+      GoogleSettings.parse(await (await t.api("/api/org/google", { cookie: owner })).json()).autoJoin;
     const WORKSPACE = { domain: "acme.test", role: "reviewer", teamIds: [] };
 
     test("off by default, whatever the claim says", async () => {
@@ -743,21 +786,18 @@ describe("Google sign-in", () => {
     });
 
     test("on: the hd claim gets the chosen role and teams", async () => {
-      const team = await json<{ team: { id: string } }>(
-        await t.api("/api/teams", { method: "POST", cookie: owner, json: { name: `Auto ${sub()}` } }),
-      );
-      await setJoin({ ...WORKSPACE, teamIds: [team.team.id] });
+      const team = await newTeam(`Auto ${sub()}`);
+      await setJoin({ ...WORKSPACE, teamIds: [team.id] });
       const response = await roundTrip(
         "intent=signin&next=/x",
         account("joiner@acme.test", { hd: "ACME.test" }),
       );
       expect(landed(response)).toBe("/x");
       const { person } = await json<{ person: { id: string; role: string } }>(
-        await t.api("/api/me", { cookie: cookieNamed(response, "art_session") as string }),
+        await t.api("/api/me", { cookie: cookieOf(response, "art_session") }),
       );
       expect(person.role).toBe("reviewer");
-      const rows = await t.server.db.select().from(teamMembers).where(eq(teamMembers.personId, person.id));
-      expect(rows.map((row) => row.teamId)).toEqual([team.team.id]);
+      expect(await membersOf(team.slug)).toEqual([person.id]);
       await setJoin(null);
     });
 
@@ -813,7 +853,13 @@ describe("Google sign-in", () => {
         });
         expect(response.status).toBe(400);
       }
-      await setJoin({ ...WORKSPACE, domain: "gmail.com" });
+      // Stored before the rule, say: no route can save one now.
+      const current = (await findOrg(t.server.db))?.settings;
+      const googleAutoJoin = { ...WORKSPACE, domain: "gmail.com" } as OrgSettings["googleAutoJoin"];
+      await t.server.db
+        .update(org)
+        .set({ settings: { ...current, googleAutoJoin } as OrgSettings })
+        .where(eq(org.id, orgId));
       expect(landed(await roundTrip("intent=signin", account("person@gmail.com", { hd: "gmail.com" })))).toBe(
         "/sign-in?google=no-account",
       );
@@ -836,7 +882,7 @@ describe("Google sign-in", () => {
         cookie: owner,
         json: { settings: { linkSharing: true, googleAutoJoin: null } },
       });
-      expect((await findOrg(t.server.db))?.settings.googleAutoJoin).toEqual(WORKSPACE as never);
+      expect(await autoJoin()).toEqual(WORKSPACE as never);
       await setJoin(null);
     });
   });
@@ -870,17 +916,14 @@ describe("Google sign-in", () => {
       expect((await save({ bearer: ownerToken })).status).toBe(403);
       expect((await t.api("/api/org/google", { bearer: ownerToken })).status).toBe(403);
       const admin = await makeAccount(t, orgId, "admin");
-      await t.server.db
-        .update(sessions)
-        .set({ authAt: new Date(t.clock.now().getTime() - 3600_000) })
-        .where(eq(sessions.personId, admin.id));
+      ageSignIns();
       const stale = await save({ cookie: admin.cookie });
       expect((await json<{ error: { code: string } }>(stale)).error.code).toBe("recent_auth_required");
     });
 
     test("new credentials turn it off, and it only comes on after that admin's own round trip", async () => {
       const admin = await makeAccount(t, orgId, "admin");
-      await t.server.db.insert(passwords).values({ personId: admin.id, orgId, hash: "x" });
+      await setPassword(admin.cookie);
       const put = (json_: object, cookie = admin.cookie) =>
         t.api("/api/org/google", { method: "PUT", cookie, json: json_ });
       const enable = (cookie = admin.cookie) =>
@@ -900,12 +943,8 @@ describe("Google sign-in", () => {
       expect(await t.api("/api/meta").then(json)).toMatchObject({ google: true });
 
       // A test links nobody and signs nobody in.
-      expect(
-        await t.server.db
-          .select()
-          .from(identities)
-          .where(eq(identities.subject, google.claims.sub as string)),
-      ).toEqual([]);
+      expect((await identitiesOf(owner)).identities).toEqual([]);
+      expect(landed(await roundTrip("intent=signin", google.claims))).toBe("/sign-in?google=no-account");
 
       await put({ clientId: "another-client" });
       expect(await t.api("/api/org/google", { cookie: admin.cookie }).then(json)).toMatchObject({
@@ -925,14 +964,14 @@ describe("Google sign-in", () => {
 
     test("an admin with only Google can't turn off the way they get back in", async () => {
       const admin = await makeAccount(t, orgId, "admin");
-      await linkOf(admin.id, sub());
+      await linkOf(admin, sub());
       const calls = [
         () => t.api("/api/org/google", { method: "PUT", cookie: admin.cookie, json: { clientId: "new" } }),
         () => t.api("/api/org/google", { method: "PATCH", cookie: admin.cookie, json: { enabled: false } }),
         () => t.api("/api/org/google", { method: "DELETE", cookie: admin.cookie }),
       ];
       for (const call of calls) expect((await call()).status).toBe(409);
-      await t.server.db.insert(passwords).values({ personId: admin.id, orgId, hash: "x" });
+      await setPassword(admin.cookie);
       expect((await calls[1]?.())?.status).toBe(200);
     });
 
@@ -940,13 +979,20 @@ describe("Google sign-in", () => {
       google.claims = account("racing@example.com");
       const { state, browser } = await begin("intent=test&next=/settings/google", owner, SITE);
       google.during = async () => {
-        await t.server.db
-          .update(org)
-          .set({ googleClientId: "changed-meanwhile", googleTestedBy: null })
-          .where(eq(org.id, orgId));
+        const saved = await t.api("/api/org/google", {
+          method: "PUT",
+          cookie: owner,
+          json: { clientId: "changed-meanwhile" },
+        });
+        expect(saved.status).toBe(200);
       };
       expect(landed(await finish(state, `${browser}; ${owner}`))).toBe("/settings/google?google=failed");
-      expect((await findOrg(t.server.db))?.googleTestedBy).toBeNull();
+      expect(
+        GoogleSettings.parse(await (await t.api("/api/org/google", { cookie: owner })).json()),
+      ).toMatchObject({
+        clientId: "changed-meanwhile",
+        tested: false,
+      });
     });
 
     test("a client can be removed", async () => {
@@ -961,13 +1007,20 @@ describe("Google sign-in", () => {
 
   test("the people list says who has Google, and passkey removal knows it counts", async () => {
     const person = await makeAccount(t, orgId, "member");
-    await linkOf(person.id, sub());
-    const list = await json<{ people: { id: string; google: boolean }[] }>(
-      await t.api("/api/people", { cookie: owner }),
-    );
-    expect(list.people.find((row) => row.id === person.id)?.google).toBe(true);
-    const [row] = await t.server.db.select().from(people).where(eq(people.id, person.id));
-    expect(row?.role).toBe("member");
+    expect(await hasGoogle(person.id)).toBe(false);
+    await linkOf(person, sub());
+    expect(await hasGoogle(person.id)).toBe(true);
+    // No password, so without Google this passkey would be the last way in.
+    expect((await addPasskey(t, person.cookie, softAuthenticator())).status).toBe(200);
+    const passkeys = async () =>
+      PasskeyList.parse(await (await t.api("/api/me/passkeys", { cookie: person.cookie })).json()).passkeys;
+    const [passkey] = await passkeys();
+    const removed = await t.api(`/api/me/passkeys/${passkey?.id}`, {
+      method: "DELETE",
+      cookie: person.cookie,
+    });
+    expect(removed.status).toBe(200);
+    expect(await passkeys()).toEqual([]);
   });
 
   test("setup stores a client, off, and says nothing about it", async () => {
@@ -976,7 +1029,7 @@ describe("Google sign-in", () => {
       const response = await fresh.api("/api/setup", {
         method: "POST",
         json: {
-          setupToken: "s".repeat(48),
+          setupToken: SETUP_TOKEN,
           orgName: "Mochahub",
           clientName: "Test",
           ...OWNER,
@@ -985,10 +1038,11 @@ describe("Google sign-in", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.text()).not.toContain("shh");
-      expect(await findOrg(fresh.server.db)).toMatchObject({
-        googleClientId: CLIENT,
-        googleClientSecret: "shh",
-        googleEnabled: false,
+      const cookie = await signIn(fresh, OWNER.email, OWNER.password);
+      expect(await fresh.api("/api/org/google", { cookie }).then(json)).toMatchObject({
+        clientId: CLIENT,
+        hasSecret: true,
+        enabled: false,
       });
       expect(await fresh.api("/api/meta").then(json)).toMatchObject({ google: false });
     } finally {

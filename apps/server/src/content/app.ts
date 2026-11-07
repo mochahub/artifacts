@@ -1,20 +1,21 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
-import { findArtifact } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
+import { findArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { guestCaller } from "../auth/resolve.ts";
+import { personView } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
 import { people, versions } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { createApp } from "../http/app.ts";
 import { ApiError } from "../http/errors.ts";
-import { blobKey } from "../publish/blobs.ts";
+import { blobKey } from "../layout.ts";
 import { bucketOrigin } from "../s3.ts";
 import { corsPreflight, runBackend } from "./proxy.ts";
 import { type ContentPayload, verifyContentToken } from "./token.ts";
 
-const RECHECK_MS = 5000;
+export const RECHECK_MS = 5000;
 const CACHE_BYTES = 64 * 1024 * 1024;
 /** A file bigger than this is only ever read from the bucket a piece at a time, when asked for a range. */
 const PIECE_BYTES = 8 * 1024 * 1024;
@@ -119,7 +120,10 @@ export function createContentApp(deps: Deps) {
   }
 
   async function currentCaller(payload: ContentPayload): Promise<Caller | null> {
-    if (payload.c.kind === "guest") return guestCaller(deps, payload.c.id);
+    if (payload.c.kind === "guest") {
+      const org = await findOrg(db);
+      return org ? guestCaller(deps, org, payload.c.id) : null;
+    }
     const [person] = await db
       .select()
       .from(people)
@@ -130,7 +134,7 @@ export function createContentApp(deps: Deps) {
       kind: "person",
       sessionId: "",
       recentAuth: false,
-      person: { id: person.id, name: person.name, email: person.email, role: person.role },
+      person: personView(person),
     };
   }
 
@@ -146,7 +150,7 @@ export function createContentApp(deps: Deps) {
       .from(versions)
       .where(and(eq(versions.artifactId, payload.a), eq(versions.n, version)))
       .limit(1);
-    const files = row?.files as Record<string, { hash: string; type: string; size: number }> | undefined;
+    const files = row?.files;
     const file = files && Object.hasOwn(files, path) ? files[path] : undefined;
     if (!file) throw new ApiError("not_found", "Not found.");
 
@@ -222,7 +226,6 @@ export function createContentApp(deps: Deps) {
     const prefix = `/t/${c.req.param("token")}/${c.req.param("version")}/api/`;
     const { payload, caller } = await authorize(c.req.param("token"), Number(match[1]));
     if (c.req.method === "OPTIONS") return corsPreflight();
-    if (!deps.sandbox) throw new ApiError("not_found", "Not found.");
     return runBackend(c, deps, deps.sandbox, payload, caller, c.req.path.slice(prefix.length));
   });
 

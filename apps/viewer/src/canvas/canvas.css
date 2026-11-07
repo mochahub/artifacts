@@ -1,0 +1,137 @@
+/* Canvas */
+.cv {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+  background:
+    var(--canvas) radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1.3px) 0 0 / 18px 18px;
+  color-scheme: dark;
+}
+.cv.commenting {
+  cursor: crosshair;
+}
+.world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.fr {
+  position: absolute;
+}
+.fr img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+.fr.chg::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 2.5px solid var(--agent);
+  border-radius: 12px;
+  pointer-events: none;
+}
+.brd {
+  position: absolute;
+  font: 700 26px / 1 var(--ui);
+  color: #fff;
+  white-space: nowrap;
+}
+.brd small {
+  display: block;
+  font-weight: 500;
+  font-size: 15px;
+  color: #a0a6b1;
+  margin-top: 5px;
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.pin {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -34px 0 0;
+  border-radius: 17px 17px 17px 3px;
+  background: var(--mark);
+  color: var(--mark-ink);
+  font: 800 15px / 31px var(--ui);
+  text-align: center;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  padding: 0;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.pin::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+.pin.done {
+  background: #4a4f59;
+  color: #d5d8de;
+}
+.pin.draft {
+  background: #fff;
+  color: #111;
+  font-size: 22px;
+  line-height: 27px;
+}
+.pin.active {
+  box-shadow:
+    0 0 0 6px rgba(255, 216, 77, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.5);
+}
+.pin.static {
+  position: static;
+  margin: 0;
+  flex: none;
+}
+/* Not positioned, so this would stretch across the sheet. The row is the tap target here. */
+.pin.static::before {
+  display: none;
+}
+
+:where(.pin) {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    scale 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) {
+  .pin:hover {
+    scale: 1.08;
+  }
+}
+.pin:active {
+  scale: 0.94;
+}
+
+:where(.pin):focus {
+  outline: none;
+}
+:where(.pin):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: 2px;
+}
+.th.frame {
+  width: 44px;
+  height: 56px;
+}
+.on-canvas .vb[aria-pressed="true"] {
+  background: rgba(255, 216, 77, 0.18);
+  color: var(--mark);
+}

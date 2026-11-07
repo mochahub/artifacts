@@ -1,27 +1,14 @@
-import type { Person } from "@artifacts/schema";
+import type { PersonResponse } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ScanFace } from "lucide-preact";
 import { useEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { ApiFailure, post } from "../api.ts";
-import { safeNext } from "../next.ts";
+import { message, post } from "../api.ts";
+import { googleAnswer } from "../google.ts";
 import { canUseHomePasskey, signInWithPasskey } from "../passkey.ts";
+import { googleStart, safeNext } from "../paths.ts";
 import { me, meta } from "../session.ts";
 import { useTitle } from "../title.ts";
-
-/** What each way back from Google means, in the words of the flow in 04. */
-const GOOGLE_ANSWERS: Record<string, string> = {
-  "link-first": "Sign in once the usual way to connect Google.",
-  "no-account": "Ask an admin for an invite.",
-  "invite-mismatch": "That Google account's email doesn't match the invite.",
-  "invite-gone": "That invite has expired or was already used. Ask for a new one.",
-  "in-use": "That Google account is already connected to someone here.",
-  unverified: "Google hasn't verified that email address.",
-  expired: "That took too long. Try again.",
-  cancelled: "Google sign-in was cancelled.",
-  off: "Google sign-in is turned off here.",
-  failed: "Google sign-in didn't work. Try again.",
-};
 
 export function SignIn() {
   const { route, query } = useLocation();
@@ -43,8 +30,7 @@ export function SignIn() {
       me.value = await signInWithPasskey();
       route(safeNext(query.next), true);
     } catch (failure) {
-      error.value =
-        failure instanceof ApiFailure ? failure.message : "That passkey didn't work. Try your password.";
+      error.value = message(failure, "That passkey didn't work. Try your password.");
     }
   }
 
@@ -53,18 +39,19 @@ export function SignIn() {
     busy.value = true;
     error.value = null;
     try {
-      const { person } = await post<{ person: Person }>("/api/auth/password", {
+      const { person } = await post<PersonResponse>("/api/auth/password", {
         email: email.value,
         password: password.value,
       });
       me.value = person;
       route(safeNext(query.next), true);
     } catch (failure) {
-      error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+      error.value = message(failure);
       busy.value = false;
     }
   }
 
+  const google = googleAnswer("sign-in", query.google);
   return (
     <main class="screen">
       <div class="row">
@@ -72,7 +59,7 @@ export function SignIn() {
         <b>{meta.value?.orgName}</b>
       </div>
       <h1 class="h1">Sign in</h1>
-      {query.google && GOOGLE_ANSWERS[query.google] && <p class="err">{GOOGLE_ANSWERS[query.google]}</p>}
+      {google && <p class="err">{google}</p>}
       <button type="button" class="btn ink" onClick={withPasskey}>
         <ScanFace />
         Sign in with a passkey
@@ -83,10 +70,7 @@ export function SignIn() {
         </a>
       )}
       {meta.value?.google && (
-        <a
-          class="btn soft"
-          href={`/api/auth/google/start?intent=signin&next=${encodeURIComponent(safeNext(query.next))}`}
-        >
+        <a class="btn soft" href={googleStart("signin", { next: safeNext(query.next) })}>
           Continue with Google
         </a>
       )}

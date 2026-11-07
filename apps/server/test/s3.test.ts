@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { DeleteBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import { Bucket, bucketOrigin, PreconditionFailed } from "../src/s3.ts";
 import { testEnv } from "./helpers.ts";
 
@@ -12,8 +13,17 @@ describe("Bucket against SeaweedFS", () => {
   beforeAll(async () => {
     expect(await bucket.ensure()).toBe("created");
   });
-  afterAll(() => {
+  afterAll(async () => {
     time = new Date();
+    // A bucket of its own, removed after, so runs don't fill the shared SeaweedFS with empty buckets.
+    await bucket.deletePrefix("");
+    const s3 = new S3Client({
+      endpoint: config.endpoint,
+      region: config.region,
+      forcePathStyle: true,
+      credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+    });
+    await s3.send(new DeleteBucketCommand({ Bucket: config.bucket }));
   });
 
   test("ensure leaves an existing bucket alone", async () => {

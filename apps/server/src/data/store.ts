@@ -1,15 +1,15 @@
 import { createHmac } from "node:crypto";
 import { isDataKey } from "@artifacts/schema";
 import { and, eq, sql } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
-import type { Caller } from "../auth/caller.ts";
-import type { OrgRow } from "../db/index.ts";
+import type { OrgRow, Tx } from "../db/index.ts";
 import { artifactUsage } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
+import { type DataScope, dataPrefix, dataScopePrefix, usageScopeOf } from "../layout.ts";
 import { PreconditionFailed } from "../s3.ts";
 
 type Limits = OrgRow["settings"]["limits"];
-export type Scope = "shared" | "me";
+export type Scope = DataScope;
 type UsageScope = Scope | "files";
 
 export function checkKey(key: string): string {
@@ -40,42 +40,13 @@ export function pseudonym(org: OrgRow, artifactId: string, personOrGuestId: stri
   return out;
 }
 
-export const callerKey = (caller: Caller): string | null => {
-  if (caller.kind === "person" || caller.kind === "cliToken") return caller.person.id;
-  if (caller.kind === "guest") return caller.guestId;
-  if (caller.kind === "content") return caller.caller.id;
-  return null;
-};
-
-/**
- * Reads a request body without taking more than `limit` bytes, whether or not it declares a length. Bun
- * would otherwise buffer up to 128 MB of a chunked body before anyone could say no.
- */
-export async function readLimited(request: Request, limit: number): Promise<Uint8Array> {
-  if (Number(request.headers.get("content-length") ?? 0) > limit) throw tooBig(limit);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of (request.body ?? []) as AsyncIterable<Uint8Array>) {
-    size += chunk.length;
-    if (size > limit) throw tooBig(limit);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-const tooBig = (limit: number) => new ApiError("too_large", "That request is too big.", { limit });
-
-export const dataPrefix = (artifactId: string) => `data/${artifactId}/`;
-
 /** Where a scope lives. `me` needs the caller's pseudonym; nobody reads another person's space here. */
 export function scopePath(artifactId: string, scope: Scope, me: string | null, files = false) {
-  const base = `${dataPrefix(artifactId)}${files ? "files/" : ""}`;
-  if (scope === "shared") return `${base}shared/`;
-  if (!me) throw new ApiError("forbidden", "Only a person or a named guest has a personal space.");
-  return `${base}me/${me}/`;
+  if (scope === "me" && !me) {
+    throw new ApiError("forbidden", "Only a person or a named guest has a personal space.");
+  }
+  return dataScopePrefix(artifactId, scope, { files, me: me ?? undefined });
 }
-
-type Tx = Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0];
 
 /** The row lock in 08: writes to one artifact's scope run one at a time. */
 async function withUsage<T>(
@@ -226,12 +197,7 @@ export async function listKeys(deps: Deps, prefix: string, cursor?: string) {
 /** Every object under a prefix. */
 export async function walk(deps: Deps, prefix: string) {
   const all: { key: string; size: number }[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await deps.bucket.list(prefix, { cursor });
-    all.push(...page.objects);
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
+  for await (const objects of deps.bucket.listAll(prefix)) all.push(...objects);
   return all;
 }
 
@@ -244,9 +210,9 @@ export async function recountUsage(deps: Deps, orgId: string, artifactId: string
     return { keys: rows.length, bytes: rows.reduce((sum, row) => sum + row.size, 0) };
   };
   const scopes = {
-    shared: tally((key) => key.startsWith("shared/")),
-    me: tally((key) => key.startsWith("me/")),
-    files: tally((key) => key.startsWith("files/")),
+    shared: tally((key) => usageScopeOf(key) === "shared"),
+    me: tally((key) => usageScopeOf(key) === "me"),
+    files: tally((key) => usageScopeOf(key) === "files"),
   };
   for (const [scope, { keys, bytes }] of Object.entries(scopes)) {
     await deps.db

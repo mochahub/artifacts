@@ -2,11 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { TEMPLATE_SUMMARY, TEMPLATES } from "@artifacts/schema/templates";
-import { and, eq } from "drizzle-orm";
-import { pages, versions } from "../../../apps/server/src/db/schema.ts";
-import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
-import { cli, sandbox } from "./sandbox.ts";
+import { TEMPLATES } from "@artifacts/kit/templates";
+import type { TestServer } from "../../../apps/server/test/helpers.ts";
+import { cli, cliJson, hostedServer, sandbox, versionOf } from "./sandbox.ts";
 
 const NAMES = Object.keys(TEMPLATES);
 const kit = join(import.meta.dir, "../../kit/src/templates");
@@ -58,14 +56,7 @@ describe("templates", () => {
   const folders = new Map<string, string>();
 
   beforeAll(async () => {
-    const port = testPort();
-    url = `http://127.0.0.1:${port}`;
-    t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
-    const setup = await t.api("/api/setup", {
-      method: "POST",
-      json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "x", ...OWNER },
-    });
-    token = ((await setup.json()) as { token: string }).token;
+    ({ t, url, token } = await hostedServer());
   });
   afterAll(() => t.stop());
 
@@ -79,7 +70,7 @@ describe("templates", () => {
       );
       expect(init.code).toBe(0);
       folders.set(name, dir);
-      const lint = JSON.parse((await cli(["lint", "--json"], env(), dir)).stdout);
+      const lint = await cliJson(["lint"], env(), dir);
       expect(lint.problems).toEqual([]);
       expect(lint.ok).toBe(true);
       const published = await cli(["publish", "--json", "-m", "First"], env(), dir);
@@ -91,32 +82,24 @@ describe("templates", () => {
 
   test("one accent reaches every template, on canvases and in article pages", async () => {
     const accent = "#00a36c";
+    let articles = 0;
     for (const name of NAMES) {
       const dir = folders.get(name) as string;
       const path = join(dir, "artifact.json");
       const manifest = JSON.parse(readFileSync(path, "utf8"));
       writeFileSync(path, JSON.stringify({ ...manifest, summary: "Mine.", theme: { accent } }));
-      const result = await cli(["publish", "--json", "-m", "Rebrand"], env(), dir);
-      expect(result.code).toBe(0);
-      const body = JSON.parse(result.stdout);
+      const body = await cliJson(["publish", "-m", "Rebrand"], env(), dir);
       expect(body.version).toBe(2);
       // Pixels, not the stylesheet: every template has at least one frame that really changed.
       expect(body.changes.frames.changed.length).toBeGreaterThan(0);
-      const article = await t.server.db
-        .select({ meta: pages.meta, n: versions.n })
-        .from(pages)
-        .innerJoin(versions, eq(versions.id, pages.versionId))
-        .where(and(eq(pages.pageKey, "doc"), eq(versions.n, 2)));
-      if (Object.keys(TEMPLATES[name] as object).includes("doc.md")) {
-        expect(
-          article.some((row) => (row.meta as { theme?: { accent?: string } }).theme?.accent === accent),
-        ).toBe(true);
+      const { version } = await versionOf(t, token, `templates/${name}`, 2);
+      for (const page of version.pages) {
+        if (page.kind !== "article") continue;
+        articles += 1;
+        expect(`${name}/${page.key}: ${page.theme?.accent}`).toBe(`${name}/${page.key}: ${accent}`);
       }
     }
+    // Some templates are articles, so the check above ran.
+    expect(articles).toBeGreaterThan(0);
   }, 240_000);
-
-  test("the placeholder summary is the one the warning looks for", () => {
-    const manifest = JSON.parse(TEMPLATES.prd?.["artifact.json"] as string);
-    expect(manifest.summary).toBe(TEMPLATE_SUMMARY);
-  });
 });

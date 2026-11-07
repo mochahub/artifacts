@@ -5,7 +5,10 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/host.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/host.js"
+    }
   },
   "dependencies": {
     "quickjs-emscripten": "0.32.0"

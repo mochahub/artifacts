@@ -1,5 +1,6 @@
-import { and, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import type { Deps } from "../api/deps.ts";
+import { and, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
+import type { Tx } from "../db/index.ts";
+import { lockArtifact } from "../db/locks.ts";
 import {
   activity,
   artifactAccess,
@@ -22,22 +23,14 @@ import {
   versions,
   views,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { dataPrefix } from "../layout.ts";
 
 type ArtifactRow = typeof artifacts.$inferSelect;
 type VersionRow = typeof versions.$inferSelect;
 
-/** Bucket keys under a prefix, deleted a page at a time. */
-export async function deletePrefix(deps: Deps, prefix: string) {
-  let cursor: string | undefined;
-  do {
-    const page = await deps.bucket.list(prefix, { cursor });
-    await Promise.all(page.objects.map((object) => deps.bucket.delete(object.key)));
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
-}
-
 /** Erases a version's rows. Its blobs go later, in GC, if nothing else uses them. */
-async function deleteVersionRows(tx: Parameters<Parameters<Deps["db"]["transaction"]>[0]>[0], ids: string[]) {
+async function deleteVersionRows(tx: Tx, ids: string[]) {
   if (ids.length === 0) return;
   await tx.delete(frames).where(inArray(frames.versionId, ids));
   await tx.delete(blocks).where(inArray(blocks.versionId, ids));
@@ -56,7 +49,7 @@ const notDue = (current: { purgeAfter: Date | null }, actorId: string | null, no
 export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: string | null) {
   const { db, clock } = deps;
   const crops = await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 0))`);
+    await lockArtifact(tx, artifact.id, "content");
     // Rechecked under the lock: it may have been restored since this purge was decided.
     const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, artifact.id)).limit(1);
     if (!current?.deletedAt || notDue(current, actorId, clock.now())) return null;
@@ -126,7 +119,7 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
   // Past this point the rows are gone. A bucket failure is logged, and the daily sweep finishes it.
   try {
     await Promise.all(crops.map((key) => deps.bucket.delete(key)));
-    await deletePrefix(deps, `data/${artifact.id}/`);
+    await deps.bucket.deletePrefix(dataPrefix(artifact.id));
   } catch (error) {
     deps.log.warn("purge left objects for the sweep", { artifact: artifact.id, error: String(error) });
   }
@@ -141,7 +134,7 @@ export async function purgeVersion(
 ) {
   const { db, clock } = deps;
   const crops = await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 0))`);
+    await lockArtifact(tx, artifact.id, "content");
     const [current] = await tx.select().from(versions).where(eq(versions.id, version.id)).limit(1);
     if (!current?.deletedAt || notDue(current, actorId, clock.now())) return null;
 
@@ -150,15 +143,14 @@ export async function purgeVersion(
       .select()
       .from(threads)
       .where(and(eq(threads.artifactId, artifact.id), eq(threads.movedFromVersion, version.n)));
-    for (const thread of moved) {
-      const anchor = thread.anchor as { type: string; blockKey?: string } | null;
+    for (const { id, anchor } of moved) {
       await tx
         .update(threads)
         .set({
           cropKey: null,
-          anchor: anchor?.type === "text" ? { type: "block", blockKey: anchor.blockKey } : thread.anchor,
+          anchor: anchor?.type === "text" ? { type: "block", blockKey: anchor.blockKey } : anchor,
         })
-        .where(eq(threads.id, thread.id));
+        .where(eq(threads.id, id));
     }
 
     await deleteVersionRows(tx, [version.id]);

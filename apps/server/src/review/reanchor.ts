@@ -1,4 +1,8 @@
 import type { Anchor } from "@artifacts/schema";
+import { and, eq, ne } from "drizzle-orm";
+import type { Tx } from "../db/index.ts";
+import { threads, versions } from "../db/schema.ts";
+import { hashesOf, NOTHING, type VersionHashes } from "../versions/diff.ts";
 
 export type AnchorResult = { anchor: Anchor | null; state: "ok" | "updated" | "orphaned" };
 type Keyed = Map<string, string>;
@@ -63,4 +67,65 @@ export function reanchor(
     return { anchor: { ...anchor, blockKey: best.key }, state: "updated" };
   }
   return { anchor, state: "orphaned" };
+}
+
+/** 05, "Re-anchoring". Runs inside the commit, and again when a version is restored or removed. */
+export async function reanchorThreads(
+  tx: Tx,
+  artifactId: string,
+  pageRows: { key: string }[],
+  frameRows: { pageKey: string; frameKey: string; contentHash: string }[],
+  blockRows: { pageKey: string; blockKey: string; contentHash: string; text: string }[],
+  onlyCreatedOn?: number,
+) {
+  const open = await tx
+    .select()
+    .from(threads)
+    .where(and(eq(threads.artifactId, artifactId), ne(threads.status, "resolved")))
+    .orderBy(threads.n);
+  const pageKeys = new Set(pageRows.map((page) => page.key));
+  const threadsOnChanged: number[] = [];
+  const orphaned: number[] = [];
+  const cache = new Map<number, VersionHashes>();
+
+  for (const thread of open) {
+    if (!thread.anchor || !pageKeys.has(thread.pageKey)) continue;
+    if (onlyCreatedOn !== undefined && thread.createdVersion !== onlyCreatedOn) continue;
+    let then = cache.get(thread.createdVersion);
+    if (!then) {
+      const [version] = await tx
+        .select({ id: versions.id })
+        .from(versions)
+        .where(and(eq(versions.artifactId, artifactId), eq(versions.n, thread.createdVersion)))
+        .limit(1);
+      then = version ? await hashesOf(tx, version.id) : NOTHING;
+      cache.set(thread.createdVersion, then);
+    }
+    const prefix = `${thread.pageKey}/`;
+    const unprefix = (map: Map<string, string>) =>
+      new Map(
+        [...map]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, hash]) => [key.slice(prefix.length), hash]),
+      );
+    const result = reanchor(
+      thread.anchor,
+      { frames: unprefix(then.frames), blocks: unprefix(then.blocks) },
+      {
+        frames: new Map(
+          frameRows.filter((f) => f.pageKey === thread.pageKey).map((f) => [f.frameKey, f.contentHash]),
+        ),
+        blocks: blockRows
+          .filter((b) => b.pageKey === thread.pageKey)
+          .map((b) => ({ key: b.blockKey, hash: b.contentHash, text: b.text })),
+      },
+    );
+    await tx
+      .update(threads)
+      .set({ anchor: result.anchor, anchorState: result.state })
+      .where(eq(threads.id, thread.id));
+    if (result.state === "orphaned") orphaned.push(thread.n);
+    if (result.state === "updated" && thread.status === "open") threadsOnChanged.push(thread.n);
+  }
+  return { threadsOnChanged, orphaned };
 }

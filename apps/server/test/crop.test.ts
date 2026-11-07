@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import sharp from "sharp";
 import { cropAround } from "../src/review/crop.ts";
+import { solidImage } from "./helpers.ts";
 
-const image = (width: number, height: number) =>
-  sharp({ create: { width, height, channels: 3, background: "#123456" } })
-    .png()
-    .toBuffer();
+const image = (width: number, height: number) => solidImage(width, height, "#123456", "png");
 
 describe("crops", () => {
   test("cut a window around the pin from an ordinary render", async () => {

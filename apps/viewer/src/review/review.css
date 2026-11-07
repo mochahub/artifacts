@@ -1,0 +1,206 @@
+/* Review */
+.compose {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: var(--keyboard, 10px);
+  max-width: 520px;
+  margin: 0 auto;
+  z-index: 50;
+  padding: 14px 18px 16px;
+  border-radius: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--sheet);
+  border: 0.5px solid var(--sep);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+  color: var(--tx);
+}
+.compose .t {
+  font-size: 17px;
+  font-weight: 700;
+}
+.compose textarea,
+.replybox textarea {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 0.5px solid var(--sep);
+  background: var(--card);
+  color: var(--tx);
+  font: 16px / 1.4 var(--ui);
+  outline: none;
+  resize: none;
+}
+.compose textarea:focus,
+.replybox textarea:focus {
+  border-color: var(--mark);
+  box-shadow: 0 0 0 3px rgba(255, 216, 77, 0.25);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.quote {
+  font: italic 16px / 1.45 var(--serif);
+  color: var(--tx2);
+}
+.quote::before {
+  content: "\201C";
+}
+.quote::after {
+  content: "\201D";
+}
+.msg {
+  display: flex;
+  gap: 12px;
+}
+.msg .name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.msg .name span {
+  font-weight: 400;
+  color: var(--tx3);
+  margin-left: 6px;
+  font-size: 14px;
+}
+.msg p {
+  margin: 3px 0 0;
+  font-size: 16px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.crop {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  border-radius: 12px;
+  margin-top: 8px;
+}
+.replybox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+.replybox textarea {
+  min-height: 48px;
+  flex: 1;
+}
+.thread-row {
+  position: relative;
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  border-top: 0.5px solid var(--sep);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.thread-row:first-child {
+  border-top: 0;
+}
+.thread-row .body {
+  font-size: 15px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+:where(.thread-row):focus {
+  outline: none;
+}
+:where(.thread-row):focus-visible {
+  outline: 2px solid var(--tx);
+  outline-offset: -2px;
+}
+.panel {
+  display: none;
+}
+.copy-prompt-note {
+  margin: 0;
+  font-size: 15px;
+  color: var(--tx2);
+}
+.copy-prompt {
+  flex: none;
+}
+.panel .copy-prompt {
+  width: auto;
+  margin: 12px;
+}
+.panel .fn,
+.panel .copy-prompt-text {
+  margin: 0 12px 12px;
+}
+.copy-prompt.done svg {
+  color: var(--ok);
+}
+.copy-prompt-text {
+  flex: none;
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  -webkit-user-select: all;
+  user-select: all;
+}
+@media (min-width: 1100px) {
+  .panel {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 330px;
+    z-index: 39;
+    background: var(--bg);
+    border-left: 1px solid var(--sep);
+    color: var(--tx);
+    overflow: auto;
+    padding-top: 12px;
+  }
+  .panel .seg {
+    margin: 0 12px 10px;
+  }
+  /* The panel's column is spoken for: the page, the canvas and what floats over them keep to the rest. */
+  .has-panel {
+    --panel-w: 330px;
+    padding-right: var(--panel-w);
+  }
+  .has-panel .cv {
+    right: var(--panel-w);
+  }
+  .has-panel .capsule {
+    right: calc(env(safe-area-inset-right) + 12px + var(--panel-w));
+  }
+  .has-panel .popover {
+    right: calc(14px + var(--panel-w));
+  }
+  .has-panel .vbar,
+  .has-panel .hint,
+  .has-panel .notice {
+    left: calc((100% - var(--panel-w)) / 2);
+  }
+  .has-panel .sheet,
+  .has-panel .compose {
+    right: calc(10px + var(--panel-w));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .compose {
+    animation: rise 320ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}

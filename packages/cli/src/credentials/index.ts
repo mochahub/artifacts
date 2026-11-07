@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { configDir, normalizeUrl, readConfig, writePrivateFile } from "../config.ts";
+import { configDir, defaultServer, writePrivateFile } from "../config.ts";
 import { CliError } from "../output.ts";
 
 const SERVICE = "artifacts";
@@ -146,11 +146,9 @@ async function withFallback<T>(use: (backend: Backend) => Promise<T>): Promise<T
  */
 function envTokenFits(url: string) {
   try {
-    if (process.env.ARTIFACTS_URL) return normalizeUrl(process.env.ARTIFACTS_URL) === url;
-    const servers = readConfig().servers;
-    const own = servers.find((server) => server.default) ?? servers[0];
+    const own = defaultServer();
     // With no server known at all, `--server` is the only way to name one, so the token goes there.
-    return !own || own.url === url;
+    return !own || own === url;
   } catch {
     return false;
   }

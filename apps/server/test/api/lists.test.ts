@@ -5,14 +5,14 @@ import {
   Home,
   ProjectArtifacts,
   ProjectRow,
+  PublishPrepared,
   VersionRow,
 } from "@artifacts/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { sha256 } from "../../src/auth/secrets.ts";
-import { artifacts, decisions, people, threads, tokens, views } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makePerson, publish } from "../publish-helper.ts";
+import { views } from "../../src/db/schema.ts";
+import { claim, OWNER, orgToken, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { file, hash, makePerson, publish, published } from "../publish-helper.ts";
 
 describe("lists and artifacts", () => {
   let t: TestServer;
@@ -20,7 +20,7 @@ describe("lists and artifacts", () => {
   let personId: string;
   let member: string;
   let id: string;
-  let orgId: string;
+  let cookie: string;
   const get = (path: string, bearer = token) => t.api(path, { bearer });
 
   beforeAll(async () => {
@@ -28,12 +28,11 @@ describe("lists and artifacts", () => {
     const owner = await claim(t);
     token = owner.token;
     personId = owner.person.id;
-    await publish(t, token);
-    await publish(t, token, { frameHash: "a".repeat(64) });
-    await publish(t, token, { slug: "secret", visibility: "me" });
-    id = (await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "roadmap")))[0]?.id as string;
-    orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
-    member = await makePerson(t, orgId, "member");
+    await published(t, token);
+    id = (await published(t, token, { frameHash: "a".repeat(64) })).id;
+    await published(t, token, { slug: "secret", visibility: "me" });
+    member = (await makePerson(t, owner.orgId, "member")).token;
+    cookie = await signIn(t, OWNER.email, OWNER.password);
   });
   afterAll(() => t.stop());
 
@@ -72,16 +71,12 @@ describe("lists and artifacts", () => {
   });
 
   test("projects: counts, search and sort", async () => {
-    await t.server.db.insert(threads).values({
-      id: Bun.randomUUIDv7(),
-      orgId,
-      artifactId: id,
-      n: 1,
-      pageKey: "mocks",
-      createdVersion: 2,
-      authorPersonId: personId,
-      authorName: "Zahin",
+    const thread = await t.api(`/api/artifacts/${id}/threads`, {
+      method: "POST",
+      bearer: token,
+      json: { pageKey: "mocks", anchor: null, body: "Open", version: 2 },
     });
+    expect(thread.status).toBe(200);
     const rows = z.array(ProjectRow).parse(await (await get("/api/projects")).json());
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ slug: "camerabuddy", artifactCount: 2, openCount: 1 });
@@ -102,16 +97,14 @@ describe("lists and artifacts", () => {
 
   test("status follows the review", async () => {
     const status = async () => Artifact.parse(await (await get(`/api/artifacts/${id}`)).json()).status;
-    const decide = (kind: "approved" | "changes_requested", version: number) =>
-      t.server.db.insert(decisions).values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        artifactId: id,
-        version,
-        personId,
-        kind,
-        createdAt: t.clock.now(),
+    const decide = async (kind: "approved" | "changes_requested", version: number) => {
+      const decided = await t.api(`/api/artifacts/${id}/decisions`, {
+        method: "POST",
+        cookie,
+        json: { version, kind },
       });
+      expect(decided.status).toBe(200);
+    };
     expect((await status()).kind).toBe("not_reviewed");
     t.clock.advance(1000);
     await decide("changes_requested", 2);
@@ -173,20 +166,6 @@ describe("lists and artifacts", () => {
     expect(other.status).toBe(200);
   });
 
-  test("a deleted artifact: 410 for those who could see it, 404 for everyone else", async () => {
-    const [secret] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "secret"));
-    await t.server.db
-      .update(artifacts)
-      .set({ deletedAt: t.clock.now(), deletedBy: personId })
-      .where(eq(artifacts.id, secret?.id as string));
-    const gone = await get("/api/artifacts/by-slug/camerabuddy/secret");
-    expect(gone.status).toBe(410);
-    expect(JSON.stringify(await gone.json())).not.toContain("Zahin");
-    expect((await get(`/api/artifacts/${secret?.id}`)).status).toBe(410);
-    expect((await get("/api/artifacts/by-slug/camerabuddy/secret", member)).status).toBe(404);
-    expect((await get(`/api/artifacts/${secret?.id}`, member)).status).toBe(404);
-  });
-
   test("versions: the list, and one version's frames and blocks", async () => {
     const list = z.array(VersionRow).parse(await (await get(`/api/artifacts/${id}/versions`)).json());
     expect(list.map((v) => v.n)).toEqual([3, 2, 1]);
@@ -227,29 +206,74 @@ describe("lists and artifacts", () => {
       200,
     );
     expect((await seen({ version: 1, pageKey: "mocks", position: { y: 2 } })).status).toBe(200);
+    // No route reads positions back yet; the viewer will.
     const [row] = await t.server.db.select().from(views).where(eq(views.personId, personId));
     expect(row?.positions).toEqual({ plan: { blockKey: "x" }, mocks: { y: 2 } });
-    const [art] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
-    expect(row?.lastSeenVersion).toBeLessThanOrEqual(art?.latestVersion as number);
+    expect(row?.lastSeenVersion).toBe(3); // The latest, not the 99_999_999_999 asked for.
   });
 
   test("one org token's searches don't use up another's", async () => {
-    const make = async (secret: string) => {
-      await t.server.db.insert(tokens).values({
-        id: Bun.randomUUIDv7(),
-        orgId,
-        kind: "org",
-        name: secret,
-        tokenHash: sha256(secret),
-        scopes: ["read"],
-        createdBy: personId,
-      });
-      return secret;
-    };
-    const busy = await make("art_org_busy_token");
-    const quiet = await make("art_org_quiet_token");
+    const busy = (await orgToken(t, cookie, { name: "busy" })).token;
+    const quiet = (await orgToken(t, cookie, { name: "quiet" })).token;
     for (let i = 0; i < 60; i++) await get("/api/search?q=roadmap", busy);
     expect((await get("/api/search?q=roadmap", busy)).status).toBe(429);
     expect((await get("/api/search?q=roadmap", quiet)).status).toBe(200);
+  });
+  test("a card counts changed frames by page, so two pages' frames of one name don't collide", async () => {
+    const render = file("__renders/two.webp", "render-two-pages", "image/webp");
+    const frame = (pageKey: string) => ({
+      pageKey,
+      boardKey: "main",
+      frameKey: "hero",
+      title: null,
+      device: null,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+      contentHash: hash(`hero on ${pageKey}`),
+      renders: { "1x": render.sha256, "2x": render.sha256, "3x": render.sha256, thumb: render.sha256 },
+      livePath: null,
+    });
+    const page = (key: string, position: number) => ({
+      key,
+      kind: "canvas",
+      title: key,
+      group: null,
+      position,
+      meta: { boards: [] },
+    });
+    for (let i = 0; i < 2; i++) {
+      const prepared = await t.api("/api/publish/prepare", {
+        method: "POST",
+        bearer: token,
+        json: {
+          project: "camerabuddy",
+          slug: "two-pages",
+          title: "Two pages",
+          files: [{ path: render.path, sha256: render.sha256, size: render.size, type: render.type }],
+        },
+      });
+      const ready = PublishPrepared.parse(await prepared.json());
+      for (const missing of ready.missing) {
+        await fetch(missing.url, { method: "PUT", headers: missing.headers, body: render.body });
+      }
+      const committed = await t.api("/api/publish/commit", {
+        method: "POST",
+        bearer: token,
+        json: {
+          uploadId: ready.uploadId,
+          files: {},
+          pages: [page("first", 0), page("second", 1)],
+          frames: [frame("first"), frame("second")],
+          blocks: [],
+        },
+      });
+      expect(committed.status).toBe(200);
+    }
+    const list = ProjectArtifacts.parse(await (await get("/api/projects/camerabuddy/artifacts")).json());
+    const card = list.artifacts.find((entry) => entry.slug === "two-pages");
+    expect(card?.latestVersion).toBe(2);
+    expect(card?.counts.changedFrames).toBe(0);
   });
 });

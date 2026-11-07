@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cli, sandbox } from "./sandbox.ts";
+import { cli, fakeBin, sandbox } from "./sandbox.ts";
 
 /** A server whose sign-in page is wherever the test says. */
 function serverWithVerificationUrl(verificationUrl: string) {
@@ -28,11 +28,7 @@ function serverWithVerificationUrl(verificationUrl: string) {
 function fakeOpeners(home: string) {
   const bin = join(home, "openers");
   const log = join(home, "opened.log");
-  mkdirSync(bin, { recursive: true });
-  for (const name of ["open", "xdg-open"]) {
-    writeFileSync(join(bin, name), `#!/bin/sh\necho "$1" >> ${log}\n`);
-    chmodSync(join(bin, name), 0o755);
-  }
+  for (const name of ["open", "xdg-open"]) fakeBin(bin, name, `echo "$1" >> ${log}`);
   return { bin, opened: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
 }
 
@@ -42,25 +38,40 @@ describe("login opens the browser", () => {
     for (const server of servers) server.stop(true);
   });
 
-  async function loginTo(verificationUrl: string, wanted = false) {
-    const server = serverWithVerificationUrl(verificationUrl);
+  /** Logs in to a server that names `verificationUrl`, with openers that write down what they open. */
+  async function loginTo(openers: ReturnType<typeof fakeOpeners>, env: Record<string, string>, url: string) {
+    const server = serverWithVerificationUrl(url);
     servers.push(server);
-    const box = sandbox();
-    const openers = fakeOpeners(box.home);
-    const { ARTIFACTS_NO_BROWSER: _off, ...env } = box.env;
     await cli(["login", `http://127.0.0.1:${server.port}`], { ...env, PATH: `${openers.bin}:${env.PATH}` });
-    // The opener is started and left running, so give it a moment to write its line.
-    for (let i = 0; i < 100 && (i < 12 || wanted) && openers.opened().length === 0; i++) await Bun.sleep(25);
+  }
+  /** The opener is started and left running, so wait for the line it writes. */
+  async function opened(openers: ReturnType<typeof fakeOpeners>) {
+    for (let i = 0; i < 200 && openers.opened().length === 0; i++) await Bun.sleep(25);
     return openers.opened();
   }
+  const browserBox = () => {
+    const box = sandbox();
+    const { ARTIFACTS_NO_BROWSER: _off, ...env } = box.env;
+    return { openers: fakeOpeners(box.home), env };
+  };
 
   test("for a web page", async () => {
-    expect(await loginTo("https://art.example.com/device", true)).toEqual(["https://art.example.com/device"]);
+    const { openers, env } = browserBox();
+    await loginTo(openers, env, "https://art.example.com/device");
+    expect(await opened(openers)).toEqual(["https://art.example.com/device"]);
   });
 
   test("but not for a file or an app the server named", async () => {
-    expect(await loginTo("file:///System/Applications/Calculator.app")).toEqual([]);
-    expect(await loginTo("/System/Applications/Calculator.app")).toEqual([]);
-    expect(await loginTo("ssh://attacker.example/")).toEqual([]);
+    const { openers, env } = browserBox();
+    for (const url of [
+      "file:///System/Applications/Calculator.app",
+      "/System/Applications/Calculator.app",
+      "ssh://attacker.example/",
+    ]) {
+      await loginTo(openers, env, url);
+    }
+    // A web page last: once its line is written, an opener started for any earlier one would have written too.
+    await loginTo(openers, env, "https://art.example.com/after");
+    expect(await opened(openers)).toEqual(["https://art.example.com/after"]);
   });
 });

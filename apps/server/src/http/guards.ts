@@ -1,11 +1,11 @@
 import type { MiddlewareHandler } from "hono";
-import type { Deps } from "../api/deps.ts";
-import type { ApiVars } from "../api/routes.ts";
 import { resolveCaller } from "../auth/resolve.ts";
 import { GUEST_COOKIE, SESSION_COOKIE } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
+import type { Deps } from "../deps.ts";
 import { MIN_CLI_VERSION } from "../version.ts";
 import { ApiError } from "./errors.ts";
+import type { ApiVars } from "./routes.ts";
 
 const SETUP_ROUTES = new Set(["/api/health", "/api/meta", "/api/setup"]);
 

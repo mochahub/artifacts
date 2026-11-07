@@ -1,9 +1,26 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/schema" },
-    { "path": "apps/server" },
-    { "path": "apps/viewer" },
-    { "path": "packages/cli" }
+    {
+      "path": "packages/schema"
+    },
+    {
+      "path": "packages/kit"
+    },
+    {
+      "path": "skill"
+    },
+    {
+      "path": "apps/server"
+    },
+    {
+      "path": "apps/viewer"
+    },
+    {
+      "path": "packages/cli"
+    },
+    {
+      "path": "scripts"
+    }
   ]
 }

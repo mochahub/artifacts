@@ -1,36 +1,42 @@
-import { createHash } from "node:crypto";
-import { CONSUMER_DOMAINS, type GoogleSettings, PatchGoogle, SaveGoogle } from "@artifacts/schema";
+import type { IdentityList } from "@artifacts/schema";
+import {
+  CONSUMER_DOMAINS,
+  type GoogleOutcome,
+  type GoogleSettings,
+  MINUTE_MS,
+  PatchGoogle,
+  SaveGoogle,
+} from "@artifacts/schema";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { can } from "../auth/can.ts";
-import { type GoogleClaims, googleProvider, readIdToken } from "../auth/google.ts";
-import { randomSecret, sha256 } from "../auth/secrets.ts";
-import { isSecureRequest, startSession } from "../auth/sessions.ts";
-import type { OrgRow } from "../db/index.ts";
+import { type CallerFor, can } from "../auth/can.ts";
+import { type GoogleClaims, readIdToken } from "../auth/google.ts";
+import { acceptInvite, findLiveInvite, joinTeams } from "../auth/invites.ts";
+import { randomSecret, s256, sha256 } from "../auth/secrets.ts";
+import { isSecureRequest, markReauthed, signInMethods, startSession } from "../auth/sessions.ts";
+import { isUniqueViolation, type OrgRow } from "../db/index.ts";
 import {
   activity,
   googleStates,
   identities,
   org as orgTable,
-  passkeys,
-  passwords,
   people,
   removedIdentities,
   sessions,
 } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { requestOrigin } from "../oauth/origin.ts";
-import { isUuid } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import { acceptInvite, findLiveInvite, joinTeams } from "./join.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
+import { requestOrigin } from "../http/origins.ts";
+import { isUuid } from "../http/params.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
 
 export const CALLBACK_PATH = "/api/auth/google/callback";
 const COOKIE = "art_google";
 const COOKIE_PATH = "/api/auth/google";
-const STATE_MS = 10 * 60_000;
-const WINDOW_MS = 15 * 60_000;
+const STATE_MS = 10 * MINUTE_MS;
+const WINDOW_MS = 15 * MINUTE_MS;
 const PROVIDER = "google";
 const SIGNED_IN = ["link", "reauth", "test"];
 const INTENTS = ["signin", "invite", ...SIGNED_IN];
@@ -39,15 +45,13 @@ const INTENTS = ["signin", "invite", ...SIGNED_IN];
 const safePath = (value: string | undefined) =>
   value?.startsWith("/") && !value.startsWith("//") && !/[\\\s]/.test(value) ? value : "/";
 
-const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
-
 type StateRow = typeof googleStates.$inferSelect;
 
 export function googleRoutes(routes: Routes, deps: Deps) {
   const { db, clock, limits } = deps;
-  const provider = deps.google ?? googleProvider;
+  const provider = deps.google;
 
-  const back = (c: Context, path: string, code: string) =>
+  const back = (c: Context, path: string, code: GoogleOutcome) =>
     c.redirect(`${path}${path.includes("?") ? "&" : "?"}google=${code}`, 302);
 
   const hasClient = (row: OrgRow) => Boolean(row.googleClientId && row.googleClientSecret);
@@ -342,7 +346,7 @@ export function googleRoutes(routes: Routes, deps: Deps) {
       .limit(1);
     if (!identity) return back(c, row.next, "mismatch");
     await db.update(identities).set(remember(claims)).where(eq(identities.id, identity.id));
-    await db.update(sessions).set({ authAt: clock.now() }).where(eq(sessions.id, caller.sessionId));
+    await markReauthed(deps, caller.sessionId);
     return back(c, row.next, "confirmed");
   }
 
@@ -417,19 +421,16 @@ export function googleRoutes(routes: Routes, deps: Deps) {
     } catch (error) {
       if (error instanceof ApiError) return back(c, home, error.code === "gone" ? "invite-gone" : "in-use");
       // Two people racing for one email or Google account: the unique index settled it.
-      if ((error as { cause?: { code?: string } }).cause?.code === "23505") return back(c, home, "in-use");
+      if (isUniqueViolation(error)) return back(c, home, "in-use");
       throw error;
     }
   });
 
   routes.get("/api/me/identities", { action: "account.manage" }, async (c) => {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
-    const { id } = caller.person;
-    const [rows, keys, password] = await Promise.all([
+    const { id } = c.var.caller.person;
+    const [rows, ways] = await Promise.all([
       db.select().from(identities).where(eq(identities.personId, id)),
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, id)),
-      db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, id)).limit(1),
+      signInMethods(deps, id),
     ]);
     return c.json({
       identities: rows.map((row) => ({
@@ -438,17 +439,15 @@ export function googleRoutes(routes: Routes, deps: Deps) {
         email: row.email,
         lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       })),
-      passkeys: keys.length,
-      password: password.length > 0,
-      google: c.get("org").googleEnabled,
-    });
+      passkeys: ways.passkeys,
+      password: ways.password,
+      google: c.var.org.googleEnabled,
+    } satisfies IdentityList);
   });
 
   routes.delete("/api/me/identities/:id", { action: "account.manage", recentAuth: true }, async (c) => {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
     const id = c.req.param("id");
-    const { id: personId } = caller.person;
+    const { id: personId } = c.var.caller.person;
     const [row] = isUuid(id)
       ? await db
           .select()
@@ -457,11 +456,8 @@ export function googleRoutes(routes: Routes, deps: Deps) {
           .limit(1)
       : [];
     if (!row) throw new ApiError("not_found", "Not found.");
-    const [keys, password] = await Promise.all([
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, personId)).limit(1),
-      db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, personId)).limit(1),
-    ]);
-    if (keys.length === 0 && password.length === 0) {
+    const ways = await signInMethods(deps, personId);
+    if (ways.passkeys === 0 && !ways.password) {
       throw new ApiError("conflict", "This is your only way to sign in. Add another first.");
     }
     await db.delete(identities).where(eq(identities.id, row.id));
@@ -469,45 +465,32 @@ export function googleRoutes(routes: Routes, deps: Deps) {
   });
 
   /** Turning Google off with no other way in would leave nobody able to confirm it's them, or to undo it. */
-  async function guardLockout(c: ApiContext) {
-    const caller = c.get("caller");
-    if (caller.kind !== "person") return;
-    const { id } = caller.person;
-    const [keys, password] = await Promise.all([
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, id)).limit(1),
-      db.select({ id: passwords.personId }).from(passwords).where(eq(passwords.personId, id)).limit(1),
-    ]);
-    if (keys.length === 0 && password.length === 0) {
+  async function guardLockout(c: RouteRequest<CallerFor<"org.manage">>) {
+    const ways = await signInMethods(deps, c.var.caller.person.id);
+    if (ways.passkeys === 0 && !ways.password) {
       throw new ApiError("conflict", "Add a password or a passkey first, or you'd lose your way in.");
     }
   }
 
-  async function settingsOf(c: ApiContext): Promise<GoogleSettings> {
-    const [row] = await db
-      .select()
-      .from(orgTable)
-      .where(eq(orgTable.id, c.get("org").id))
-      .limit(1);
-    const caller = c.get("caller");
+  async function settingsOf(c: RouteRequest<CallerFor<"org.manage">>): Promise<GoogleSettings> {
+    const [row] = await db.select().from(orgTable).where(eq(orgTable.id, c.var.org.id)).limit(1);
     return {
       clientId: row?.googleClientId ?? null,
       hasSecret: Boolean(row?.googleClientSecret),
       enabled: row?.googleEnabled ?? false,
-      tested: caller.kind === "person" && row?.googleTestedBy === caller.person.id,
+      tested: row?.googleTestedBy === c.var.caller.person.id,
       redirectUris: (await deps.origins()).map((origin) => `${origin}${CALLBACK_PATH}`),
-      autoJoin: (row?.settings as OrgRow["settings"] | undefined)?.googleAutoJoin ?? null,
+      autoJoin: row?.settings.googleAutoJoin ?? null,
     };
   }
 
-  routes.get("/api/org/google", { action: "org.manage" }, async (c) =>
-    c.json(await settingsOf(c as ApiContext)),
-  );
+  routes.get("/api/org/google", { action: "org.manage" }, async (c) => c.json(await settingsOf(c)));
 
   // New credentials haven't been proved, so Google goes off until someone tests them.
   routes.put("/api/org/google", { action: "org.manage", recentAuth: true }, async (c) => {
     const { clientId, clientSecret } = await parseBody(c, SaveGoogle);
     const current = c.get("org");
-    await guardLockout(c as ApiContext);
+    await guardLockout(c);
     if (!clientSecret && !current.googleClientSecret) {
       throw new ApiError("invalid", "Paste the client secret too.");
     }
@@ -520,15 +503,14 @@ export function googleRoutes(routes: Routes, deps: Deps) {
         googleTestedBy: null,
       })
       .where(eq(orgTable.id, current.id));
-    return c.json(await settingsOf(c as ApiContext));
+    return c.json(await settingsOf(c));
   });
 
   routes.patch("/api/org/google", { action: "org.manage", recentAuth: true }, async (c) => {
     const { enabled, autoJoin } = await parseBody(c, PatchGoogle);
-    const current = c.get("org");
-    const caller = c.get("caller");
-    if (enabled === false) await guardLockout(c as ApiContext);
-    if (enabled && (caller.kind !== "person" || current.googleTestedBy !== caller.person.id)) {
+    const current = c.var.org;
+    if (enabled === false) await guardLockout(c);
+    if (enabled && current.googleTestedBy !== c.var.caller.person.id) {
       throw new ApiError("conflict", "Run a test with your own account first.");
     }
     await db
@@ -541,12 +523,12 @@ export function googleRoutes(routes: Routes, deps: Deps) {
         },
       })
       .where(eq(orgTable.id, current.id));
-    return c.json(await settingsOf(c as ApiContext));
+    return c.json(await settingsOf(c));
   });
 
   routes.delete("/api/org/google", { action: "org.manage", recentAuth: true }, async (c) => {
     const current = c.get("org");
-    await guardLockout(c as ApiContext);
+    await guardLockout(c);
     await db
       .update(orgTable)
       .set({

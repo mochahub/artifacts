@@ -2,28 +2,28 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_ORG_SETTINGS } from "@artifacts/schema";
 import type { Context } from "hono";
-import { routePath } from "hono/route";
-import type { Deps } from "./api/deps.ts";
 import { mountApi } from "./api/index.ts";
-import { metaRoutes, viewerOrigins } from "./api/meta.ts";
-import { type ApiVars, Routes } from "./api/routes.ts";
-import type { GoogleProvider } from "./auth/google.ts";
+import { metaRoutes } from "./api/meta.ts";
+import { type GoogleProvider, googleProvider } from "./auth/google.ts";
 import { RateLimits } from "./auth/rate-limit.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { createContentApp } from "./content/app.ts";
 import { connect, findOrg } from "./db/index.ts";
 import { runMigrations } from "./db/migrate.ts";
+import type { Deps } from "./deps.ts";
 import { type Env, EnvError } from "./env.ts";
 import { createApp } from "./http/app.ts";
 import { apiGuards } from "./http/guards.ts";
+import { MCP_PATH, viewerOrigins } from "./http/origins.ts";
+import { type ApiVars, Routes } from "./http/routes.ts";
 import { requireViewerHost, serveViewer, viewerHeaders } from "./http/viewer.ts";
 import { wellKnownWebauthn } from "./http/well-known.ts";
 import { createInternalApp } from "./internal/app.ts";
 import { jobsFor, startJobs } from "./jobs/index.ts";
 import type { Logger } from "./log.ts";
 import { mcpChallenge } from "./mcp/routes.ts";
-import type { MetadataFetch } from "./oauth/clients.ts";
-import { MCP_PATH } from "./oauth/origin.ts";
+import { fetchMetadata, type MetadataFetch } from "./oauth/metadata.ts";
+import { isPushEndpoint } from "./push/notify.ts";
 import { Events } from "./realtime/events.ts";
 import { Bucket, bucketOrigin } from "./s3.ts";
 import { SandboxPool } from "./sandbox/pool.ts";
@@ -33,14 +33,13 @@ export type StartOptions = {
   clock?: Clock;
   /** The built viewer. Found automatically: beside server.js in the image, in apps/viewer in the repo. */
   viewerDir?: string | null;
-  /** Called with every API route served; tests use it to prove each route was exercised. */
-  onRoute?: (method: string, path: string) => void;
-  /** Tests move the clock, so they run jobs by hand. */
+  /** Runs the daily jobs on a timer. Without it they run only when POST /internal/jobs/:name asks. */
   jobs?: boolean;
+  /** The services outside: Google, the browsers' push services and OAuth clients' metadata documents. */
+  google?: GoogleProvider;
   pushAllow?: (endpoint: string) => boolean;
   clientMetadata?: MetadataFetch;
-  google?: GoogleProvider;
-  /** Tests shorten this, so a stream's recheck doesn't take 25 seconds. */
+  /** How often an open event stream checks that its caller can still see the artifact. */
   heartbeatMs?: number;
 };
 
@@ -107,16 +106,12 @@ export async function startServer(env: Env, options: StartOptions) {
     limits: new RateLimits(clock),
     origins: async () => viewerOrigins(env, await currentHomeDomain()),
     clientIp,
-    sandbox: null,
+    sandbox: new SandboxPool(org?.settings.sandboxProcesses ?? DEFAULT_ORG_SETTINGS.sandboxProcesses, log),
     events,
-    pushAllow: options.pushAllow,
-    clientMetadata: options.clientMetadata,
-    google: options.google,
+    pushAllow: options.pushAllow ?? isPushEndpoint,
+    clientMetadata: options.clientMetadata ?? fetchMetadata,
+    google: options.google ?? googleProvider,
   };
-  deps.sandbox = new SandboxPool(
-    org?.settings.sandboxProcesses ?? DEFAULT_ORG_SETTINGS.sandboxProcesses,
-    log,
-  );
 
   const viewer = createApp(log) as unknown as ReturnType<typeof createApp> & import("hono").Hono<ApiVars>;
   viewer.use(viewerHeaders(env, bucketOrigin(env.s3)));
@@ -125,15 +120,6 @@ export async function startServer(env: Env, options: StartOptions) {
   viewer.use((c, next) => (c.req.path === "/api/health" ? next() : viewerHost(c, next)));
   viewer.use(MCP_PATH, mcpChallenge(deps));
   viewer.use(apiGuards(deps));
-  if (options.onRoute) {
-    const record = options.onRoute;
-    const hit: Parameters<typeof viewer.use>[1] = async (c, next) => {
-      await next();
-      record(c.req.method, routePath(c));
-    };
-    viewer.use("/api/*", hit);
-    viewer.use("/.well-known/*", hit);
-  }
   metaRoutes(viewer, env, db);
   viewer.get("/.well-known/webauthn", wellKnownWebauthn(deps));
   const routes = new Routes(viewer);
@@ -174,7 +160,7 @@ export async function startServer(env: Env, options: StartOptions) {
     deps,
     async stop() {
       stopJobs();
-      deps.sandbox?.stop();
+      deps.sandbox.stop();
       await Promise.all(servers.map((server) => server.stop(true)));
       await events.stop();
       await close();

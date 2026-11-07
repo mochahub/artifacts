@@ -1,6 +1,7 @@
+import type { PushKey } from "@artifacts/schema";
 import { signal } from "@preact/signals";
 import { api, del, post } from "./api.ts";
-import { safeNext } from "./next.ts";
+import { safeNext } from "./paths.ts";
 import { readStored, writeStored } from "./storage.ts";
 
 /** Set after a first comment; the app shows the sheet. */
@@ -10,8 +11,11 @@ export const askInstall = signal(false);
 export const tapped = signal(0);
 
 const ASKED = "artifacts.install-asked";
-const TAPPED = "/tapped-notification";
 const TAP_LASTS_MS = 60_000;
+
+/** The worker's caches and where it leaves a tapped notification. sw.js has its own copy (sw.test.ts). */
+export const CACHES = { shell: "shell-v1", api: "api-v1", content: "content-v1" } as const;
+export const TAPPED = "/tapped-notification";
 
 export const standalone = () =>
   matchMedia("(display-mode: standalone)").matches ||
@@ -42,7 +46,7 @@ export async function currentSubscription() {
 export async function turnOnNotifications() {
   if ((await Notification.requestPermission()) !== "granted") return false;
   const registration = await navigator.serviceWorker.ready;
-  const { key } = await api<{ key: string }>("/api/push/key");
+  const { key } = await api<PushKey>("/api/push/key");
   const subscription = await registration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: keyBytes(key),
@@ -65,7 +69,7 @@ export async function turnOffNotifications() {
  */
 export async function followTapped(go: (url: string) => void) {
   try {
-    const cache = await caches.open("shell-v1");
+    const cache = await caches.open(CACHES.shell);
     const note = await cache.match(TAPPED);
     if (!note || !(await cache.delete(TAPPED))) return;
     const { url, at } = (await note.json()) as { url: string; at: number };
@@ -77,5 +81,5 @@ export async function followTapped(go: (url: string) => void) {
 
 /** Kept pages and answers belong to whoever was signed in. From here too: this page may not be controlled. */
 export async function clearOffline() {
-  await Promise.all(["api-v1", "content-v1"].map((name) => caches.delete(name))).catch(() => {});
+  await Promise.all([CACHES.api, CACHES.content].map((name) => caches.delete(name))).catch(() => {});
 }

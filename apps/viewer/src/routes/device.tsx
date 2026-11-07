@@ -1,15 +1,13 @@
+import type { DeviceDetails } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { Laptop, Lock, Terminal } from "lucide-preact";
 import { useEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { ApiFailure, api, post } from "../api.ts";
-import { ReauthSheet } from "../components/reauth.tsx";
+import { api, message, post } from "../api.ts";
+import { useAction } from "../components/reauth.tsx";
+import { signInHref } from "../paths.ts";
 import { me } from "../session.ts";
-
-type Details = { clientName: string; agent: string | null; createdAt: string; ip: string | null };
-
-const message = (failure: unknown) =>
-  failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+import { forgetStored, readStored, writeStored } from "../storage.ts";
 
 const KEPT_CODE = "artifacts.device-code";
 
@@ -17,20 +15,20 @@ const KEPT_CODE = "artifacts.device-code";
 export function Device() {
   const { route, path, query } = useLocation();
   // A Google round trip reloads the page. The person typed this, so it only lasts for this tab.
-  const code = useSignal(query.google ? (sessionStorage.getItem(KEPT_CODE) ?? "") : "");
-  const details = useSignal<Details | null>(null);
+  const code = useSignal(query.google ? (readStored(KEPT_CODE, "session") ?? "") : "");
+  const details = useSignal<DeviceDetails | null>(null);
   const error = useSignal<string | null>(null);
   const outcome = useSignal<"approved" | "denied" | null>(null);
-  const reauth = useSignal(false);
+  const action = useAction({ beforeReauth: () => writeStored(KEPT_CODE, code.value, "session") });
 
   useEffect(() => {
-    if (!me.value) route(`/sign-in?next=${encodeURIComponent(path)}`, true);
+    if (!me.value) route(signInHref(path), true);
   }, [route, path]);
 
   async function find() {
     error.value = null;
     try {
-      details.value = await api<Details>(`/api/device/${encodeURIComponent(code.value.trim())}`);
+      details.value = await api<DeviceDetails>(`/api/device/${encodeURIComponent(code.value.trim())}`);
     } catch (failure) {
       error.value = message(failure);
     }
@@ -39,24 +37,16 @@ export function Device() {
     event.preventDefault();
     await find();
   }
-  // biome-ignore lint/correctness/useExhaustiveDependencies: once, for a code kept across a round trip.
   useEffect(() => {
-    sessionStorage.removeItem(KEPT_CODE);
+    forgetStored(KEPT_CODE, "session");
     if (code.value) find();
   }, []);
 
-  async function decide(kind: "approve" | "deny") {
-    error.value = null;
-    try {
+  const decide = (kind: "approve" | "deny") =>
+    action.run(async () => {
       await post(`/api/device/${encodeURIComponent(code.value.trim())}/${kind}`);
       outcome.value = kind === "approve" ? "approved" : "denied";
-    } catch (failure) {
-      if (failure instanceof ApiFailure && failure.code === "recent_auth_required") {
-        sessionStorage.setItem(KEPT_CODE, code.value);
-        reauth.value = true;
-      } else error.value = message(failure);
-    }
-  }
+    });
 
   if (outcome.value) {
     return (
@@ -132,7 +122,7 @@ export function Device() {
           </div>
         </div>
       </div>
-      {error.value && <p class="err">{error.value}</p>}
+      {action.error.value && <p class="err">{action.error.value}</p>}
       <div class="spacer" />
       <button type="button" class="btn ink" onClick={() => decide("approve")}>
         Approve
@@ -140,17 +130,7 @@ export function Device() {
       <button type="button" class="btn" onClick={() => decide("deny")}>
         Deny
       </button>
-      {reauth.value && (
-        <ReauthSheet
-          onCancel={() => {
-            reauth.value = false;
-          }}
-          onDone={() => {
-            reauth.value = false;
-            decide("approve");
-          }}
-        />
-      )}
+      {action.sheet}
     </main>
   );
 }

@@ -1,33 +1,26 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { artifacts, people, versions } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { file, publish } from "../publish-helper.ts";
+import { ContentToken } from "@artifacts/schema";
+import { RECHECK_MS } from "../../src/content/app.ts";
+import { claim, contentFor, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { file, hash, makeAccount, published } from "../publish-helper.ts";
 
 describe("the content host", () => {
   let t: TestServer;
   let cookie: string;
   let ownerToken: string;
+  let orgId: string;
   let id: string;
   beforeAll(async () => {
     t = await startTestServer();
     const owner = await claim(t);
     ownerToken = owner.token;
-    await publish(t, owner.token);
+    orgId = owner.orgId;
+    id = (await published(t, owner.token)).id;
     cookie = await signIn(t, OWNER.email, OWNER.password);
-    id = (await t.server.db.select().from(artifacts))[0]?.id as string;
   });
   afterAll(() => t.stop());
 
-  const mint = async (version = 1) => {
-    const response = await t.api(`/api/artifacts/${id}/content-token`, {
-      method: "POST",
-      cookie,
-      json: { version },
-    });
-    expect(response.status).toBe(200);
-    return ((await response.json()) as { base: string }).base;
-  };
+  const mint = async (version = 1) => (await contentFor(t, id, { cookie }, version)).base;
   const get = (base: string, path: string, dest: string | null = "iframe", host = "content.test") =>
     fetch(`http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}${path}`, {
       headers: { Host: host, ...(dest ? { "Sec-Fetch-Dest": dest } : {}) },
@@ -51,44 +44,39 @@ describe("the content host", () => {
   });
 
   test("answers byte ranges, which Safari needs for media", async () => {
-    const base = await mint();
-    const url = `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}index.html`;
-    const headers = { Host: "content.test", "Sec-Fetch-Dest": "video" };
-    const full = await (await fetch(url, { headers })).text();
-    const part = await fetch(url, { headers: { ...headers, Range: "bytes=0-3" } });
+    const content = await contentFor(t, id, { cookie });
+    const range = (bytes?: string) =>
+      content.fetch("index.html", {
+        headers: { "Sec-Fetch-Dest": "video", ...(bytes ? { Range: `bytes=${bytes}` } : {}) },
+      });
+    const full = await (await range()).text();
+    const part = await range("0-3");
     expect(part.status).toBe(206);
     expect(part.headers.get("content-range")).toBe(`bytes 0-3/${full.length}`);
     expect(await part.text()).toBe(full.slice(0, 4));
-    const tail = await fetch(url, { headers: { ...headers, Range: "bytes=-2" } });
-    expect(await tail.text()).toBe(full.slice(-2));
-    expect((await fetch(url, { headers: { ...headers, Range: "bytes=999999-" } })).status).toBe(416);
+    expect(await (await range("-2")).text()).toBe(full.slice(-2));
+    expect((await range("999999-")).status).toBe(416);
   });
 
   test("a big file is read from the bucket in pieces, never whole", async () => {
     const piece = 8 * 1024 * 1024;
     const body = `${"0123456789abcdef".repeat(piece / 16 + 1000)}`; // A little over 8 MB.
     const movie = file("clip.bin", body, "video/mp4");
-    expect((await publish(t, ownerToken, { slug: "big", extra: [movie] })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, "big"));
-    const minted = await t.api(`/api/artifacts/${row?.id}/content-token`, {
-      method: "POST",
-      cookie,
-      json: { version: 1 },
-    });
-    const { base } = (await minted.json()) as { base: string };
-    const url = `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}clip.bin`;
-    const headers = { Host: "content.test", "Sec-Fetch-Dest": "video" };
+    const big = await published(t, ownerToken, { slug: "big", extra: [movie] });
+    const content = await contentFor(t, big.id, { cookie });
+    const range = (bytes: string) =>
+      content.fetch("clip.bin", { headers: { "Sec-Fetch-Dest": "video", Range: `bytes=${bytes}` } });
 
     // "From here to the end" is what browsers ask first; the answer may be shorter than the file.
-    const open = await fetch(url, { headers: { ...headers, Range: "bytes=0-" } });
+    const open = await range("0-");
     expect(open.status).toBe(206);
     expect(open.headers.get("content-range")).toBe(`bytes 0-${piece - 1}/${body.length}`);
     expect((await open.arrayBuffer()).byteLength).toBe(piece);
 
-    const tail = await fetch(url, { headers: { ...headers, Range: `bytes=${body.length - 5}-` } });
+    const tail = await range(`${body.length - 5}-`);
     expect(tail.status).toBe(206);
     expect(await tail.text()).toBe(body.slice(-5));
-    expect((await fetch(url, { headers: { ...headers, Range: `bytes=${body.length}-` } })).status).toBe(416);
+    expect((await range(`${body.length}-`)).status).toBe(416);
   });
 
   test("refuses a top-level page, and a request with no Sec-Fetch-Dest", async () => {
@@ -110,33 +98,49 @@ describe("the content host", () => {
   });
 
   test("an expired token stops working", async () => {
-    const base = await mint();
-    t.clock.advance(2 * 3600_000 + 1000);
+    const minted = await t.api(`/api/artifacts/${id}/content-token`, {
+      method: "POST",
+      cookie,
+      json: { version: 1 },
+    });
+    const { base, expiresAt } = ContentToken.parse(await minted.json());
+    t.clock.advance(new Date(expiresAt).getTime() - t.clock.now().getTime() - 1000);
+    expect((await get(base, "index.html")).status).toBe(200);
+    t.clock.advance(2000);
     expect((await get(base, "index.html")).status).toBe(403);
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
 
   test("access is re-checked: deleting, removing a version or a person stops open frames in seconds", async () => {
-    const base = await mint();
-    expect((await get(base, "index.html")).status).toBe(200);
+    const owner = await signIn(t, OWNER.email, OWNER.password);
+    const post = (path: string) => t.api(path, { method: "POST", cookie: owner });
+    const recheck = () => t.clock.advance(RECHECK_MS + 1);
+    const artifact = await published(t, ownerToken, { slug: "recheck" });
+    await published(t, ownerToken, { slug: "recheck", frameHash: hash("recheck v2") });
+    const v1 = await contentFor(t, artifact.id, { cookie: owner }, 1);
+    expect((await v1.fetch("index.html")).status).toBe(200);
 
-    await t.server.db.update(artifacts).set({ deletedAt: t.clock.now() }).where(eq(artifacts.id, id));
-    t.clock.advance(5001);
-    expect((await get(base, "index.html")).status).toBe(404);
-    await t.server.db.update(artifacts).set({ deletedAt: null }).where(eq(artifacts.id, id));
-    t.clock.advance(5001);
-    expect((await get(base, "index.html")).status).toBe(200);
+    expect((await post(`/api/artifacts/${artifact.id}/delete`)).status).toBe(200);
+    recheck();
+    expect((await v1.fetch("index.html")).status).toBe(404);
+    expect((await post(`/api/artifacts/${artifact.id}/undelete`)).status).toBe(200);
+    recheck();
+    expect((await v1.fetch("index.html")).status).toBe(200);
 
-    await t.server.db.update(versions).set({ deletedAt: t.clock.now() }).where(eq(versions.artifactId, id));
-    t.clock.advance(5001);
-    expect((await get(base, "index.html")).status).toBe(404);
-    await t.server.db.update(versions).set({ deletedAt: null }).where(eq(versions.artifactId, id));
-    t.clock.advance(5001);
+    expect((await post(`/api/artifacts/${artifact.id}/versions/1/delete`)).status).toBe(200);
+    recheck();
+    expect((await v1.fetch("index.html")).status).toBe(404);
+    expect((await post(`/api/artifacts/${artifact.id}/versions/1/undelete`)).status).toBe(200);
+    recheck();
+    expect((await v1.fetch("index.html")).status).toBe(200);
 
-    await t.server.db.update(people).set({ removedAt: t.clock.now() });
-    t.clock.advance(5001);
-    expect((await get(base, "index.html")).status).toBe(404);
-    await t.server.db.update(people).set({ removedAt: null });
+    const member = await makeAccount(t, orgId, "member");
+    const theirs = await contentFor(t, artifact.id, { cookie: member.cookie }, 1);
+    expect((await theirs.fetch("index.html")).status).toBe(200);
+    expect((await t.api(`/api/people/${member.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
+    recheck();
+    expect((await theirs.fetch("index.html")).status).toBe(404);
+    expect((await v1.fetch("index.html")).status).toBe(200);
   });
 
   test("minting needs a browser caller and a live version", async () => {

@@ -33,7 +33,6 @@ export function writePrivateFile(path: string, content: string) {
 export const writeConfig = (config: Config) =>
   writePrivateFile(configPath(), JSON.stringify(config, null, 2));
 
-/** Adds or updates a server and makes it the default. */
 export function saveServer(entry: ServerEntry) {
   const config = readConfig();
   const rest = config.servers.filter((server) => server.url !== entry.url);
@@ -54,12 +53,17 @@ export function saveServer(entry: ServerEntry) {
   });
 }
 
-/** The hosts where plain http is still fine: this machine itself, where nothing crosses a network. */
+/** Plain http is fine only to this machine itself, where nothing crosses a network (07). */
 const isLoopback = (hostname: string) =>
   hostname === "localhost" ||
   hostname === "127.0.0.1" ||
   hostname === "[::1]" ||
   hostname.endsWith(".localhost");
+
+export function isSecure(url: string) {
+  const { protocol, hostname } = new URL(url);
+  return protocol === "https:" || (protocol === "http:" && isLoopback(hostname));
+}
 
 /** Raised for a server address the CLI won't send a password or token to. */
 export class InsecureServerError extends CliError {}
@@ -70,7 +74,7 @@ export class InsecureServerError extends CliError {}
  */
 export function requireHttps(url: string): string {
   const parsed = new URL(url);
-  if (parsed.protocol === "http:" && !isLoopback(parsed.hostname)) {
+  if (parsed.protocol === "http:" && !isSecure(url)) {
     throw new InsecureServerError(
       `The CLI only signs in over HTTPS, and ${parsed.origin} is plain http: put a reverse proxy in front of the server (the README's HTTPS section shows how) and use its https:// address.`,
     );
@@ -92,15 +96,21 @@ export const normalizeUrl = (url: string) => {
   return requireHttps(parsed.origin);
 };
 
-/** --server, then ARTIFACTS_URL, then the default server in config (07). */
-export function pickServer(option?: string): string {
+/** ARTIFACTS_URL, then the default server in config, then the first one; null with none (07). */
+export function defaultServer(): string | null {
+  if (process.env.ARTIFACTS_URL) return normalizeUrl(process.env.ARTIFACTS_URL);
   const servers = readConfig().servers;
+  const chosen = servers.find((server) => server.default) ?? servers[0];
+  return chosen ? requireHttps(chosen.url) : null;
+}
+
+/** --server, else the default server (07). */
+export function pickServer(option?: string): string {
   if (option) {
-    const named = servers.find((server) => server.name === option || server.url === option);
+    const named = readConfig().servers.find((server) => server.name === option || server.url === option);
     return named ? requireHttps(named.url) : normalizeUrl(option);
   }
-  if (process.env.ARTIFACTS_URL) return normalizeUrl(process.env.ARTIFACTS_URL);
-  const chosen = servers.find((server) => server.default) ?? servers[0];
-  if (!chosen) throw new CliError("No server yet. Run artifacts setup.");
-  return requireHttps(chosen.url);
+  const url = defaultServer();
+  if (!url) throw new CliError("No server yet. Run artifacts setup.");
+  return url;
 }

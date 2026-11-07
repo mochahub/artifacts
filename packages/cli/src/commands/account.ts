@@ -1,168 +1,31 @@
-import {
-  DevicePollResult,
-  DeviceStarted,
-  Health,
-  Me,
-  Meta,
-  RecoverResponse,
-  SetupResponse,
-} from "@artifacts/schema";
-import { clientName, detectAgent } from "../agent.ts";
-import { ApiCallError, Client } from "../client.ts";
-import { normalizeUrl, pickServer, readConfig, saveServer, writeConfig } from "../config.ts";
-import { getToken, removeToken, setToken } from "../credentials/index.ts";
-import { CliError, type Output } from "../output.ts";
+import { Me, RecoverResponse } from "@artifacts/schema";
+import { Client } from "../client.ts";
+import type { Input } from "../command.ts";
+import { normalizeUrl, pickServer, readConfig, writeConfig } from "../config.ts";
+import { getToken, removeToken } from "../credentials/index.ts";
+import type { Output } from "../output.ts";
 import { ask, askSecret } from "../prompt.ts";
+import { login, serverName, signedIn } from "../session.ts";
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** A client with this machine's token for the server the command is about. */
-export async function signedIn(server: string | undefined): Promise<Client> {
-  const url = pickServer(server);
-  const token = await getToken(url);
-  if (!token) throw new CliError(`Not signed in to ${url}. Run artifacts login ${url}`);
-  return new Client(url, token);
-}
-
-/** The same client, or null with no server or token, for callers that must not fail. */
-export async function findClient(): Promise<Client | null> {
-  const url = pickServer(undefined);
-  const token = await getToken(url);
-  return token ? new Client(url, token) : null;
-}
-
-/** The link comes from the server, so only web pages open: not file:, an app's own scheme, or a path. */
-function openBrowser(url: string) {
-  if (!/^https?:\/\//i.test(url)) return;
-  const command =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-  try {
-    Bun.spawn([command, url], { stdout: "ignore", stderr: "ignore" });
-  } catch {}
-}
-
-export const serverName = (url: string) => new URL(url).hostname;
-
-/** The device flow (04): prints the code, the person approves in a browser, the CLI collects the token. */
-export async function login(url: string, out: Output) {
-  const client = new Client(url);
-  const started = DeviceStarted.parse(
-    await client.post("/api/device/start", { clientName: clientName(), agent: detectAgent() ?? undefined }),
-  );
-  out.say(`Your code: ${started.userCode}`);
-  out.say(`Open ${started.verificationUrl}, sign in, and type the code.`);
-  if (!process.env.ARTIFACTS_NO_BROWSER) openBrowser(started.verificationUrl);
-
-  const deadline = Date.now() + started.expiresIn * 1000;
-  while (Date.now() < deadline) {
-    await wait(started.interval * 1000);
-    let poll: unknown;
-    try {
-      poll = await client.post("/api/device/poll", { deviceCode: started.deviceCode });
-    } catch (error) {
-      if (error instanceof ApiCallError && error.failure.code === "rate_limited") continue;
-      throw error;
-    }
-    const result = DevicePollResult.parse(poll);
-    if (result.status === "denied") throw new CliError("That sign-in was denied.");
-    if (result.status === "approved") {
-      await setToken(url, result.token);
-      saveServer({ url, name: serverName(url) });
-      return result.person;
-    }
-  }
-  throw new CliError("The code expired. Run artifacts login again.");
-}
-
-export type ClaimAnswers = { org?: string; name?: string; email?: string; password?: string };
-
-/**
- * Google is optional, so Enter skips it, and with nobody at the keyboard it's only used if it's set.
- * A server stores these and leaves them off until an admin tests them in Settings.
- */
-async function askGoogle(url: string, out: Output) {
-  const clientId = process.env.ARTIFACTS_GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.ARTIFACTS_GOOGLE_CLIENT_SECRET;
-  if (clientId && clientSecret) return { clientId, clientSecret };
-  if (!process.stdin.isTTY) return undefined;
-  const meta = Meta.parse(await new Client(url).get("/api/meta"));
-  out.say("Google sign-in is optional. To use it, add these redirect URIs to a Web application client:");
-  for (const origin of new Set([url, ...meta.viewerOrigins])) {
-    out.say(`  ${origin}/api/auth/google/callback`);
-  }
-  const id = await ask("Google client ID (Enter to skip):");
-  if (!id) return undefined;
-  return { clientId: id, clientSecret: await askSecret("Google client secret:") };
-}
-
-/** Claims a server in setup mode, with the same questions everywhere it's reached from. */
-export async function claim(url: string, setupToken: string, answers: ClaimAnswers, out: Output) {
-  const orgName = answers.org ?? (await ask("Organization name:"));
-  const name = answers.name ?? (await ask("Your name:"));
-  const email = answers.email ?? (await ask("Email:"));
-  const password = answers.password ?? process.env.ARTIFACTS_PASSWORD ?? (await askNewPassword());
-  const google = await askGoogle(url, out);
-  const result = SetupResponse.parse(
-    await new Client(url).post("/api/setup", {
-      setupToken,
-      orgName,
-      name,
-      email,
-      password,
-      clientName: clientName(),
-      agent: detectAgent() ?? undefined,
-      ...(google ? { google } : {}),
-    }),
-  );
-  await setToken(url, result.token);
-  saveServer({ url, name: serverName(url) });
-  out.say(`Created ${orgName} with you as owner. This machine is signed in as you.`);
-  if (google) out.say(`Google is saved but off. Open ${url}/settings/google and press Test to turn it on.`);
-  return result.person;
-}
-
-async function askNewPassword() {
-  for (;;) {
-    const first = await askSecret("Password (12 or more characters):");
-    if (first.length < 12) {
-      console.error("That's under 12 characters.");
-      continue;
-    }
-    if (first === (await askSecret("Again:"))) return first;
-    console.error("Those didn't match.");
-  }
-}
-
-export async function health(url: string) {
-  return Health.parse(await new Client(url).get("/api/health"));
-}
-
-export async function setupExisting(
-  rawUrl: string,
-  flags: ClaimAnswers & { setupToken?: string },
+export async function loginCommand(
+  { args: { url: given }, flags }: Input<"url", { server?: string }>,
   out: Output,
 ) {
-  const url = normalizeUrl(rawUrl);
-  if ((await health(url)).setupMode) {
-    const token =
-      flags.setupToken ??
-      process.env.ARTIFACTS_SETUP_TOKEN ??
-      (await askSecret("Setup token (Railway: your project, then artifacts, then Variables, SETUP_TOKEN):"));
-    return claim(url, token, flags, out);
-  }
-  return login(url, out);
+  const url = given ? normalizeUrl(given) : pickServer(flags.server);
+  const person = await login(url, out);
+  out.result({ server: url, person }, () => out.say(`Signed in to ${serverName(url)} as ${person.name}.`));
 }
 
-export async function whoami(server: string | undefined, out: Output) {
-  const client = await signedIn(server);
+export async function whoami({ flags }: Input<never, { server?: string }>, out: Output) {
+  const client = await signedIn(flags.server);
   const me = Me.parse(await client.get("/api/me"));
   out.result({ ...me, server: client.url }, () =>
     out.say(`${me.person.name} (${me.person.email}), ${me.person.role} of ${me.org.name}, on ${client.url}`),
   );
 }
 
-export async function logout(server: string | undefined, out: Output) {
-  const url = pickServer(server);
+export async function logout({ flags }: Input<never, { server?: string }>, out: Output) {
+  const url = pickServer(flags.server);
   const token = await getToken(url);
   if (token && !process.env.ARTIFACTS_TOKEN) {
     // The token is gone locally either way; revoking it is best effort if the server is away.
@@ -174,10 +37,14 @@ export async function logout(server: string | undefined, out: Output) {
   out.result({ ok: true, server: url }, () => out.say(`Signed out of ${url}.`));
 }
 
-export async function recover(rawUrl: string, email: string | undefined, out: Output) {
-  const url = normalizeUrl(rawUrl);
+export async function recover(
+  { args: { url: given }, flags, usage }: Input<"url", { email?: string }>,
+  out: Output,
+) {
+  if (!given) throw usage();
+  const url = normalizeUrl(given);
   const setupToken = process.env.ARTIFACTS_SETUP_TOKEN ?? (await askSecret("Setup token:"));
-  const owner = email ?? (await ask("An owner's email:"));
+  const owner = flags.email ?? (await ask("An owner's email:"));
   const { resetUrl } = RecoverResponse.parse(
     await new Client(url).post("/api/recover", { setupToken, email: owner }),
   );

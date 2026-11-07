@@ -1,10 +1,9 @@
+import { EVENT_TYPES, type EventType } from "@artifacts/schema/constants";
 import { signal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 
 /** True while a stream is open: the fast polls then only run as a slow safety net (06). */
 export const live = signal(false);
-
-const TYPES = ["thread", "comment", "version", "decision", "data"];
 
 /**
  * Opens the stream for one artifact. EventSource reconnects by itself, and that rechecks access, but
@@ -13,7 +12,7 @@ const TYPES = ["thread", "comment", "version", "decision", "data"];
  */
 export function watchEvents(
   artifactId: string,
-  onChange: (type: string) => void,
+  onChange: (type: EventType | "reconnect") => void,
   Source: typeof EventSource = EventSource,
 ) {
   const source = new Source(`/api/events?artifact=${encodeURIComponent(artifactId)}`);
@@ -26,7 +25,7 @@ export function watchEvents(
   source.onerror = () => {
     live.value = false;
   };
-  for (const type of TYPES) source.addEventListener(type, () => onChange(type));
+  for (const type of EVENT_TYPES) source.addEventListener(type, () => onChange(type));
   return () => {
     source.close();
     live.value = false;
@@ -34,7 +33,10 @@ export function watchEvents(
 }
 
 /** Refreshes on every change to this artifact. */
-export function useEvents(artifactId: string | null | undefined, onChange: (type: string) => void) {
+export function useEvents(
+  artifactId: string | null | undefined,
+  onChange: (type: EventType | "reconnect") => void,
+) {
   const callback = useRef(onChange);
   callback.current = onChange;
   useEffect(() => {

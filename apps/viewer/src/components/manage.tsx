@@ -1,13 +1,13 @@
 import type { Artifact } from "@artifacts/schema";
+import { PURGE_DAYS } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { Archive, History, Share, Trash2 } from "lucide-preact";
 import { useLocation } from "preact-iso";
-import { ApiFailure, post } from "../api.ts";
+import { post } from "../api.ts";
 import { plural } from "../format.ts";
-import { Sheet } from "./sheets.tsx";
-
-const message = (failure: unknown) =>
-  failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+import { projectHref } from "../paths.ts";
+import { useAction } from "./reauth.tsx";
+import { Sheet } from "./sheet.tsx";
 
 /** The artifact menu (07·1). Each row says what it does before you commit to it. */
 export function ArtifactMenu({
@@ -25,30 +25,24 @@ export function ArtifactMenu({
 }) {
   const { route } = useLocation();
   const deleting = useSignal(false);
-  const error = useSignal<string | null>(null);
-
-  async function archive() {
-    try {
+  const action = useAction();
+  const error = action.error;
+  const archive = () =>
+    action.run(async () => {
       await post(`/api/artifacts/${artifact.id}/${artifact.archivedAt ? "unarchive" : "archive"}`);
       onChanged();
       onClose();
-    } catch (failure) {
-      error.value = message(failure);
-    }
-  }
-  async function remove() {
-    try {
+    });
+  const remove = () =>
+    action.run(async () => {
       await post(`/api/artifacts/${artifact.id}/delete`);
-      route(`/${artifact.project}`);
-    } catch (failure) {
-      error.value = message(failure);
-    }
-  }
+      route(projectHref(artifact.project));
+    });
 
   if (deleting.value) {
     return (
       <Sheet title={`Delete ${artifact.title}?`} onClose={onClose}>
-        <p class="sub">It moves to Recently deleted for 30 days, then these are erased for good:</p>
+        <p class="sub">It moves to Recently deleted for {PURGE_DAYS} days, then these are erased for good:</p>
         <div class="group">
           <div class="li">
             <div class="grow">
@@ -82,6 +76,7 @@ export function ArtifactMenu({
             Archive instead
           </button>
         )}
+        {action.sheet}
       </Sheet>
     );
   }
@@ -129,34 +124,37 @@ export function ArtifactMenu({
               <div class="tt" style="color:var(--warn-word)">
                 Delete
               </div>
-              <div class="ss">Goes to Recently deleted for 30 days.</div>
+              <div class="ss">Goes to Recently deleted for {PURGE_DAYS} days.</div>
             </div>
           </button>
         </div>
       )}
       {error.value && <p class="err">{error.value}</p>}
+      {action.sheet}
     </Sheet>
   );
 }
 
 export function ArchivedBanner({ artifact, onChanged }: { artifact: Artifact; onChanged(): void }) {
+  const action = useAction({ after: onChanged });
   if (!artifact.archivedAt) return null;
   const on = new Date(artifact.archivedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return (
-    <div class="banner">
-      <span class="grow">Archived on {on}. Read-only.</span>
-      {artifact.permissions.manage && (
-        <button
-          type="button"
-          class="vchip"
-          onClick={async () => {
-            await post(`/api/artifacts/${artifact.id}/unarchive`);
-            onChanged();
-          }}
-        >
-          Unarchive
-        </button>
-      )}
-    </div>
+    <>
+      <div class="banner">
+        <span class="grow">Archived on {on}. Read-only.</span>
+        {artifact.permissions.manage && (
+          <button
+            type="button"
+            class="vchip"
+            onClick={() => action.run(() => post(`/api/artifacts/${artifact.id}/unarchive`))}
+          >
+            Unarchive
+          </button>
+        )}
+      </div>
+      {action.error.value && <p class="err">{action.error.value}</p>}
+      {action.sheet}
+    </>
   );
 }

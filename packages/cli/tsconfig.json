@@ -1,6 +1,26 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "../..", "outDir": "dist/types", "types": ["bun"] },
-  "include": ["src", "test", "package.json"],
-  "references": [{ "path": "../schema" }, { "path": "../../apps/server" }]
+  "compilerOptions": {
+    "rootDir": "../..",
+    "outDir": "dist/types",
+    "types": ["bun"]
+  },
+  "include": ["src", "test", "package.json", "../kit/src/text-imports.d.ts"],
+  "references": [
+    {
+      "path": "../schema"
+    },
+    {
+      "path": "../../apps/server"
+    },
+    {
+      "path": "../kit"
+    },
+    {
+      "path": "../../skill"
+    },
+    {
+      "path": "../../scripts"
+    }
+  ]
 }

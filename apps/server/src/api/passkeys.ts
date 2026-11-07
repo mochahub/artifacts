@@ -1,140 +1,54 @@
-import { AddPasskeyVerify, PasskeyOptions, PasskeyVerify, RenamePasskey } from "@artifacts/schema";
+import type { PasskeyList, PersonResponse } from "@artifacts/schema";
+import { AddPasskeyVerify, MINUTE_MS, PasskeyOptions, PasskeyVerify, RenamePasskey } from "@artifacts/schema";
 import {
   type AuthenticatorTransport,
   generateAuthenticationOptions,
   generateRegistrationOptions,
-  verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { and, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Caller } from "../auth/caller.ts";
-import { personView, startSession } from "../auth/sessions.ts";
-import { identities, passkeys, passwords, people, sessions, webauthnChallenges } from "../db/schema.ts";
+import { bytes, type Passkeys } from "../auth/passkeys.ts";
+import { personView, signInMethods, startSession } from "../auth/sessions.ts";
+import { passkeys, passwords } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { isUuid } from "./artifacts-db.ts";
-import type { Deps } from "./deps.ts";
-import { type ApiContext, parseBody, type Routes } from "./routes.ts";
+import { isUuid } from "../http/params.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
 
-const CHALLENGE_MS = 5 * 60_000;
-
-const bytes = (base64url: string) => new Uint8Array(Buffer.from(base64url, "base64url"));
 const b64 = (value: Uint8Array) => Buffer.from(value).toString("base64url");
 
-export function passkeyRoutes(routes: Routes, deps: Deps) {
+export function passkeyRoutes(routes: Routes, deps: Deps, keys: Passkeys) {
   const { db, clock } = deps;
-
-  const hostname = (c: ApiContext) => (c.req.header("host") ?? "").split(":")[0]?.toLowerCase() ?? "";
+  const { expected, saveChallenge, takeChallenge, assertion } = keys;
 
   /** The home domain, or this domain for a browser without Related Origin Requests (04). */
-  const rpFor = (c: ApiContext, local?: boolean) => (local ? hostname(c) : c.get("org").homeDomain);
-
-  const expected = async () => {
-    const origins = await deps.origins();
-    return { origins, rpIds: [...new Set(origins.map((origin) => new URL(origin).hostname))] };
-  };
-
-  async function saveChallenge(c: ApiContext, challenge: string, kind: string, personId: string | null) {
-    const id = Bun.randomUUIDv7();
-    const now = clock.now();
-    await db.delete(webauthnChallenges).where(lt(webauthnChallenges.expiresAt, now));
-    await db.insert(webauthnChallenges).values({
-      id,
-      orgId: c.get("org").id,
-      challenge,
-      kind,
-      personId,
-      expiresAt: new Date(now.getTime() + CHALLENGE_MS),
-    });
-    return id;
-  }
-
-  /** Single use: whoever deletes the row owns it (04). */
-  async function takeChallenge(c: ApiContext, id: string, kind: string, personId: string | null) {
-    const [row] = await db
-      .delete(webauthnChallenges)
-      .where(
-        and(
-          eq(webauthnChallenges.id, id),
-          eq(webauthnChallenges.orgId, c.get("org").id),
-          eq(webauthnChallenges.kind, kind),
-          personId ? eq(webauthnChallenges.personId, personId) : isNull(webauthnChallenges.personId),
-          gt(webauthnChallenges.expiresAt, clock.now()),
-        ),
-      )
-      .returning();
-    if (!row) throw new ApiError("unauthenticated", "That sign-in attempt expired. Try again.");
-    return row.challenge;
-  }
-
-  /** Verifies an assertion and returns the person, for sign-in and for re-authentication. */
-  async function assertion(c: ApiContext, challengeId: string, response: unknown) {
-    const challenge = await takeChallenge(c, challengeId, "authenticate", null);
-    const credentialId = (response as { id?: unknown })?.id;
-    if (typeof credentialId !== "string") throw new ApiError("invalid", "That isn't a passkey response.");
-    const [row] = await db
-      .select({ passkey: passkeys, person: people })
-      .from(passkeys)
-      .innerJoin(people, eq(people.id, passkeys.personId))
-      .where(
-        and(
-          eq(passkeys.orgId, c.get("org").id),
-          eq(passkeys.credentialId, bytes(credentialId)),
-          isNull(people.removedAt),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new ApiError("unauthenticated", "That passkey isn't registered here.");
-    const { origins, rpIds } = await expected();
-    const result = await verifyAuthenticationResponse({
-      response: response as Parameters<typeof verifyAuthenticationResponse>[0]["response"],
-      expectedChallenge: challenge,
-      expectedOrigin: origins,
-      expectedRPID: rpIds,
-      requireUserVerification: true,
-      credential: {
-        id: credentialId,
-        publicKey: row.passkey.publicKey as Uint8Array<ArrayBuffer>,
-        counter: row.passkey.counter,
-        transports: row.passkey.transports as AuthenticatorTransport[],
-      },
-    }).catch(() => ({ verified: false as const, authenticationInfo: null }));
-    if (!result.verified || !result.authenticationInfo) {
-      throw new ApiError("unauthenticated", "That passkey didn't verify.");
-    }
-    await db
-      .update(passkeys)
-      .set({ counter: result.authenticationInfo.newCounter, lastUsedAt: clock.now() })
-      .where(eq(passkeys.id, row.passkey.id));
-    return row.person;
-  }
+  const rpFor = (c: RouteRequest, local?: boolean) =>
+    local ? ((c.req.header("host") ?? "").split(":")[0]?.toLowerCase() ?? "") : c.var.org.homeDomain;
 
   routes.post("/api/auth/passkey/options", { public: true }, async (c) => {
     // Every call writes a row for 5 minutes, and anyone can make one.
-    deps.limits.hit(`passkey-options:${deps.clientIp(c)}`, 60, 15 * 60_000);
+    deps.limits.hit(`passkey-options:${deps.clientIp(c)}`, 60, 15 * MINUTE_MS);
     const { local } = await parseBody(c, PasskeyOptions);
     const options = await generateAuthenticationOptions({
-      rpID: rpFor(c as ApiContext, local),
+      rpID: rpFor(c, local),
       userVerification: "required",
       allowCredentials: [],
     });
-    const challengeId = await saveChallenge(c as ApiContext, options.challenge, "authenticate", null);
+    const challengeId = await saveChallenge(c.var.org, options.challenge, "authenticate", null);
     return c.json({ ...options, challengeId });
   });
 
   routes.post("/api/auth/passkey/verify", { public: true }, async (c) => {
     const { challengeId, response } = await parseBody(c, PasskeyVerify);
-    const person = await assertion(c as ApiContext, challengeId, response);
+    const person = await assertion(c.var.org, challengeId, response);
     await startSession(c, deps, person.orgId, person.id);
-    return c.json({ person: personView(person) });
+    return c.json({ person: personView(person) } satisfies PersonResponse);
   });
 
-  const session = (caller: Caller) => {
-    if (caller.kind !== "person") throw new ApiError("forbidden", "This needs a signed-in browser.");
-    return caller;
-  };
-
   routes.get("/api/me/passkeys", { action: "account.manage" }, async (c) => {
-    const { person } = session(c.get("caller"));
+    const { person } = c.var.caller;
     const [rows, password] = await Promise.all([
       db.select().from(passkeys).where(eq(passkeys.personId, person.id)),
       db
@@ -152,16 +66,16 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
         lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
       })),
       passwordSetAt: password[0]?.at.toISOString() ?? null,
-    });
+    } satisfies PasskeyList);
   });
 
   routes.post("/api/me/passkeys/options", { action: "account.manage", recentAuth: true }, async (c) => {
-    const { person } = session(c.get("caller"));
+    const { person } = c.var.caller;
     const { local } = await parseBody(c, PasskeyOptions);
     const existing = await db.select().from(passkeys).where(eq(passkeys.personId, person.id));
     const options = await generateRegistrationOptions({
-      rpName: c.get("org").name,
-      rpID: rpFor(c as ApiContext, local),
+      rpName: c.var.org.name,
+      rpID: rpFor(c, local),
       userName: person.email,
       userDisplayName: person.name,
       userID: new TextEncoder().encode(person.id),
@@ -172,14 +86,14 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
       })),
       authenticatorSelection: { residentKey: "required", userVerification: "required" },
     });
-    const challengeId = await saveChallenge(c as ApiContext, options.challenge, "register", person.id);
+    const challengeId = await saveChallenge(c.var.org, options.challenge, "register", person.id);
     return c.json({ ...options, challengeId });
   });
 
   routes.post("/api/me/passkeys/verify", { action: "account.manage", recentAuth: true }, async (c) => {
-    const { person } = session(c.get("caller"));
+    const { person } = c.var.caller;
     const body = await parseBody(c, AddPasskeyVerify);
-    const challenge = await takeChallenge(c as ApiContext, body.challengeId, "register", person.id);
+    const challenge = await takeChallenge(c.var.org, body.challengeId, "register", person.id);
     const { origins, rpIds } = await expected();
     const result = await verifyRegistrationResponse({
       response: body.response as Parameters<typeof verifyRegistrationResponse>[0]["response"],
@@ -195,13 +109,13 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
       .insert(passkeys)
       .values({
         id: Bun.randomUUIDv7(),
-        orgId: c.get("org").id,
+        orgId: c.var.org.id,
         personId: person.id,
         credentialId: bytes(credential.id),
         publicKey: credential.publicKey,
         counter: credential.counter,
         transports: credential.transports ?? [],
-        rpId: result.registrationInfo.rpID ?? c.get("org").homeDomain,
+        rpId: result.registrationInfo.rpID ?? c.var.org.homeDomain,
         name: body.name ?? "Passkey",
         createdAt: clock.now(),
       })
@@ -209,8 +123,8 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
     return c.json({ passkey: { id: row?.id, name: row?.name } });
   });
 
-  async function ownPasskey(c: ApiContext) {
-    const { person } = session(c.get("caller"));
+  async function ownPasskey(c: RouteRequest<Extract<Caller, { kind: "person" }>>) {
+    const { person } = c.var.caller;
     const id = c.req.param("id");
     const [row] = isUuid(id)
       ? await db
@@ -224,39 +138,20 @@ export function passkeyRoutes(routes: Routes, deps: Deps) {
   }
 
   routes.patch("/api/me/passkeys/:id", { action: "account.manage" }, async (c) => {
-    const row = await ownPasskey(c as ApiContext);
+    const row = await ownPasskey(c);
     const { name } = await parseBody(c, RenamePasskey);
     await db.update(passkeys).set({ name }).where(eq(passkeys.id, row.id));
     return c.json({ ok: true });
   });
 
   routes.delete("/api/me/passkeys/:id", { action: "account.manage", recentAuth: true }, async (c) => {
-    const row = await ownPasskey(c as ApiContext);
-    const [others, password, linked] = await Promise.all([
-      db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.personId, row.personId)),
-      db
-        .select({ id: passwords.personId })
-        .from(passwords)
-        .where(eq(passwords.personId, row.personId))
-        .limit(1),
-      db.select({ id: identities.id }).from(identities).where(eq(identities.personId, row.personId)),
-    ]);
-    const google = c.get("org").googleEnabled && linked.length > 0;
-    if (others.length <= 1 && password.length === 0 && !google) {
+    const row = await ownPasskey(c);
+    const ways = await signInMethods(deps, row.personId);
+    const google = c.var.org.googleEnabled && ways.google > 0;
+    if (ways.passkeys <= 1 && !ways.password && !google) {
       throw new ApiError("conflict", "This is your only way to sign in. Add another first.");
     }
     await db.delete(passkeys).where(eq(passkeys.id, row.id));
     return c.json({ ok: true });
   });
-
-  return {
-    /** For POST /api/auth/reauth. */
-    async reauth(c: ApiContext, challengeId: string, response: unknown) {
-      const caller = session(c.get("caller"));
-      const person = await assertion(c, challengeId, response);
-      if (person.id !== caller.person.id)
-        throw new ApiError("unauthenticated", "That's someone else's passkey.");
-      await db.update(sessions).set({ authAt: clock.now() }).where(eq(sessions.id, caller.sessionId));
-    },
-  };
 }

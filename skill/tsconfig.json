@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "dist", "types": ["bun"] },
+  "include": ["index.ts", "../packages/kit/src/text-imports.d.ts"]
+}

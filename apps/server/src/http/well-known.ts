@@ -1,6 +1,6 @@
 import type { Context } from "hono";
-import type { Deps } from "../api/deps.ts";
 import { findOrg } from "../db/index.ts";
+import type { Deps } from "../deps.ts";
 import { ApiError } from "./errors.ts";
 
 /** Related Origin Requests (SPEC §7.3): served only by the home domain, never listing the content host. */

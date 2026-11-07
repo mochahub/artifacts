@@ -1,31 +1,25 @@
+import type { IdentityList } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
-import { X } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
-import { ApiFailure, api, post } from "../api.ts";
+import { ApiFailure, api, message, post } from "../api.ts";
+import { googleAnswer } from "../google.ts";
 import { assertion } from "../passkey.ts";
+import { googleStart } from "../paths.ts";
+import { Sheet } from "./sheet.tsx";
 
-type Ways = { identities: unknown[]; passkeys: number; password: boolean; google: boolean };
-
-/** Starts a round trip that comes back to this page. It's a link: CSP stops a form leaving the site. */
+/** A Google round trip that comes back to this page. */
 export const googleLink = (intent: string, next = `${location.pathname}${location.search}`) =>
-  `/api/auth/google/start?intent=${intent}&next=${encodeURIComponent(next)}`;
+  googleStart(intent, { next });
 
 /** Confirms who's there before a sensitive action, then calls `done` so it can be retried (04). */
-export function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): void }) {
-  const ways = useSignal<Ways | null>(null);
+function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): void }) {
+  const ways = useSignal<IdentityList | null>(null);
   const password = useSignal("");
   // A round trip that didn't confirm them lands back here, so the reason shows in the sheet.
-  const came = new URLSearchParams(location.search).get("google");
-  const error = useSignal<string | null>(
-    came === "mismatch"
-      ? "That's a different Google account."
-      : came === "failed" || came === "expired"
-        ? "Google didn't confirm it. Try again."
-        : null,
-  );
+  const error = useSignal(googleAnswer("reauth", new URLSearchParams(location.search).get("google")));
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    api<Ways>("/api/me/identities")
+    api<IdentityList>("/api/me/identities")
       .then((body) => {
         ways.value = body;
       })
@@ -37,40 +31,27 @@ export function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): 
   const hasPassword = !ways.value || ways.value.password;
   const hasGoogle = Boolean(ways.value?.google && ways.value.identities.length > 0);
 
-  async function submit(event: SubmitEvent) {
-    event.preventDefault();
+  async function prove(proof: () => Promise<object>, fallback?: string) {
     try {
-      await post("/api/auth/reauth", { password: password.value });
+      await post("/api/auth/reauth", await proof());
       onDone();
     } catch (failure) {
-      error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+      error.value = message(failure, fallback);
     }
   }
 
   return (
-    <>
-      <div class="dim" />
-      <form class="sheet" onSubmit={submit}>
-        <div class="grabber" />
-        <div class="shead">
-          <div class="t">Confirm it's you</div>
-          <button type="button" class="x" aria-label="Close" onClick={onCancel}>
-            <X />
-          </button>
-        </div>
+    <Sheet title="Confirm it's you" onClose={onCancel}>
+      {/* Not a box of its own: the sheet lays out what's in it. */}
+      <form
+        style="display:contents"
+        onSubmit={(event) => {
+          event.preventDefault();
+          prove(async () => ({ password: password.value }));
+        }}
+      >
         {hasPasskey && (
-          <button
-            type="button"
-            class="btn ink"
-            onClick={async () => {
-              try {
-                await post("/api/auth/reauth", await assertion());
-                onDone();
-              } catch (failure) {
-                error.value = failure instanceof ApiFailure ? failure.message : "That passkey didn't work.";
-              }
-            }}
-          >
+          <button type="button" class="btn ink" onClick={() => prove(assertion, "That passkey didn't work.")}>
             Use a passkey
           </button>
         )}
@@ -107,6 +88,40 @@ export function ReauthSheet({ onDone, onCancel }: { onDone(): void; onCancel(): 
           </button>
         )}
       </form>
-    </>
+    </Sheet>
   );
+}
+
+/**
+ * Runs what a button does, and says what went wrong. Something that needs a recent sign-in (04) asks for
+ * one in a sheet, then runs again. `after` runs on success, such as a refresh; render `sheet` in the page.
+ */
+export function useAction({ after, beforeReauth }: { after?(): unknown; beforeReauth?(): void } = {}) {
+  const pending = useSignal<(() => Promise<unknown>) | null>(null);
+  const error = useSignal<string | null>(null);
+  async function run(work: () => Promise<unknown>) {
+    error.value = null;
+    try {
+      await work();
+      await after?.();
+    } catch (failure) {
+      if (failure instanceof ApiFailure && failure.code === "recent_auth_required") {
+        beforeReauth?.();
+        pending.value = work;
+      } else error.value = message(failure);
+    }
+  }
+  const sheet = pending.value ? (
+    <ReauthSheet
+      onCancel={() => {
+        pending.value = null;
+      }}
+      onDone={() => {
+        const work = pending.value;
+        pending.value = null;
+        if (work) run(work);
+      }}
+    />
+  ) : null;
+  return { run, error, sheet };
 }

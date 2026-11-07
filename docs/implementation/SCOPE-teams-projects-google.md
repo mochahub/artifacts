@@ -95,7 +95,7 @@ type ArtifactResource = {
 
 Expanding at load time, not on the caller, is deliberate:
 
-- Only two places build a resource: `toResource` in `api/artifacts-db.ts` and `visibleTo` in `library/visible.ts`. Required fields make the compiler flag both, and the permission test.
+- Only two places build a resource: `toResource` in `auth/access.ts` and `visibleTo` in `library/visible.ts`. Required fields make the compiler flag both, and the permission test.
 - The content-port recheck and push notifications build callers by hand. `push/notify.ts` checks many people against one resource, so a resource that already holds everyone's grants needs no per-person query.
 - `visibleTo` loads only the caller's rows, so lists stay at one query per concern. `toResource` loads everyone's. `/api/activity` calls it for up to 200 rows, so add that case to `load-notes.md`.
 
@@ -143,9 +143,9 @@ PUT    /api/artifacts/:id/teams/:teamId   DELETE /api/artifacts/:id/teams/:teamI
 
 | Where | Problem today | Change |
 |---|---|---|
-| `publish/routes.ts` `target()` | A new artifact in an existing project checks only `project.create`, for people | Require `project.publish`. Refuse with `conflict`, "That project name is taken", which says no more than a slug clash does and doesn't send anyone hunting for a new artifact slug. |
+| `publish/publisher.ts` `target()` | A new artifact in an existing project checks only `project.create`, for people | Require `project.publish`. Refuse with `conflict`, "That project name is taken", which says no more than a slug clash does and doesn't send anyone hunting for a new artifact slug. |
 | `/api/projects`, project page | Built only from visible artifacts, so a grantee with nothing visible yet can't reach the project | Include projects where the caller holds a grant |
-| `realtime/events.ts` | Access is checked once at connect, so a stream outlives revocation by up to 5 minutes | Recheck on the 25-second heartbeat and close. Losing a team can now remove many artifacts at once. |
+| `realtime/routes.ts` | Access is checked once at connect, so a stream outlives revocation by up to 5 minutes | Recheck on the 25-second heartbeat and close. Losing a team can now remove many artifacts at once. |
 | `DELETE /api/people/:id` | Doesn't know about teams | Delete their `team_members` and person `project_access` rows in the same transaction |
 | Share links and outside invites | Any publisher can make one | In a restricted project, they need `manage`. Otherwise a link undoes the restriction. |
 | Restricting a project | New action | Confirm first with who loses access and how many share links stay live, with an option to revoke them |

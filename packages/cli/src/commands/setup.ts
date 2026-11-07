@@ -1,24 +1,28 @@
 import { BRAND_PROMPT } from "@artifacts/schema/brand-prompt";
 import qrcode from "qrcode-terminal";
+import { setupExisting } from "../admin.ts";
+import { type Input, portOption } from "../command.ts";
 import { setupDocker } from "../docker/setup.ts";
 import type { Output } from "../output.ts";
-import { ask, confirm } from "../prompt.ts";
+import { ask, choose, confirm } from "../prompt.ts";
 import { setupRailway } from "../railway/setup.ts";
 import { installSkill } from "../skill/install.ts";
 import { offerStageshow } from "../skill/stageshow.ts";
-import { type ClaimAnswers, setupExisting } from "./account.ts";
 
-type Flags = ClaimAnswers & {
+type Flags = {
   docker?: boolean;
   dir?: string;
   image?: string;
-  port?: number;
-  setupToken?: string;
-  skill?: boolean;
+  port?: string;
+  org?: string;
+  name?: string;
+  email?: string;
+  "no-skill"?: boolean;
   stageshow?: boolean;
 };
 
-export async function setup(url: string | undefined, flags: Flags, out: Output) {
+export async function setup({ args: { url }, flags: given }: Input<"url", Flags>, out: Output) {
+  const flags = { ...given, port: portOption(given.port), skill: !given["no-skill"] };
   let person: { name: string; email: string };
   let target: string | null = url ?? null;
   if (flags.docker) {
@@ -28,7 +32,11 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
   } else if (url) {
     person = await setupExisting(url, flags, out);
   } else {
-    const choice = await ask("Where should your Artifacts server run? [railway/docker/existing]");
+    const choice = await choose("Where should your Artifacts server run?", [
+      "railway",
+      "docker",
+      "existing",
+    ] as const);
     if (choice === "docker") {
       const result = await setupDocker(flags, out);
       person = result.person;
@@ -44,7 +52,7 @@ export async function setup(url: string | undefined, flags: Flags, out: Output) 
   }
   if (
     flags.skill !== false &&
-    (await confirm("Install the skill for Claude Code and Codex?").catch(() => false))
+    (await confirm("Install the skill for Claude Code and Codex?", { enter: true, unattended: false }))
   ) {
     installSkill({}, out);
     await offerStageshow(flags.stageshow, out);

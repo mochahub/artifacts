@@ -1,23 +1,25 @@
+import type { BackendLogs, DataFiles, DataList, DataValue, UrlResponse } from "@artifacts/schema";
 import { DataClear, DataPut } from "@artifacts/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
-import { artifactParam } from "../api/artifacts-db.ts";
-import type { Deps } from "../api/deps.ts";
-import { type ApiContext, parseBody, type Routes } from "../api/routes.ts";
+import type { LoadedArtifact } from "../auth/access.ts";
+import { type Caller, callerKey, limiterKey } from "../auth/caller.ts";
+import type { OrgRow } from "../db/index.ts";
 import { backendLogs, guestLinks, people, shareLinks } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { parseBody, readLimited } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
-import { deletePrefix } from "../jobs/purge.ts";
+import { artifactParam } from "../http/resources.ts";
+import type { RouteRequest, Routes } from "../http/routes.ts";
+import { dataPrefix, dataScopePrefix } from "../layout.ts";
 import { PreconditionFailed } from "../s3.ts";
 import {
-  callerKey,
   checkKey,
-  dataPrefix,
   deleteValue,
   fileUrl,
   listKeys,
   pseudonym,
   putFile,
   putValue,
-  readLimited,
   recountUsage,
   type Scope,
   scopePath,
@@ -28,26 +30,27 @@ export function dataRoutes(routes: Routes, deps: Deps) {
   const { db, bucket, clock, limits: rate } = deps;
   const artifact = artifactParam(deps);
 
-  const scopeOf = (c: ApiContext): Scope => {
+  type DataRequest = RouteRequest<Caller, LoadedArtifact>;
+  const scopeOf = (c: DataRequest): Scope => {
     const scope = c.req.param("scope");
     if (scope !== "shared" && scope !== "me") throw new ApiError("not_found", "Not found.");
     return scope;
   };
-  const myId = (c: ApiContext) => {
-    const key = callerKey(c.get("caller"));
-    return key ? pseudonym(c.get("org"), c.req.param("id") as string, key) : null;
+  const myId = (c: DataRequest) => {
+    const key = callerKey(c.var.caller);
+    return key ? pseudonym(c.var.org, c.var.resource.id, key) : null;
   };
-  const prefix = (c: ApiContext, files = false) =>
-    scopePath(c.req.param("id") as string, scopeOf(c), scopeOf(c) === "me" ? myId(c) : null, files);
+  const prefix = (c: DataRequest, files = false) =>
+    scopePath(c.var.resource.id, scopeOf(c), scopeOf(c) === "me" ? myId(c) : null, files);
   /** Only `shared`: a `me` key is one person's, and its name says nothing anyone else should see. */
-  const changed = (c: ApiContext, key: string, etag: string | null) => {
+  const changed = (c: DataRequest, key: string, etag: string | null) => {
     if (scopeOf(c) === "shared") {
-      void deps.events.emit(c.req.param("id") as string, "data", { scope: "shared", key, etag });
+      void deps.events.emit(c.var.resource.id, "data", { scope: "shared", key, etag });
     }
   };
-  const limited = (c: ApiContext) => {
-    const key = callerKey(c.get("caller")) ?? "token";
-    rate.hit(`data:${c.req.param("id")}:${key}`, c.get("org").settings.limits.writesPerSecond, 1000);
+  const limited = (c: DataRequest) => {
+    const key = limiterKey(c.var.caller) ?? "token";
+    rate.hit(`data:${c.var.resource.id}:${key}`, c.var.org.settings.limits.writesPerSecond, 1000);
   };
   const precondition = async <T>(work: () => Promise<T>) => {
     try {
@@ -58,10 +61,9 @@ export function dataRoutes(routes: Routes, deps: Deps) {
       throw error;
     }
   };
-  const usageScope = (c: ApiContext) => scopeOf(c);
   /** `parseBody` for a data PUT, but never reading more than a value may be (plus the envelope). */
-  const boundedPut = async (c: ApiContext) => {
-    const bytes = await readLimited(c.req.raw, c.get("org").settings.limits.dataValueBytes + 1024);
+  const boundedPut = async (c: DataRequest) => {
+    const bytes = await readLimited(c.req.raw, c.var.org.settings.limits.dataValueBytes + 1024);
     let raw: unknown;
     try {
       raw = JSON.parse(new TextDecoder().decode(bytes));
@@ -76,14 +78,14 @@ export function dataRoutes(routes: Routes, deps: Deps) {
   };
 
   routes.get("/api/artifacts/:id/data/:scope", { action: "data.read", resource: artifact }, async (c) => {
-    const base = prefix(c as ApiContext);
+    const base = prefix(c);
     const wanted = c.req.query("prefix");
     if (wanted) checkKey(wanted);
     const page = await listKeys(deps, `${base}${wanted ?? ""}`, c.req.query("cursor"));
     return c.json({
       keys: page.keys.map((entry) => ({ ...entry, key: `${wanted ?? ""}${entry.key}` })),
       nextCursor: page.nextCursor,
-    });
+    } satisfies DataList);
   });
 
   routes.get(
@@ -91,9 +93,12 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.read", resource: artifact },
     async (c) => {
       const key = checkKey(c.req.param("key") as string);
-      const object = await bucket.get(`${prefix(c as ApiContext)}${key}`);
+      const object = await bucket.get(`${prefix(c)}${key}`);
       if (!object) throw new ApiError("not_found", "Not found.");
-      return c.json({ value: JSON.parse(new TextDecoder().decode(object.body)), etag: object.etag });
+      return c.json({
+        value: JSON.parse(new TextDecoder().decode(object.body)),
+        etag: object.etag,
+      } satisfies DataValue);
     },
   );
 
@@ -102,22 +107,22 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.write", resource: artifact },
     async (c) => {
       const key = checkKey(c.req.param("key") as string);
-      limited(c as ApiContext);
-      const { value } = await boundedPut(c as ApiContext);
+      limited(c);
+      const { value } = await boundedPut(c);
       const ifMatch = c.req.header("if-match");
       const result = await precondition(() =>
         putValue(deps, {
-          orgId: c.get("org").id,
-          artifactId: c.req.param("id") as string,
-          scope: usageScope(c as ApiContext),
-          objectKey: `${prefix(c as ApiContext)}${key}`,
+          orgId: c.var.org.id,
+          artifactId: c.var.resource.id,
+          scope: scopeOf(c),
+          objectKey: `${prefix(c)}${key}`,
           value,
-          limits: c.get("org").settings.limits,
+          limits: c.var.org.settings.limits,
           ifMatch: ifMatch && ifMatch !== "*" ? ifMatch.replaceAll('"', "") : undefined,
           ifNoneMatch: c.req.header("if-none-match") === "*",
         }),
       );
-      changed(c as ApiContext, key, result.etag);
+      changed(c, key, result.etag);
       return c.json(result);
     },
   );
@@ -127,27 +132,27 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.write", resource: artifact },
     async (c) => {
       const key = checkKey(c.req.param("key") as string);
-      limited(c as ApiContext);
+      limited(c);
       await precondition(() =>
         deleteValue(deps, {
-          orgId: c.get("org").id,
-          artifactId: c.req.param("id") as string,
-          scope: usageScope(c as ApiContext),
-          objectKey: `${prefix(c as ApiContext)}${key}`,
+          orgId: c.var.org.id,
+          artifactId: c.var.resource.id,
+          scope: scopeOf(c),
+          objectKey: `${prefix(c)}${key}`,
           ifMatch: c.req.header("if-match")?.replaceAll('"', ""),
         }),
       );
-      changed(c as ApiContext, key, null);
+      changed(c, key, null);
       return c.json({ ok: true });
     },
   );
 
   routes.get("/api/artifacts/:id/files/:scope", { action: "data.read", resource: artifact }, async (c) => {
-    const page = await listKeys(deps, prefix(c as ApiContext, true), c.req.query("cursor"));
+    const page = await listKeys(deps, prefix(c, true), c.req.query("cursor"));
     return c.json({
       files: page.keys.map(({ key, ...rest }) => ({ name: key, ...rest })),
       nextCursor: page.nextCursor,
-    });
+    } satisfies DataFiles);
   });
 
   routes.put(
@@ -155,12 +160,12 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.write", resource: artifact },
     async (c) => {
       const name = checkKey(c.req.param("name") as string);
-      limited(c as ApiContext);
-      const limits = c.get("org").settings.limits;
+      limited(c);
+      const limits = c.var.org.settings.limits;
       const result = await putFile(deps, {
-        orgId: c.get("org").id,
-        artifactId: c.req.param("id") as string,
-        objectKey: `${prefix(c as ApiContext, true)}${name}`,
+        orgId: c.var.org.id,
+        artifactId: c.var.resource.id,
+        objectKey: `${prefix(c, true)}${name}`,
         body: await readLimited(c.req.raw, limits.fileBytes),
         contentType: c.req.header("content-type") ?? "application/octet-stream",
         limits,
@@ -174,9 +179,9 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.read", resource: artifact },
     async (c) => {
       const name = checkKey(c.req.param("name") as string);
-      const url = await fileUrl(deps, `${prefix(c as ApiContext, true)}${name}`);
+      const url = await fileUrl(deps, `${prefix(c, true)}${name}`);
       // A frame can't follow a redirect it can't see, so the bridge asks for the URL.
-      if (c.req.header("accept")?.includes("application/json")) return c.json({ url });
+      if (c.req.header("accept")?.includes("application/json")) return c.json({ url } satisfies UrlResponse);
       return c.redirect(url, 302);
     },
   );
@@ -186,12 +191,12 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     { action: "data.write", resource: artifact },
     async (c) => {
       const name = checkKey(c.req.param("name") as string);
-      limited(c as ApiContext);
+      limited(c);
       await deleteValue(deps, {
-        orgId: c.get("org").id,
-        artifactId: c.req.param("id") as string,
+        orgId: c.var.org.id,
+        artifactId: c.var.resource.id,
         scope: "files",
-        objectKey: `${prefix(c as ApiContext, true)}${name}`,
+        objectKey: `${prefix(c, true)}${name}`,
       });
       return c.json({ ok: true });
     },
@@ -205,7 +210,7 @@ export function dataRoutes(routes: Routes, deps: Deps) {
       .from(backendLogs)
       .where(
         and(
-          eq(backendLogs.artifactId, c.req.param("id") as string),
+          eq(backendLogs.artifactId, c.var.resource.id),
           Number.isInteger(version) && version > 0 ? eq(backendLogs.version, version) : undefined,
           after ? gt(backendLogs.id, after) : undefined,
         ),
@@ -220,14 +225,12 @@ export function dataRoutes(routes: Routes, deps: Deps) {
         message: row.message,
         requestId: row.requestId,
         createdAt: row.createdAt.toISOString(),
-      })),
+      })) satisfies BackendLogs,
     );
   });
 
   /** Pseudonym to display name, for the publisher's export (08). */
-  async function names(c: ApiContext) {
-    const org = c.get("org");
-    const id = c.req.param("id") as string;
+  async function names(org: OrgRow, id: string) {
     const map = new Map<string, string>();
     const everyone = await db
       .select({ id: people.id, name: people.name })
@@ -244,9 +247,9 @@ export function dataRoutes(routes: Routes, deps: Deps) {
   }
 
   routes.get("/api/artifacts/:id/data-export", { action: "data.export", resource: artifact }, async (c) => {
-    const id = c.req.param("id") as string;
+    const { id } = c.var.resource;
     const base = dataPrefix(id);
-    const who = await names(c as ApiContext);
+    const who = await names(c.var.org, id);
     const body = {
       shared: {} as Record<string, unknown>,
       me: {} as Record<string, { name: string; data: Record<string, unknown> }>,
@@ -278,15 +281,18 @@ export function dataRoutes(routes: Routes, deps: Deps) {
     return c.json(body);
   });
 
-  routes.post("/api/artifacts/:id/data-clear", { action: "data.export", resource: artifact }, async (c) => {
-    const resource = await artifact(c as ApiContext);
-    if (resource.archivedAt) throw new ApiError("read_only", "This artifact is archived, so it's read-only.");
-    const { scope } = await parseBody(c, DataClear);
-    const id = resource.id;
-    const base = dataPrefix(id);
-    const prefixes = scope ? [`${base}${scope}/`, `${base}files/${scope}/`] : [base];
-    for (const entry of prefixes) await deletePrefix(deps, entry);
-    await recountUsage(deps, c.get("org").id, id);
-    return c.json({ ok: true, at: clock.now().toISOString() });
-  });
+  routes.post(
+    "/api/artifacts/:id/data-clear",
+    { action: "data.export", resource: artifact, writes: true },
+    async (c) => {
+      const { scope } = await parseBody(c, DataClear);
+      const { id } = c.var.resource;
+      const prefixes = scope
+        ? [dataScopePrefix(id, scope), dataScopePrefix(id, scope, { files: true })]
+        : [dataPrefix(id)];
+      for (const entry of prefixes) await bucket.deletePrefix(entry);
+      await recountUsage(deps, c.var.org.id, id);
+      return c.json({ ok: true, at: clock.now().toISOString() });
+    },
+  );
 }

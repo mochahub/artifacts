@@ -1,8 +1,10 @@
-import type { Person } from "@artifacts/schema";
+import type { PersonResponse, ResetPreview } from "@artifacts/schema";
+import { PASSWORD_MIN, RESET_HOURS } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { useLocation, useRoute } from "preact-iso";
-import { ApiFailure, api, post } from "../api.ts";
+import { api, message, post } from "../api.ts";
+import { plural } from "../format.ts";
 import { me } from "../session.ts";
 
 export function Reset() {
@@ -15,7 +17,7 @@ export function Reset() {
   const token = encodeURIComponent(params.token ?? "");
 
   useEffect(() => {
-    api<{ email: string }>(`/api/reset/${token}`)
+    api<ResetPreview>(`/api/reset/${token}`)
       .then((body) => {
         email.value = body.email;
       })
@@ -27,11 +29,11 @@ export function Reset() {
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     try {
-      const { person } = await post<{ person: Person }>(`/api/reset/${token}`, { password: password.value });
+      const { person } = await post<PersonResponse>(`/api/reset/${token}`, { password: password.value });
       me.value = person;
       route("/", true);
     } catch (failure) {
-      error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+      error.value = message(failure);
     }
   }
 
@@ -39,7 +41,9 @@ export function Reset() {
     return (
       <main class="screen">
         <h1 class="h1 m">This link no longer works</h1>
-        <p class="sub">Reset links work once, for one hour. Ask an admin for a new one.</p>
+        <p class="sub">
+          Reset links work once, for {plural(RESET_HOURS, "hour")}. Ask an admin for a new one.
+        </p>
       </main>
     );
   }
@@ -57,14 +61,14 @@ export function Reset() {
           class="field"
           type="password"
           autocomplete="new-password"
-          minLength={12}
+          minLength={PASSWORD_MIN}
           required
           value={password.value}
           onInput={(e) => {
             password.value = e.currentTarget.value;
           }}
         />
-        <p class="fn">At least 12 characters. Your other sign-ins end when you save.</p>
+        <p class="fn">At least {PASSWORD_MIN} characters. Your other sign-ins end when you save.</p>
         {error.value && <p class="err">{error.value}</p>}
         <button class="btn ink" type="submit">
           Save password

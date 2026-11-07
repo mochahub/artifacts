@@ -2,12 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq, sql } from "drizzle-orm";
-import { versions } from "../../../apps/server/src/db/schema.ts";
-import { OWNER, startTestServer, type TestServer, testPort } from "../../../apps/server/test/helpers.ts";
-import { publish as apiPublish } from "../../../apps/server/test/publish-helper.ts";
+import { sql } from "drizzle-orm";
+import type { TestServer } from "../../../apps/server/test/helpers.ts";
+import { published } from "../../../apps/server/test/publish-helper.ts";
 import { safeTarget } from "../src/commands/library.ts";
-import { cli, copyFixture, sandbox, start } from "./sandbox.ts";
+import { artifactAt, cli, cliJson, copyFixture, hostedServer, sandbox, start } from "./sandbox.ts";
 
 const artStyles = join(import.meta.dir, "../../../fixtures/art-styles");
 const pollBackend = join(import.meta.dir, "../../../fixtures/micro-app-poll-backend");
@@ -20,11 +19,7 @@ describe("a later agent finds hosted work", () => {
   let token: string;
   const box = sandbox();
   const signedIn = () => ({ ...box.env, ARTIFACTS_URL: url, ARTIFACTS_TOKEN: token });
-  const json = async (args: string[], cwd: string) => {
-    const result = await cli([...args, "--json"], signedIn(), cwd);
-    if (result.code !== 0) throw new Error(`${args.join(" ")}: ${result.stderr}`);
-    return JSON.parse(result.stdout);
-  };
+  const json = (args: string[], cwd: string) => cliJson(args, signedIn(), cwd);
   const emptyFolder = () => mkdtempSync(join(tmpdir(), "artifacts-agent-"));
   const summarize = (root: string) => {
     const path = join(root, "artifact.json");
@@ -33,14 +28,7 @@ describe("a later agent finds hosted work", () => {
   };
 
   beforeAll(async () => {
-    const port = testPort();
-    url = `http://127.0.0.1:${port}`;
-    t = await startTestServer({ PUBLIC_URL: url, MORE_URLS: "", PORT: String(port) });
-    const setup = await t.api("/api/setup", {
-      method: "POST",
-      json: { setupToken: "s".repeat(48), orgName: "Mochahub", clientName: "x", ...OWNER },
-    });
-    token = ((await setup.json()) as { token: string }).token;
+    ({ t, url, token } = await hostedServer());
     const dir = copyFixture(artStyles);
     git(dir, "init", "-q");
     git(dir, "remote", "add", "origin", "git@github.com:Mocha/Forest-Game.git");
@@ -92,7 +80,7 @@ describe("a later agent finds hosted work", () => {
     expect(existsSync(join(pulled.root, "img/gouache.svg"))).toBe(true);
     expect(existsSync(join(pulled.root, "__og.webp"))).toBe(false);
 
-    // Pull, then publish unchanged: nothing about the content moves.
+    // Pull, then publish unchanged: nothing about the content moves, so the pull gave back every byte.
     const again = await json(["publish", "-m", "Nothing new"], pulled.root);
     expect(again.version).toBe(2);
     expect(again.uploaded.files).toBe(0);
@@ -120,7 +108,7 @@ describe("a later agent finds hosted work", () => {
   }, 60_000);
 
   test("a version from before stored manifests is rebuilt, and says so", async () => {
-    await apiPublish(t, token, { project: "old", slug: "plan", summary: null });
+    await published(t, token, { project: "old", slug: "plan", summary: null });
     const dir = emptyFolder();
     const pulled = await json(["pull", "old/plan", "--dir", join(dir, "out")], dir);
     expect(pulled.rebuilt).toBe(true);
@@ -129,15 +117,13 @@ describe("a later agent finds hosted work", () => {
   }, 60_000);
 
   test("what a publisher stored can't write outside the folder, or into what the CLI runs", async () => {
-    await apiPublish(t, token, { project: "old", slug: "hostile", summary: null });
-    const [row] = await t.server.db.select().from(versions).where(eq(versions.n, 1));
-    // Rows from before commit checked paths, and whatever else got into the table.
+    const { id } = await published(t, token, { project: "old", slug: "hostile", summary: null });
+    // Rows from before commit checked paths, and whatever else got into the table: no API writes these.
     await t.server.db.execute(sql`
       update versions set files = files
         || jsonb_build_object('../../escape.txt', files->'index.html')
         || jsonb_build_object('lint.rules.js', files->'index.html')
-      where artifact_id = (select id from artifacts where slug = 'hostile')`);
-    expect(row).toBeDefined();
+      where artifact_id = ${id}`);
     const dir = emptyFolder();
     const pulled = await json(["pull", "old/hostile", "--dir", join(dir, "a/b/out")], dir);
     expect(pulled.skipped).toEqual(["lint.rules.js"]);
@@ -164,13 +150,13 @@ describe("a later agent finds hosted work", () => {
   }, 120_000);
 
   test("export writes every artifact, with versions, comments and decisions", async () => {
-    const page = await t.api("/api/artifacts/by-slug/forest-game/art-styles", { bearer: token });
-    const { id } = (await page.json()) as { id: string };
-    await t.api(`/api/artifacts/${id}/threads`, {
+    const { id } = await artifactAt(t, token, "forest-game/art-styles");
+    const posted = await t.api(`/api/artifacts/${id}/threads`, {
       method: "POST",
       bearer: token,
       json: { pageKey: "studies", anchor: null, body: "Warmer", version: 1 },
     });
+    expect(posted.status).toBe(200);
     const dir = emptyFolder();
     const result = await json(["export", "forest-game", "--dir", join(dir, "out")], dir);
     expect(result.artifacts).toBe(1);

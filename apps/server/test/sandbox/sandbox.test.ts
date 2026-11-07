@@ -1,8 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { artifacts, backendLogs, people } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { hash, makePerson, publish } from "../publish-helper.ts";
+import { startChild } from "@artifacts/sandbox";
+import { DEFAULT_ORG_SETTINGS, type OrgLimits } from "@artifacts/schema";
+import type { z } from "zod";
+import { RECHECK_MS } from "../../src/content/app.ts";
+import { childIndex } from "../../src/sandbox/pool.ts";
+import {
+  claim,
+  contentFor,
+  joinAsGuest,
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { hash, makePerson, published } from "../publish-helper.ts";
+
+type Limits = z.infer<typeof OrgLimits>;
 
 const POLL = `
 export default {
@@ -24,30 +37,62 @@ describe("the backend sandbox", () => {
   let orgId: string;
   let n = 0;
 
+  /** A backend's calls through the content port, the way a page's fetch() makes them. */
+  const caller =
+    (content: Awaited<ReturnType<typeof contentFor>>) =>
+    (path: string, init: RequestInit = {}) =>
+      content.fetch(`api/${path}`, {
+        ...init,
+        headers: { "Sec-Fetch-Dest": "empty", ...(init.headers as Record<string, string>) },
+      });
+
   /** Publishes a backend and returns a way to call it through the content port. */
   async function deploy(backend: string, slug = `b${++n}`) {
-    expect((await publish(t, token, { slug, backend })).status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, slug));
-    const id = row?.id as string;
-    const mint = await t.api(`/api/artifacts/${id}/content-token`, {
-      method: "POST",
-      cookie,
-      json: { version: 1 },
-    });
-    const { base } = (await mint.json()) as { base: string };
-    const call = (path: string, init: RequestInit = {}) =>
-      fetch(`http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}api/${path}`, {
-        ...init,
-        headers: { Host: "content.test", "Sec-Fetch-Dest": "empty", ...init.headers },
-      });
-    return { id, call, base };
+    const { id } = await published(t, token, { slug, backend });
+    const content = await contentFor(t, id, { cookie });
+    return { id, call: caller(content), base: content.base };
   }
+
+  /** What's saved in an artifact's shared data, read the way its publisher would. */
+  const sharedKeys = async (id: string) =>
+    (
+      (await (await t.api(`/api/artifacts/${id}/data/shared`, { bearer: token })).json()) as {
+        keys: { key: string }[];
+      }
+    ).keys.map((entry) => entry.key);
+
+  const limits = async () =>
+    ((await (await t.api("/api/org", { cookie })).json()) as { settings: { limits: Limits } }).settings
+      .limits;
+  const setLimits = async (value: Limits) => {
+    const response = await t.api("/api/org", {
+      method: "PATCH",
+      cookie,
+      json: { settings: { limits: value } },
+    });
+    expect(response.status).toBe(200);
+  };
+  /** Runs `work` with some of the org's limits changed, the way an admin changes them, and puts them back. */
+  async function withLimits(changed: Partial<Limits>, work: () => Promise<void>) {
+    const before = await limits();
+    await setLimits({ ...before, ...changed });
+    try {
+      await work();
+    } finally {
+      await setLimits(before);
+    }
+  }
+
+  /** Code that lands on the pool's first child: a child runs one request at a time, and its hash picks it. */
+  const onFirstChild = (make: (i: number) => string) => {
+    for (let i = 0; ; i++)
+      if (childIndex(hash(make(i)), DEFAULT_ORG_SETTINGS.sandboxProcesses) === 0) return make(i);
+  };
 
   beforeAll(async () => {
     t = await startTestServer();
-    token = (await claim(t)).token;
+    ({ token, orgId } = await claim(t));
     cookie = await signIn(t, OWNER.email, OWNER.password);
-    orgId = (await t.server.db.select().from(people))[0]?.orgId as string;
   });
   afterAll(() => t.stop());
 
@@ -69,8 +114,7 @@ describe("the backend sandbox", () => {
     expect(body.who).toMatchObject({ name: "Zahin", kind: "owner", canComment: true, isPublisher: true });
     expect(Object.values(body.votes)).toEqual(["B"]);
     expect(body.who).not.toHaveProperty("email");
-    const stored = await t.server.bucket.get(`data/${id}/shared/votes`);
-    expect(stored).not.toBeNull();
+    expect(await sharedKeys(id)).toEqual(["votes"]);
   });
 
   test("a client's own X-Caller is dropped, and so are its cookies", async () => {
@@ -135,12 +179,15 @@ describe("the backend sandbox", () => {
         env.DATA.get("a").then(() => env.DATA.get("b")).then(() => env.DATA.put("floated", 1));
         return Response.json("left");
       }
+      // The same steps and one more, started after the floating work: its write comes after that one's would.
+      await env.DATA.get("a");
+      await env.DATA.get("b");
+      await env.DATA.put("after", 1);
       return Response.json("next");
     } };`);
     expect(await (await call("float")).json()).toBe("left");
     expect(await (await call("other")).json()).toBe("next");
-    await Bun.sleep(150);
-    expect(await t.server.bucket.get(`data/${id}/shared/floated`)).toBeNull();
+    expect(await sharedKeys(id)).toEqual(["after"]);
   });
 
   test("env.DATA: calls per request and writes per second are capped", async () => {
@@ -160,13 +207,8 @@ describe("the backend sandbox", () => {
 
   test("env.DATA: no dot segment, look-alike dot or odd character gets past the key checks", async () => {
     // Writes are rate-limited before their keys are looked at, and this makes many.
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: { writesPerSecond: number } };
-    const original = settings.limits.writesPerSecond;
-    settings.limits.writesPerSecond = 1000;
-    await t.server.db.update(org).set({ settings });
-    const { call, id } = await deploy(`export default { async fetch(r, env) {
+    await withLimits({ writesPerSecond: 1000 }, async () => {
+      const { call, id } = await deploy(`export default { async fetch(r, env) {
       const code = (p) => p.then(() => "ok", (e) => e.code);
       const keys = ["../x", "a/../x", "a/..", "./x", "a/./x", "/abs", "me/../x", "files/../../x", "",
         "\\uFF0E\\uFF0E/x", "\\u2024\\u2024/x", "\\u2025/x", "a\\u0000b", "a b", "a\\\\..\\\\x", "%2e%2e/x", "k".repeat(201)];
@@ -181,17 +223,17 @@ describe("the backend sandbox", () => {
       }
       return Response.json(out);
     } };`);
-    const body = (await (await call("x")).json()) as Record<string, string>;
-    for (const [key, codes] of Object.entries(body)) {
-      // An empty prefix means "everything in shared", which is allowed; the other three refuse an empty key.
-      expect([JSON.stringify(key), codes]).toEqual([
-        JSON.stringify(key),
-        key === "" ? "invalid,invalid,invalid,ok" : "invalid,invalid,invalid,invalid",
-      ]);
-    }
-    expect((await t.server.bucket.list(`data/${id}/`)).objects).toEqual([]);
-    settings.limits.writesPerSecond = original;
-    await t.server.db.update(org).set({ settings });
+      const body = (await (await call("x")).json()) as Record<string, string>;
+      for (const [key, codes] of Object.entries(body)) {
+        // An empty prefix means "everything in shared", which is allowed; the other three refuse an empty key.
+        expect([JSON.stringify(key), codes]).toEqual([
+          JSON.stringify(key),
+          key === "" ? "invalid,invalid,invalid,ok" : "invalid,invalid,invalid,invalid",
+        ]);
+      }
+      // Nothing was written, inside the scopes or beside them, where no listing would show it.
+      expect((await t.server.bucket.list(`data/${id}/`)).objects).toEqual([]);
+    });
   });
 
   test("env.DATA: etags, only-if-new, listing every scope, and bad keys", async () => {
@@ -245,12 +287,14 @@ describe("the backend sandbox", () => {
       return Response.json("ok");
     } };`);
     for (let i = 0; i < 4; i++) expect((await call("x")).status).toBe(200);
-    const rows = await t.server.db.select().from(backendLogs).where(eq(backendLogs.artifactId, id));
+    const rows = (await (await t.api(`/api/artifacts/${id}/logs`, { bearer: token })).json()) as {
+      message: string;
+    }[];
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.reduce((sum, row) => sum + Buffer.byteLength(row.message), 0)).toBeLessThanOrEqual(
       1024 * 1024,
     );
-    expect(rows.every((row) => Buffer.byteLength(row.message) <= 8192)).toBe(true);
+    expect(Math.max(...rows.map((row) => Buffer.byteLength(row.message)))).toBeLessThanOrEqual(8192);
   });
 
   test("a chunked body can't pass the size limit, and answers aren't cached", async () => {
@@ -268,17 +312,11 @@ describe("the backend sandbox", () => {
   });
 
   test("a backend over a code limit set after it was published is refused without being fetched", async () => {
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: { backendCodeBytes: number } };
     const { call } = await deploy(POLL);
     expect((await call("votes")).status).toBe(200);
-    const original = settings.limits.backendCodeBytes;
-    settings.limits.backendCodeBytes = 10;
-    await t.server.db.update(org).set({ settings });
-    expect((await call("votes")).status).toBe(413);
-    settings.limits.backendCodeBytes = original;
-    await t.server.db.update(org).set({ settings });
+    await withLimits({ backendCodeBytes: 10 }, async () => {
+      expect((await call("votes")).status).toBe(413);
+    });
   });
 
   test("query strings are read as the URL standard reads them, so a backend sees what the client sent", async () => {
@@ -312,63 +350,45 @@ describe("the backend sandbox", () => {
   });
 
   test("a loop in top-level code times out, and doesn't hold other backends", async () => {
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
-    settings.limits.backendTimeoutMs = 700;
-    await t.server.db.update(org).set({ settings });
-    const stuck = await deploy(`while (true) {} export default { fetch() {} };`);
-    const started = performance.now();
-    expect((await stuck.call("x")).status).toBe(504);
-    expect(performance.now() - started).toBeLessThan(1900);
-    settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await withLimits({ backendTimeoutMs: 700 }, async () => {
+      const stuck = await deploy(`while (true) {} export default { fetch() {} };`);
+      const started = performance.now();
+      expect((await stuck.call("x")).status).toBe(504);
+      expect(performance.now() - started).toBeLessThan(1900);
+    });
   });
 
   test("a stuck backend times out alone, and others keep answering", async () => {
-    const [row] = await t.server.db.select().from((await import("../../src/db/schema.ts")).org);
-    const { org } = await import("../../src/db/schema.ts");
-    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
-    settings.limits.backendTimeoutMs = 700;
-    await t.server.db.update(org).set({ settings });
-    const stuck = await deploy(`export default { fetch() { while (true) {} } };`);
-    const other = await deploy(`export default { fetch() { return Response.json("ok"); } };`);
-    const hung = stuck.call("x");
-    const started = performance.now();
-    const quick = await other.call("x");
-    expect(quick.status).toBe(200);
-    const timedOut = await hung;
-    expect(timedOut.status).toBe(504);
-    expect(performance.now() - started).toBeLessThan(3000);
-    settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await withLimits({ backendTimeoutMs: 700 }, async () => {
+      const stuck = await deploy(`export default { fetch() { while (true) {} } };`);
+      const other = await deploy(`export default { fetch() { return Response.json("ok"); } };`);
+      const hung = stuck.call("x");
+      const started = performance.now();
+      const quick = await other.call("x");
+      expect(quick.status).toBe(200);
+      const timedOut = await hung;
+      expect(timedOut.status).toBe(504);
+      expect(performance.now() - started).toBeLessThan(3000);
+    });
   });
 
   test("busy loops on a child can't get a waiting backend on it killed", async () => {
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
-    settings.limits.backendTimeoutMs = 500;
-    await t.server.db.update(org).set({ settings });
-    // A child runs one request at a time, and an author can pick which child a backend lands on.
-    const onFirstChild = (make: (i: number) => string) => {
-      for (let i = 0; ; i++) if (Number.parseInt(hash(make(i)).slice(0, 8), 16) % 2 === 0) return make(i);
-    };
-    const looper = (seed: number) =>
-      onFirstChild((i) => `// loop ${seed}.${i}\nexport default { fetch() { while (true) {} } };`);
-    const victim = await deploy(
-      onFirstChild((i) => `// v${i}\nexport default { fetch() { return Response.json("alive"); } };`),
-    );
-    const loops = await Promise.all(Array.from({ length: 8 }, (_, i) => deploy(looper(i))));
-    expect((await victim.call("x")).status).toBe(200); // Warm.
-    const running = loops.map((loop) => loop.call("x"));
-    await Bun.sleep(150);
-    // It waits behind eight loops of half a second each, which is longer than the child's backstop.
-    const answer = await victim.call("x");
-    expect(answer.status).toBe(200);
-    expect(await Promise.all(running.map(async (r) => (await r).status))).toEqual(Array(8).fill(504));
-    settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await withLimits({ backendTimeoutMs: 500 }, async () => {
+      // A child runs one request at a time, and an author can pick which child a backend lands on.
+      const looper = (seed: number) =>
+        onFirstChild((i) => `// loop ${seed}.${i}\nexport default { fetch() { while (true) {} } };`);
+      const victim = await deploy(
+        onFirstChild((i) => `// v${i}\nexport default { fetch() { return Response.json("alive"); } };`),
+      );
+      const loops = await Promise.all(Array.from({ length: 8 }, (_, i) => deploy(looper(i))));
+      expect((await victim.call("x")).status).toBe(200); // Warm.
+      const running = loops.map((loop) => loop.call("x"));
+      await Bun.sleep(150);
+      // It waits behind eight loops of half a second each, which is longer than the child's backstop.
+      const answer = await victim.call("x");
+      expect(answer.status).toBe(200);
+      expect(await Promise.all(running.map(async (r) => (await r).status))).toEqual(Array(8).fill(504));
+    });
   }, 30_000);
 
   for (const [name, source] of [
@@ -387,11 +407,19 @@ describe("the backend sandbox", () => {
 
   test("an instance that failed comes back clean for its next request", async () => {
     const { call } = await deploy(`
-      let boom = true;
-      export default { fetch() { if (boom) { boom = false; const k = []; while (true) k.push(new Uint8Array(1 << 20)); } return Response.json("back"); } };`);
-    expect((await call("x")).status).toBe(500);
-    // A new instance has `boom = true` again, so it fails the same way, and it isn't wedged.
-    expect((await call("x")).status).toBe(500);
+      let n = 0;
+      export default { fetch(r) {
+        n += 1;
+        if (r.url.endsWith("/boom")) { const k = []; while (true) k.push(new Uint8Array(1 << 20)); }
+        return Response.json(n);
+      } };`);
+    expect(await (await call("x")).json()).toBe(1);
+    expect(await (await call("x")).json()).toBe(2);
+    expect((await call("boom")).status).toBe(500);
+    // It answers, from a fresh instance: the failed one's state is gone with it.
+    const next = await call("x");
+    expect(next.status).toBe(200);
+    expect(await next.json()).toBe(1);
   });
 
   test("module state stays between requests to a warm instance", async () => {
@@ -401,38 +429,49 @@ describe("the backend sandbox", () => {
   });
 
   test("calls in flight at teardown don't hurt the child", async () => {
-    const [row] = await t.server.db.select().from((await import("../../src/db/schema.ts")).org);
-    const { org } = await import("../../src/db/schema.ts");
-    const settings = row?.settings as { limits: { backendTimeoutMs: number } };
-    settings.limits.backendTimeoutMs = 500;
-    await t.server.db.update(org).set({ settings });
-    const { call } = await deploy(`
-      export default { async fetch(r, env) {
-        await env.DATA.get("a");
-        env.DATA.put("left", 1);
-        while (true) {}
-      } };`);
-    expect((await call("x")).status).toBe(504);
-    settings.limits.backendTimeoutMs = 10_000;
-    await t.server.db.update(org).set({ settings });
+    await withLimits({ backendTimeoutMs: 500 }, async () => {
+      const { call } = await deploy(`
+        export default { async fetch(r, env) {
+          await env.DATA.get("a");
+          env.DATA.put("left", 1);
+          while (true) {}
+        } };`);
+      expect((await call("x")).status).toBe(504);
+    });
     const next = await deploy(`export default { fetch() { return Response.json("fine"); } };`);
     expect((await next.call("x")).status).toBe(200);
   });
 
   test("a child that dies answers 502, and the next request starts another", async () => {
     const pool = t.server.deps.sandbox as NonNullable<typeof t.server.deps.sandbox>;
-    const { call } = await deploy(`export default { fetch() { return Response.json("up"); } };`);
-    expect((await call("x")).status).toBe(200);
+    // On the child killChild() kills: it says it has started, then works until the child dies under it.
+    const { call, id } = await deploy(
+      onFirstChild(
+        (i) => `// ${i}
+        export default { async fetch(r, env) {
+          if (r.url.endsWith("/slow")) { await env.DATA.put("started", 1); const end = Date.now() + 5000; while (Date.now() < end) {} }
+          return Response.json("up");
+        } };`,
+      ),
+    );
+    const slow = call("slow");
+    for (let i = 0; i < 100 && !(await sharedKeys(id)).includes("started"); i++) await Bun.sleep(20);
     await pool.killChild();
-    await Bun.sleep(200);
+    expect((await slow).status).toBe(502);
     expect((await call("x")).status).toBe(200);
   });
 
   test("a child's environment holds nothing", async () => {
-    const pool = t.server.deps.sandbox as NonNullable<typeof t.server.deps.sandbox>;
-    const keys = await pool.childEnv();
-    expect(keys.filter((key) => /DATABASE|S3|SECRET|TOKEN/.test(key))).toEqual([]);
-    expect(keys.length).toBeLessThanOrEqual(1);
+    // Started the one way the pool starts every child.
+    const child = startChild();
+    try {
+      await child.up;
+      const keys = await child.env();
+      expect(keys.filter((key) => /DATABASE|S3|SECRET|TOKEN/.test(key))).toEqual([]);
+      expect(keys.length).toBeLessThanOrEqual(1);
+    } finally {
+      child.kill();
+    }
   });
 
   test("read-only: a viewer's env.DATA writes are refused, whatever the backend says", async () => {
@@ -448,25 +487,10 @@ describe("the backend sandbox", () => {
         json: { permission: "view" },
       })
     ).json()) as { url: string };
-    const joined = await t.api(`/api/s/${url.split("/s/")[1]}/guest`, {
-      method: "POST",
-      json: { name: "Viewer" },
-    });
-    const guest = (joined.headers.getSetCookie()[0] ?? "").split(";")[0] as string;
-    const mint = await t.api(`/api/artifacts/${id}/content-token`, {
-      method: "POST",
-      cookie: guest,
-      json: { version: 1 },
-    });
-    const theirs = ((await mint.json()) as { base: string }).base;
-    expect(theirs).not.toBe(base);
-    const response = await fetch(
-      `http://127.0.0.1:${t.server.ports.content}${new URL(theirs).pathname}api/x`,
-      {
-        headers: { Host: "content.test", "Sec-Fetch-Dest": "empty" },
-      },
-    );
-    expect(await response.json()).toEqual({ read: null, write: "read_only" });
+    const guest = await joinAsGuest(t, url, "Viewer");
+    const theirs = await contentFor(t, id, { cookie: guest });
+    expect(theirs.base).not.toBe(base);
+    expect(await (await caller(theirs)("x")).json()).toEqual({ read: null, write: "read_only" });
   });
 
   test("read-only: archived refuses writes, and reads keep working", async () => {
@@ -475,30 +499,22 @@ describe("the backend sandbox", () => {
     } };`);
     expect(await (await call("x")).json()).toEqual({ write: "wrote" });
     await t.api(`/api/artifacts/${id}/archive`, { method: "POST", bearer: token });
-    t.clock.advance(5001);
+    t.clock.advance(RECHECK_MS + 1);
     expect(await (await call("x")).json()).toEqual({ write: "read_only" });
   });
 
   test("old versions run their own backend", async () => {
     const slug = "versions";
-    await publish(t, token, { slug, backend: `export default { fetch() { return Response.json("v1"); } };` });
-    await publish(t, token, { slug, backend: `export default { fetch() { return Response.json("v2"); } };` });
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, slug));
-    const at = async (version: number) => {
-      const mint = await t.api(`/api/artifacts/${row?.id}/content-token`, {
-        method: "POST",
-        cookie,
-        json: { version },
-      });
-      const { base } = (await mint.json()) as { base: string };
-      const response = await fetch(
-        `http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}api/x`,
-        {
-          headers: { Host: "content.test", "Sec-Fetch-Dest": "empty" },
-        },
-      );
-      return response.json();
-    };
+    await published(t, token, {
+      slug,
+      backend: `export default { fetch() { return Response.json("v1"); } };`,
+    });
+    const { id } = await published(t, token, {
+      slug,
+      backend: `export default { fetch() { return Response.json("v2"); } };`,
+    });
+    const at = async (version: number) =>
+      (await caller(await contentFor(t, id, { cookie }, version))("x")).json();
     expect(await at(1)).toBe("v1");
     expect(await at(2)).toBe("v2");
   });
@@ -516,7 +532,7 @@ describe("the backend sandbox", () => {
     }[];
     expect(logs).toHaveLength(100);
     expect(logs[0]).toMatchObject({ level: "log", message: "line 0" });
-    const member = await makePerson(t, orgId, "member");
+    const member = (await makePerson(t, orgId, "member")).token;
     expect((await t.api(`/api/artifacts/${id}/logs`, { bearer: member })).status).toBe(403);
   });
 
@@ -547,17 +563,12 @@ describe("the backend sandbox", () => {
   });
 
   test("the rate limit is per caller per artifact", async () => {
-    const { org } = await import("../../src/db/schema.ts");
-    const [row] = await t.server.db.select().from(org);
-    const settings = row?.settings as { limits: { backendRequestsPerMinute: number } };
-    settings.limits.backendRequestsPerMinute = 3;
-    await t.server.db.update(org).set({ settings });
-    const { call } = await deploy(`export default { fetch() { return Response.json(1); } };`);
-    const statuses: number[] = [];
-    for (let i = 0; i < 5; i++) statuses.push((await call("x")).status);
-    expect(statuses).toEqual([200, 200, 200, 429, 429]);
-    settings.limits.backendRequestsPerMinute = 120;
-    await t.server.db.update(org).set({ settings });
+    await withLimits({ backendRequestsPerMinute: 3 }, async () => {
+      const { call } = await deploy(`export default { fetch() { return Response.json(1); } };`);
+      const statuses: number[] = [];
+      for (let i = 0; i < 5; i++) statuses.push((await call("x")).status);
+      expect(statuses).toEqual([200, 200, 200, 429, 429]);
+    });
   });
 
   test("a busy backend queues, then refuses", async () => {

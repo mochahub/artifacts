@@ -14,6 +14,7 @@ import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { chartSvg } from "./chart.ts";
 import { ARTICLE_SCHEMA } from "./sanitize.ts";
+import { remarkWikilinks } from "./wiki.ts";
 
 /** A stray `%` ("100%.png") isn't valid percent-encoding; it stays as written and fails as a missing file. */
 export const cleanUrl = (url: string) => {
@@ -45,6 +46,8 @@ export type ArticleInput = {
   frameHash(ref: string): string | undefined;
   /** Mermaid sources already drawn to SVG, by source text. */
   mermaid: Map<string, string>;
+  /** The project, so `[[Page]]` links resolve to `/<project>/<slug>` (SPEC 16). Without it they stay text. */
+  project?: string;
 };
 
 export type ArticleOutput = {
@@ -54,6 +57,39 @@ export type ArticleOutput = {
   readingMinutes: number;
   problems: { rule: string; severity: "error" | "warning"; message: string }[];
 };
+
+/**
+ * A built article as a publish records it: its page, with the hash of its HTML, and its blocks on that
+ * page. The CLI and the hosted MCP both publish articles, so they make the same records.
+ */
+export function articleRecords(
+  built: Pick<ArticleOutput, "blocks" | "outline" | "readingMinutes">,
+  page: {
+    id: string;
+    title: string;
+    group: string | null;
+    position: number;
+    htmlHash: string | undefined;
+    theme: { accent?: string; font?: string; display?: string; radius?: number } | null;
+  },
+) {
+  return {
+    page: {
+      key: page.id,
+      kind: "article" as const,
+      title: page.title,
+      group: page.group,
+      position: page.position,
+      meta: {
+        htmlHash: page.htmlHash,
+        outline: built.outline,
+        readingMinutes: built.readingMinutes,
+        ...(page.theme ? { theme: page.theme } : {}),
+      },
+    },
+    blocks: built.blocks.map((block) => ({ ...block, pageKey: page.id })),
+  };
+}
 
 /** Every ```mermaid block, so the render helper can draw them first. */
 export function mermaidSources(markdown: string): string[] {
@@ -278,6 +314,7 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       .use(remarkGfm)
       .use(remarkDirective)
       .use(directives as never)
+      .use(remarkWikilinks(input.project) as never)
       .use(remarkRehype)
       .use(rehypeSlug)
       .use(decorate)

@@ -1,17 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { findOrg } from "../../../apps/server/src/db/index.ts";
+import { GoogleSettings } from "@artifacts/schema";
 import {
   OWNER,
+  SETUP_TOKEN,
   signIn,
   startTestServer,
   type TestServer,
   testPort,
 } from "../../../apps/server/test/helpers.ts";
 import { cli, sandbox, start } from "./sandbox.ts";
-
-const SETUP_TOKEN = "s".repeat(48);
 
 describe("the account commands against a real server", () => {
   let t: TestServer;
@@ -71,11 +70,9 @@ describe("the account commands against a real server", () => {
       expect(result.code).toBe(0);
       expect(result.stdout + result.stderr).toContain(`${other}/settings/google`);
       expect(result.stdout + result.stderr).not.toContain("client-secret");
-      expect(await findOrg(server.server.db)).toMatchObject({
-        googleClientId: "client-id",
-        googleClientSecret: "client-secret",
-        googleEnabled: false,
-      });
+      const cookie = await signIn(server, OWNER.email, OWNER.password);
+      const google = GoogleSettings.parse(await (await server.api("/api/org/google", { cookie })).json());
+      expect(google).toMatchObject({ clientId: "client-id", hasSecret: true, enabled: false });
     } finally {
       await server.stop();
     }
@@ -97,7 +94,7 @@ describe("the account commands against a real server", () => {
     expect(missing.checks.find((check: { name: string }) => check.name === "skill").detail).toContain(
       "skill install",
     );
-    await cli(["skill", "install"], box.env);
+    expect((await cli(["skill", "install"], box.env)).code).toBe(0);
     const result = await cli(["doctor", "--json"], box.env);
     expect(JSON.parse(result.stdout).ok).toBe(true);
   });

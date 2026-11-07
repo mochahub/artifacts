@@ -21,7 +21,7 @@ Agents stay free to build any UI. Artifacts adds three things around that freedo
 4. Each contract document (02 to 09) before you change what it owns.
 5. These files:
    - `apps/server/src/api/lists.ts`: `/api/search` and `visible()`
-   - `apps/server/src/publish/routes.ts`: `prepare` and `commit`
+   - `apps/server/src/publish/publisher.ts`: `prepare` and `commit`
    - `apps/server/src/api/device.ts`: the device flow
    - `apps/server/src/auth/can.ts` and `resolve.ts`: callers, scopes and agent limits
    - `packages/cli/src/commands/mcp.ts`, `write.ts`, `packages/cli/src/skill/install.ts`
@@ -62,7 +62,7 @@ If evidence goes against one, change it and record why in `progress.md`.
 - **Origins:** MCP and OAuth go on viewer origins only, never the Live-preview origin. An OAuth issuer and resource must match the origin the client used, including `MORE_URLS` and the home domain.
 - **Route tests:** every new route needs a `can()` action, an entry in the permission matrix test, and a test that reaches it. Otherwise a full `bun run test` fails. That includes public metadata routes.
 - **Migrations:** only add. Run `bun run db:generate`, and never edit a generated migration. Every new table has `org_id`.
-- **Binary packaging:** the CLI is one compiled binary. A new skill file ships only when it's in `FILES` in `packages/cli/src/skill/install.ts`. Template text needs text imports, as `write.ts` does for the kit. Binary template assets need another route: prefer SVG and CSS.
+- **Binary packaging:** the CLI is one compiled binary. A new skill file ships only when it's in `SKILL_FILES` in `skill/index.ts`, which the CLI installs and the MCP serves. Template text needs text imports, as `write.ts` does for the kit. Binary template assets need another route: prefer SVG and CSS.
 - **Search visibility:** every search, list and read goes through the same `can()` checks as the viewer. A hidden artifact must not leak through a count, snippet or summary. `visible()` loads every artifact on each search, so check its cost.
 - **Agent limits:** agent tokens stay limited to undoable actions. Only people resolve and decide.
 - **Untrusted text:** comments, summaries and articles can come from other people, including guests. Tool results must mark them as untrusted data, never instructions.

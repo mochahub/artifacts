@@ -1,24 +1,17 @@
-import { BridgeRequest } from "@artifacts/schema";
+import { BridgeErrorCode, BridgeRequest, type DataScope, type UrlResponse } from "@artifacts/schema";
 import { ApiFailure, api } from "../api.ts";
 import { me } from "../session.ts";
 
 const MAX_IN_FLIGHT = 8;
-const CODES = new Set([
-  "precondition_failed",
-  "read_only",
-  "too_large",
-  "forbidden",
-  "not_found",
-  "rate_limited",
-  "invalid",
-]);
+// This chunk loads with zod already, for BridgeRequest, so the codes come from the schema itself.
+const CODES = new Set<string>(BridgeErrorCode.options);
 
 type Options = {
   iframe: HTMLIFrameElement;
   artifactId: string;
   canWrite: boolean;
   /** The first time a frame saves or reads, so the viewer can say where it goes. */
-  onUse?(scope: "shared" | "me"): void;
+  onUse?(scope: DataScope): void;
 };
 
 const path = (encoded: string) => encoded.split("/").map(encodeURIComponent).join("/");
@@ -45,52 +38,30 @@ export function startBridge({ iframe, artifactId, canWrite, onUse }: Options) {
       case "put": {
         const headers: Record<string, string> =
           op.ifMatch === "*" ? { "If-None-Match": "*" } : op.ifMatch ? { "If-Match": op.ifMatch } : {};
-        return send(
-          `${data}/${path(op.key)}`,
-          "PUT",
-          { ...headers, "Content-Type": "application/json" },
-          JSON.stringify({ value: op.value }),
-        );
+        return api(`${data}/${path(op.key)}`, { method: "PUT", headers, json: { value: op.value } });
       }
       case "delete":
-        return send(`${data}/${path(op.key)}`, "DELETE", op.ifMatch ? { "If-Match": op.ifMatch } : {});
+        return api(`${data}/${path(op.key)}`, {
+          method: "DELETE",
+          headers: op.ifMatch ? { "If-Match": op.ifMatch } : {},
+        });
       case "file.put":
-        return send(
-          `${files}/${path(op.name)}`,
-          "PUT",
-          { "Content-Type": op.blob.type || "application/octet-stream" },
-          op.blob,
-        );
+        return api(`${files}/${path(op.name)}`, {
+          method: "PUT",
+          headers: { "Content-Type": op.blob.type || "application/octet-stream" },
+          body: op.blob,
+        });
       case "file.url": {
-        const { url } = await send<{ url: string }>(`${files}/${path(op.name)}`, "GET", {
-          Accept: "application/json",
+        const { url } = await api<UrlResponse>(`${files}/${path(op.name)}`, {
+          headers: { Accept: "application/json" },
         });
         return url;
       }
       case "file.list":
         return api(files);
       case "file.delete":
-        return send(`${files}/${path(op.name)}`, "DELETE");
+        return api(`${files}/${path(op.name)}`, { method: "DELETE" });
     }
-  }
-
-  async function send<T>(
-    url: string,
-    method: string,
-    headers: Record<string, string> = {},
-    body?: BodyInit,
-  ): Promise<T> {
-    const response = await fetch(url, { method, headers, body });
-    const text = await response.text();
-    const parsed = text ? JSON.parse(text) : undefined;
-    if (!response.ok) {
-      throw new ApiFailure(
-        response.status,
-        parsed?.error?.code ?? "invalid",
-        parsed?.error?.message ?? "That didn't work.",
-      );
-    }
-    return parsed as T;
   }
 
   const onMessage = async (event: MessageEvent) => {

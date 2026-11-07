@@ -1,6 +1,6 @@
 import { join, resolve, sep } from "node:path";
 import type { Context, MiddlewareHandler } from "hono";
-import type { Deps } from "../api/deps.ts";
+import type { Deps } from "../deps.ts";
 import type { Env } from "../env.ts";
 import { ApiError } from "./errors.ts";
 import { unfurl } from "./unfurl.ts";

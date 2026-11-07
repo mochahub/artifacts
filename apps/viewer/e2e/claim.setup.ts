@@ -1,19 +1,19 @@
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { OWNER, SETUP_TOKEN, signIn, watchErrors } from "./helpers.ts";
+import { OWNER, SETUP_TOKEN, shot, signIn, watchErrors } from "./helpers.ts";
 import { seedFixture } from "./seed.ts";
 
 test.describe.configure({ mode: "serial" });
 
-test("setup mode: every route shows Almost ready, under the real CSP", async ({ page }) => {
+test("setup mode: every route shows Almost ready, under the real CSP", async ({ page, baseURL }) => {
   const errors = watchErrors(page);
   for (const path of ["/", "/some/deep/link", "/sign-in"]) {
     const response = await page.goto(path);
     expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Almost ready");
   }
-  await expect(page.getByText("artifacts setup http://localhost:18080")).toBeVisible();
-  await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/06-1-almost-ready.png" });
+  await expect(page.getByText(`artifacts setup ${baseURL}`)).toBeVisible();
+  await shot(page, "06-1-almost-ready");
   expect(errors).toEqual([]);
 });
 
@@ -34,9 +34,10 @@ test("home: a new version is waiting, before anyone has looked at it", async ({ 
   await expect(page.getByText("Waiting on you")).toBeVisible();
   await expect(page.getByText("1 frame changed")).toBeVisible();
   await expect(page.getByText("Claude published v2")).toBeVisible();
-  await expect(page.locator(".tab .count")).toHaveText("1");
+  // The Review tab counts it.
+  await expect(page.getByRole("link", { name: /^Review\s*1$/ })).toBeVisible();
   await page.locator(".cover img").evaluate((img: HTMLImageElement) => img.decode());
-  await page.screenshot({ animations: "disabled", path: "../../docs/mocks/shots/01-1-review.png" });
+  await shot(page, "01-1-review");
   // Every other test reuses this session: signing in each time would hit the real per-IP limit.
   // The install sheet would otherwise cover every test's first comment; live-review.e2e.ts clears this.
   await page.evaluate(() => localStorage.setItem("artifacts.install-asked", "1"));

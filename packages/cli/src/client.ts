@@ -1,9 +1,11 @@
+import type { ApiErrorBody } from "@artifacts/schema";
 import { detectAgent } from "./agent.ts";
 import { requireHttps } from "./config.ts";
 import { CliError } from "./output.ts";
 import { VERSION } from "./version.ts";
 
-export type ApiFailure = { status: number; code: string; message: string; details: Record<string, unknown> };
+/** The server's error body (03), with the status it came with. */
+export type ApiFailure = ApiErrorBody["error"] & { status: number };
 
 export class ApiCallError extends CliError {
   constructor(readonly failure: ApiFailure) {
@@ -34,27 +36,33 @@ export class Client {
     readonly token: string | null = null,
   ) {}
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    // Whatever built this client, nothing goes to a plain http server that isn't this machine.
+  /** Whatever built this client, nothing goes to a plain http server that isn't this machine. */
+  private send(path: string, init: { method?: string; body?: string; json?: boolean } = {}) {
     requireHttps(this.url);
-    let response: Response;
-    try {
-      response = await fetch(`${this.url}${path}`, {
-        method,
-        headers: {
-          "Artifacts-CLI": VERSION,
-          ...(detectAgent() ? { "Artifacts-Agent": detectAgent() as string } : {}),
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        // A redirect would carry the token to wherever it points, so none is followed.
-        redirect: "manual",
-        signal: AbortSignal.timeout(timeoutMs()),
-      });
-    } catch (error) {
+    const agent = detectAgent();
+    return fetch(`${this.url}${path}`, {
+      method: init.method ?? "GET",
+      headers: {
+        "Artifacts-CLI": VERSION,
+        ...(agent ? { "Artifacts-Agent": agent } : {}),
+        ...(init.json ? { "Content-Type": "application/json" } : {}),
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
+      body: init.body,
+      // A redirect would carry the token to wherever it points, so none is followed.
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs()),
+    }).catch((error) => {
       throw new CliError(`Can't reach ${this.url}: ${(error as Error).message}`);
-    }
+    });
+  }
+
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const response = await this.send(path, {
+      method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      json: body !== undefined,
+    });
     if (response.status === 426)
       throw new CliError("This CLI is too old for the server. Run artifacts upgrade.");
     let text: string;
@@ -72,7 +80,7 @@ export class Client {
         details: {},
       };
       try {
-        const { error } = JSON.parse(text) as { error: Omit<ApiFailure, "status"> };
+        const { error } = JSON.parse(text) as ApiErrorBody;
         failure = { status: response.status, ...error };
       } catch {}
       throw new ApiCallError(failure);
@@ -82,17 +90,7 @@ export class Client {
 
   /** A picture from the API, as bytes. A redirect isn't followed, as everywhere, so it counts as a failure. */
   async bytes(path: string): Promise<Uint8Array> {
-    requireHttps(this.url);
-    const response = await fetch(`${this.url}${path}`, {
-      headers: {
-        "Artifacts-CLI": VERSION,
-        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-      },
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs()),
-    }).catch((error) => {
-      throw new CliError(`Can't reach ${this.url}: ${(error as Error).message}`);
-    });
+    const response = await this.send(path);
     if (response.status !== 200)
       throw new CliError(`The server answered ${response.status} for that picture.`);
     return new Uint8Array(await response.arrayBuffer());

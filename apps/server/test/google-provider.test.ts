@@ -29,12 +29,12 @@ describe("Google's token endpoint", () => {
 
   test("a reply that isn't JSON is still a refusal", async () => {
     spy = answers(502, "<html>Bad gateway</html>");
-    expect(exchange()).rejects.toThrow("Google answered 502");
+    await expect(exchange()).rejects.toThrow("Google answered 502");
   });
 
   test("a reply with no ID token is a refusal", async () => {
     spy = answers(200, JSON.stringify({ access_token: "token" }));
-    expect(exchange()).rejects.toThrow("Google sent no ID token");
+    await expect(exchange()).rejects.toThrow("Google sent no ID token");
   });
 
   test("the ID token comes back", async () => {

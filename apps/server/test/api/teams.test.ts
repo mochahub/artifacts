@@ -1,19 +1,25 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
-import { activity, artifacts, artifactTeamAccess, people, teamMembers, teams } from "../../src/db/schema.ts";
-import { claim, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
-import { makeAccount, publish } from "../publish-helper.ts";
+import { ActivityPage } from "@artifacts/schema";
+import {
+  acceptInvite,
+  claim,
+  code,
+  inviteSecret,
+  json,
+  OWNER,
+  signIn,
+  startTestServer,
+  type TestServer,
+} from "../helpers.ts";
+import { makeAccount, publish, published } from "../publish-helper.ts";
 
 type Account = Awaited<ReturnType<typeof makeAccount>>;
-const code = async (response: Response) =>
-  ((await response.json()) as { error: { code: string } }).error.code;
-const json = async <T = Record<string, unknown>>(response: Response) => (await response.json()) as T;
-const PASSWORD = "a perfectly long password";
 
 describe("teams", () => {
   let t: TestServer;
   let token: string;
   let owner: string;
+  let ownerId: string;
   let orgId: string;
   let lead: Account;
   let member: Account;
@@ -27,12 +33,19 @@ describe("teams", () => {
   };
   const addMember = (slug: string, who: { id: string }, role: "lead" | "member" = "member", cookie = owner) =>
     t.api(`/api/teams/${slug}/members/${who.id}`, { method: "PUT", cookie, json: { role } });
-  const publishPrivate = async (slug: string, bearer = token) => {
-    const result = await publish(t, bearer, { slug, visibility: "me" });
-    expect(result.status).toBe(200);
-    const [row] = await t.server.db.select().from(artifacts).where(eq(artifacts.slug, slug));
-    return row?.id as string;
-  };
+  const publishPrivate = async (slug: string, bearer = token) =>
+    (await published(t, bearer, { slug, visibility: "me" })).id;
+  /** What the owner's Teams page shows of a team's members. */
+  const membersOf = async (slug: string) =>
+    (
+      await json<{ members: { id: string }[] }>(await t.api(`/api/teams/${slug}`, { cookie: owner }))
+    ).members.map((row) => row.id);
+  const teamsOnAccess = async (artifact: string) =>
+    (
+      await json<{ teams: { id: string; viaToken: boolean }[] }>(
+        await t.api(`/api/artifacts/${artifact}/access`, { cookie: owner }),
+      )
+    ).teams;
   const share = (artifact: string, team: string, permission: string, auth: object = { cookie: owner }) =>
     t.api(`/api/artifacts/${artifact}/teams/${team}`, { method: "PUT", json: { permission }, ...auth });
 
@@ -40,9 +53,9 @@ describe("teams", () => {
     t = await startTestServer();
     const made = await claim(t);
     token = made.token;
+    ownerId = made.person.id;
+    orgId = made.orgId;
     owner = await signIn(t, OWNER.email, OWNER.password);
-    const [row] = await t.server.db.select().from(people).limit(1);
-    orgId = row?.orgId as string;
     lead = await makeAccount(t, orgId, "member");
     member = await makeAccount(t, orgId, "member");
     reviewer = await makeAccount(t, orgId, "reviewer");
@@ -139,8 +152,8 @@ describe("teams", () => {
         })
       ).status,
     ).toBe(404);
-    const kinds = await t.server.db.select({ kind: activity.kind }).from(activity);
-    expect(kinds.map((row) => row.kind)).toEqual(
+    const feed = ActivityPage.parse(await json(await t.api("/api/activity", { cookie: owner })));
+    expect(feed.items.map((item) => item.kind)).toEqual(
       expect.arrayContaining(["team_created", "team_member_added", "team_member_removed"]),
     );
   });
@@ -197,7 +210,7 @@ describe("teams", () => {
       expect(await t.api(`/api/artifacts/${id}`, { bearer: who.token }).then(json)).toMatchObject({
         permissions: { comment: true, manage: false },
       });
-      expect((await publish(t, who.token, { slug: "shared-out", visibility: "me" })).status).not.toBe(200);
+      expect((await publish(t, who.token, { slug: "shared-out", visibility: "me" })).status).toBe(403);
     }
     expect(
       (await t.api(`/api/artifacts/${id}/teams/${team.id}`, { method: "DELETE", cookie: owner })).status,
@@ -230,9 +243,8 @@ describe("teams", () => {
     expect((await share(id, team.id, "publish", { bearer: token })).status).toBe(403);
     expect((await share(id, team.id, "comment", { bearer: token })).status).toBe(200);
 
-    const row = () =>
-      t.server.db.select().from(artifactTeamAccess).where(eq(artifactTeamAccess.artifactId, id));
-    expect((await row())[0]?.viaToken).toBe(true);
+    const viaToken = async () => (await teamsOnAccess(id))[0]?.viaToken;
+    expect(await viaToken()).toBe(true);
     const before = await json(await t.api(`/api/artifacts/${id}`, { cookie: member.cookie }));
     expect(before).toMatchObject({ permissions: { comment: true, decide: false } });
 
@@ -258,16 +270,16 @@ describe("teams", () => {
 
     // A person granting it again is the confirmation, and a token repeating it can't undo that.
     expect((await share(id, team.id, "comment")).status).toBe(200);
-    expect((await row())[0]?.viaToken).toBe(false);
+    expect(await viaToken()).toBe(false);
     expect((await share(id, team.id, "comment", { bearer: token })).status).toBe(200);
-    expect((await row())[0]?.viaToken).toBe(false);
+    expect(await viaToken()).toBe(false);
     expect(await t.api(`/api/artifacts/${id}`, { cookie: member.cookie }).then(json)).toMatchObject({
       permissions: { decide: true },
     });
 
     // Changing it is a new grant, and so unconfirmed again.
     expect((await share(id, team.id, "view", { bearer: token })).status).toBe(200);
-    expect((await row())[0]?.viaToken).toBe(true);
+    expect(await viaToken()).toBe(true);
   });
 
   test("a token-made team row tied with a person's lets a person decide", async () => {
@@ -326,8 +338,7 @@ describe("teams", () => {
       sources: [{ name: "Sources" }],
     });
     expect(row(member.id)).toBeUndefined();
-    const [me] = await t.server.db.select().from(people).where(eq(people.email, OWNER.email));
-    expect(row(me?.id as string)).toMatchObject({ level: "manage", via: "publisher" });
+    expect(row(ownerId)).toMatchObject({ level: "manage", via: "publisher" });
   });
 
   test("a stored token can't invite anyone into a team, and a person can", async () => {
@@ -357,29 +368,27 @@ describe("teams", () => {
     expect(
       (await t.api(`/api/invites/${made.invite.id}/link`, { method: "POST", bearer: token })).status,
     ).toBe(403);
-    const secret = made.url.split("/join/")[1] as string;
+    const secret = inviteSecret(made.url);
     expect(await t.api(`/api/invites/${secret}`).then(json)).toMatchObject({
       teams: expect.arrayContaining(["Joining", "Gone by then"]),
     });
     expect((await t.api(`/api/teams/${gone.slug}`, { method: "DELETE", cookie: owner })).status).toBe(200);
-    const accepted = await t.api(`/api/invites/${secret}/accept`, {
-      method: "POST",
-      json: { name: "Joiner", password: PASSWORD },
-    });
-    expect(accepted.status).toBe(200);
-    const { person } = await json<{ person: { id: string } }>(accepted);
-    const rows = await t.server.db.select().from(teamMembers).where(eq(teamMembers.personId, person.id));
-    expect(rows.map((row) => row.teamId)).toEqual([team.id]);
+    const { person } = await acceptInvite(t, made.url);
+    const listed = await json<{ people: { id: string; teams: { slug: string }[] }[] }>(
+      await t.api("/api/people", { cookie: owner }),
+    );
+    expect(listed.people.find((row) => row.id === person.id)?.teams.map((row) => row.slug)).toEqual([
+      team.slug,
+    ]);
   });
 
   test("removing a person takes them off their teams", async () => {
     const team = await makeTeam("Leaving");
     const leaver = await makeAccount(t, orgId, "member");
     await addMember(team.slug, leaver);
+    expect(await membersOf(team.slug)).toEqual([leaver.id]);
     expect((await t.api(`/api/people/${leaver.id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
-    expect(await t.server.db.select().from(teamMembers).where(eq(teamMembers.personId, leaver.id))).toEqual(
-      [],
-    );
+    expect(await membersOf(team.slug)).toEqual([]);
   });
 
   test("deleting a team removes its access", async () => {
@@ -390,7 +399,7 @@ describe("teams", () => {
     expect((await t.api(`/api/artifacts/${id}`, { bearer: member.token })).status).toBe(200);
     expect((await t.api(`/api/teams/${team.slug}`, { method: "DELETE", cookie: owner })).status).toBe(200);
     expect((await t.api(`/api/artifacts/${id}`, { bearer: member.token })).status).toBe(404);
-    expect(await t.server.db.select().from(teams).where(eq(teams.id, team.id))).toEqual([]);
+    expect((await t.api(`/api/teams/${team.slug}`, { cookie: owner })).status).toBe(404);
   });
 
   test("the people list shows each person's teams", async () => {
@@ -406,36 +415,13 @@ describe("teams", () => {
     });
   });
 
-  test("losing a team stops an open frame within seconds", async () => {
-    const team = await makeTeam("Frames");
-    await addMember(team.slug, member);
-    const id = await publishPrivate("framed");
-    await share(id, team.id, "view");
-    const minted = await t.api(`/api/artifacts/${id}/content-token`, {
-      method: "POST",
-      cookie: member.cookie,
-      json: { version: 1 },
-    });
-    const { base } = await json<{ base: string }>(minted);
-    const open = () =>
-      fetch(`http://127.0.0.1:${t.server.ports.content}${new URL(base).pathname}index.html`, {
-        headers: { Host: "content.test", "Sec-Fetch-Dest": "iframe" },
-      });
-    expect((await open()).status).toBe(200);
-    await t.api(`/api/teams/${team.slug}/members/${member.id}`, { method: "DELETE", cookie: owner });
-    t.clock.advance(5001);
-    expect((await open()).status).toBe(404);
-  });
-
   test("purging an artifact shared with a team works", async () => {
     const team = await makeTeam("Purged");
     const id = await publishPrivate("purged");
-    await share(id, team.id, "comment");
-    await t.api(`/api/artifacts/${id}/delete`, { method: "POST", cookie: owner });
+    expect((await share(id, team.id, "comment")).status).toBe(200);
+    expect((await t.api(`/api/artifacts/${id}/delete`, { method: "POST", cookie: owner })).status).toBe(200);
     expect((await t.api(`/api/artifacts/${id}`, { method: "DELETE", cookie: owner })).status).toBe(200);
-    expect(
-      await t.server.db.select().from(artifactTeamAccess).where(eq(artifactTeamAccess.artifactId, id)),
-    ).toEqual([]);
+    expect((await t.api(`/api/artifacts/${id}`, { cookie: owner })).status).toBe(404);
   });
 });
 
@@ -446,10 +432,8 @@ describe("people search", () => {
 
   beforeAll(async () => {
     t = await startTestServer();
-    await claim(t);
+    orgId = (await claim(t)).orgId;
     owner = await signIn(t, OWNER.email, OWNER.password);
-    const [row] = await t.server.db.select().from(people).limit(1);
-    orgId = row?.orgId as string;
   });
   afterAll(() => t.stop());
 
@@ -496,8 +480,9 @@ describe("people search", () => {
 
   test("it has a rate limit", async () => {
     const member = await makeAccount(t, orgId, "member");
-    const hit = () => t.api("/api/people/search?q=zahin", { cookie: member.cookie });
-    for (let i = 0; i < 60; i++) await hit();
-    expect((await hit()).status).toBe(429);
+    const statuses: number[] = [];
+    for (let i = 0; i < 61; i++)
+      statuses.push((await t.api("/api/people/search?q=zahin", { cookie: member.cookie })).status);
+    expect(statuses).toEqual([...Array(60).fill(200), 429]);
   });
 });

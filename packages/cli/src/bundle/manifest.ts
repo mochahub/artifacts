@@ -1,26 +1,14 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Manifest } from "@artifacts/schema";
+import type { Problem } from "../lint/problem.ts";
 import { CliError } from "../output.ts";
+import { MANIFEST, WORK } from "./layout.ts";
 
-export type Problem = { rule: string; severity: "error" | "warning"; message: string; file?: string };
-
-export const manifestPath = (root: string) => join(root, "artifact.json");
-
-export const WORK = ".artifacts/work";
-
-/** The repo this folder is in, or the folder itself: where `.artifacts/` lives. */
-export function repoRoot(from = process.cwd()): string {
-  const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
-    cwd: from,
-    stdout: "pipe",
-    stderr: "ignore",
-  });
-  return result.success ? result.stdout.toString().trim() : resolve(from);
-}
+const manifestPath = (root: string) => join(root, MANIFEST);
 
 /** Every working folder in the nearest `.artifacts/work/`, from `from` upward. */
-export function workFolders(from = process.cwd()): string[] {
+function workFolders(from = process.cwd()): string[] {
   let dir = resolve(from);
   for (;;) {
     const work = join(dir, WORK);

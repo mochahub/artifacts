@@ -1,9 +1,8 @@
+import { HOUR_MS, MINUTE_MS } from "@artifacts/schema";
 import type { Clock } from "../clock.ts";
 import { ApiError } from "../http/errors.ts";
 
-const FIFTEEN_MINUTES = 15 * 60_000;
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
+const FIFTEEN_MINUTES = 15 * MINUTE_MS;
 const MAX_KEYS = 50_000;
 
 const limited = (retryAfterMs: number) =>
@@ -31,7 +30,7 @@ export class RateLimits {
   private sweep(now: number) {
     for (const map of [this.hits, this.accountFailures]) {
       if (map.size < MAX_KEYS) continue;
-      for (const [key, times] of map) if ((times.at(-1) ?? 0) < now - 2 * HOUR) map.delete(key);
+      for (const [key, times] of map) if ((times.at(-1) ?? 0) < now - 2 * HOUR_MS) map.delete(key);
       // Still full of live keys: drop the oldest tenth, so flooding can't also wipe everyone's limits.
       for (const key of map.keys()) {
         if (map.size < MAX_KEYS * 0.9) break;
@@ -64,10 +63,10 @@ export class RateLimits {
   /** 5 failures per account per 15 minutes, then 1 attempt a minute, doubling to an hour (04). */
   checkPassword(email: string, ip: string) {
     this.hit(`password-ip:${ip}`, 30, FIFTEEN_MINUTES);
-    const failures = this.recent(this.accountFailures, email, HOUR + FIFTEEN_MINUTES);
+    const failures = this.recent(this.accountFailures, email, HOUR_MS + FIFTEEN_MINUTES);
     const over = failures.length - 4;
     if (over <= 0) return;
-    const wait = Math.min(MINUTE * 2 ** (over - 1), HOUR);
+    const wait = Math.min(MINUTE_MS * 2 ** (over - 1), HOUR_MS);
     const until = (failures.at(-1) as number) + wait;
     const now = this.clock.now().getTime();
     if (now < until) throw limited(until - now);
@@ -75,7 +74,7 @@ export class RateLimits {
 
   passwordFailed(email: string) {
     this.sweep(this.clock.now().getTime());
-    const failures = this.recent(this.accountFailures, email, HOUR + FIFTEEN_MINUTES);
+    const failures = this.recent(this.accountFailures, email, HOUR_MS + FIFTEEN_MINUTES);
     failures.push(this.clock.now().getTime());
     this.accountFailures.set(email, failures);
   }

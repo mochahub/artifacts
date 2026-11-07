@@ -1,0 +1,21 @@
+.wiki-section {
+  min-width: 0;
+}
+.wiki-section > h2 {
+  margin: 0 0 12px;
+}
+.wiki-section .li {
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+.wiki-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wiki-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}

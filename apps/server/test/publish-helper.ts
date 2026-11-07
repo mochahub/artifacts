@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { PublishPrepared } from "@artifacts/schema";
+import { Artifact, PublishPrepared, PublishResult } from "@artifacts/schema";
 import { randomSecret, sha256 } from "../src/auth/secrets.ts";
+import { SESSION_DAYS } from "../src/auth/sessions.ts";
 import { people, sessions, tokens } from "../src/db/schema.ts";
 import type { TestServer } from "./helpers.ts";
 
@@ -13,32 +14,34 @@ export const file = (path: string, body: string, type = "text/html") => ({
   type,
 });
 
-/** A minimal publish, the way the CLI does it: prepare, upload what's missing, commit. */
-export async function publish(
-  t: TestServer,
-  bearer: string,
-  options: {
-    project?: string;
-    slug?: string;
-    files?: ReturnType<typeof file>[];
-    frameHash?: string;
-    visibility?: "me" | "org";
-    extra?: ReturnType<typeof file>[];
-    tamper?: string;
-    renderBytes?: Uint8Array;
-    frameKey?: string;
-    title?: string;
-    backend?: string;
-    agent?: string;
-    summary?: string | null;
-    tags?: string[];
-    blocks?: { key: string; text: string }[];
-    frameTitle?: string;
-    message?: string;
-    notes?: Record<string, string>;
-    repo?: string;
-  } = {},
-) {
+type PublishOptions = {
+  project?: string;
+  slug?: string;
+  files?: ReturnType<typeof file>[];
+  frameHash?: string;
+  visibility?: "me" | "org";
+  extra?: ReturnType<typeof file>[];
+  tamper?: string;
+  renderBytes?: Uint8Array;
+  frameKey?: string;
+  title?: string;
+  backend?: string;
+  agent?: string;
+  summary?: string | null;
+  tags?: string[];
+  blocks?: { key: string; text: string }[];
+  frameTitle?: string;
+  message?: string;
+  notes?: Record<string, string>;
+  repo?: string;
+  projectName?: string;
+};
+
+/** The render a publish uploads for a frame, unless `renderBytes` gives one. */
+const renderFile = (frameHash: string) => file("__renders/a.webp", `render-${frameHash}`, "image/webp");
+
+/** A minimal publish, the way the CLI does it: prepare, upload what's missing, commit. Returns the response. */
+export async function publish(t: TestServer, bearer: string, options: PublishOptions = {}) {
   const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame"), visibility } = options;
   const page = file("index.html", `<h1>${frameHash}</h1>`);
   const article = file(
@@ -52,7 +55,7 @@ export async function publish(
         sha256: createHash("sha256").update(options.renderBytes).digest("hex"),
         size: options.renderBytes.length,
       }
-    : file("__renders/a.webp", `render-${frameHash}`, "image/webp");
+    : renderFile(frameHash);
   const module = options.backend ? file("__backend.js", options.backend, "text/javascript") : null;
   const files = [
     ...(options.files ?? [page, article, render]),
@@ -64,6 +67,7 @@ export async function publish(
     bearer,
     json: {
       project,
+      projectName: options.projectName,
       slug,
       title: options.title ?? "Roadmap",
       visibility,
@@ -137,6 +141,24 @@ export async function publish(
   });
 }
 
+/**
+ * A publish that has to work: throws on anything but 200, and returns what tests reach for next — the
+ * artifact's id (read through the API, the way the viewer finds it), the version, and the render's hash.
+ */
+export async function published(t: TestServer, bearer: string, options: PublishOptions = {}) {
+  const response = await publish(t, bearer, options);
+  if (response.status !== 200) throw new Error(`publish ${response.status}: ${await response.text()}`);
+  const result = PublishResult.parse(await response.json());
+  const { project = "camerabuddy", slug = "roadmap", frameHash = hash("frame") } = options;
+  const found = await t.api(`/api/artifacts/by-slug/${project}/${slug}`, { bearer });
+  if (found.status !== 200) throw new Error(`by-slug ${found.status}: ${await found.text()}`);
+  const artifact = Artifact.parse(await found.json());
+  const renderHash = options.renderBytes
+    ? createHash("sha256").update(options.renderBytes).digest("hex")
+    : renderFile(frameHash).sha256;
+  return { id: artifact.id, version: result.version, renderHash, result };
+}
+
 let people_n = 0;
 /** A person with a CLI token, without going through invites (M6). */
 export async function makePerson(
@@ -146,21 +168,21 @@ export async function makePerson(
 ) {
   const id = Bun.randomUUIDv7();
   people_n += 1;
-  await t.server.db
-    .insert(people)
-    .values({ id, orgId, email: `p${people_n}@example.com`, name: `P${people_n}`, role });
-  const secret = `art_test${id}`;
+  const email = `p${people_n}@example.com`;
+  const name = `P${people_n}`;
+  await t.server.db.insert(people).values({ id, orgId, email, name, role });
+  const token = `art_test${id}`;
   await t.server.db.insert(tokens).values({
     id: Bun.randomUUIDv7(),
     orgId,
     kind: "cli",
     personId: id,
     name: "test",
-    tokenHash: sha256(secret),
+    tokenHash: sha256(token),
     scopes: ["publish", "comment", "read", "manage", "data"],
     createdBy: id,
   });
-  return secret;
+  return { id, email, name, token };
 }
 
 /** A person with a CLI token and a browser session, for routes only a session can use. */
@@ -169,25 +191,26 @@ export async function makeAccount(
   orgId: string,
   role: "member" | "reviewer" | "outside" | "admin",
 ) {
-  const token = await makePerson(t, orgId, role);
-  const id = token.slice("art_test".length);
+  const person = await makePerson(t, orgId, role);
+  return { ...person, cookie: await sessionFor(t, orgId, person.id) };
+}
+
+/**
+ * A browser session for a person, signed in now, as a cookie. Written directly: only a password or
+ * passkey sign-in makes one through the API, and these people have neither.
+ */
+export async function sessionFor(t: TestServer, orgId: string, personId: string) {
   const secret = randomSecret();
   const now = t.clock.now();
   await t.server.db.insert(sessions).values({
     id: Bun.randomUUIDv7(),
     orgId,
     tokenHash: sha256(secret),
-    personId: id,
+    personId,
     domain: "viewer.test",
     authAt: now,
     lastSeenAt: now,
-    expiresAt: new Date(now.getTime() + 30 * 24 * 3600_000),
+    expiresAt: new Date(now.getTime() + SESSION_DAYS * 24 * 3600_000),
   });
-  return {
-    id,
-    token,
-    cookie: `art_session=${secret}`,
-    email: `p${people_n}@example.com`,
-    name: `P${people_n}`,
-  };
+  return `art_session=${secret}`;
 }

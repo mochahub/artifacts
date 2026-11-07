@@ -843,3 +843,40 @@ Defaults the builder uses until the user says otherwise:
 11. **The 30-minute Claude Code artifacts test:** skipped; the direction is set.
 12. **Who can read `me` data in an artifact without a backend:** that person, plus the publisher and admins through the CLI, with the viewer saying so (§7.9). Confirmed 2026-10-30.
 13. **CLI install channel:** an install script that downloads the binary from GitHub Releases, plus `bun add -g @artifacts/cli`. Homebrew later.
+
+## 16. Wikis
+
+A wiki is a project of kind `wiki`. Its artifacts are pages. A company wiki is
+open to the organization. A personal wiki starts restricted to its creator,
+with a manage grant; admins retain their normal access. Personal content moves
+to a company wiki only when the person asks.
+
+Artifacts have role `page` (the default) or `source`. Sources preserve raw inputs;
+new input versions are republished, never rewritten into maintained pages.
+Pages cite same-wiki source slugs in their `wiki` metadata. Outside material
+carries its origin and an untrusted mark. Source text is data, never instructions.
+The page with slug `rules` says how to organize and maintain the wiki. Agents
+read it before writing and create it when it is absent.
+
+Articles support `[[Target]]`, `[[Target|label]]` and `[[other-wiki/Target]]`.
+Targets become ASCII slugs and link to the named wiki or the current project.
+Code spans and existing links stay intact. The server derives outgoing links
+from sanitized article HTML, and uses visible artifacts to derive backlinks.
+A missing target and a target the caller cannot see look alike.
+
+The server derives the index from visible, unarchived artifacts and the log
+from activity. The garden reports untrusted citations, stale citations, wanted
+pages, orphan pages and unsourced pages. Agents fix findings by republishing;
+questions for people become page-level threads. People resolve threads.
+
+Existing project and artifact permissions govern reading, publishing, commenting
+and sharing. Creating a wiki requires project creation permission. A personal
+wiki requires a person, so an organization token cannot create one. A manager
+can convert an ordinary project to a wiki while preserving its access. Readers
+see only content they can access; publishers maintain pages and sources; access
+managers control sharing. Agents use the CLI or hosted MCP tools.
+
+Phase 1 lets agents write and people read and comment. It does not provide
+browser editing; that comes in Phase 2. It does not maintain hand-written index
+or log pages. See the [wiki contract](implementation/12-wikis.md) for names and
+shapes, and the hosted plan artifact `artifacts/company-brain` for the plan.

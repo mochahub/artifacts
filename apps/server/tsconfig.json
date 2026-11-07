@@ -1,6 +1,20 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": ".", "outDir": "dist/types", "types": ["bun"] },
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/types",
+    "types": ["bun"]
+  },
   "include": ["src", "test", "drizzle.config.ts", "package.json"],
-  "references": [{ "path": "../../packages/schema" }]
+  "references": [
+    {
+      "path": "../../packages/schema"
+    },
+    {
+      "path": "../../packages/kit"
+    },
+    {
+      "path": "../../skill"
+    }
+  ]
 }

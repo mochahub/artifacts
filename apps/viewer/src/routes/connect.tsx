@@ -1,21 +1,15 @@
+import type { ConsentRedirect, OAuthConsent } from "@artifacts/schema";
+import type { OAuthScope } from "@artifacts/schema/constants";
 import { useSignal } from "@preact/signals";
 import { Cable } from "lucide-preact";
 import { useEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { ApiFailure, api, post } from "../api.ts";
-import { ReauthSheet } from "../components/reauth.tsx";
+import { api, message, post } from "../api.ts";
+import { useAction } from "../components/reauth.tsx";
+import { signInHref } from "../paths.ts";
 import { me } from "../session.ts";
 
-type Consent = {
-  client: string;
-  clientId: string;
-  redirectHost: string;
-  local: boolean;
-  scopes: string[];
-  resource: string;
-};
-
-const MEANS: Record<string, string> = {
+const MEANS: Record<OAuthScope, string> = {
   read: "Search and read what you can see",
   comment: "Comment and reply as you",
   publish: "Publish new versions as you",
@@ -24,37 +18,32 @@ const MEANS: Record<string, string> = {
 /** "Connect an app": a client's OAuth request, in the same plain style as approving the CLI. */
 export function Connect() {
   const { route, url } = useLocation();
-  const consent = useSignal<Consent | null>(null);
+  const consent = useSignal<OAuthConsent | null>(null);
   const error = useSignal<string | null>(null);
-  const reauth = useSignal(false);
+  const action = useAction();
   const search = url.slice(url.indexOf("?"));
 
   useEffect(() => {
     if (!me.value) {
-      route(`/sign-in?next=${encodeURIComponent(url)}`, true);
+      route(signInHref(url), true);
       return;
     }
-    api<Consent>(`/api/oauth/consent${search}`).then(
+    api<OAuthConsent>(`/api/oauth/consent${search}`).then(
       (body) => {
         consent.value = body;
       },
       (failure) => {
-        error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
+        error.value = message(failure);
       },
     );
   }, [route, url, search]);
 
-  async function decide(approve: boolean) {
-    error.value = null;
-    try {
+  const decide = (approve: boolean) =>
+    action.run(async () => {
       const request = Object.fromEntries(new URLSearchParams(search));
-      const { redirect } = await post<{ redirect: string }>("/api/oauth/consent", { approve, request });
+      const { redirect } = await post<ConsentRedirect>("/api/oauth/consent", { approve, request });
       window.location.assign(redirect);
-    } catch (failure) {
-      if (failure instanceof ApiFailure && failure.code === "recent_auth_required") reauth.value = true;
-      else error.value = failure instanceof ApiFailure ? failure.message : "Something went wrong.";
-    }
-  }
+    });
 
   const body = consent.value;
   return (
@@ -66,14 +55,14 @@ export function Connect() {
         <h1 class="h1 m">Connect an app</h1>
         {body && <p class="sub">An app calling itself "{body.client}" wants to use Artifacts as you.</p>}
       </div>
-      {error.value && <p class="err">{error.value}</p>}
+      {(error.value ?? action.error.value) && <p class="err">{error.value ?? action.error.value}</p>}
       {body && (
         <>
           <div class="group">
             {body.scopes.map((scope) => (
               <div class="li" key={scope}>
                 <div class="grow">
-                  <div class="tt">{MEANS[scope] ?? scope}</div>
+                  <div class="tt">{Object.hasOwn(MEANS, scope) ? MEANS[scope as OAuthScope] : scope}</div>
                 </div>
               </div>
             ))}
@@ -94,17 +83,7 @@ export function Connect() {
           </button>
         </>
       )}
-      {reauth.value && (
-        <ReauthSheet
-          onCancel={() => {
-            reauth.value = false;
-          }}
-          onDone={() => {
-            reauth.value = false;
-            void decide(true);
-          }}
-        />
-      )}
+      {action.sheet}
     </main>
   );
 }

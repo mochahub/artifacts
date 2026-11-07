@@ -28,6 +28,7 @@
 | `device_status` | `pending`, `approved`, `denied`, `used` |
 | `team_role` | `lead`, `member` |
 | `activity_kind` | `published`, `restored`, `commented`, `replied`, `fixed`, `resolved`, `reopened`, `approved`, `changes_requested`, `archived`, `unarchived`, `deleted`, `undeleted`, `purged`, `version_deleted`, `version_undeleted`, `version_named`, `shared`, `joined`, `recovered`, `team_created`, `team_deleted`, `team_member_added`, `team_member_removed`, `project_access_changed`, `identity_linked` |
+| `project_kind` | `project`, `wiki` |
 
 ## Tables
 
@@ -182,7 +183,7 @@ Index: unique `(org_id, lower(email)) where removed_at is null`.
 
 ### Projects and artifacts
 
-**`projects`**: `id`, `org_id`, `slug` text (unique per org; lowercase `a-z0-9-`, 1–40 chars, not a reserved word, see [06-viewer.md](06-viewer.md#routes)), `name` text, `repo` text null (`owner/name`, lowercased, from `git remote`; a project with none learns it on its next publish), `restricted` boolean not null default false, `created_by` uuid null FK people (null for a project from before this column, or one a token made), `created_by_token` uuid null FK tokens (the organization token that made it), `created_at`, `updated_at`. Index `(org_id, lower(repo))`.
+**`projects`**: `id`, `org_id`, `slug` text (unique per org; lowercase `a-z0-9-`, 1–40 chars, not a reserved word, see [06-viewer.md](06-viewer.md#routes)), `name` text, `repo` text null (`owner/name`, lowercased, from `git remote`; a project with none learns it on its next publish), `restricted` boolean not null default false, `kind` project_kind not null default `project` (a wiki holds knowledge pages), `created_by` uuid null FK people (null for a project from before this column, or one a token made), `created_by_token` uuid null FK tokens (the organization token that made it), `created_at`, `updated_at`. Index `(org_id, lower(repo))`.
 
 **`project_access`**: access to a whole project, for a person or a team. `id`, `org_id`, `project_id`, `person_id` uuid null, `team_id` uuid null, `permission` `project_permission`, `granted_by`, `created_at`. Exactly one of `person_id` and `team_id` is set. Unique `(project_id, person_id)` and `(project_id, team_id)`; indexes on `person_id` and `team_id`. Whoever creates a project gets `manage` here. Tokens never write this table.
 
@@ -225,6 +226,8 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `message` | text | `publish -m`. |
 | `name` | text null | Version name ("Real photos"), set by `publish --name`, `versions name`, or the viewer. |
 | `notes` | jsonb | `{ "<frameKey>": "Moved MF above the strip" }` from `--note`. |
+| `wiki` | jsonb null | Wiki role, source slugs, origin and trust metadata; see 12-wikis.md. |
+| `links` | text[] | Not null, default empty; server-extracted article targets as project/slug, with a GIN index. |
 | `summary` | text null | The manifest's `summary`, at most 280 characters. Null on versions from before it existed; those show their first text instead (03). |
 | `tags` | text[] null | The manifest's `tags`, at most 8 of at most 32 characters. |
 | `published_by` | uuid FK people | |
@@ -235,7 +238,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 **`blobs`**: bucket objects the server has hashed itself. PK `(org_id, hash)`, `size` bigint, `verified_at`. Files are shared by hash across artifacts, so "the bucket has this key" isn't proof of its content: anyone with a presigned PUT could have stored something else there. A hash counts as already stored only with a row here; commit downloads and hashes anything without one (05).
 
-**`pages`**: `id`, `org_id`, `version_id`, `page_key` text (manifest page `id`), `kind` `page_kind`, `title`, `group` text null, `position` int, `meta` jsonb (article: `{ readingMinutes, htmlHash, outline: [{ id, title, level }], theme?: { accent, font, display, radius } }`; canvas: `{ boards: [{ key, title, subtitle, x, y, w, h }] }`). Unique `(version_id, page_key)`.
+**`pages`**: `id`, `org_id`, `version_id`, `page_key` text (manifest page `id`), `kind` `page_kind`, `title`, `group` text null, `position` int, `meta` jsonb (article: `{ readingMinutes, htmlHash, outline: [{ id, title, level }], theme?: { accent, font, display, radius } }`; canvas: `{ boards: [{ key, title, subtitle, x, y, w, h }] }`; gallery: `{ items: [{ hash, caption?, type? }] }`, `type` being the file's content type, so a video plays as one). Unique `(version_id, page_key)`.
 
 **`frames`**: canvas frames, one row per frame per version.
 

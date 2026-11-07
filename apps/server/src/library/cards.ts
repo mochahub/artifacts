@@ -1,11 +1,28 @@
-import { type LibraryCard, type LibraryMatch, SUMMARY_MAX } from "@artifacts/schema";
-import { desc, inArray } from "drizzle-orm";
+import {
+  type ArtifactCard,
+  agentLabel,
+  type LibraryCard,
+  type LibraryMatch,
+  SUMMARY_MAX,
+} from "@artifacts/schema";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
-import type { Deps } from "../api/deps.ts";
-import { buildCards } from "../api/lists.ts";
-import type { Caller } from "../auth/caller.ts";
-import { blocks, decisions, frames, versions } from "../db/schema.ts";
-import type { Loaded } from "./visible.ts";
+import type { LoadedArtifact } from "../auth/access.ts";
+import { type Caller, viewerId } from "../auth/caller.ts";
+import {
+  blocks,
+  comments,
+  decisions,
+  frames,
+  guestViews,
+  pages,
+  people,
+  threads,
+  versions,
+  views,
+} from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { changes, frameHashes } from "../versions/diff.ts";
 
 const clip = (text: string) => {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -45,7 +62,7 @@ async function fallbackSummaries(deps: Deps, rows: { id: string; message: string
 export async function libraryCards(
   deps: Deps,
   caller: Caller,
-  list: Loaded[],
+  list: LoadedArtifact[],
   matches: Map<string, z.infer<typeof LibraryMatch>> = new Map(),
 ): Promise<LibraryCard[]> {
   if (list.length === 0) return [];
@@ -80,14 +97,14 @@ export async function libraryCards(
     [...head.values()].filter((version) => !version.summary),
   );
   const byId = new Map(cards.map((card) => [card.id, card]));
-  return list.flatMap(({ row, projectSlug }) => {
+  return list.flatMap(({ row, project }) => {
     const card = byId.get(row.id);
     const version = head.get(row.id);
     if (!card || !version) return [];
     const decision = decisionRows.find((entry) => entry.artifactId === row.id);
     return [
       {
-        project: projectSlug,
+        project: project.slug,
         slug: row.slug,
         title: row.title,
         summary: version.summary ?? fallback.get(version.id) ?? "",
@@ -102,6 +119,176 @@ export async function libraryCards(
         latestVersion: row.latestVersion,
         updatedAt: row.updatedAt.toISOString(),
         match: matches.get(row.id) ?? null,
+      },
+    ];
+  });
+}
+
+/** Status, counts and cover for a set of artifacts, in as few queries as possible (02, "Derived state"). */
+export async function buildCards(
+  deps: Deps,
+  caller: Caller,
+  list: LoadedArtifact[],
+): Promise<ArtifactCard[]> {
+  if (list.length === 0) return [];
+  const { db } = deps;
+  const ids = list.map(({ row }) => row.id);
+  const who = viewerId(caller);
+
+  const [versionRows, decisionRows, threadRows, viewRows, pageCounts] = await Promise.all([
+    db
+      .select({
+        id: versions.id,
+        artifactId: versions.artifactId,
+        n: versions.n,
+        agent: versions.agent,
+        publishedAt: versions.publishedAt,
+        publisher: people.name,
+      })
+      .from(versions)
+      .innerJoin(people, eq(people.id, versions.publishedBy))
+      .where(and(inArray(versions.artifactId, ids), isNull(versions.deletedAt)))
+      .orderBy(desc(versions.n)),
+    db.select().from(decisions).where(inArray(decisions.artifactId, ids)).orderBy(desc(decisions.createdAt)),
+    db
+      .select({
+        id: threads.id,
+        artifactId: threads.artifactId,
+        status: threads.status,
+        person: threads.authorPersonId,
+        guest: threads.authorGuestId,
+      })
+      .from(threads)
+      .where(inArray(threads.artifactId, ids)),
+    who.person
+      ? db
+          .select({
+            artifactId: views.artifactId,
+            lastSeenVersion: views.lastSeenVersion,
+            lastSeenAt: views.lastSeenAt,
+          })
+          .from(views)
+          .where(and(eq(views.personId, who.person), inArray(views.artifactId, ids)))
+      : who.guest
+        ? db
+            .select({
+              artifactId: guestViews.artifactId,
+              lastSeenVersion: guestViews.lastSeenVersion,
+              lastSeenAt: guestViews.lastSeenAt,
+            })
+            .from(guestViews)
+            .where(and(eq(guestViews.guestId, who.guest), inArray(guestViews.artifactId, ids)))
+        : Promise.resolve([]),
+    db
+      .select({ versionId: pages.versionId, count: sql<number>`count(*)::int` })
+      .from(pages)
+      .innerJoin(versions, eq(versions.id, pages.versionId))
+      .where(inArray(versions.artifactId, ids))
+      .groupBy(pages.versionId),
+  ]);
+
+  const latestByArtifact = new Map<string, (typeof versionRows)[number][]>();
+  for (const version of versionRows) {
+    latestByArtifact.set(version.artifactId, [...(latestByArtifact.get(version.artifactId) ?? []), version]);
+  }
+  const heads = list.flatMap(({ row }) => latestByArtifact.get(row.id)?.slice(0, 2) ?? []);
+  const frameRows = heads.length
+    ? await db
+        .select({
+          versionId: frames.versionId,
+          pageKey: frames.pageKey,
+          frameKey: frames.frameKey,
+          contentHash: frames.contentHash,
+          renders: frames.renders,
+          y: frames.y,
+          x: frames.x,
+          w: frames.w,
+          h: frames.h,
+        })
+        .from(frames)
+        .where(
+          inArray(
+            frames.versionId,
+            heads.map((version) => version.id),
+          ),
+        )
+    : [];
+
+  const replies = new Map<string, number>();
+  const mine = threadRows.filter(
+    (t) => (who.person && t.person === who.person) || (who.guest && t.guest === who.guest),
+  );
+  if (mine.length > 0) {
+    const replyRows = await db
+      .select({
+        threadId: comments.threadId,
+        createdAt: comments.createdAt,
+        person: comments.authorPersonId,
+        agent: comments.agent,
+        guest: comments.authorGuestId,
+      })
+      .from(comments)
+      .where(
+        inArray(
+          comments.threadId,
+          mine.map((t) => t.id),
+        ),
+      );
+    for (const thread of mine) {
+      const seenAt = viewRows.find((row) => row.artifactId === thread.artifactId)?.lastSeenAt ?? new Date(0);
+      const count = replyRows.filter(
+        (reply) =>
+          reply.threadId === thread.id &&
+          reply.createdAt > seenAt &&
+          (reply.agent !== null || (who.person ? reply.person !== who.person : reply.guest !== who.guest)),
+      ).length;
+      replies.set(thread.artifactId, (replies.get(thread.artifactId) ?? 0) + count);
+    }
+  }
+
+  return list.flatMap(({ row, project }) => {
+    const [latest, previous] = latestByArtifact.get(row.id) ?? [];
+    if (!latest) return [];
+    const decision = decisionRows.find((entry) => entry.artifactId === row.id);
+    const view = viewRows.find((entry) => entry.artifactId === row.id);
+    const unseen = latest.n > (view?.lastSeenVersion ?? 0) || (replies.get(row.id) ?? 0) > 0;
+
+    let status: ArtifactCard["status"];
+    if (decision?.kind === "approved" && decision.version === latest.n) {
+      status = { kind: "approved", version: latest.n };
+    } else if (decision?.kind === "changes_requested" && decision.createdAt > latest.publishedAt) {
+      status = {
+        kind: "with_agent",
+        agent: latest.agent ? agentLabel(latest.publisher, latest.agent) : latest.publisher,
+      };
+    } else if (unseen) status = { kind: "waiting" };
+    else status = { kind: "not_reviewed" };
+
+    const framesOf = (versionId: string) => frameRows.filter((frame) => frame.versionId === versionId);
+    const own = framesOf(latest.id);
+    const changedFrames = previous
+      ? changes(frameHashes(framesOf(previous.id)), frameHashes(own)).changed.length
+      : 0;
+    const first = [...own].sort((a, b) => a.y - b.y || a.x - b.x)[0];
+    return [
+      {
+        id: row.id,
+        project: project.slug,
+        slug: row.slug,
+        title: row.title,
+        cover: first ? { renderHash: first.renders.thumb, w: first.w, h: first.h } : { title: row.title },
+        pageCount: pageCounts.find((entry) => entry.versionId === latest.id)?.count ?? 0,
+        latestVersion: latest.n,
+        status,
+        counts: {
+          open: threadRows.filter((t) => t.artifactId === row.id && t.status === "open").length,
+          repliesToYou: replies.get(row.id) ?? 0,
+          changedFrames,
+        },
+        publishedBy: latest.publisher,
+        agent: latest.agent ? agentLabel(latest.publisher, latest.agent) : null,
+        publishedAt: latest.publishedAt.toISOString(),
+        archivedAt: row.archivedAt?.toISOString() ?? null,
       },
     ];
   });

@@ -1,4 +1,4 @@
-import type { Person } from "@artifacts/schema";
+import type { PersonResponse } from "@artifacts/schema";
 import {
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
@@ -32,7 +32,7 @@ export async function assertion() {
 }
 
 export async function signInWithPasskey() {
-  const { person } = await post<{ person: Person }>("/api/auth/passkey/verify", await assertion());
+  const { person } = await post<PersonResponse>("/api/auth/passkey/verify", await assertion());
   return person;
 }
 

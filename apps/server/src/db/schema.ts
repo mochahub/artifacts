@@ -1,3 +1,26 @@
+import {
+  ACTIVITY_KINDS,
+  ANCHOR_STATES,
+  type Anchor,
+  type Brand,
+  COMMENT_MAX,
+  DECISION_KINDS,
+  type OAuthScope,
+  type OrgSettings,
+  PAGE_KINDS,
+  type PageMeta,
+  PERMISSIONS,
+  PROJECT_KINDS,
+  PROJECT_PERMISSIONS,
+  type Renders,
+  ROLES,
+  TEAM_ROLES,
+  THREAD_STATUSES,
+  type TokenScope,
+  type VersionFiles,
+  VISIBILITIES,
+  type WikiMeta,
+} from "@artifacts/schema";
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
@@ -32,46 +55,20 @@ const id = () => uuid("id").primaryKey();
 const time = (name: string) => timestamp(name, { withTimezone: true });
 const createdAt = () => time("created_at").notNull().defaultNow();
 
-export const role = pgEnum("role", ["owner", "admin", "member", "reviewer", "outside"]);
-export const visibility = pgEnum("visibility", ["me", "org"]);
-export const permission = pgEnum("permission", ["view", "comment", "publish"]);
-export const projectPermission = pgEnum("project_permission", ["view", "comment", "publish", "manage"]);
+export const role = pgEnum("role", ROLES);
+export const visibility = pgEnum("visibility", VISIBILITIES);
+export const permission = pgEnum("permission", PERMISSIONS);
+export const projectPermission = pgEnum("project_permission", PROJECT_PERMISSIONS);
 export const tokenKind = pgEnum("token_kind", ["cli", "org", "oauth"]);
 export const inviteKind = pgEnum("invite_kind", ["org", "artifact", "project"]);
-export const pageKind = pgEnum("page_kind", ["canvas", "article", "prototype", "gallery", "deck"]);
-export const threadStatus = pgEnum("thread_status", ["open", "fixed", "resolved"]);
-export const anchorState = pgEnum("anchor_state", ["ok", "updated", "orphaned", "moved_version"]);
-export const decisionKind = pgEnum("decision_kind", ["approved", "changes_requested"]);
+export const pageKind = pgEnum("page_kind", PAGE_KINDS);
+export const threadStatus = pgEnum("thread_status", THREAD_STATUSES);
+export const anchorState = pgEnum("anchor_state", ANCHOR_STATES);
+export const decisionKind = pgEnum("decision_kind", DECISION_KINDS);
 export const deviceStatus = pgEnum("device_status", ["pending", "approved", "denied", "used"]);
-export const teamRole = pgEnum("team_role", ["lead", "member"]);
-export const activityKind = pgEnum("activity_kind", [
-  "published",
-  "restored",
-  "commented",
-  "replied",
-  "fixed",
-  "resolved",
-  "reopened",
-  "approved",
-  "changes_requested",
-  "archived",
-  "unarchived",
-  "deleted",
-  "undeleted",
-  "purged",
-  "version_deleted",
-  "version_undeleted",
-  "version_named",
-  "shared",
-  "joined",
-  "recovered",
-  "team_created",
-  "team_deleted",
-  "team_member_added",
-  "team_member_removed",
-  "project_access_changed",
-  "identity_linked",
-]);
+export const teamRole = pgEnum("team_role", TEAM_ROLES);
+export const activityKind = pgEnum("activity_kind", ACTIVITY_KINDS);
+export const projectKind = pgEnum("project_kind", PROJECT_KINDS);
 
 // Organization and people
 
@@ -79,11 +76,12 @@ export const org = pgTable("org", {
   id: id(),
   name: text("name").notNull(),
   homeDomain: text("home_domain").notNull(),
-  settings: jsonb("settings").notNull(),
+  /** Stored before a setting existed, a row lacks it: findOrg fills in the defaults. */
+  settings: jsonb("settings").$type<Partial<OrgSettings>>().notNull(),
   vapidPublic: text("vapid_public"),
   vapidPrivate: text("vapid_private"),
   lastDigestAt: time("last_digest_at"),
-  brand: jsonb("brand"),
+  brand: jsonb("brand").$type<Brand>(),
   /** Stored as is, like `vapid_private`: tying it to SESSION_SECRET would stop that being rotated (04). */
   googleClientId: text("google_client_id"),
   googleClientSecret: text("google_client_secret"),
@@ -288,7 +286,7 @@ export const brandProposals = pgTable("brand_proposals", {
     .notNull()
     .references(() => org.id),
   name: text("name").notNull(),
-  brand: jsonb("brand").notNull(),
+  brand: jsonb("brand").$type<Brand>().notNull(),
   artifactId: uuid("artifact_id").references(() => artifacts.id, { onDelete: "set null" }),
   proposedBy: uuid("proposed_by")
     .notNull()
@@ -311,6 +309,8 @@ export const projects = pgTable(
     repo: text("repo"),
     /** Off by default: an open project is everyone's, as every project was before this column. */
     restricted: boolean("restricted").notNull().default(false),
+    /** A wiki's artifacts are the pages of one knowledge base (SPEC 16). */
+    kind: projectKind("kind").notNull().default("project"),
     createdBy: uuid("created_by").references(() => people.id),
     /** The organization token that made it, which can always reach it (04). */
     createdByToken: uuid("created_by_token").references(() => tokens.id),
@@ -540,7 +540,7 @@ export const tokens = pgTable("tokens", {
   personId: uuid("person_id").references(() => people.id),
   name: text("name").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
-  scopes: text("scopes").array().notNull(),
+  scopes: text("scopes").array().$type<TokenScope[]>().notNull(),
   projectIds: uuid("project_ids").array(),
   createdBy: uuid("created_by")
     .notNull()
@@ -583,7 +583,7 @@ export const oauthGrants = pgTable("oauth_grants", {
   clientId: text("client_id").notNull(),
   clientName: text("client_name").notNull(),
   audience: text("audience").notNull(),
-  scopes: text("scopes").array().notNull(),
+  scopes: text("scopes").array().$type<OAuthScope[]>().notNull(),
   createdAt: createdAt(),
   lastUsedAt: time("last_used_at"),
   revokedAt: time("revoked_at"),
@@ -646,13 +646,17 @@ export const versions = pgTable(
       .notNull()
       .references(() => artifacts.id),
     n: integer("n").notNull(),
-    files: jsonb("files").notNull(),
+    files: jsonb("files").$type<VersionFiles>().notNull(),
     backendHash: text("backend_hash"),
     message: text("message"),
     name: text("name"),
-    notes: jsonb("notes").notNull().default({}),
+    notes: jsonb("notes").$type<Record<string, string>>().notNull().default({}),
     summary: text("summary"),
     tags: text("tags").array(),
+    /** Role, sources, origin and trust, from the manifest, for an artifact in a wiki (SPEC 16). */
+    wiki: jsonb("wiki").$type<WikiMeta>(),
+    /** Every `project/slug` this version's articles link to, found by the server in its own clean HTML. */
+    links: text("links").array().notNull().default(sql`'{}'::text[]`),
     publishedBy: uuid("published_by")
       .notNull()
       .references(() => people.id),
@@ -663,7 +667,10 @@ export const versions = pgTable(
     deletedBy: uuid("deleted_by").references(() => people.id),
     purgeAfter: time("purge_after"),
   },
-  (t) => [unique("versions_artifact_n_unique").on(t.artifactId, t.n)],
+  (t) => [
+    unique("versions_artifact_n_unique").on(t.artifactId, t.n),
+    index("versions_links_idx").using("gin", t.links),
+  ],
 );
 
 export const pages = pgTable(
@@ -681,7 +688,7 @@ export const pages = pgTable(
     title: text("title"),
     group: text("group"),
     position: integer("position").notNull(),
-    meta: jsonb("meta").notNull().default({}),
+    meta: jsonb("meta").$type<PageMeta>().notNull().default({}),
   },
   (t) => [unique("pages_version_key_unique").on(t.versionId, t.pageKey)],
 );
@@ -706,7 +713,7 @@ export const frames = pgTable(
     w: real("w").notNull(),
     h: real("h").notNull(),
     contentHash: text("content_hash").notNull(),
-    renders: jsonb("renders").notNull(),
+    renders: jsonb("renders").$type<Renders>().notNull(),
     livePath: text("live_path"),
   },
   (t) => [unique("frames_version_page_frame_unique").on(t.versionId, t.pageKey, t.frameKey)],
@@ -749,7 +756,7 @@ export const threads = pgTable(
       .references(() => artifacts.id),
     n: integer("n").notNull(),
     pageKey: text("page_key").notNull(),
-    anchor: jsonb("anchor"),
+    anchor: jsonb("anchor").$type<Anchor>(),
     anchorState: anchorState("anchor_state").notNull().default("ok"),
     status: threadStatus("status").notNull().default("open"),
     createdVersion: integer("created_version").notNull(),
@@ -791,7 +798,7 @@ export const comments = pgTable(
   },
   (t) => [
     check("comments_one_author", oneAuthor(t.authorPersonId, t.authorGuestId)),
-    check("comments_body_length", sql`char_length(${t.body}) <= 10000`),
+    check("comments_body_length", sql`char_length(${t.body}) <= ${sql.raw(String(COMMENT_MAX))}`),
     index("comments_search_idx").using("gin", sql`to_tsvector('english', ${t.body})`),
   ],
 );
@@ -827,7 +834,7 @@ export const views = pgTable(
       .references(() => artifacts.id),
     lastSeenVersion: integer("last_seen_version").notNull(),
     lastSeenAt: time("last_seen_at").notNull(),
-    positions: jsonb("positions").notNull().default({}),
+    positions: jsonb("positions").$type<Record<string, unknown>>().notNull().default({}),
   },
   (t) => [primaryKey({ columns: [t.personId, t.artifactId] })],
 );
@@ -846,7 +853,7 @@ export const guestViews = pgTable(
       .references(() => artifacts.id),
     lastSeenVersion: integer("last_seen_version").notNull(),
     lastSeenAt: time("last_seen_at").notNull(),
-    positions: jsonb("positions").notNull().default({}),
+    positions: jsonb("positions").$type<Record<string, unknown>>().notNull().default({}),
   },
   (t) => [primaryKey({ columns: [t.guestId, t.artifactId] })],
 );
@@ -904,7 +911,7 @@ export const activity = pgTable(
     actorGuestId: uuid("actor_guest_id").references(() => guests.id),
     agent: text("agent"),
     kind: activityKind("kind").notNull(),
-    payload: jsonb("payload").notNull().default({}),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
   },
   (t) => [index("activity_org_created_idx").on(t.orgId, t.createdAt.desc())],
@@ -938,7 +945,7 @@ export const pushSubscriptions = pgTable(
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
     endpoint: text("endpoint").notNull().unique(),
-    keys: jsonb("keys").notNull(),
+    keys: jsonb("keys").$type<{ p256dh: string; auth: string }>().notNull(),
     createdAt: createdAt(),
     lastOkAt: time("last_ok_at"),
   },

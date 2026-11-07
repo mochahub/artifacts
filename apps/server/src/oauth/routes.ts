@@ -1,39 +1,43 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-import { type OAuthConsent, OAuthConsentDecision } from "@artifacts/schema";
+import type { ConsentRedirect } from "@artifacts/schema";
+import {
+  DAY_MS,
+  HOUR_MS,
+  MINUTE_MS,
+  OAUTH_SCOPES,
+  type OAuthConsent,
+  OAuthConsentDecision,
+  type OAuthScope,
+} from "@artifacts/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Context } from "hono";
-import type { Deps } from "../api/deps.ts";
-import { parseBody, type Routes } from "../api/routes.ts";
-import { newApiToken, randomSecret, sha256 } from "../auth/secrets.ts";
+import { revokeGrant } from "../auth/revoke.ts";
+import { newApiToken, randomSecret, s256, safeEqual, sha256 } from "../auth/secrets.ts";
 import { findOrg } from "../db/index.ts";
 import { oauthClients, oauthCodes, oauthGrants, oauthRefreshTokens, tokens } from "../db/schema.ts";
+import type { Deps } from "../deps.ts";
+import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
+import { MCP_PATH, requestOrigin } from "../http/origins.ts";
+import type { Routes } from "../http/routes.ts";
 import { findClient, redirectAllowed, validRedirect } from "./clients.ts";
-import { MCP_PATH, OAUTH_SCOPES, requestOrigin } from "./origin.ts";
 
 const CODE_MINUTES = 5;
 const ACCESS_SECONDS = 3600;
 const REFRESH_DAYS = 60;
-const HOUR = 3600_000;
 
 /** Answers from the token endpoint are JSON with these exact shapes (RFC 6749 5.2). */
 const oauthError = (c: Context, error: string, description: string, status: 400 | 401 = 400) =>
   c.json({ error, error_description: description }, status, { "Cache-Control": "no-store" });
 
-const parseScopes = (scope: string | undefined): string[] | null => {
+const isOAuthScope = (word: string): word is OAuthScope => (OAUTH_SCOPES as readonly string[]).includes(word);
+
+const parseScopes = (scope: string | undefined): OAuthScope[] | null => {
   const words = (scope ?? "").split(/\s+/).filter(Boolean);
   // A client can ask for refresh this way. It's implied, and not a permission.
   const wanted = words.filter((word) => word !== "offline_access");
-  if (wanted.some((word) => !(OAUTH_SCOPES as readonly string[]).includes(word))) return null;
+  if (!wanted.every(isOAuthScope)) return null;
   return wanted.length > 0 ? [...new Set(wanted)] : [...OAUTH_SCOPES];
 };
-
-const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
-
-function sameText(a: string, b: string) {
-  const [x, y] = [Buffer.from(a), Buffer.from(b)];
-  return x.length === y.length && timingSafeEqual(x, y);
-}
 
 /** What an authorization request must be before anyone is shown a consent screen. */
 async function checkRequest(
@@ -73,16 +77,6 @@ function redirectTo(uri: string, origin: string, params: Record<string, string |
   return url.toString();
 }
 
-/** Ends a grant and everything issued from it. Replaying a used code or refresh token does this too. */
-export async function revokeGrant(deps: Pick<Deps, "db" | "clock">, grantId: string) {
-  const now = deps.clock.now();
-  await deps.db.update(oauthGrants).set({ revokedAt: now }).where(eq(oauthGrants.id, grantId));
-  await deps.db
-    .update(tokens)
-    .set({ revokedAt: now })
-    .where(and(eq(tokens.grantId, grantId), isNull(tokens.revokedAt)));
-}
-
 async function issueTokens(deps: Deps, grant: typeof oauthGrants.$inferSelect) {
   const now = deps.clock.now();
   const access = newApiToken();
@@ -107,7 +101,7 @@ async function issueTokens(deps: Deps, grant: typeof oauthGrants.$inferSelect) {
     grantId: grant.id,
     tokenHash: sha256(refresh),
     createdAt: now,
-    expiresAt: new Date(now.getTime() + REFRESH_DAYS * 24 * HOUR),
+    expiresAt: new Date(now.getTime() + REFRESH_DAYS * DAY_MS),
   });
   await deps.db.update(oauthGrants).set({ lastUsedAt: now }).where(eq(oauthGrants.id, grant.id));
   return {
@@ -132,7 +126,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
   const { db, clock, limits } = deps;
 
   routes.get("/api/oauth/authorize", { public: true }, async (c) => {
-    limits.hit(`oauth-authorize:${deps.clientIp(c)}`, 60, 15 * 60_000);
+    limits.hit(`oauth-authorize:${deps.clientIp(c)}`, 60, 15 * MINUTE_MS);
     const origin = await requestOrigin(c, deps);
     if (!origin) throw new ApiError("misdirected", "This server doesn't answer on that host.");
     const query = c.req.query();
@@ -182,7 +176,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
     if (!body.approve) {
       return c.json({
         redirect: redirectTo(checked.redirectUri, origin, { error: "access_denied", state: checked.state }),
-      });
+      } satisfies ConsentRedirect);
     }
     const code = randomSecret();
     const now = clock.now();
@@ -207,14 +201,16 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         redirectUri: checked.redirectUri,
         codeChallenge: body.request.code_challenge as string,
         createdAt: now,
-        expiresAt: new Date(now.getTime() + CODE_MINUTES * 60_000),
+        expiresAt: new Date(now.getTime() + CODE_MINUTES * MINUTE_MS),
       });
     });
-    return c.json({ redirect: redirectTo(checked.redirectUri, origin, { code, state: checked.state }) });
+    return c.json({
+      redirect: redirectTo(checked.redirectUri, origin, { code, state: checked.state }),
+    } satisfies ConsentRedirect);
   });
 
   routes.post("/api/oauth/token", { public: true }, async (c) => {
-    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * 60_000);
+    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * MINUTE_MS);
     const body = await form(c);
     if (!body) return oauthError(c, "invalid_request", "Send a form.");
     const origin = await requestOrigin(c, deps);
@@ -237,7 +233,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         .where(and(eq(oauthCodes.id, row.id), isNull(oauthCodes.usedAt)))
         .returning({ id: oauthCodes.id });
       if (claimed.length === 0) {
-        await revokeGrant(deps, row.grantId);
+        await revokeGrant(db, row.grantId, clock.now());
         return oauthError(c, "invalid_grant", "That code was already used.");
       }
       const [grant] = await db.select().from(oauthGrants).where(eq(oauthGrants.id, row.grantId)).limit(1);
@@ -248,9 +244,9 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         row.clientId === body.client_id &&
         row.redirectUri === body.redirect_uri &&
         grant.audience === audience &&
-        sameText(s256(body.code_verifier ?? ""), row.codeChallenge);
+        safeEqual(s256(body.code_verifier ?? ""), row.codeChallenge);
       if (!good) {
-        await revokeGrant(deps, row.grantId);
+        await revokeGrant(db, row.grantId, clock.now());
         return oauthError(c, "invalid_grant", "That code doesn't match this request.");
       }
       return c.json(await issueTokens(deps, grant), 200, { "Cache-Control": "no-store" });
@@ -279,7 +275,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
         .returning({ id: oauthRefreshTokens.id });
       if (claimed.length === 0) {
         // A rotated token came back: either side may hold a stolen copy, so neither keeps access.
-        await revokeGrant(deps, grant.id);
+        await revokeGrant(db, grant.id, clock.now());
         return oauthError(c, "invalid_grant", "That refresh token was already used.");
       }
       if (grant.revokedAt || token.expiresAt <= clock.now()) {
@@ -292,7 +288,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
 
   /** RFC 7009: the same answer for a token that exists and one that doesn't. */
   routes.post("/api/oauth/revoke", { public: true }, async (c) => {
-    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * 60_000);
+    limits.hit(`oauth-token:${deps.clientIp(c)}`, 120, 15 * MINUTE_MS);
     const body = await form(c);
     if (!body?.token) return oauthError(c, "invalid_request", "Send a token.");
     const orgId = c.get("org").id;
@@ -302,7 +298,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
       .from(oauthRefreshTokens)
       .where(and(eq(oauthRefreshTokens.orgId, orgId), eq(oauthRefreshTokens.tokenHash, hash)))
       .limit(1);
-    if (refresh) await revokeGrant(deps, refresh.grantId);
+    if (refresh) await revokeGrant(db, refresh.grantId, clock.now());
     await db
       .update(tokens)
       .set({ revokedAt: clock.now() })
@@ -312,7 +308,7 @@ export function oauthRoutes(routes: Routes, deps: Deps) {
 
   /** Deprecated by MCP but some clients still need it (RFC 7591). Public clients only. */
   routes.post("/api/oauth/register", { public: true }, async (c) => {
-    limits.hit(`oauth-register:${deps.clientIp(c)}`, 20, HOUR);
+    limits.hit(`oauth-register:${deps.clientIp(c)}`, 20, HOUR_MS);
     const body = (await c.req.json().catch(() => null)) as {
       client_name?: unknown;
       redirect_uris?: unknown;

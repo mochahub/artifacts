@@ -1,13 +1,11 @@
-import { readFileSync } from "node:fs";
-import { type Browser, expect, type FrameLocator, test } from "@playwright/test";
+import { expect, type FrameLocator, test } from "@playwright/test";
+import { here, stranger, token } from "./helpers.ts";
 import { publishFixture } from "./seed.ts";
 
 test.describe.configure({ timeout: 120_000, mode: "serial" });
-const token = () => readFileSync("e2e/.token", "utf8");
 const slugFor = (project: string) => `poll-${project}`;
 
 const live = (page: { frameLocator(selector: string): FrameLocator }) => page.frameLocator("iframe.live");
-const stranger = (browser: Browser) => browser.newContext({ storageState: { cookies: [], origins: [] } });
 
 test("the poll works with no backend; shared counts add up and me stays personal", async ({
   page,
@@ -53,7 +51,7 @@ test("the poll works with no backend; shared counts add up and me stays personal
 test("Try it swaps a frame for its live page, and Done puts the picture back", async ({ page }, info) => {
   const slug = slugFor(info.project.name);
   await page.goto(`/demo/${slug}/frames#frame=poll`);
-  await expect(page.locator(".capsule b")).toHaveText("Poll");
+  await expect(here(page, "Poll")).toBeVisible();
   await page.getByRole("button", { name: "Try it" }).click();
   const iframe = page.locator(".fr iframe.live");
   await expect(iframe).toHaveAttribute("sandbox", "allow-scripts");
