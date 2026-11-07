@@ -14,6 +14,7 @@ import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { chartSvg } from "./chart.ts";
 import { ARTICLE_SCHEMA } from "./sanitize.ts";
+import { remarkWikilinks } from "./wiki.ts";
 
 /** A stray `%` ("100%.png") isn't valid percent-encoding; it stays as written and fails as a missing file. */
 export const cleanUrl = (url: string) => {
@@ -45,6 +46,8 @@ export type ArticleInput = {
   frameHash(ref: string): string | undefined;
   /** Mermaid sources already drawn to SVG, by source text. */
   mermaid: Map<string, string>;
+  /** The project, so `[[Page]]` links resolve to `/<project>/<slug>` (SPEC 16). Without it they stay text. */
+  project?: string;
 };
 
 export type ArticleOutput = {
@@ -311,6 +314,7 @@ export function buildArticle(input: ArticleInput): ArticleOutput {
       .use(remarkGfm)
       .use(remarkDirective)
       .use(directives as never)
+      .use(remarkWikilinks(input.project) as never)
       .use(remarkRehype)
       .use(rehypeSlug)
       .use(decorate)

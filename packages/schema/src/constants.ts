@@ -17,6 +17,15 @@ export const THREAD_STATUSES = ["open", "fixed", "resolved"] as const;
 export const ANCHOR_STATES = ["ok", "updated", "orphaned", "moved_version"] as const;
 export const DECISION_KINDS = ["approved", "changes_requested"] as const;
 export const DATA_SCOPES = ["shared", "me"] as const;
+/** A wiki is a project whose artifacts are pages of one knowledge base (SPEC 16). */
+export const PROJECT_KINDS = ["project", "wiki"] as const;
+/** What an artifact is to its wiki: a page people read, or a source pages are written from. */
+export const WIKI_ROLES = ["page", "source"] as const;
+/** The slug of a wiki's rules page, which agents read before anything else in it. */
+export const WIKI_RULES_SLUG = "rules";
+/** Links and sources one version may record. More than any page needs. */
+export const WIKI_LINKS_MAX = 500;
+export const WIKI_SOURCES_MAX = 50;
 export const ACTIVITY_KINDS = [
   "published",
   "restored",

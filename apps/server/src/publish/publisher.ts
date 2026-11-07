@@ -10,6 +10,7 @@ import {
   type PublishResult,
 } from "@artifacts/schema";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
+import { articleLinks } from "@artifacts/schema/wiki";
 import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import { type ArtifactRow, findArtifact, toProject, toResource } from "../auth/access.ts";
@@ -223,6 +224,7 @@ export function createPublisher(deps: Deps) {
     }
 
     // The CLI's article HTML can't be trusted: it goes into the viewer's own page (05).
+    const linked = new Set<string>();
     const safePages: PageRecord[] = await mapLimit(body.pages, 4, async (page) => {
       const hash = page.meta.htmlHash;
       if (page.kind !== "article") return page;
@@ -230,6 +232,8 @@ export function createPublisher(deps: Deps) {
       const object = await bucket.get(blobKey(hash));
       if (!object) throw new ApiError("invalid", `Article ${page.key} has no HTML.`);
       const clean = sanitizeArticle(new TextDecoder().decode(object.body));
+      // From the HTML just cleaned, never from the client: backlinks are only as true as this (SPEC 16).
+      for (const link of articleLinks(clean)) linked.add(link);
       const htmlHash = await putBlob(
         deps,
         org.id,
@@ -359,6 +363,8 @@ export function createPublisher(deps: Deps) {
         notes: body.notes,
         summary: body.summary ?? null,
         tags: body.tags ?? null,
+        wiki: body.wiki ?? null,
+        links: [...linked].filter((link) => link !== `${ticket.project}/${ticket.slug}`),
         publishedBy: publisher,
         agent,
         publishedAt: now,

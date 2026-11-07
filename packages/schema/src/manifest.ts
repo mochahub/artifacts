@@ -15,6 +15,8 @@ import {
   TAG_MAX,
   TAGS_MAX,
   VISIBILITIES,
+  WIKI_ROLES,
+  WIKI_SOURCES_MAX,
 } from "./constants.ts";
 
 /** Project slugs that would collide with viewer routes (06, "Routes"). */
@@ -160,6 +162,25 @@ export const ManifestPage = z.discriminatedUnion("kind", [
 ]);
 export type ManifestPage = z.infer<typeof ManifestPage>;
 
+/**
+ * What an artifact is to its wiki (SPEC 16): its role, the sources a page was written from, and for a
+ * source, where it came from and whether it can be trusted. Sources are slugs in the same wiki.
+ */
+export const WikiMeta = z
+  .object({
+    role: z.enum(WIKI_ROLES).default("page"),
+    sources: z.array(z.string().regex(SLUG_PATTERN, "use a source's slug")).max(WIKI_SOURCES_MAX).default([]),
+    origin: z
+      .string()
+      .max(2000)
+      .refine((value) => /^https?:\/\/\S+$/.test(value), "use an http or https address")
+      .optional(),
+    /** From the open web, a guest or anyone outside: agents treat what grew from it with care. */
+    untrusted: z.boolean().optional(),
+  })
+  .strict();
+export type WikiMeta = z.infer<typeof WikiMeta>;
+
 export const Manifest = z.object({
   project: Slug,
   projectName: z.string().optional(),
@@ -172,6 +193,7 @@ export const Manifest = z.object({
   /** A template's own look. Anything else wins over it: the org's brand, then `theme`. */
   templateTheme: Theme.optional(),
   backend: z.object({ src: RelPath }).optional(),
+  wiki: WikiMeta.optional(),
   pages: z.array(ManifestPage).min(1),
 });
 export type Manifest = z.infer<typeof Manifest>;

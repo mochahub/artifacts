@@ -13,6 +13,7 @@ import {
   PASSWORD_MAX,
   PASSWORD_MIN,
   PERMISSIONS,
+  PROJECT_KINDS,
   PROJECT_PERMISSIONS,
   ROLES,
   SHA256_HEX,
@@ -22,8 +23,12 @@ import {
   THREAD_STATUSES,
   TOKEN_SCOPES,
   VERSION_NAME_MAX,
+  WIKI_ROLES,
 } from "./constants.ts";
-import { ArticleTheme, Brand, Key, Slug, Summary, Tags, Visibility } from "./manifest.ts";
+import { ArticleTheme, Brand, Key, Slug, Summary, Tags, Visibility, WikiMeta } from "./manifest.ts";
+
+export const ProjectKind = z.enum(PROJECT_KINDS);
+export const WikiRole = z.enum(WIKI_ROLES);
 
 /** Request and response shapes for the HTTP API. 03-api.md owns the names; 02 owns the enums. */
 
@@ -356,6 +361,8 @@ export const Decision = z.object({
 export const Artifact = ArtifactCard.extend({
   /** The project's display name, for the back link. Absent from older servers. */
   projectName: z.string().optional(),
+  /** `wiki` when the project is a wiki, so the viewer shows links and sources. Absent from older servers. */
+  projectKind: ProjectKind.optional(),
   visibility: Visibility,
   publisherId: Id,
   hasBackend: z.boolean(),
@@ -392,6 +399,7 @@ export const ProjectRow = z.object({
   openCount: z.number().int(),
   updatedAt: Time,
   restricted: z.boolean().optional(),
+  kind: ProjectKind.optional(),
 });
 export const ProjectArtifacts = z.object({
   project: z.object({
@@ -399,6 +407,7 @@ export const ProjectArtifacts = z.object({
     name: z.string(),
     repo: z.string().nullable(),
     restricted: z.boolean().optional(),
+    kind: ProjectKind.optional(),
     /** Whether the caller can see and change who has access. */
     canShare: z.boolean().optional(),
   }),
@@ -625,6 +634,8 @@ export const PublishCommit = z.object({
   agent: z.string().nullable().optional(),
   files: VersionFiles,
   backendHash: Sha256.nullable().optional(),
+  /** What the artifact is to its wiki, from the manifest. Ignored outside a wiki. */
+  wiki: WikiMeta.nullable().optional(),
   pages: z.array(PageRecord),
   frames: z.array(FrameRecord),
   blocks: z.array(BlockRecord),
@@ -1213,3 +1224,92 @@ export const DataFiles = z.object({
   nextCursor: z.string().nullable(),
 });
 export type DataFiles = z.infer<typeof DataFiles>;
+
+// Wikis (SPEC 16)
+export const CreateWiki = z.object({
+  slug: Slug,
+  name: z.string().trim().min(1).max(80),
+  /** Only the person who makes it, and admins, can see a personal wiki. */
+  personal: z.boolean().default(false),
+});
+export const WikiCreated = z.object({
+  slug: z.string(),
+  name: z.string(),
+  personal: z.boolean(),
+  url: z.string(),
+});
+export type WikiCreated = z.infer<typeof WikiCreated>;
+export const WikiPage = z.object({
+  slug: z.string(),
+  title: z.string(),
+  summary: z.string().nullable(),
+  tags: z.array(z.string()),
+  role: WikiRole,
+  /** A source marked untrusted, or a page written from one. */
+  untrusted: z.boolean(),
+  sources: z.array(z.string()),
+  origin: z.string().nullable(),
+  version: z.number().int(),
+  updatedAt: Time,
+  publishedBy: z.string(),
+  agent: z.string().nullable(),
+  backlinks: z.number().int(),
+  open: z.number().int(),
+});
+export type WikiPage = z.infer<typeof WikiPage>;
+export const WikiLogEntry = z.object({
+  at: Time,
+  kind: ActivityKind,
+  slug: z.string().nullable(),
+  title: z.string().nullable(),
+  by: z.string(),
+  agent: z.string().nullable(),
+  version: z.number().int().nullable(),
+  message: z.string().nullable(),
+});
+export type WikiLogEntry = z.infer<typeof WikiLogEntry>;
+export const WIKI_FINDINGS = ["wanted", "orphan", "stale", "unsourced", "untrusted"] as const;
+export const WikiFinding = z.object({
+  kind: z.enum(WIKI_FINDINGS),
+  /** The page the finding is about. For `wanted`, the slug nobody has written yet. */
+  slug: z.string(),
+  message: z.string(),
+  /** The other pages involved: who links to a wanted page, or the source that changed. */
+  refs: z.array(z.string()),
+});
+export type WikiFinding = z.infer<typeof WikiFinding>;
+export const WikiSpace = z.object({
+  project: z.object({
+    slug: z.string(),
+    name: z.string(),
+    personal: z.boolean(),
+    canPublish: z.boolean(),
+    canShare: z.boolean(),
+  }),
+  rules: WikiPage.nullable(),
+  pages: z.array(WikiPage),
+  sources: z.array(WikiPage),
+  log: z.array(WikiLogEntry),
+  garden: z.array(WikiFinding),
+});
+export type WikiSpace = z.infer<typeof WikiSpace>;
+export const WikiLink = z.object({
+  project: z.string(),
+  slug: z.string(),
+  /** Null for a page nobody has written yet, or one the caller can't see: the two look the same. */
+  title: z.string().nullable(),
+  summary: z.string().nullable(),
+  exists: z.boolean(),
+  untrusted: z.boolean(),
+});
+export type WikiLink = z.infer<typeof WikiLink>;
+export const ArtifactLinks = z.object({
+  wiki: z.boolean(),
+  role: WikiRole,
+  untrusted: z.boolean(),
+  origin: z.string().nullable(),
+  outgoing: z.array(WikiLink),
+  backlinks: z.array(WikiLink),
+  sources: z.array(WikiLink),
+});
+export type ArtifactLinks = z.infer<typeof ArtifactLinks>;

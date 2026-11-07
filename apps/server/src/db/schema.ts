@@ -10,6 +10,7 @@ import {
   PAGE_KINDS,
   type PageMeta,
   PERMISSIONS,
+  PROJECT_KINDS,
   PROJECT_PERMISSIONS,
   type Renders,
   ROLES,
@@ -18,6 +19,7 @@ import {
   type TokenScope,
   type VersionFiles,
   VISIBILITIES,
+  type WikiMeta,
 } from "@artifacts/schema";
 import { sql } from "drizzle-orm";
 import {
@@ -66,6 +68,7 @@ export const decisionKind = pgEnum("decision_kind", DECISION_KINDS);
 export const deviceStatus = pgEnum("device_status", ["pending", "approved", "denied", "used"]);
 export const teamRole = pgEnum("team_role", TEAM_ROLES);
 export const activityKind = pgEnum("activity_kind", ACTIVITY_KINDS);
+export const projectKind = pgEnum("project_kind", PROJECT_KINDS);
 
 // Organization and people
 
@@ -306,6 +309,8 @@ export const projects = pgTable(
     repo: text("repo"),
     /** Off by default: an open project is everyone's, as every project was before this column. */
     restricted: boolean("restricted").notNull().default(false),
+    /** A wiki's artifacts are the pages of one knowledge base (SPEC 16). */
+    kind: projectKind("kind").notNull().default("project"),
     createdBy: uuid("created_by").references(() => people.id),
     /** The organization token that made it, which can always reach it (04). */
     createdByToken: uuid("created_by_token").references(() => tokens.id),
@@ -648,6 +653,10 @@ export const versions = pgTable(
     notes: jsonb("notes").$type<Record<string, string>>().notNull().default({}),
     summary: text("summary"),
     tags: text("tags").array(),
+    /** Role, sources, origin and trust, from the manifest, for an artifact in a wiki (SPEC 16). */
+    wiki: jsonb("wiki").$type<WikiMeta>(),
+    /** Every `project/slug` this version's articles link to, found by the server in its own clean HTML. */
+    links: text("links").array().notNull().default(sql`'{}'::text[]`),
     publishedBy: uuid("published_by")
       .notNull()
       .references(() => people.id),
@@ -658,7 +667,10 @@ export const versions = pgTable(
     deletedBy: uuid("deleted_by").references(() => people.id),
     purgeAfter: time("purge_after"),
   },
-  (t) => [unique("versions_artifact_n_unique").on(t.artifactId, t.n)],
+  (t) => [
+    unique("versions_artifact_n_unique").on(t.artifactId, t.n),
+    index("versions_links_idx").using("gin", t.links),
+  ],
 );
 
 export const pages = pgTable(

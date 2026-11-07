@@ -192,6 +192,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
             .reduce((sum, card) => sum + card.counts.open, 0),
           updatedAt: new Date(updated).toISOString(),
           restricted: row.restricted,
+          kind: row.kind,
         };
       })
       .sort((a, b) =>
@@ -233,6 +234,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
         name: project.name,
         repo: project.repo,
         restricted: project.restricted,
+        kind: project.kind,
         canShare: can(caller, "project.access.read", place),
       },
       artifacts: cards,
@@ -279,6 +281,7 @@ export function listRoutes(routes: Routes, deps: Deps) {
     const body: Artifact = {
       ...card,
       projectName: project.name,
+      projectKind: project.kind,
       visibility: row.visibility,
       publisherId: row.publisherId,
       hasBackend: row.hasBackend,

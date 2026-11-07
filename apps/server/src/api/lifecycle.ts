@@ -343,6 +343,8 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           notes: {},
           summary: version.summary,
           tags: version.tags,
+          wiki: version.wiki,
+          links: version.links,
           publishedBy: publisher,
           restoredFrom: version.n,
           publishedAt: now,
