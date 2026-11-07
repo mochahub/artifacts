@@ -3,6 +3,7 @@ import {
   addBoardObject,
   boardStamp,
   deletedMap,
+  emptyBoard,
   getRegister,
   newObject,
   objectsMap,
@@ -274,10 +275,12 @@ export async function publishOntoBoardLocked(
     return null;
   const queued: (() => void)[] = [];
   const lock: DocLock = { tx, row, after: (fn) => queued.push(fn) };
-  const loaded = await findArtifact(deps, place.row.orgId, place.row.id);
+  // Read inside this transaction, never on another pool connection while it holds the content lock.
+  const inTx = { ...deps, db: tx as unknown as Deps["db"] };
+  const loaded = await findArtifact(inTx, place.row.orgId, place.row.id);
   if (!loaded) throw new ApiError("not_found", "No such artifact.");
   // Publishing rendered source is `publish`; placing a new picture is an ordinary board decision.
-  const policy = caller.kind === "person" ? null : await agentPolicy(deps, caller, loaded);
+  const policy = caller.kind === "person" ? null : await agentPolicy(inTx, caller, loaded);
   const placement =
     !policy || policy.edits === "direct"
       ? "direct"
@@ -302,11 +305,43 @@ export async function publishOntoBoardLocked(
     merged.update.byteLength > 2
       ? await persistUpdate(deps, place.row.id, merged.update, actor, lock, row.epoch)
       : row.seq;
+  const tail = await boardVersionTail(deps, tx, place, incoming, merged.snapshot, row.pageKey, async (n) => {
+    // Native draft changes are in this version too, so it's the draft's new checkpoint.
+    await tx
+      .update(editDocs)
+      .set({ version: n, checkpointSeq: seq })
+      .where(eq(editDocs.artifactId, place.row.id));
+    queued.push(() => deps.docs?.notify(place.row.id, "c", { t: "checkpoint", version: n, kind: "handoff" }));
+  });
+  return {
+    ...tail,
+    docSeq: seq,
+    placement: merged.placement,
+    flush() {
+      for (const fn of queued.splice(0)) fn();
+    },
+  };
+}
+
+/**
+ * What a version carries for a native board, from one canonical snapshot: `__boards/<page>.json`, the
+ * manifest's server-owned `native: 1`, the page's `meta.board` marker, object-id index rows for native
+ * text and `[[links]]`, and, once `commitVersion` made version `n`, its `board_versions` row.
+ */
+async function boardVersionTail(
+  deps: Deps,
+  tx: DocLock["tx"],
+  place: { row: ArtifactRow; project: { id: string; slug: string } },
+  incoming: { files: Files; pages: PageRecord[] },
+  scene: BoardSnapshot,
+  pageKey: string,
+  then?: (n: number) => Promise<void>,
+) {
   const model = await boardModel();
-  const hashes = sourceAssets(merged.snapshot);
+  const hashes = sourceAssets(scene);
   const images = await validatedImages(tx, place.row.id, hashes);
   const snapshot = canonicalSnapshot({
-    ...merged.snapshot,
+    ...scene,
     assets: hashes.flatMap((hash) => images.get(hash) ?? []),
   });
   const hash = model.boardHash(snapshot);
@@ -314,7 +349,7 @@ export async function publishOntoBoardLocked(
     Object.entries(incoming.files).filter(([path]) => !path.startsWith("__boards/")),
   );
   const bytes = new TextEncoder().encode(canonicalJson(snapshot));
-  files[boardPath(row.pageKey)] = {
+  files[boardPath(pageKey)] = {
     hash: await putBlob(deps, place.row.orgId, bytes, "application/json"),
     size: bytes.length,
     type: "application/json",
@@ -327,7 +362,7 @@ export async function publishOntoBoardLocked(
   const manifest = {
     ...client,
     pages: ((client.pages ?? []) as { id: string }[]).map((entry) =>
-      entry.id === row.pageKey ? { ...entry, native: 1 } : entry,
+      entry.id === pageKey ? { ...entry, native: 1 } : entry,
     ),
   };
   const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
@@ -336,13 +371,15 @@ export async function publishOntoBoardLocked(
     size: manifestBytes.length,
     type: "application/json",
   };
-  const pages: PageRecord[] = [{ ...page, meta: { ...page.meta, board: { schema: 1, hash } } }];
-  // The merged version is the draft's checkpoint: native text stays in search and its links stay.
+  const pages: PageRecord[] = incoming.pages.map((page) =>
+    page.key === pageKey ? { ...page, meta: { ...page.meta, board: { schema: 1 as const, hash } } } : page,
+  );
+  // Native text stays in search and its links stay, keyed by object id: index rows, not article content.
   const blocks = outline(snapshot).flatMap((object) =>
     "text" in object && object.text
       ? [
           {
-            pageKey: row.pageKey,
+            pageKey,
             blockKey: object.id,
             contentHash: createHash("sha256").update(object.text).digest("hex"),
             text: object.text,
@@ -355,9 +392,9 @@ export async function publishOntoBoardLocked(
     files,
     pages,
     blocks,
+    pageKey,
+    snapshot,
     links: boardLinks(snapshot, place.project.slug),
-    docSeq: seq,
-    placement: merged.placement,
     /** Inside the same transaction, once `commitVersion` made version `n`. */
     async finish(n: number) {
       const [made] = await tx
@@ -368,7 +405,7 @@ export async function publishOntoBoardLocked(
       if (!made) throw new Error("no version row");
       await tx.insert(boardVersions).values({
         versionId: made.id,
-        pageKey: row.pageKey,
+        pageKey,
         orgId: place.row.orgId,
         artifactId: place.row.id,
         snapshot,
@@ -377,17 +414,70 @@ export async function publishOntoBoardLocked(
         renderedAt: null,
         createdAt: deps.clock.now(),
       });
-      // Native draft changes are in this version too, so it's the draft's new checkpoint.
-      await tx
-        .update(editDocs)
-        .set({ version: n, checkpointSeq: seq })
-        .where(eq(editDocs.artifactId, place.row.id));
-      queued.push(() =>
-        deps.docs?.notify(place.row.id, "c", { t: "checkpoint", version: n, kind: "handoff" }),
-      );
-    },
-    flush() {
-      for (const fn of queued.splice(0)) fn();
+      await then?.(n);
     },
   };
+}
+
+/**
+ * A publish onto a native board with no live draft (14, "Republish merge"; never edited, retired after a
+ * checkpoint, or just created). There is no draft to merge into, so the latest version's snapshot is
+ * carried forward as plain JSON: matching `(page, frame)` objects get the new rendered data, removed
+ * identities are marked `missing`, deleted ones stay deleted, and new ones are reported `unplaced` for an
+ * ordinary `place_frame`. Null when the latest version has no native board or the page's shape changed.
+ * `create` starts an empty native board instead (`POST /api/boards`).
+ */
+export async function carryBoardLocked(
+  deps: Deps,
+  tx: DocLock["tx"],
+  place: { row: ArtifactRow; project: { id: string; slug: string } } | null,
+  incoming: { files: Files; pages: PageRecord[]; frames: FrameRecord[]; backendHash: string | null },
+  create?: { row: ArtifactRow; project: { id: string; slug: string }; pageKey: string },
+) {
+  const [page] = incoming.pages;
+  if (incoming.pages.length !== 1 || page?.kind !== "canvas" || incoming.backendHash) return null;
+  if (create) {
+    if (page.key !== create.pageKey) return null;
+    const tail = await boardVersionTail(deps, tx, create, incoming, emptyBoard(page.key), page.key);
+    return { ...tail, placement: { placed: [], suggestions: [], unplaced: [] } };
+  }
+  if (!place) return null;
+  const [found] = await tx
+    .select({ snapshot: boardVersions.snapshot, pageKey: boardVersions.pageKey })
+    .from(boardVersions)
+    .innerJoin(versions, eq(versions.id, boardVersions.versionId))
+    .where(and(eq(versions.artifactId, place.row.id), eq(versions.n, place.row.latestVersion)))
+    .limit(1);
+  if (!found || found.pageKey !== page.key) return null;
+  const version = place.row.latestVersion + 1;
+  const carried = carrySnapshot(found.snapshot, page.key, incoming.frames, version);
+  const tail = await boardVersionTail(deps, tx, place, incoming, carried.snapshot, page.key);
+  return { ...tail, placement: { placed: [], suggestions: [], unplaced: carried.unplaced } };
+}
+
+/** The pure carry-forward: refresh, mark missing, keep deletions, list new identities. Ids never change. */
+export function carrySnapshot(
+  snapshot: BoardSnapshot,
+  pageKey: string,
+  frames: FrameRecord[],
+  version: number,
+) {
+  const incoming = new Map(
+    frames
+      .filter((frame) => frame.pageKey === pageKey)
+      .map((frame) => [identity(frame.pageKey, frame.frameKey), frame]),
+  );
+  const represented = new Set<string>();
+  const objects = snapshot.objects.map((object) => {
+    if (object.kind !== "rendered_frame") return object;
+    const at = identity(object.data.source.page, object.data.source.frame);
+    represented.add(at);
+    const frame = incoming.get(at);
+    const data = frame ? renderedFrom(frame, version) : { ...object.data, missing: true };
+    return JSON.stringify(data) === JSON.stringify(object.data) ? object : { ...object, data };
+  });
+  for (const tombstone of snapshot.deleted)
+    if (tombstone.source) represented.add(identity(tombstone.source.page, tombstone.source.frame));
+  const unplaced = [...incoming.entries()].filter(([at]) => !represented.has(at)).map(([, f]) => f.frameKey);
+  return { snapshot: { ...snapshot, objects }, unplaced };
 }

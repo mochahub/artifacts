@@ -482,7 +482,8 @@ describe("OAuth and the hosted MCP", () => {
     expect(discover.result.supportedVersions).toContain("2026-07-28");
     const tools = await mcp(owner, "tools/list", meta, { ...modern, "Mcp-Method": "tools/list" });
     const list = (await tools.json()) as { result: { tools: { name: string }[]; ttlMs: number } };
-    expect(list.result.tools).toHaveLength(21);
+    // Twenty-one, plus the seven board tools (14, "Hosted MCP tools").
+    expect(list.result.tools).toHaveLength(28);
     expect(list.result.ttlMs).toBeGreaterThan(0);
     const mismatch = await mcp(owner, "tools/list", meta, { ...modern, "Mcp-Method": "tools/call" });
     expect(mismatch.status).toBe(400);

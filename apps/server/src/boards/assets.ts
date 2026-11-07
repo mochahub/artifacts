@@ -6,7 +6,7 @@ import {
   BOARD_ASSETS_MAX,
   type BoardImage,
 } from "@artifacts/schema";
-import { and, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, notInArray, sql } from "drizzle-orm";
 import sharp from "sharp";
 import type { LoadedArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
@@ -231,7 +231,7 @@ export async function sweepBoardUploads(deps: Deps) {
   const cutoff = new Date(deps.clock.now().getTime() - UNATTACHED_MS);
   const gone = await deps.db
     .delete(boardAssets)
-    .where(and(isNull(boardAssets.validatedAt), sql`${boardAssets.createdAt} < ${cutoff}`))
+    .where(and(isNull(boardAssets.validatedAt), lt(boardAssets.createdAt, cutoff)))
     .returning({ artifactId: boardAssets.artifactId, hash: boardAssets.hash });
   for (const row of gone.slice(0, 500)) await deps.bucket.delete(boardUploadKey(row.artifactId, row.hash));
 }

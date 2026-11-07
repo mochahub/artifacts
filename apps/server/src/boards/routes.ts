@@ -1,4 +1,5 @@
 import {
+  AcceptSuggestion,
   BOARD_CALL_MAX,
   BoardAssetPrepare,
   BoardCaptureCommit,
@@ -9,6 +10,7 @@ import {
   type BoardVersionView,
   SuggestionStatus,
 } from "@artifacts/schema";
+import { BoardEditRequest } from "@artifacts/schema/boards";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { type LoadedArtifact, toProject } from "../auth/access.ts";
@@ -37,9 +39,17 @@ import type { Routes } from "../http/routes.ts";
 import { blobKey } from "../layout.ts";
 import { wikiAudience } from "../wiki/service.ts";
 import { commitBoardAssets, prepareBoardAssets } from "./assets.ts";
-import { commitCapture, prepareCapture } from "./captures.ts";
+import { attachThreadCrops, commitCapture, prepareCapture } from "./captures.ts";
 import { checkpointBoardLocked } from "./checkpoint.ts";
-import { boardSuggestionParam, decideBoardSuggestion, listBoardSuggestions } from "./suggestions.ts";
+import { boardEdit } from "./ops.ts";
+import { readBoard } from "./read.ts";
+import {
+  acceptBoardSuggestion,
+  boardSuggestionParam,
+  decideBoardSuggestion,
+  listBoardSuggestions,
+  previewBoardSuggestion,
+} from "./suggestions.ts";
 
 type Reason = NonNullable<BoardState["reason"]>;
 export type BoardEligibility =
@@ -282,6 +292,31 @@ export function boardRoutes(routes: Routes, deps: Deps) {
     async (c) =>
       c.json(await versionView(deps, c.var.caller, c.var.resource, numberQuery(c.req.query("version")))),
   );
+  routes.get(
+    "/api/artifacts/:id/board/objects",
+    { action: "artifact.read", resource: artifact },
+    async (c) => {
+      const draft = c.req.query("draft");
+      const cursor = c.req.query("cursor");
+      if (cursor && cursor.length > 400) throw new ApiError("invalid", "That cursor isn't valid.");
+      return c.json(
+        await readBoard(deps, c.var.caller, c.var.resource, {
+          draft: draft === "1" || draft === "true",
+          version: numberQuery(c.req.query("version")),
+          cursor: cursor || undefined,
+        }),
+      );
+    },
+  );
+  routes.post(
+    "/api/artifacts/:id/board/ops",
+    { action: "artifact.edit", resource: artifact, writes: true },
+    async (c) => {
+      refuseOversized(c);
+      const body = await parseBody(c, BoardEditRequest);
+      return c.json(await boardEdit(deps, c.var.caller, c.var.resource, body));
+    },
+  );
   routes.post(
     "/api/artifacts/:id/board/checkpoint",
     { action: "artifact.edit", resource: artifact, writes: true },
@@ -297,27 +332,28 @@ export function boardRoutes(routes: Routes, deps: Deps) {
         .where(eq(projects.id, resource.projectId))
         .limit(1);
       if (!project) throw new ApiError("not_found", "Not found.");
-      return c.json(
-        await withDocLock(deps, resource.id, async (lock) => {
-          if (!lock.row || lock.row.kind !== "board" || lock.row.pageKey !== state.pageKey)
-            return { version: resource.row.latestVersion, created: false, kind: null };
-          if (lock.row.epoch !== body.epoch)
-            throw new ApiError("conflict", "The draft was reset.", { reason: "stale_epoch" });
-          return checkpointBoardLocked(
-            deps,
-            lock,
-            { row: resource.row, project },
-            {
-              kind: caller.kind === "person" ? "saved" : "agent",
-              personId: actorOf(caller),
-              agent: agentOf(caller, null),
-              name: body.name ?? null,
-              message: body.message ?? null,
-            },
-            capture,
-          );
-        }),
-      );
+      const result = await withDocLock(deps, resource.id, async (lock) => {
+        if (!lock.row || lock.row.kind !== "board" || lock.row.pageKey !== state.pageKey)
+          return { version: resource.row.latestVersion, created: false, kind: null };
+        if (lock.row.epoch !== body.epoch)
+          throw new ApiError("conflict", "The draft was reset.", { reason: "stale_epoch" });
+        return checkpointBoardLocked(
+          deps,
+          lock,
+          { row: resource.row, project },
+          {
+            kind: caller.kind === "person" ? "saved" : "agent",
+            personId: actorOf(caller),
+            agent: agentOf(caller, null),
+            name: body.name ?? null,
+            message: body.message ?? null,
+          },
+          capture,
+        );
+      });
+      if (capture && result.created)
+        await attachThreadCrops(deps, resource.id, result.version, capture.renders.crops);
+      return c.json(result);
     },
   );
 
@@ -372,7 +408,9 @@ export function boardRoutes(routes: Routes, deps: Deps) {
       const person = sessionPerson(c.var.caller);
       refuseOversized(c);
       const body = await parseBody(c, BoardCaptureCommit);
-      return c.json(await commitCapture(deps, person, c.var.resource, body));
+      const committed = await commitCapture(deps, person, c.var.resource, body);
+      await attachThreadCrops(deps, c.var.resource.id, committed.version, body.renders.crops);
+      return c.json(committed);
     },
   );
 
@@ -389,6 +427,23 @@ export function boardRoutes(routes: Routes, deps: Deps) {
       return c.json(
         await listBoardSuggestions(deps, c.var.caller, c.var.resource, { status: parsed?.data, cursor }),
       );
+    },
+  );
+  routes.get(
+    "/api/board-suggestions/:id/preview",
+    { action: "artifact.edit", resource: suggestion },
+    async (c) => {
+      const cursor = c.req.query("cursor");
+      if (cursor && cursor.length > 400) throw new ApiError("invalid", "That cursor isn't valid.");
+      return c.json(await previewBoardSuggestion(deps, c.var.caller, c.var.resource, cursor || undefined));
+    },
+  );
+  routes.post(
+    "/api/board-suggestions/:id/accept",
+    { action: "artifact.accept", resource: suggestion, writes: true },
+    async (c) => {
+      const { force } = await parseBody(c, AcceptSuggestion);
+      return c.json(await acceptBoardSuggestion(deps, c.var.caller, c.var.resource, force ?? false));
     },
   );
   routes.post(

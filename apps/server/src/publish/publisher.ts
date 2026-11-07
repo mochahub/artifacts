@@ -12,6 +12,7 @@ import {
   type PublishPrepare,
   type PublishResult,
 } from "@artifacts/schema";
+import type { BoardSnapshot } from "@artifacts/schema/boards";
 import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { articleLinks } from "@artifacts/schema/wiki";
 import { and, eq, inArray } from "drizzle-orm";
@@ -20,7 +21,7 @@ import { type ArtifactRow, findArtifact, type ProjectRow, toProject, toResource 
 import { type Asker, actorOf, agentOf } from "../auth/caller.ts";
 import { type CallerFor, can, seesArtifact, seesProject } from "../auth/can.ts";
 import { signPayload, verifyPayload } from "../auth/signed.ts";
-import { publishOntoBoardLocked } from "../boards/merge.ts";
+import { carryBoardLocked, publishOntoBoardLocked } from "../boards/merge.ts";
 import type { Tx } from "../db/index.ts";
 import { lockArtifact } from "../db/locks.ts";
 import { activity, artifacts, blobs, people, projectAccess, projects, versions } from "../db/schema.ts";
@@ -101,6 +102,8 @@ export type VersionInput = {
   checkpoint: CheckpointKind | null;
   docSeq: number | null;
   now: Date;
+  /** Native boards this version carries, for object-pin re-anchoring before their rows exist (14). */
+  boards?: { pageKey: string; snapshot: BoardSnapshot }[];
 };
 
 /**
@@ -144,7 +147,16 @@ export async function commitVersion(
     publishedAt: input.now,
   });
   await writeContent(tx, input.orgId, versionId, input.pages, input.frames, input.blocks);
-  const reanchored = await reanchorThreads(tx, input.artifactId, input.pages, input.frames, input.blocks);
+  const reanchored = await reanchorThreads(
+    tx,
+    input.artifactId,
+    input.pages,
+    input.frames,
+    input.blocks,
+    undefined,
+    input.boards,
+  );
+  const board = input.boards?.[0];
   const before = previous ? await hashesOf(tx, previous.id) : NOTHING;
   const after = { frames: frameHashes(input.frames), blocks: blockHashes(input.blocks) };
   await tx
@@ -165,9 +177,13 @@ export async function commitVersion(
     actorPersonId: by.personId,
     agent: by.agent,
     kind: input.checkpoint ? "checkpointed" : "published",
-    payload: input.checkpoint
-      ? { version: n, kind: input.checkpoint, message: input.message }
-      : { version: n, message: input.message },
+    payload: {
+      version: n,
+      ...(input.checkpoint ? { kind: input.checkpoint } : {}),
+      message: input.message,
+      // A board's checkpoint or publish says so; general logs carry no object text (14, "activity").
+      ...(board ? { document: "board", page: board.pageKey } : {}),
+    },
     createdAt: input.now,
   });
   return {
@@ -286,7 +302,13 @@ export function createPublisher(deps: Deps) {
     };
   }
 
-  async function commit(asker: Asker, body: z.infer<typeof PublishCommit>, payload: string | null = null) {
+  async function commit(
+    asker: Asker,
+    body: z.infer<typeof PublishCommit>,
+    payload: string | null = null,
+    /** Server-only: `POST /api/boards` starts an empty native board on this page. Never a body field. */
+    internal: { nativeBoard?: string } = {},
+  ) {
     const { org } = asker;
     const ticket = verifyPayload<UploadTicket>(body.uploadId, env.sessionSecret, UPLOAD_INFO);
     if (!ticket || ticket.exp <= clock.now().getTime()) {
@@ -493,21 +515,22 @@ export function createPublisher(deps: Deps) {
       }
 
       // A compatible republish onto a live board merges its rendered frames into the draft (14).
-      const board = current
-        ? await publishOntoBoardLocked(
-            deps,
-            tx,
-            { row: current, project },
-            {
-              files: body.files,
-              pages: safePages,
-              frames: body.frames,
-              backendHash: body.backendHash ?? null,
-            },
-            caller,
-            editActor(caller as never, body.agent ?? null),
-          )
-        : null;
+      const board =
+        current && !internal.nativeBoard
+          ? await publishOntoBoardLocked(
+              deps,
+              tx,
+              { row: current, project },
+              {
+                files: body.files,
+                pages: safePages,
+                frames: body.frames,
+                backendHash: body.backendHash ?? null,
+              },
+              caller,
+              editActor(caller as never, body.agent ?? null),
+            )
+          : null;
       if (board) {
         const merged = await commitVersion(
           tx,
@@ -539,6 +562,7 @@ export function createPublisher(deps: Deps) {
             checkpoint: null,
             docSeq: board.docSeq,
             now,
+            boards: [{ pageKey: board.pageKey, snapshot: board.snapshot }],
           },
           { personId: publisher, agent },
         );
@@ -559,6 +583,24 @@ export function createPublisher(deps: Deps) {
       const [latest] = draft?.saved
         ? await tx.select().from(artifacts).where(eq(artifacts.id, ticket.artifactId)).limit(1)
         : [current];
+      // No live draft: a native board in the latest version is carried into this one, never dropped (14).
+      const incoming = {
+        files: body.files,
+        pages: safePages,
+        frames: body.frames,
+        backendHash: body.backendHash ?? null,
+      };
+      const native = internal.nativeBoard
+        ? await carryBoardLocked(deps, tx, null, incoming, {
+            row: { id: ticket.artifactId, orgId: org.id } as ArtifactRow,
+            project,
+            pageKey: internal.nativeBoard,
+          })
+        : latest
+          ? await carryBoardLocked(deps, tx, { row: latest, project }, incoming)
+          : null;
+      if (internal.nativeBoard && !native) throw new ApiError("invalid", "A new board is one canvas page.");
+      if (native) boardPlacement = native.placement;
 
       const result = await commitVersion(
         tx,
@@ -568,7 +610,7 @@ export function createPublisher(deps: Deps) {
           orgId: org.id,
           projectId: project.id,
           title: ticket.title,
-          files: body.files,
+          files: native?.files ?? body.files,
           backendHash: body.backendHash ?? null,
           message: body.message ?? null,
           name: body.name ?? null,
@@ -576,16 +618,25 @@ export function createPublisher(deps: Deps) {
           summary: body.summary ?? null,
           tags: body.tags ?? null,
           wiki: body.wiki ?? null,
-          links: [...linked].filter((link) => link !== `${ticket.project}/${ticket.slug}`),
-          pages: safePages,
+          links: [...new Set([...linked, ...(native?.links ?? [])])].filter(
+            (link) => link !== `${ticket.project}/${ticket.slug}`,
+          ),
+          pages: native?.pages ?? safePages,
           frames: body.frames,
-          blocks: blockRows,
+          blocks: native
+            ? [
+                ...blockRows.filter((block) => !native.blocks.some((row) => row.blockKey === block.blockKey)),
+                ...native.blocks,
+              ]
+            : blockRows,
           checkpoint: null,
           docSeq: null,
           now,
+          ...(native ? { boards: [{ pageKey: native.pageKey, snapshot: native.snapshot }] } : {}),
         },
         { personId: publisher, agent },
       );
+      await native?.finish(result.version);
       await draft?.retire(result.version);
       if (draft) flushDraft = draft.flush;
       return result;

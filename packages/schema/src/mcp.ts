@@ -354,6 +354,21 @@ export const BOARD_TOOLS = {
     required: ["artifact"],
     untrusted: true,
   },
+  create: {
+    name: "artifacts_board_create",
+    description:
+      "Start an empty native board as a new wiki page, with no CLI frames. Then read it with artifacts_board_read (draft true) and draw with artifacts_board_edit.",
+    properties: {
+      project: { type: "string", description: "The wiki's slug" },
+      slug: { type: "string", description: "The new page's slug" },
+      title: { type: "string", description: "Title" },
+      summary: { type: "string", description: "What it holds and why it matters, up to 280 characters" },
+      tags: { type: "array", description: "Up to 8" },
+      sources: { type: "array", description: "Slugs of readable source artifacts in this wiki" },
+    },
+    required: ["project", "slug", "title", "summary"],
+    untrusted: true,
+  },
 } satisfies Record<string, McpToolSpec>;
 
 /** Wiki metadata accepted by the hosted article publisher. */

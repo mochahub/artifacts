@@ -8,9 +8,21 @@ import {
   artifactTeamAccess,
   artifactUsage,
   backendLogs,
+  blockAliases,
   blocks,
+  boardAssets,
+  boardCaptures,
+  boardRequests,
+  boardSuggestions,
+  boardVersions,
   comments,
   decisions,
+  editAtoms,
+  editAuthors,
+  editDocs,
+  editPresence,
+  editRuns,
+  editUpdates,
   frames,
   guestLinks,
   guestViews,
@@ -18,6 +30,7 @@ import {
   pages,
   projects,
   shareLinks,
+  suggestions,
   threads,
   tombstones,
   versions,
@@ -32,6 +45,9 @@ type VersionRow = typeof versions.$inferSelect;
 /** Erases a version's rows. Its blobs go later, in GC, if nothing else uses them. */
 async function deleteVersionRows(tx: Tx, ids: string[]) {
   if (ids.length === 0) return;
+  // A version's native board and its capture tickets go with it (14, "Data model").
+  await tx.delete(boardCaptures).where(inArray(boardCaptures.versionId, ids));
+  await tx.delete(boardVersions).where(inArray(boardVersions.versionId, ids));
   await tx.delete(frames).where(inArray(frames.versionId, ids));
   await tx.delete(blocks).where(inArray(blocks.versionId, ids));
   await tx.delete(pages).where(inArray(pages.versionId, ids));
@@ -82,6 +98,19 @@ export async function purgeArtifact(deps: Deps, artifact: ArtifactRow, actorId: 
     }
     await tx.delete(shareLinks).where(eq(shareLinks.artifactId, artifact.id));
     await tx.delete(invites).where(eq(invites.artifactId, artifact.id));
+    // The draft and everything about it: boards (14) and articles (13). Blobs go later, in GC.
+    await tx.delete(boardRequests).where(eq(boardRequests.artifactId, artifact.id));
+    await tx.delete(boardSuggestions).where(eq(boardSuggestions.artifactId, artifact.id));
+    await tx.delete(boardCaptures).where(eq(boardCaptures.artifactId, artifact.id));
+    await tx.delete(boardAssets).where(eq(boardAssets.artifactId, artifact.id));
+    await tx.delete(suggestions).where(eq(suggestions.artifactId, artifact.id));
+    await tx.delete(editRuns).where(eq(editRuns.artifactId, artifact.id));
+    await tx.delete(editUpdates).where(eq(editUpdates.artifactId, artifact.id));
+    await tx.delete(editPresence).where(eq(editPresence.artifactId, artifact.id));
+    await tx.delete(editAtoms).where(eq(editAtoms.artifactId, artifact.id));
+    await tx.delete(editAuthors).where(eq(editAuthors.artifactId, artifact.id));
+    await tx.delete(blockAliases).where(eq(blockAliases.artifactId, artifact.id));
+    await tx.delete(editDocs).where(eq(editDocs.artifactId, artifact.id));
     const versionRows = await tx
       .select({ id: versions.id })
       .from(versions)

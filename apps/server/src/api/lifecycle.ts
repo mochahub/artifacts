@@ -16,6 +16,7 @@ import {
   activity,
   artifacts,
   blocks,
+  boardVersions,
   frames,
   guests,
   pages,
@@ -377,6 +378,15 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
           frameRows,
           blockRows,
         );
+        // A native board's immutable scene comes too (its pictures fit the same hash), so it isn't lost (14).
+        const boardRows = await tx
+          .select()
+          .from(boardVersions)
+          .where(eq(boardVersions.versionId, version.id));
+        if (boardRows.length)
+          await tx
+            .insert(boardVersions)
+            .values(boardRows.map((row) => ({ ...row, versionId: id, createdAt: now })));
         await reanchorThreads(
           tx,
           resource.id,

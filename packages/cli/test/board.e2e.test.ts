@@ -318,13 +318,35 @@ describe("board commands against a server", () => {
 
   test("an old CLI still reads a board's comments: the pin has no anchor, but the thread is there", async () => {
     const artifact = await artifactAt(t, token, "mine/map");
-    const response = await t.api(`/api/artifacts/${artifact.id}/threads`, {
+    const latest = await read("mine/map");
+    const pinned = latest.objects.find((o) => o.object.kind === "sticky")?.object.id as string;
+    const made = await t.api(`/api/artifacts/${artifact.id}/threads`, {
+      method: "POST",
       bearer: token,
-      headers: { "Artifacts-Features": "editing" },
+      headers: { "Artifacts-CLI": "test", "Artifacts-Features": "editing,boards" },
+      json: {
+        pageKey: "board",
+        version: latest.version,
+        anchor: { type: "object", object: pinned, u: 0.5, v: 0.5, checkpoint: latest.version },
+        body: "Is this the right step?",
+      },
     });
-    expect(response.status).toBe(200);
-    for (const thread of (await response.json()) as { anchor: { type: string } | null }[]) {
-      expect(thread.anchor?.type).not.toBe("object");
-    }
+    expect(made.status).toBe(200);
+    const threads = async (features: string) => {
+      const response = await t.api(`/api/artifacts/${artifact.id}/threads`, {
+        bearer: token,
+        headers: { "Artifacts-CLI": "0.1.0", "Artifacts-Features": features },
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as
+        | { anchor: { type: string } | null; body?: string }[]
+        | { threads: { anchor: { type: string } | null }[] };
+      return Array.isArray(body) ? body : body.threads;
+    };
+    const old = await threads("editing");
+    expect(old.length).toBe(1);
+    expect(old[0]?.anchor).toBeNull();
+    // This CLI says it knows boards, so it gets the pin.
+    expect((await threads("editing,boards"))[0]?.anchor).toMatchObject({ type: "object", object: pinned });
   });
 });

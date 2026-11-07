@@ -4,14 +4,16 @@ import {
   type BoardCaptureRequest,
   type BoardRenders,
 } from "@artifacts/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { lockArtifact } from "../db/locks.ts";
-import { boardCaptures, boardVersions, versions } from "../db/schema.ts";
+import { boardCaptures, boardVersions, threads, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { loadDoc, withDocLock } from "../editing/store.ts";
 import { ApiError } from "../http/errors.ts";
+import { blobKey, cropKey } from "../layout.ts";
+import { mapLimit } from "../map-limit.ts";
 import {
   boardModel,
   canonicalJson,
@@ -193,5 +195,51 @@ export async function commitCapture(
       .where(and(eq(boardVersions.versionId, ticket.versionId), eq(boardVersions.pageKey, ticket.pageKey)));
     await tx.update(boardCaptures).set({ consumedAt: now }).where(eq(boardCaptures.id, ticket.id));
     return { version: row.n, hash: row.board.hash, renders };
+  });
+}
+
+/**
+ * After a capture is attached: each object-pinned thread made on that version gets its crop as its own
+ * crop picture (14, "Object comments"), copied to the thread's crop key so a thread purge never deletes a
+ * shared blob. Only threads still anchored to that version, and only ones without a crop. Best effort: a
+ * failure is logged and the pictures stay with the version.
+ */
+export async function attachThreadCrops(
+  deps: Deps,
+  artifactId: string,
+  version: number,
+  crops: BoardRenders["crops"],
+) {
+  if (crops.length === 0) return;
+  const rows = await deps.db
+    .select({ id: threads.id, n: threads.n, anchor: threads.anchor, cropKey: threads.cropKey })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.artifactId, artifactId),
+        inArray(
+          threads.n,
+          crops.map((crop) => crop.thread),
+        ),
+        isNull(threads.cropKey),
+      ),
+    )
+    .limit(crops.length);
+  const byN = new Map(crops.map((crop) => [crop.thread, crop.image.hash]));
+  await mapLimit(rows, 4, async (row) => {
+    const hash = byN.get(row.n);
+    if (!hash || row.anchor?.type !== "object" || row.anchor.checkpoint !== version) return;
+    try {
+      const object = await deps.bucket.get(blobKey(hash));
+      if (!object) return;
+      const key = cropKey(row.id);
+      await deps.bucket.put(key, object.body, { contentType: object.contentType ?? "image/webp" });
+      await deps.db
+        .update(threads)
+        .set({ cropKey: key })
+        .where(and(eq(threads.id, row.id), isNull(threads.cropKey)));
+    } catch (error) {
+      deps.log.warn("couldn't attach a board crop", { thread: row.id, error: String(error) });
+    }
   });
 }

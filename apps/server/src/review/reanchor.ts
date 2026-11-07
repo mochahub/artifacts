@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+import { canonicalJSON } from "@artifacts/doc/board";
 import type { Anchor } from "@artifacts/schema";
-import { and, eq, ne } from "drizzle-orm";
+import type { BoardObject, BoardSnapshot } from "@artifacts/schema/boards";
+import { and, desc, eq, ne } from "drizzle-orm";
 import type { Tx } from "../db/index.ts";
-import { blockAliases, threads, versions } from "../db/schema.ts";
+import { blockAliases, boardVersions, threads, versions } from "../db/schema.ts";
 import { hashesOf, NOTHING, type VersionHashes } from "../versions/diff.ts";
 
 export type AnchorResult = { anchor: Anchor | null; state: "ok" | "updated" | "orphaned" };
@@ -34,9 +37,15 @@ function occurrences(text: string, exact: string): number[] {
 /** 05, "Re-anchoring". `then` is the content at the version the thread was made on. */
 export function reanchor(
   anchor: Anchor,
-  then: { frames: Keyed; blocks: Keyed },
-  now: { frames: Keyed; blocks: Block[] },
+  then: { frames: Keyed; blocks: Keyed; objects?: Keyed },
+  now: { frames: Keyed; blocks: Block[]; objects?: Keyed },
 ): AnchorResult {
+  if (anchor.type === "object") {
+    // Geometry and order never move a pin's state; content, style or picture does; deletion orphans it.
+    const hash = now.objects?.get(anchor.object);
+    if (hash === undefined) return { anchor, state: "orphaned" };
+    return { anchor, state: hash === then.objects?.get(anchor.object) ? "ok" : "updated" };
+  }
   if (anchor.type === "frame") {
     const hash = now.frames.get(anchor.frameKey);
     if (hash === undefined) return { anchor, state: "orphaned" };
@@ -69,6 +78,17 @@ export function reanchor(
   return { anchor, state: "orphaned" };
 }
 
+/**
+ * A native object's content-only anchor hash (14, "Object comments"): kind, label, style and kind fields,
+ * without pose, parent, order or attribution, so moving, grouping or reordering keeps a pin `ok`.
+ */
+export function objectContentHash(object: BoardObject): string {
+  const { pose: _p, parent: _parent, order: _o, attribution: _a, id: _id, ...content } = object;
+  return createHash("sha256").update(canonicalJSON(content)).digest("hex").slice(0, 16);
+}
+const objectHashes = (snapshot: BoardSnapshot | null | undefined): Keyed =>
+  new Map((snapshot?.objects ?? []).map((object) => [object.id, objectContentHash(object)]));
+
 /** 05, "Re-anchoring". Runs inside the commit, and again when a version is restored or removed. */
 export async function reanchorThreads(
   tx: Tx,
@@ -77,6 +97,8 @@ export async function reanchorThreads(
   frameRows: { pageKey: string; frameKey: string; contentHash: string }[],
   blockRows: { pageKey: string; blockKey: string; contentHash: string; text: string }[],
   onlyCreatedOn?: number,
+  /** The new version's native boards, when the caller has them before their `board_versions` rows. */
+  boards?: { pageKey: string; snapshot: BoardSnapshot }[],
 ) {
   const open = await tx
     .select()
@@ -97,6 +119,27 @@ export async function reanchorThreads(
   const threadsOnChanged: number[] = [];
   const orphaned: number[] = [];
   const cache = new Map<number, VersionHashes>();
+  // Native boards, loaded only when a thread pins an object: then by its checkpoint, now as given or latest.
+  const thenBoards = new Map<string, Keyed>();
+  const nowBoards = new Map<string, Keyed>(
+    (boards ?? []).map((board) => [board.pageKey, objectHashes(board.snapshot)]),
+  );
+  const boardAt = async (pageKey: string, n: number | null) => {
+    const [row] = await tx
+      .select({ snapshot: boardVersions.snapshot })
+      .from(boardVersions)
+      .innerJoin(versions, eq(versions.id, boardVersions.versionId))
+      .where(
+        and(
+          eq(versions.artifactId, artifactId),
+          eq(boardVersions.pageKey, pageKey),
+          n === null ? undefined : eq(versions.n, n),
+        ),
+      )
+      .orderBy(desc(versions.n))
+      .limit(1);
+    return objectHashes(row?.snapshot);
+  };
 
   for (const thread of open) {
     if (!thread.anchor || !pageKeys.has(thread.pageKey)) continue;
@@ -120,8 +163,16 @@ export async function reanchorThreads(
       );
     const thenBlocks = unprefix(then.blocks);
     let anchor = thread.anchor;
-    const alias = anchor.type === "frame" ? undefined : aliases.get(anchor.blockKey);
-    if (anchor.type !== "frame" && alias) {
+    let objects: { made: Keyed; now: Keyed } | undefined;
+    if (anchor.type === "object") {
+      const thenKey = `${thread.pageKey}\u0000${anchor.checkpoint}`;
+      if (!thenBoards.has(thenKey)) thenBoards.set(thenKey, await boardAt(thread.pageKey, anchor.checkpoint));
+      if (!nowBoards.has(thread.pageKey)) nowBoards.set(thread.pageKey, await boardAt(thread.pageKey, null));
+      objects = { made: thenBoards.get(thenKey) as Keyed, now: nowBoards.get(thread.pageKey) as Keyed };
+    }
+    const alias =
+      anchor.type === "text" || anchor.type === "block" ? aliases.get(anchor.blockKey) : undefined;
+    if ((anchor.type === "text" || anchor.type === "block") && alias) {
       // Compared by the hash the legacy block had, so the renumbering alone never orphans it.
       const hash = thenBlocks.get(anchor.blockKey);
       if (hash !== undefined) thenBlocks.set(alias, hash);
@@ -129,8 +180,9 @@ export async function reanchorThreads(
     }
     const result = reanchor(
       anchor,
-      { frames: unprefix(then.frames), blocks: thenBlocks },
+      { frames: unprefix(then.frames), blocks: thenBlocks, objects: objects?.made },
       {
+        objects: objects?.now,
         frames: new Map(
           frameRows.filter((f) => f.pageKey === thread.pageKey).map((f) => [f.frameKey, f.contentHash]),
         ),

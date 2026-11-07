@@ -11,7 +11,7 @@ import {
 } from "@artifacts/doc/board";
 import { boardBase } from "@artifacts/doc/board-hash";
 import { mintBoardObjectId } from "@artifacts/doc/board-ids";
-import { keyBetween } from "@artifacts/doc/board-order";
+import { keyBetween, orderBetween, rebalanceOrders } from "@artifacts/doc/board-order";
 import {
   type AgentPolicy,
   BOARD_CALL_MAX,
@@ -430,7 +430,23 @@ export function planBoardBatch(
     }
     stamped.set(id, set);
   };
-  const lastKey = (parent: string | null) => keyBetween(scene.children(parent).at(-1)?.order ?? null, null);
+  /**
+   * A key between two neighbours of a sibling group. An exhausted or shared interval is repaired first:
+   * the server rebalances the group in this same transaction, in its `(order, id)` order, each key
+   * keeping its stamp (14, "Z-order and containment"), so the batch never fails on keys it didn't make.
+   */
+  const keyAt = (siblings: BoardObject[], at: number): string => {
+    const low = siblings[at - 1]?.order ?? null;
+    const high = siblings[at]?.order ?? null;
+    const key = low !== null && high !== null && low >= high ? null : orderBetween(low, high);
+    if (key !== null) return key;
+    for (const [id, fresh] of rebalanceOrders(siblings)) (scene.get(id) as BoardObject).order = fresh;
+    return keyBetween(siblings[at - 1]?.order ?? null, siblings[at]?.order ?? null);
+  };
+  const lastKey = (parent: string | null) => {
+    const siblings = scene.children(parent);
+    return keyAt(siblings, siblings.length);
+  };
   const parentFrame = (ref: string | null): string | null => {
     if (ref === null) return null;
     const parent = resolve(ref);
@@ -717,12 +733,7 @@ export function planBoardBatch(
           if (before?.id === object.id) refuse("invalid", "An object can't go before itself.");
           const siblings = scene.children(object.parent).filter((s) => s.id !== object.id);
           const at = before ? siblings.findIndex((s) => s.id === before.id) : siblings.length;
-          const low = siblings[at - 1]?.order ?? null;
-          const high = siblings[at]?.order ?? null;
-          object.order =
-            low !== null && high !== null && low >= high
-              ? refuse("limit", "Those objects share an order key. Try again after the board settles.")
-              : keyBetween(low, high);
+          object.order = keyAt(siblings, at);
           stamp(object.id, "order");
           results.push({ index, objects: [object.id] });
           break;
@@ -1032,11 +1043,18 @@ export type BoardAcceptActor = {
   force?: boolean;
 };
 
-const empty = (agents: AgentPolicy, seq: number, reason: Reason, message: string): BoardEditResult => ({
+const empty = (
+  agents: AgentPolicy,
+  seq: number,
+  reason: Reason,
+  message: string,
+  epoch = 0,
+): BoardEditResult => ({
   outcome: "refused",
   reason,
   message,
   seq,
+  epoch,
   version: null,
   suggestion: null,
   ids: {},
@@ -1055,7 +1073,7 @@ const callerKeyOf = (caller: Caller) =>
       : null;
 
 /** Rendered sources of the latest version, keyed by `(page, frame)`, for `place_frame` on the token path. */
-async function latestSources(lock: DocLock, artifact: LoadedArtifact, pageKey: string) {
+export async function latestSources(lock: DocLock, artifact: LoadedArtifact, pageKey: string) {
   const [version] = await lock.tx
     .select({ id: versions.id, n: versions.n })
     .from(versions)
@@ -1082,20 +1100,100 @@ async function latestSources(lock: DocLock, artifact: LoadedArtifact, pageKey: s
 }
 
 /** Ids and sources open suggestions reserved, so a new batch neither reuses one nor places a source twice. */
-async function openReservations(lock: DocLock, artifactId: string) {
+async function openReservations(lock: DocLock, artifactId: string, exceptRun: string | null = null) {
   const rows = await lock.tx
-    .select({ ids: boardSuggestions.ids, request: boardSuggestions.request })
+    .select({ ids: boardSuggestions.ids, request: boardSuggestions.request, run: boardSuggestions.runId })
     .from(boardSuggestions)
     .where(and(eq(boardSuggestions.artifactId, artifactId), eq(boardSuggestions.status, "open")));
   const ids = new Set<string>();
   const sources = new Set<string>();
-  for (const row of rows) {
+  // A run's own earlier batches are its prerequisites, projected into its scene, not someone else's claim.
+  for (const row of rows.filter((entry) => !exceptRun || entry.run !== exceptRun)) {
     for (const id of Object.values(row.ids)) ids.add(id);
     for (const op of row.request.ops)
       if (op.op === "place_frame" && op.ref) sources.add(sourceKey(op.source));
   }
   return { ids, sources };
 }
+
+type Prerequisite = Pick<
+  typeof boardSuggestions.$inferSelect,
+  "id" | "request" | "ids" | "authorKey" | "createdAt"
+>;
+
+/**
+ * The open batches of one run on this epoch, in creation order, before `before` when it's named: what a
+ * dependent batch of that run builds on (14, "Suggestions, runs and acceptance").
+ */
+export async function runPrerequisites(
+  db: DocLock["tx"] | Deps["db"],
+  artifactId: string,
+  runId: string,
+  epoch: number,
+  before?: { id: string; createdAt: Date },
+): Promise<Prerequisite[]> {
+  const rows = await db
+    .select({
+      id: boardSuggestions.id,
+      request: boardSuggestions.request,
+      ids: boardSuggestions.ids,
+      authorKey: boardSuggestions.authorKey,
+      createdAt: boardSuggestions.createdAt,
+    })
+    .from(boardSuggestions)
+    .where(
+      and(
+        eq(boardSuggestions.artifactId, artifactId),
+        eq(boardSuggestions.runId, runId),
+        eq(boardSuggestions.epoch, epoch),
+        eq(boardSuggestions.status, "open"),
+      ),
+    )
+    .orderBy(boardSuggestions.createdAt, boardSuggestions.id)
+    .limit(SUGGESTIONS_OPEN_MAX);
+  if (!before) return rows;
+  const at = rows.findIndex((row) => row.id === before.id);
+  return at < 0 ? rows.filter((row) => row.createdAt <= before.createdAt) : rows.slice(0, at);
+}
+
+/**
+ * The scene with a run's earlier batches applied in order, with their promised ids and no holds, so a
+ * later batch can name their reserved lasting ids. A prerequisite that no longer plans is skipped; a
+ * batch depending on it then refuses or previews as missing, never against a guessed state.
+ */
+export function projectPrerequisites(
+  snapshot: BoardSnapshot,
+  rows: Prerequisite[],
+  ctx: Pick<PlanContext, "asset" | "source">,
+): BoardSnapshot {
+  let scene = snapshot;
+  for (const row of rows) {
+    const plan = planBoardBatch(scene, row.request, {
+      author: row.authorKey,
+      time: row.createdAt.toISOString(),
+      mint: mintBoardObjectId,
+      held: () => false,
+      asset: ctx.asset,
+      source: ctx.source,
+      force: true,
+      ids: row.ids,
+    });
+    if (plan.outcome === "ok") scene = plan.after;
+  }
+  return scene;
+}
+
+/** Image hashes a set of batches adds or swaps in. */
+export const batchAssets = (requests: Pick<BoardEditRequest, "ops">[]) =>
+  requests.flatMap((request) =>
+    request.ops.flatMap((op) =>
+      op.op === "add" && op.object.kind === "image"
+        ? [op.object.asset]
+        : op.op === "update" && op.patch.asset
+          ? [op.patch.asset]
+          : [],
+    ),
+  );
 
 /** Open proposals on this artifact, article and board together, against the one limit. */
 async function openCount(lock: DocLock, artifactId: string) {
@@ -1217,36 +1315,49 @@ export async function applyBoardBatchLocked(
   }
 
   if (policy.edits === "refused")
-    return empty(agents, row.seq, policy.reason === "writing" ? "writing" : "no_edit", policy.text);
+    return empty(
+      agents,
+      row.seq,
+      policy.reason === "writing" ? "writing" : "no_edit",
+      policy.text,
+      row.epoch,
+    );
   const runId = policy.reason === "run" ? (request.run ?? null) : null;
 
-  const snapshot = yToBoard(ydoc);
-  const images = new Map(snapshot.assets.map((image) => [image.hash, image]));
+  const canonicalSnapshot = yToBoard(ydoc);
+  const images = new Map(canonicalSnapshot.assets.map((image) => [image.hash, image]));
   const key = accept?.authorKey ?? (await authorKey(deps, artifact.id, actor, request.sources ?? [], lock));
   const now = deps.clock.now();
   const sources = await latestSources(lock, artifact, row.pageKey);
-  const reservations = await openReservations(lock, artifact.id);
-  const wanted = request.ops.flatMap((op) =>
-    op.op === "add" && op.object.kind === "image"
-      ? [op.object.asset]
-      : op.op === "update" && op.patch.asset
-        ? [op.patch.asset]
-        : [],
+  // A suggesting run's batch builds on that run's earlier open batches; a direct one has none open.
+  const prerequisites =
+    runId && !accept && policy.edits === "suggestion"
+      ? await runPrerequisites(lock.tx, artifact.id, runId, row.epoch)
+      : [];
+  const reservations = await openReservations(lock, artifact.id, prerequisites.length ? runId : null);
+  const usable = await validatedImages(
+    lock.tx,
+    artifact.id,
+    batchAssets([...prerequisites.map((p) => p.request), request]),
   );
-  const usable = await validatedImages(lock.tx, artifact.id, wanted);
+  const asset = (h: string) => usable.get(h) ?? images.get(h) ?? null;
+  const source = (s: { page: string; frame: string }) => sources.get(sourceKey(s)) ?? null;
+  const snapshot = prerequisites.length
+    ? projectPrerequisites(canonicalSnapshot, prerequisites, { asset, source })
+    : canonicalSnapshot;
   const plan = planBoardBatch(snapshot, request, {
     author: key,
     time: now.toISOString(),
     mint: mintBoardObjectId,
     reserved: reservations.ids,
     held: policy.held,
-    asset: (h) => usable.get(h) ?? images.get(h) ?? null,
-    source: (s) => sources.get(sourceKey(s)) ?? null,
+    asset,
+    source,
     reservedSources: reservations.sources,
     force: accept?.force,
     ids: accept?.ids,
   });
-  if (plan.outcome === "refused") return empty(agents, row.seq, plan.reason, plan.message);
+  if (plan.outcome === "refused") return empty(agents, row.seq, plan.reason, plan.message, row.epoch);
 
   // Meta sources are checked as a publish checks them, so a bad slug never reaches the draft.
   if (plan.meta?.sources?.length) {
@@ -1257,7 +1368,7 @@ export async function applyBoardBatchLocked(
       } as WikiMeta);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
-      return empty(agents, row.seq, "invalid", error.message);
+      return empty(agents, row.seq, "invalid", error.message, row.epoch);
     }
   }
 
@@ -1283,7 +1394,7 @@ export async function applyBoardBatchLocked(
       touched: new Set([...plan.touched, ...Object.values(plan.ids)]),
     });
     if (!checked.ok)
-      return empty(agents, row.seq, "invalid", `The board would be invalid: ${checked.reason}`);
+      return empty(agents, row.seq, "invalid", `The board would be invalid: ${checked.reason}`, row.epoch);
     const update = Y.encodeStateAsUpdate(ydoc, before);
     const changed = canonical(plan.before) !== canonical(plan.after);
     const seq = changed ? await persistUpdate(deps, artifact.id, update, actor, lock) : row.seq;
@@ -1312,6 +1423,7 @@ export async function applyBoardBatchLocked(
       reason: null,
       message: null,
       seq,
+      epoch: row.epoch,
       version: null,
       suggestion: null,
       ids: plan.ids,
@@ -1325,6 +1437,7 @@ export async function applyBoardBatchLocked(
         row.seq,
         "limit",
         `This page has ${SUGGESTIONS_OPEN_MAX} open suggestions. Wait for people to decide some.`,
+        row.epoch,
       );
     const id = Bun.randomUUIDv7();
     await lock.tx.insert(boardSuggestions).values({
@@ -1357,6 +1470,7 @@ export async function applyBoardBatchLocked(
           ? `Someone is working on ${plan.held.join(", ")}, so this waits as a suggestion.`
           : null,
       seq: row.seq,
+      epoch: row.epoch,
       version: null,
       suggestion: id,
       ids: plan.ids,

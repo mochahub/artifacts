@@ -25,7 +25,7 @@ import {
   WikiMeta,
 } from "@artifacts/schema";
 import { articleRecords, buildArticle } from "@artifacts/schema/article";
-import { BoardEditRequest } from "@artifacts/schema/boards";
+import { BoardCreateRequest, BoardEditRequest } from "@artifacts/schema/boards";
 import {
   BOARD_TOOLS,
   EDIT_TOOLS,
@@ -52,10 +52,12 @@ import { GUIDES } from "../../../../skill/index.ts";
 import { findArtifactBySlug, toProject } from "../auth/access.ts";
 import type { Asker, Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
+import { createBoard } from "../boards/create.ts";
 import { boardEdit } from "../boards/ops.ts";
 import { readBoard } from "../boards/read.ts";
-import { listBoardSuggestions } from "../boards/suggestions.ts";
-import { pages, projects, versions } from "../db/schema.ts";
+import { requireBoard } from "../boards/routes.ts";
+import { listBoardSuggestions, previewBoardSuggestion } from "../boards/suggestions.ts";
+import { boardSuggestions, pages, projects, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { checkpointLocked } from "../editing/checkpoint.ts";
 import { applyOps, pageRead } from "../editing/ops.ts";
@@ -64,6 +66,7 @@ import { loadDoc, withDocLock } from "../editing/store.ts";
 import { listSuggestions } from "../editing/suggestions.ts";
 import { ApiError } from "../http/errors.ts";
 import { MCP_PATH, requestOrigin } from "../http/origins.ts";
+import { isUuid } from "../http/params.ts";
 import type { ApiVars, Routes } from "../http/routes.ts";
 import { blobKey, planKey } from "../layout.ts";
 import {
@@ -481,6 +484,27 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
   /** Drawn boards by operation (14, "Hosted MCP tools"): the same functions the HTTP routes call. */
   const boardTools: Tool[] = [
     {
+      ...BOARD_TOOLS.create,
+      scope: "publish",
+      async run({ asker, input }) {
+        const parsed = BoardCreateRequest.safeParse({
+          project: input.project,
+          slug: input.slug,
+          title: input.title,
+          summary: input.summary,
+          ...(input.tags !== undefined ? { tags: input.tags } : {}),
+          ...(input.sources !== undefined ? { sources: input.sources } : {}),
+        });
+        if (!parsed.success)
+          throw new ToolError(
+            parsed.error.issues
+              .map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`)
+              .join("\n"),
+          );
+        return createBoard(deps, publisher, asker, parsed.data, "Connector");
+      },
+    },
+    {
       ...BOARD_TOOLS.read,
       scope: "read",
       async run(context) {
@@ -520,6 +544,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         const epoch = whole(context.input.epoch, "epoch");
         if (!epoch) throw new ToolError("epoch is the draft's, from artifacts_board_read.");
         const caller = context.caller;
+        await requireBoard(deps, loaded);
         return withDocLock(deps, loaded.id, async (lock) => {
           const { row } = await loadDoc(deps, loaded.id, lock);
           if (row.epoch !== epoch)
@@ -552,10 +577,23 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         const loaded = await load(context, deps);
         if (!can(context.caller, "artifact.edit", loaded))
           throw new ApiError("forbidden", "Suggestions are for people and agents who can edit this board.");
-        if (context.input.preview !== undefined)
-          throw new ToolError(
-            "Ghost previews aren't served here yet: read the suggestion's request instead.",
+        if (context.input.preview !== undefined) {
+          const id = str(context.input.preview, "preview", 40) ?? "";
+          const [row] = isUuid(id)
+            ? await deps.db
+                .select()
+                .from(boardSuggestions)
+                .where(and(eq(boardSuggestions.artifactId, loaded.id), eq(boardSuggestions.id, id)))
+                .limit(1)
+            : [];
+          if (!row) throw new ApiError("not_found", "There's no such suggestion on this board.");
+          return previewBoardSuggestion(
+            deps,
+            context.caller,
+            { ...loaded, suggestion: row },
+            str(context.input.cursor, "cursor", 400),
           );
+        }
         const raw = str(context.input.status, "status", 12) ?? "open";
         const status = raw === "all" ? undefined : SuggestionStatus.safeParse(raw);
         if (status && !status.success) throw new ToolError("status isn't one of the suggestion statuses.");

@@ -7,6 +7,7 @@ import {
   DELETED,
   OBJECTS,
   REGISTERS,
+  rebalanceBoard,
   repairBoard,
   TEXT_KINDS,
   validateBoard,
@@ -80,6 +81,11 @@ const PRESENCE_WRITE_MS = 1000;
 /** Agents renew their awareness state well inside y-protocols' 30-second timeout. */
 const AGENT_RENEW_MS = 15_000;
 const REMOTE = "remote";
+/** An update the live document may relay: a connection's (persisted first), the catch-up's or the server's. */
+const persistedOrigin = (origin: unknown) =>
+  origin === REMOTE ||
+  origin === SERVER_ORIGIN ||
+  (typeof origin === "object" && origin !== null && "ws" in origin && "personId" in origin);
 const AGENT_COLOR = "#2f5fb3";
 
 type PersonCaller = Extract<Caller, { kind: "person" }>;
@@ -564,7 +570,10 @@ export class DocHub {
     this.watch(held);
     // Only persisted updates reach this document, and each one goes to every editor once: whichever of
     // the writer's own commit or the catch-up that reads it back applies it first.
+    // Only those: a transaction Yjs runs itself after one of them (its author-format tidy-up, origin
+    // null) was never persisted, and every client makes the same one locally, so it isn't relayed.
     ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+      if (!persistedOrigin(origin)) return;
       const message = syncUpdate(update);
       for (const conn of held.conns) if (conn !== origin) this.write(conn, message);
     });
@@ -719,6 +728,8 @@ export class DocHub {
           // Clearing a tombstone is an undo of this connection's own deletion, checked from the old value.
           const old = change.oldValue as { a?: string } | undefined;
           if (old?.a !== collect.own) fail(collect, "a deletion that isn't yours to undo");
+          // A checkpoint removed the hidden object itself; nothing is left to restore.
+          else if (!objects.has(id)) fail(collect, "that object was removed at a checkpoint");
         } else fail(collect, "a tombstone can't change");
       }
     });
@@ -1127,9 +1138,11 @@ export class DocHub {
   private async repairPersisted(held: Held) {
     const copy = new Y.Doc();
     Y.applyUpdate(copy, Y.encodeStateAsUpdate(held.ydoc));
-    const fix = repairBoard(copy);
+    // The projection, then any sibling group whose order keys are nearly exhausted, as one repair.
+    const fixes = [repairBoard(copy), rebalanceBoard(copy)].filter((u): u is Uint8Array => u !== null);
     copy.destroy();
-    if (!fix) return;
+    if (fixes.length === 0) return;
+    const fix = fixes.length === 1 ? (fixes[0] as Uint8Array) : Y.mergeUpdates(fixes);
     try {
       await persistUpdate(
         this.d,

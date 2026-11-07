@@ -1,5 +1,8 @@
 import { DAY_MS } from "@artifacts/schema";
 import { and, gt, inArray, lt, sql } from "drizzle-orm";
+import { sweepBoardUploads } from "../boards/assets.ts";
+import { sweepCaptures } from "../boards/checkpoint.ts";
+import { expireBoardSuggestions } from "../boards/suggestions.ts";
 import { expireLogs } from "../data/logs.ts";
 import { recountUsage } from "../data/store.ts";
 import { tryLockJobs } from "../db/locks.ts";
@@ -59,6 +62,15 @@ async function referencedHashes(deps: Deps) {
     add(row.meta.htmlHash);
     for (const item of row.meta.items ?? []) add(item.hash);
   }
+  // Native boards (14): a version's source images and pictures, and every image associated with a board,
+  // which covers drafts, suggestions and pending uploads. Read as hashes, never whole snapshots.
+  const boardRows = await deps.db.execute(sql`
+    select a ->> 'hash' as hash from board_versions, jsonb_array_elements(snapshot -> 'assets') a
+    union select renders -> 'thumbnail' ->> 'hash' from board_versions where renders is not null
+    union select c -> 'image' ->> 'hash'
+      from board_versions, jsonb_array_elements(coalesce(renders -> 'crops', '[]'::jsonb)) c
+    union select hash from board_assets`);
+  for (const row of boardRows as unknown as { hash: string | null }[]) add(row.hash);
   return referenced;
 }
 
@@ -155,6 +167,13 @@ export async function expireLeftovers(deps: Deps) {
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
   await expireLogs(deps);
+  // Boards (14): capture tickets, unattached uploads, suggestions past expiry and receipts of retired epochs.
+  await sweepCaptures(deps);
+  await sweepBoardUploads(deps);
+  await expireBoardSuggestions(deps);
+  await deps.db.execute(sql`
+    delete from board_requests r using edit_docs d
+    where d.artifact_id = r.artifact_id and r.epoch < d.epoch`);
 }
 
 /** Recounts usage for artifacts written since yesterday (08). */

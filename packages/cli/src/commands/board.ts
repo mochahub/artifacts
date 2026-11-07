@@ -180,7 +180,7 @@ export function boardEditRequest(flags: BoardFlags, suggest: boolean): BoardEdit
 
 const mark = { applied: "✓", suggested: "~", refused: "✗" } as const;
 
-function receiptLines(result: BoardEditResult, requestId: string): string[] {
+function receiptLines(result: BoardEditResult, request: BoardEditRequest): string[] {
   const why = result.reason ? ` (${result.reason})` : "";
   const lines = [
     `${mark[result.outcome]} ${result.outcome}${why}${result.message ? `: ${result.message}` : ""}`,
@@ -193,7 +193,10 @@ function receiptLines(result: BoardEditResult, requestId: string): string[] {
   }
   if (result.version !== null) lines.push(`✓ saved as v${result.version}`);
   if (result.outcome !== "applied") lines.push(`agents: ${result.agents.text}`);
-  lines.push(`  request ${requestId}, seq ${result.seq}`);
+  lines.push(`  request ${request.requestId}, seq ${result.seq}, epoch ${result.epoch}`);
+  // The next batch sends the epoch the server checked this one against, not the one the file had.
+  if (result.epoch !== request.epoch)
+    lines.push(`  The board was reset: send epoch ${result.epoch} next, after board read --draft.`);
   return lines;
 }
 
@@ -205,7 +208,7 @@ async function submit(client: Client, artifact: Artifact, request: BoardEditRequ
   if (result.outcome === "refused") process.exitCode = 1;
   else if (result.outcome === "suggested") process.exitCode = 2;
   out.result(data({ ...result, requestId: request.requestId }), () => {
-    for (const line of receiptLines(result, request.requestId)) out.say(line);
+    for (const line of receiptLines(result, request)) out.say(line);
   });
 }
 

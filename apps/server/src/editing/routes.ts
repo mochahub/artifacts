@@ -48,6 +48,7 @@ import {
   acceptRun,
   activeRuns,
   cancelRun,
+  documentContext,
   findRun,
   finishRun,
   type RunRow,
@@ -407,6 +408,7 @@ export function editingRoutes(routes: Routes, deps: Deps) {
       const { resource, caller } = c.var;
       const now = deps.clock.now();
       if (resource.row.agentMaintained !== agentMaintained) {
+        const context = await documentContext(deps, resource);
         await deps.db.transaction(async (tx) => {
           await tx
             .update(artifacts)
@@ -420,7 +422,7 @@ export function editingRoutes(routes: Routes, deps: Deps) {
             actorPersonId: caller.person.id,
             agent: null,
             kind: "maintained_changed",
-            payload: { agentMaintained },
+            payload: { agentMaintained, ...context },
             createdAt: now,
           });
         });

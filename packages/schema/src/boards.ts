@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WikiAudience } from "./api.ts";
+import { ObjectAnchor, WikiAudience } from "./api.ts";
 import {
   AGENT_MAX,
   BLOCK_ID_PATTERN,
@@ -312,6 +312,8 @@ export const BoardEditResult = z.strictObject({
     .nullable(),
   message: z.string().nullable(),
   seq: z.number().int().nonnegative(),
+  /** The draft's epoch the batch was checked against: the next batch sends it. */
+  epoch: z.number().int().nonnegative(),
   version: z.number().int().positive().nullable(),
   suggestion: Id.nullable(),
   /** Reserved on suggestion as well as apply. Empty on refusal. */
@@ -399,14 +401,8 @@ export const BoardRead = z.strictObject({
 });
 export type BoardRead = z.infer<typeof BoardRead>;
 
-/** Add to the shared Anchor union during implementation, without changing existing frame anchors. */
-export const BoardObjectAnchor = z.strictObject({
-  type: z.literal("object"),
-  object: BoardObjectId,
-  u: Unit,
-  v: Unit,
-  checkpoint: z.number().int().positive(),
-});
+/** The shared `Anchor` union's object variant, under its board name. */
+export const BoardObjectAnchor = ObjectAnchor;
 export type BoardObjectAnchor = z.infer<typeof BoardObjectAnchor>;
 export const BoardThumbnail = BoardImage.refine(
   (image) =>

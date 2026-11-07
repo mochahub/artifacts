@@ -3,11 +3,22 @@ import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { actorOf, agentOf, type Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
-import { activity, editRuns, people, suggestions } from "../db/schema.ts";
+import { acceptBoardLocked } from "../boards/suggestions.ts";
+import {
+  activity,
+  boardSuggestions,
+  boardVersions,
+  editDocs,
+  editRuns,
+  people,
+  suggestions,
+  versions,
+} from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
-import { checkpoint } from "./checkpoint.ts";
+import { checkpoint, checkpointLocked } from "./checkpoint.ts";
 import { basePolicy, ownsRun } from "./policy.ts";
+import { withDocLock } from "./store.ts";
 import { applySuggestion, logDecision } from "./suggestions.ts";
 
 export type RunRow = typeof editRuns.$inferSelect;
@@ -17,12 +28,18 @@ type Member = Extract<Caller, { kind: "person" | "cliToken" | "orgToken" }>;
 export async function toRuns(deps: Deps, rows: RunRow[]): Promise<Run[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
-  const [counts, names] = await Promise.all([
+  const [articleCounts, boardCounts, names] = await Promise.all([
     deps.db
       .select({ run: suggestions.runId, n: sql<number>`count(*)::int` })
       .from(suggestions)
       .where(inArray(suggestions.runId, ids))
       .groupBy(suggestions.runId),
+    // A board run's batches count as its suggestions too (14).
+    deps.db
+      .select({ run: boardSuggestions.runId, n: sql<number>`count(*)::int` })
+      .from(boardSuggestions)
+      .where(inArray(boardSuggestions.runId, ids))
+      .groupBy(boardSuggestions.runId),
     deps.db
       .select({ id: people.id, name: people.name })
       .from(people)
@@ -39,11 +56,36 @@ export async function toRuns(deps: Deps, rows: RunRow[]): Promise<Run[]> {
     expiresAt: row.expiresAt.toISOString(),
     finishedAt: row.finishedAt?.toISOString() ?? null,
     version: row.version,
-    suggestions: counts.find((count) => count.run === row.id)?.n ?? 0,
+    suggestions:
+      (articleCounts.find((count) => count.run === row.id)?.n ?? 0) +
+      (boardCounts.find((count) => count.run === row.id)?.n ?? 0),
   }));
 }
 
 const one = async (deps: Deps, row: RunRow) => (await toRuns(deps, [row]))[0] as Run;
+
+/**
+ * `{ document: "board", page }` for a board page's activity (14, "Search, links, metadata and activity"),
+ * from its draft's kind, or from its latest version's native board before any draft exists; else empty.
+ */
+export async function documentContext(
+  deps: Deps,
+  artifact: Pick<LoadedArtifact, "id"> & { row: { latestVersion: number } },
+): Promise<{ document: "board"; page: string } | Record<string, never>> {
+  const [doc] = await deps.db
+    .select({ kind: editDocs.kind, page: editDocs.pageKey })
+    .from(editDocs)
+    .where(eq(editDocs.artifactId, artifact.id))
+    .limit(1);
+  if (doc) return doc.kind === "board" ? { document: "board", page: doc.page } : {};
+  const [board] = await deps.db
+    .select({ page: boardVersions.pageKey })
+    .from(boardVersions)
+    .innerJoin(versions, eq(versions.id, boardVersions.versionId))
+    .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, artifact.row.latestVersion)))
+    .limit(1);
+  return board ? { document: "board", page: board.page } : {};
+}
 
 async function log(deps: Deps, artifact: LoadedArtifact, row: RunRow, kind: "run_started" | "run_finished") {
   await deps.db.insert(activity).values({
@@ -54,7 +96,13 @@ async function log(deps: Deps, artifact: LoadedArtifact, row: RunRow, kind: "run
     actorPersonId: row.decidedBy ?? row.startedBy,
     agent: row.agent,
     kind,
-    payload: { run: row.id, goal: row.goal, status: row.status, version: row.version },
+    payload: {
+      run: row.id,
+      goal: row.goal,
+      status: row.status,
+      version: row.version,
+      ...(await documentContext(deps, artifact)),
+    },
     createdAt: deps.clock.now(),
   });
   deps.docs?.notify(artifact.id, "c", { t: "run", id: row.id, status: row.status });
@@ -205,6 +253,12 @@ export async function acceptRun(
   if (row.edits !== "suggestion") throw notActive();
   // Claimed first, so an accept and a reject at once can't both decide it.
   await claim(deps, row, "accepted", caller.person.id);
+  const [doc] = await deps.db
+    .select({ kind: editDocs.kind })
+    .from(editDocs)
+    .where(eq(editDocs.artifactId, artifact.id))
+    .limit(1);
+  if (doc?.kind === "board") return acceptBoardRun(deps, caller, artifact, row, force);
   // Each applies through the page's lock as its own author, so this stays one call per suggestion; a run
   // holds at most SUGGESTIONS_OPEN_MAX open ones.
   let count = 0;
@@ -237,6 +291,64 @@ export async function acceptRun(
   return one(deps, done as RunRow);
 }
 
+/**
+ * A board run's change set (14, "Suggestions, runs and acceptance"): every open batch in creation order
+ * under one lock, each in its own savepoint so a held or stale one is skipped (and stays open) without
+ * undoing the others, then one `delegate` checkpoint by the person, all in one transaction.
+ */
+async function acceptBoardRun(
+  deps: Deps,
+  caller: Extract<Caller, { kind: "person" }>,
+  artifact: LoadedArtifact,
+  row: RunRow,
+  force: boolean,
+): Promise<Run> {
+  let count = 0;
+  const made = await withDocLock(deps, artifact.id, async (lock) => {
+    const open = await lock.tx
+      .select({ id: boardSuggestions.id })
+      .from(boardSuggestions)
+      .where(and(eq(boardSuggestions.runId, row.id), eq(boardSuggestions.status, "open")))
+      .orderBy(asc(boardSuggestions.createdAt), asc(boardSuggestions.id))
+      .limit(SUGGESTIONS_OPEN_MAX);
+    for (const { id } of open) {
+      const kept = lock.row;
+      try {
+        const done = await lock.tx.transaction((sp) =>
+          acceptBoardLocked(deps, caller, artifact, id, force, { ...lock, tx: sp }),
+        );
+        if (done.status === "accepted") count += 1;
+      } catch (error) {
+        lock.row = kept;
+        if (!(error instanceof ApiError) || error.code !== "conflict") throw error;
+      }
+    }
+    return checkpointLocked(
+      deps,
+      lock,
+      { row: artifact.row, project: artifact.project },
+      { kind: "delegate", personId: caller.person.id, agent: row.agent, message: row.goal },
+    );
+  });
+  const [done] = await deps.db
+    .update(editRuns)
+    .set({
+      status: "accepted",
+      finishedAt: row.finishedAt ?? deps.clock.now(),
+      decidedBy: caller.person.id,
+      version: made.version,
+    })
+    .where(and(eq(editRuns.id, row.id), eq(editRuns.status, "accepted")))
+    .returning();
+  await logDecision(deps, artifact, caller.person.id, "suggestion_accepted", {
+    run: row.id,
+    count,
+    ...(await documentContext(deps, artifact)),
+  });
+  await log(deps, artifact, done as RunRow, "run_finished");
+  return one(deps, done as RunRow);
+}
+
 export async function rejectRun(
   deps: Deps,
   caller: Extract<Caller, { kind: "person" }>,
@@ -257,7 +369,18 @@ export async function rejectRun(
     })
     .where(and(eq(suggestions.runId, row.id), eq(suggestions.status, "open")))
     .returning({ id: suggestions.id });
-  const count = rejected.length;
+  // A board run's batches are rejected with it, in one statement too.
+  const boards = await deps.db
+    .update(boardSuggestions)
+    .set({
+      status: "rejected",
+      decidedAt: deps.clock.now(),
+      decidedBy: caller.person.id,
+      decisionNote: note ?? null,
+    })
+    .where(and(eq(boardSuggestions.runId, row.id), eq(boardSuggestions.status, "open")))
+    .returning({ id: boardSuggestions.id });
+  const count = rejected.length + boards.length;
   const done = claimed;
   await logDecision(deps, artifact, caller.person.id, "suggestion_rejected", { run: row.id, count });
   await log(deps, artifact, done as RunRow, "run_finished");

@@ -16,6 +16,7 @@ import {
   BOARD_DEPTH_MAX,
   BOARD_JSON_MAX,
   BOARD_OBJECTS_MAX,
+  BOARD_ORDER_MAX,
   KEY_PATTERN,
 } from "@artifacts/schema/constants";
 import * as Y from "yjs";
@@ -27,7 +28,7 @@ import {
   poseLocalPoint,
   translate,
 } from "./board-geometry.ts";
-import { compareSiblings, isOrderKey } from "./board-order.ts";
+import { compareSiblings, isOrderKey, rebalanceOrders } from "./board-order.ts";
 
 /**
  * The board document model (14, "Yjs mapping and concurrency"). Browser-safe: Yjs and board schemas
@@ -898,6 +899,49 @@ export function repairBoard(doc: Y.Doc): Uint8Array | null {
     }
   }, BOARD_SERVER_ORIGIN);
   return changed ? Y.encodeStateAsUpdate(doc, before) : null;
+}
+
+/**
+ * Drops the hidden maps of deleted objects (14, "Yjs mapping"), keeping their tombstones. The server
+ * does this at a checkpoint, so a deleted object's text (a pasted secret, say) leaves the draft's
+ * snapshot and log once a version records the deletion. An undo of that deletion can't restore it
+ * afterwards. Server-origin. Returns the update, or null when nothing was hidden.
+ */
+export function purgeDeleted(doc: Y.Doc): Uint8Array | null {
+  const before = Y.encodeStateVector(doc);
+  const objects = objectsMap(doc);
+  const hidden = [...deletedMap(doc).keys()].filter((id) => objects.has(id));
+  if (hidden.length === 0) return null;
+  doc.transact(() => {
+    for (const id of hidden) objects.delete(id);
+  }, BOARD_SERVER_ORIGIN);
+  return Y.encodeStateAsUpdate(doc, before);
+}
+
+/** A sibling key this long is close enough to `BOARD_ORDER_MAX` that its group gets fresh keys. */
+export const ORDER_REBALANCE_AT = BOARD_ORDER_MAX - 8;
+
+/**
+ * Rebalances each sibling group holding an exhausted order key (14, "Z-order and containment"): fresh
+ * evenly spaced keys in the group's current `(order, id)` order, each order register keeping its stamp.
+ * Only the server does this, as its own update. Returns the update, or null when no key is that long.
+ */
+export function rebalanceBoard(doc: Y.Doc, at = ORDER_REBALANCE_AT): Uint8Array | null {
+  const groups = new Map<string | null, { id: string; order: string }[]>();
+  for (const o of yToBoard(doc).objects) groups.set(o.parent, [...(groups.get(o.parent) ?? []), o]);
+  const exhausted = [...groups.values()].filter((group) => group.some((o) => o.order.length > at));
+  if (exhausted.length === 0) return null;
+  const before = Y.encodeStateVector(doc);
+  const objects = objectsMap(doc);
+  doc.transact(() => {
+    for (const group of exhausted)
+      for (const [id, key] of rebalanceOrders(group)) {
+        const map = objects.get(id) as Y.Map<unknown>;
+        const r = map.get("order") as Register<string>;
+        if (r.value !== key) map.set("order", { value: key, a: r.a, t: r.t });
+      }
+  }, BOARD_SERVER_ORIGIN);
+  return Y.encodeStateAsUpdate(doc, before);
 }
 
 /** Characters per author key over every active and hidden object's text (the server's high-water). */

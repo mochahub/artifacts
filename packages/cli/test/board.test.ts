@@ -64,6 +64,7 @@ const result = (outcome: "applied" | "suggested" | "refused", over: object = {})
   reason: outcome === "refused" ? "stale" : outcome === "suggested" ? "audience" : null,
   message: outcome === "refused" ? `Current base of ${SKETCH} is bbbbbbbbbbbb.` : null,
   seq: 42,
+  epoch: 2,
   version: null,
   suggestion: outcome === "suggested" ? SUGGESTION : null,
   ids: outcome === "refused" ? {} : { $total: "~t0tal00007" },
@@ -233,7 +234,16 @@ describe("board edit and suggest", () => {
     expect(done.stdout).toContain("✓ applied");
     expect(done.stdout).toContain(`op 1: ~t0tal00007`);
     expect(done.stdout).toContain("ids: $total=~t0tal00007");
-    expect(done.stdout).toContain(`request ${ops().requestId}, seq 42`);
+    expect(done.stdout).toContain(`request ${ops().requestId}, seq 42, epoch 2`);
+    expect(done.stdout).not.toContain("was reset");
+  });
+
+  test("the receipt names the epoch the server checked, so the next batch can send it", async () => {
+    answers[`POST /api/artifacts/${ID}/board/ops`] = () => Response.json(result("applied", { epoch: 3 }));
+    const done = await board("edit", "brain/pricing", "--ops", file("edit.json", JSON.stringify(fixture("edit.json"))));
+    expect(done.code).toBe(0);
+    expect(done.stdout).toContain("seq 42, epoch 3");
+    expect(done.stdout).toContain("send epoch 3 next");
   });
 
   test("the request can come from standard input, as a bare operation list with --epoch, and a request id can be named", async () => {

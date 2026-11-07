@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { boardText, canonicalJSON, validateBoard, yToBoard } from "@artifacts/doc/board";
+import { boardText, canonicalJSON, purgeDeleted, validateBoard, yToBoard } from "@artifacts/doc/board";
 import { boardBase, boardHash } from "@artifacts/doc/board-hash";
 import {
   BOARD_ASSETS_BYTES_MAX,
@@ -32,7 +32,7 @@ import {
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { type CheckpointOptions, markFixed, resolveVersionMeta } from "../editing/checkpoint.ts";
-import { compact, type DocLock, loadDoc } from "../editing/store.ts";
+import { compact, type DocLock, loadDoc, persistUpdate } from "../editing/store.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../layout.ts";
 import { putBlob } from "../publish/blobs.ts";
@@ -286,6 +286,21 @@ export async function checkpointBoardLocked(
     await tx.update(boardCaptures).set({ consumedAt: now }).where(eq(boardCaptures.id, ticket.id));
   }
 
+  // Deleted objects' hidden maps go now, as the server's own update, so what someone deleted (a pasted
+  // secret in a sticky, say) is gone from the draft's snapshot and log once this version records the
+  // deletion. Their tombstones stay. The snapshot is unchanged by this, so the capture fence above holds.
+  const purge = purgeDeleted(ydoc);
+  const docSeq = purge
+    ? await persistUpdate(
+        deps,
+        current.id,
+        purge,
+        { origin: "server", personId: null, agent: null, tokenId: null },
+        lock,
+        loadedRow.epoch,
+      )
+    : loadedRow.seq;
+
   const [base] = await tx
     .select()
     .from(versions)
@@ -339,6 +354,7 @@ export async function checkpointBoardLocked(
   }
 
   // Native text joins the existing search/anchor index as rows keyed by object id; never article content.
+  // A native frame's title is its label, so a group is found by its name as a sticky is by its text.
   const blockRows = outline(snapshot).flatMap((object) =>
     "text" in object && object.text
       ? [
@@ -350,7 +366,17 @@ export async function checkpointBoardLocked(
             authors: object.attribution.text.length ? object.attribution.text : null,
           },
         ]
-      : [],
+      : object.kind === "frame" && object.label.trim()
+        ? [
+            {
+              pageKey: row.pageKey,
+              blockKey: object.id,
+              contentHash: sha256(object.label),
+              text: object.label,
+              authors: null,
+            },
+          ]
+        : [],
   );
   const page: PageRecord = {
     key: row.pageKey,
@@ -387,8 +413,9 @@ export async function checkpointBoardLocked(
       frames: carried,
       blocks: blockRows,
       checkpoint: options.kind,
-      docSeq: loadedRow.seq,
+      docSeq,
       now,
+      boards: [{ pageKey: loadedRow.pageKey, snapshot }],
     },
     { personId, agent: options.agent },
   );
@@ -411,7 +438,7 @@ export async function checkpointBoardLocked(
   });
   await tx
     .update(editDocs)
-    .set({ version: n, checkpointSeq: loadedRow.seq, meta: null, dirtySince: null })
+    .set({ version: n, checkpointSeq: docSeq, meta: null, dirtySince: null })
     .where(eq(editDocs.artifactId, current.id));
   await compact(tx, current.id);
   // Accepted board batches that said they fix a thread are fixed by this version, as article ones are.
@@ -433,7 +460,7 @@ export async function checkpointBoardLocked(
       decidedBy: boardSuggestions.decidedBy,
     });
   await markFixed(deps, tx, current, n, (meta?.fixes ?? []) as never, accepted);
-  lock.row = { ...row, version: n, checkpointSeq: loadedRow.seq, meta: null, dirtySince: null };
+  lock.row = { ...row, seq: docSeq, version: n, checkpointSeq: docSeq, meta: null, dirtySince: null };
   lock.after(() => {
     void deps.events.emit(current.id, "version", { version: n });
     deps.docs?.notify(current.id, "c", { t: "checkpoint", version: n, kind: options.kind });

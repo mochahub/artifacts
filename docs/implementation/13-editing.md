@@ -375,7 +375,7 @@ The migration is `apps/server/drizzle/0018_*.sql`, and it only adds.
 3. **Persist.** In one transaction:
    - `UPDATE edit_docs SET seq = seq + 1, updated_at = now(), dirty_since = coalesce(dirty_since, now()), last_actor_person_id = … RETURNING seq` (the row lock orders writers per page);
    - `INSERT edit_updates`.
-4. **Broadcast after persisting.** Send to the replica's other local connections, then `NOTIFY artifacts_docs`. A failure to persist closes the socket with 1011. The client reconnects and syncs again, and loses nothing, because its own `Y.Doc` still holds the change.
+4. **Broadcast after persisting.** Send to the replica's other local connections, then `NOTIFY artifacts_docs`. A failure to persist closes the socket with 1011. The client reconnects and syncs again, and loses nothing, because its own `Y.Doc` still holds the change. The replica's live document relays only updates from a connection (after persisting), the database catch-up and the server's own repairs. Yjs's own follow-up transactions, such as its author-format tidy-up, are never persisted; every client makes the same ones, so they are not relayed.
 
 ### Epochs and `seq`
 

@@ -15,7 +15,17 @@ import type { LoadedArtifact } from "../auth/access.ts";
 import { type Asker, agentOf, type Caller, limiterKey } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { lockArtifact } from "../db/locks.ts";
-import { activity, artifacts, blocks, comments, decisions, frames, threads, versions } from "../db/schema.ts";
+import {
+  activity,
+  artifacts,
+  blocks,
+  boardVersions,
+  comments,
+  decisions,
+  frames,
+  threads,
+  versions,
+} from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey, cropKey } from "../layout.ts";
@@ -188,6 +198,20 @@ export function createReview(deps: Deps) {
         .limit(1);
       if (!frame) throw new ApiError("invalid", "That frame isn't in this version.");
       return frame.renders["2x"];
+    }
+    if (body.anchor?.type === "object") {
+      // A pin on a native object names the checkpoint it was made on, and the object must be in it (14).
+      if (body.anchor.checkpoint !== body.version)
+        throw new ApiError("invalid", "An object pin is made on the version it names.");
+      const [board] = await db
+        .select({ snapshot: boardVersions.snapshot })
+        .from(boardVersions)
+        .where(and(eq(boardVersions.versionId, versionId), eq(boardVersions.pageKey, body.pageKey)))
+        .limit(1);
+      const objectId = body.anchor.object;
+      if (!board?.snapshot.objects.some((object) => object.id === objectId))
+        throw new ApiError("invalid", "That object isn't in this version.");
+      return null;
     }
     if (body.anchor) {
       const [block] = await db

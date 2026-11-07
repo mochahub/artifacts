@@ -156,24 +156,6 @@ const csv = (flag: Flag, name: string, value: unknown, form: RegExp, label: stri
   return flag(name, value.join(","), /^.{0,2000}$/s, label);
 };
 
-/**
- * `artifacts_board_create` has no spec in `@artifacts/schema/mcp` yet; this is its input from 14, and it
- * moves there with the others.
- */
-const BOARD_CREATE: McpToolSpec = {
-  name: "artifacts_board_create",
-  description: "Create an empty board as a new wiki page, to draw on or to place published mocks on.",
-  properties: {
-    project: { type: "string", description: "Wiki slug" },
-    slug: { type: "string", description: "Page slug" },
-    title: { type: "string", description: "Title" },
-    summary: { type: "string", description: "What it holds, up to 280 characters" },
-    tags: { type: "array", description: "Up to 8" },
-    sources: { type: "array", description: "Source slugs in this wiki" },
-  },
-  required: ["project", "slug", "title", "summary"],
-};
-
 /** Each tool is one CLI command with --json, so tools without a shell behave the same as those with one. */
 const TOOLS: Tool[] = [
   {
@@ -397,7 +379,7 @@ const TOOLS: Tool[] = [
     },
   },
   {
-    ...BOARD_CREATE,
+    ...BOARD_TOOLS.create,
     command: "board",
     args: (input, flag) => {
       const wikiSlug = `${text(input.project, "project")}/${text(input.slug, "slug")}`;

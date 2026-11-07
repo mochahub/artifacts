@@ -43,7 +43,7 @@ export function mountApi(routes: Routes, deps: Deps) {
   teamRoutes(routes, deps);
   projectRoutes(routes, deps);
   deviceRoutes(routes, deps);
-  publishRoutes(routes, publisher);
+  publishRoutes(routes, publisher, deps);
   listRoutes(routes, deps);
   wikiRoutes(routes, deps);
   editingRoutes(routes, deps);

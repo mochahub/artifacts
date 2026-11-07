@@ -686,6 +686,18 @@ export const PublishResult = z.object({
 export type PublishResult = z.infer<typeof PublishResult>;
 
 // Review
+/**
+ * A pin on a native board object (14, "Object comments"): normalized local `u/v` before rotation and
+ * ancestor translation, and the checkpoint it was made on. Clients without the `boards` feature get
+ * `anchor: null` for it instead.
+ */
+export const ObjectAnchor = z.strictObject({
+  type: z.literal("object"),
+  object: z.string().regex(BLOCK_ID_PATTERN),
+  u: z.number().min(0).max(1),
+  v: z.number().min(0).max(1),
+  checkpoint: z.number().int().positive(),
+});
 export const Anchor = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("frame"),
@@ -699,6 +711,7 @@ export const Anchor = z.discriminatedUnion("type", [
     quote: z.object({ exact: z.string(), prefix: z.string(), suffix: z.string() }),
   }),
   z.object({ type: z.literal("block"), blockKey: z.string() }),
+  ObjectAnchor,
 ]);
 export type Anchor = z.infer<typeof Anchor>;
 
