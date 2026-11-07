@@ -18,6 +18,7 @@ These guides turn [SPEC.md](../SPEC.md) into something buildable. Read the spec 
 | 09 | [Deploying](09-deploy.md) | **Contract** | Images, environment variables, the Railway template, Compose, releases |
 | 10 | [Testing and acceptance](10-testing-and-acceptance.md) | Guide | Test layers, fixtures, what the agent verifies versus the user |
 | 11 | [Build order](11-milestones.md) | Guide | Spikes S1–S8, milestones M0–M16 |
+| 12 | [Wikis](12-wikis.md) | **Contract** | Wiki projects, roles, wiki links, the wiki API and MCP tools, the viewer's wiki screens |
 | — | [Spike results](spikes.md) | Record | What each M0 spike found, and the design changes it caused |
 | — | [Load notes](load-notes.md) | Record | Local measurements of the app under load |
 | — | [HANDOFF.md](HANDOFF.md) | Prompt | The brief for the building agent |
