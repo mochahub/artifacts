@@ -1,14 +1,14 @@
-import type { Artifact, Thread, VersionPageOf } from "@artifacts/schema";
+import type { Artifact, ArtifactLinks, Thread, VersionPageOf } from "@artifacts/schema";
 import { articleStyle } from "@artifacts/schema/theme-css";
 import { useSignal } from "@preact/signals";
-import { Diff, List, MessageCircle, MessagesSquare } from "lucide-preact";
+import { Diff, List, MessageCircle, MessagesSquare, ShieldAlert } from "lucide-preact";
 import { useEffect, useRef } from "preact/hooks";
 import { api, post } from "../api.ts";
 import { LoadFailed } from "../components/placeholder.tsx";
 import { Sheet } from "../components/sheet.tsx";
 import { PageCapsule } from "../components/shell.tsx";
 import { capitalize, plural } from "../format.ts";
-import { articleUrl, renderUrl } from "../paths.ts";
+import { articleUrl, artifactHref, renderUrl } from "../paths.ts";
 import type { Remote } from "../poll.ts";
 import { useReview } from "../review/use-review.tsx";
 import { readStored, writeStored } from "../storage.ts";
@@ -43,6 +43,25 @@ export function ArticleView({
   onPages,
   onVersions,
 }: Props) {
+  const links = useSignal<ArtifactLinks | null>(null);
+  const linksFailed = useSignal(false);
+  useEffect(() => {
+    let live = true;
+    links.value = null;
+    linksFailed.value = false;
+    if (artifact.projectKind === "wiki")
+      api<ArtifactLinks>(`/api/artifacts/${artifact.id}/links`).then(
+        (value) => {
+          if (live) links.value = value;
+        },
+        () => {
+          if (live) linksFailed.value = true;
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [artifact.id, artifact.projectKind, version]);
   const body = useRef<HTMLDivElement>(null);
   const capsule = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -90,6 +109,18 @@ export function ArticleView({
     `${page.title ?? page.key} / ${page.outline?.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
 
   // Only when the marks change: redrawing them on every poll would disturb a selection in progress.
+  useEffect(() => {
+    if (!body.current || !links.value) return;
+    const wanted = new Set(
+      links.value.outgoing.filter((link) => !link.exists).map((link) => artifactHref(link)),
+    );
+    for (const anchor of body.current.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+      if (wanted.has(anchor.getAttribute("href") ?? "")) {
+        anchor.classList.add("wanted");
+        anchor.title = "Not written yet";
+      }
+    }
+  }, [links.value, loaded.value]);
   const marks = JSON.stringify(all.map((t) => [t.id, t.n, t.status, t.anchorState, t.anchor]));
   useEffect(() => {
     if (body.current && loaded.value > 0) {
@@ -236,7 +267,47 @@ export function ArticleView({
             }}
           />
         )}
+        {links.value?.untrusted && (
+          <p class="wiki-trust word">
+            <ShieldAlert />
+            {links.value.role === "source" ? "Untrusted source" : "Written from untrusted sources"}
+            {links.value.origin && `, ${links.value.origin}`}
+          </p>
+        )}
         <div ref={body} />
+        {linksFailed.value && <p class="ss">Sources and links could not be loaded.</p>}
+        {links.value && (
+          <footer class="wiki-footer">
+            {(
+              [
+                ["Sources", links.value.sources],
+                ["Linked from", links.value.backlinks],
+              ] as const
+            ).map(([title, items]) => (
+              <section key={title}>
+                <h2>{title}</h2>
+                {items.length === 0 ? (
+                  <p class="ss">{title === "Sources" ? "No sources cited." : "No pages link here yet."}</p>
+                ) : (
+                  items.map((link) => (
+                    <a class="li" href={artifactHref(link)} key={`${link.project}/${link.slug}`}>
+                      <div class="grow">
+                        <div class="tt">{link.title ?? link.slug}</div>
+                        {link.summary && <div class="ss">{link.summary}</div>}
+                        {link.untrusted && (
+                          <span class="word">
+                            <ShieldAlert />
+                            Untrusted source, {link.project}/{link.slug}
+                          </span>
+                        )}
+                      </div>
+                    </a>
+                  ))
+                )}
+              </section>
+            ))}
+          </footer>
+        )}
       </article>
       <PageCapsule
         box={capsule}

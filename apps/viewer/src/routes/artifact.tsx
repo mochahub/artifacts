@@ -2,7 +2,8 @@ import type { Artifact } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ChevronLeft, ChevronRight, Diff, Ellipsis, FileText, Images } from "lucide-preact";
 import type { ComponentChildren } from "preact";
-import { useRoute } from "preact-iso";
+import { useEffect } from "preact/hooks";
+import { useLocation, useRoute } from "preact-iso";
 import { StatusWord } from "../components/cards.tsx";
 import { Gate, Loaded } from "../components/loaded.tsx";
 import { ArchivedBanner, ArtifactMenu } from "../components/manage.tsx";
@@ -27,11 +28,20 @@ const KIND_LABELS: Record<Artifact["pages"][number]["kind"], string> = {
 
 export function ArtifactPage() {
   const { params } = useRoute();
+  const { route } = useLocation();
   const project = params.project ?? "";
   const remote = usePoll<Artifact>(artifactApi({ project, slug: params.artifact ?? "" }), 10_000);
   // Another artifact's detail must not stand in for this one while it loads: the shape does.
   const artifact = remote.loading ? null : remote.data.value;
   useTitle(artifact?.title);
+  const single =
+    artifact?.projectKind === "wiki" && artifact.pages.length === 1
+      ? artifactHref(artifact, artifact.pages[0]?.key)
+      : null;
+  useEffect(() => {
+    if (single) route(single, true);
+  }, [single]);
+  if (single) return null;
   const waiting = (inner: ComponentChildren) => (
     <Shell>
       <a class="back" href={projectHref(project)}>

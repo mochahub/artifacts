@@ -66,7 +66,11 @@ function List() {
                     <div class="tt">{project.name}</div>
                     <div class="ss">
                       {plural(project.artifactCount, "artifact")}, {ago(project.updatedAt)}
-                      {project.restricted && ", restricted"}
+                      {project.kind === "wiki"
+                        ? project.restricted
+                          ? ", Personal wiki"
+                          : ", Wiki"
+                        : project.restricted && ", restricted"}
                     </div>
                   </div>
                   {project.openCount > 0 && <b class="count">{project.openCount}</b>}

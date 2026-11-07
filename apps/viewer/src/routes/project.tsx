@@ -1,7 +1,7 @@
 import type { ProjectArtifacts } from "@artifacts/schema";
 import { useSignal } from "@preact/signals";
 import { ChevronLeft, ChevronsUpDown, Search, Share } from "lucide-preact";
-import { useRoute } from "preact-iso";
+import { lazy, useRoute } from "preact-iso";
 import { ArtifactTile } from "../components/cards.tsx";
 import { SignedIn } from "../components/guard.tsx";
 import { Loaded, NotFound } from "../components/loaded.tsx";
@@ -11,6 +11,8 @@ import { Shell } from "../components/shell.tsx";
 import { usePoll } from "../poll.ts";
 import { meta } from "../session.ts";
 import { useTitle } from "../title.ts";
+
+const WikiHome = lazy(() => import("../wiki/home.tsx").then((m) => m.WikiHome));
 
 const FILTERS = [
   ["all", "All"],
@@ -34,6 +36,8 @@ function Project() {
   useTitle(project?.name);
   // A project answers 404 when nothing in it is visible; never 410 (03).
   if (poll.error.value?.status === 404) return <NotFound />;
+  if (!poll.loading && project?.kind === "wiki")
+    return <WikiHome key={params.project} slug={params.project ?? ""} />;
   return (
     <Shell wide>
       <a class="back" href="/projects">

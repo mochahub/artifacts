@@ -508,3 +508,21 @@
     display: none;
   }
 }
+
+.article a.wanted {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+}
+.wiki-footer {
+  margin-top: 32px;
+  border-top: 1px solid var(--sep);
+  font: 15px / 1.4 var(--ui);
+}
+.wiki-footer .li {
+  padding-inline: 0;
+  overflow-wrap: anywhere;
+}
+.article .wiki-trust {
+  font: 15px / 1.4 var(--ui);
+  overflow-wrap: anywhere;
+}
