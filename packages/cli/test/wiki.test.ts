@@ -121,6 +121,20 @@ test("links show the artifact's role, trust and origin even with no links", () =
   ]);
 });
 
+test("links print no wiki sections for an ordinary artifact", () => {
+  expect(
+    linksSummary({
+      wiki: false,
+      role: "page",
+      untrusted: false,
+      origin: null,
+      outgoing: [],
+      backlinks: [],
+      sources: [],
+    }),
+  ).toEqual([]);
+});
+
 test("links preserve cited sources' origins and support older servers without them", () => {
   expect(
     linksSummary({

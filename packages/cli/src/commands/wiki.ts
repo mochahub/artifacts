@@ -21,6 +21,7 @@ export function wikiSummary(space: WikiSpace): string[] {
 }
 
 export function linksSummary(links: ArtifactLinks): string[] {
+  if (!links.wiki) return [];
   return [
     `Role: ${links.role}${links.untrusted ? " [untrusted]" : ""}${links.origin ? ` (${links.origin})` : ""}`,
     ...(["outgoing", "backlinks", "sources"] as const).flatMap((kind) => [

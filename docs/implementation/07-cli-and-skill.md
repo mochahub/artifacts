@@ -80,7 +80,7 @@ Commands about one artifact use the nearest `artifact.json` from the current fol
 |---|---|
 | `artifacts wiki create <slug> [--name <name>] [--personal]` | Calls `POST /api/wikis`. Name defaults to the slug. Prints the wiki name and URL. Personal wikis require a person. |
 | `artifacts wiki show <slug> [--json]` | Calls `GET /api/wikis/:slug`. Prints the rules summary, pages and sources with summaries and untrusted marks, then garden findings as `kind slug: message`. Empty Pages, Sources and Garden sections say `none`. |
-| `artifacts wiki links <project/slug> [--json]` | Resolves the artifact, then calls `GET /api/artifacts/:id/links`. Prints the artifact's role, untrusted mark and origin, then outgoing links, backlinks and sources, marking wanted and untrusted targets and showing origins when present. Empty sections say `none`. |
+| `artifacts wiki links <project/slug> [--json]` | Resolves the artifact, then calls `GET /api/artifacts/:id/links`. Prints the artifact's role, untrusted mark and origin, then outgoing links, backlinks and sources, marking wanted and untrusted targets and showing origins when present. Empty sections say `none`. Non-wiki artifacts print no wiki sections. |
 
 Publishing and packing pass the manifest's `project` into article rendering and
 its `wiki` field (or null) into the commit. See [Wikis](12-wikis.md).
