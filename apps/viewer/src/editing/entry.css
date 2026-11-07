@@ -1,0 +1,67 @@
+/* What the reader needs of editing, in the article chunk: the pencil, the author popover, Edit. */
+/* The blue pencil: a soft line under what an agent wrote, never a bar beside it. */
+.pen {
+  text-decoration: underline 1.5px var(--agent);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 5px;
+  cursor: pointer;
+}
+.pen.lit {
+  background: rgba(43, 140, 214, 0.13);
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px rgba(43, 140, 214, 0.13);
+}
+
+.rowx {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.agent-word {
+  color: var(--agent-word);
+  font-weight: 700;
+}
+.warn-word {
+  color: var(--warn-word);
+}
+.ed .acts,
+.acts {
+  display: flex;
+  gap: 12px;
+}
+.acts .btn {
+  min-height: 44px;
+  flex: 1;
+  font-size: 16px;
+}
+
+/* The reader's side: the author popover by a passage, and the Edit key at the end of the bar. */
+.author-pop {
+  position: fixed;
+  z-index: 30;
+  width: 330px;
+  padding: 16px;
+  background: var(--card);
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 0.5px var(--sep),
+    0 18px 40px -12px rgba(18, 20, 24, 0.35);
+  font: 15px / 1.45 var(--ui);
+}
+.author-pop .group {
+  margin-top: 6px;
+}
+
+.edit-key {
+  width: auto;
+  min-height: 44px;
+  padding: 0 16px;
+  margin-left: 4px;
+  font-size: 16px;
+  flex: none;
+}
+@media (max-width: 759px) {
+  .vbar.can-edit .comment-key {
+    display: none;
+  }
+}

@@ -249,7 +249,9 @@ export function ShareSheet({
     run(async () => {
       await api(`/api/artifacts/${artifact.id}/teams/${id}`, { method: "PUT", json: { permission: level } });
     });
-  const levels: Level[] = ["view", "comment", "publish"];
+  // Can edit is for wiki pages: the editor works on them only (13, "Permissions").
+  const levels: Level[] =
+    artifact.projectKind === "wiki" ? ["view", "comment", "edit", "publish"] : ["view", "comment", "publish"];
   const restricted = data?.project?.restricted;
   // Until it's loaded, the links stay hidden rather than appear and vanish.
   const outside = data?.canShareOutside === true;
@@ -504,10 +506,13 @@ function RestrictConfirm({
 /** A whole project's access: the same sheet as an artifact's, a level higher (05·1). */
 export function ProjectShareSheet({
   slug,
+  wiki,
   onClose,
   onChanged,
 }: {
   slug: string;
+  /** A wiki's sharing offers Can edit, which gives edit on its pages. */
+  wiki?: boolean;
   onClose(): void;
   onChanged(): void;
 }) {
@@ -519,7 +524,9 @@ export function ProjectShareSheet({
   const action = useAction({ after: access.refresh });
   const { run, error } = action;
   const data = access.data.value;
-  const levels: Level[] = ["view", "comment", "publish", "manage"];
+  const levels: Level[] = wiki
+    ? ["view", "comment", "edit", "publish", "manage"]
+    : ["view", "comment", "publish", "manage"];
   const set = (subject: string, level: Level) =>
     run(() => api(`${path}/${subject}`, { method: "PUT", json: { permission: level } }));
   const invite = (email: string) =>
@@ -679,8 +686,9 @@ export function ProjectShareSheet({
       <InheritedRows rows={data.inherited} />
       {error.value && <p class="err">{error.value}</p>}
       <p class="fn">
-        Reviewers and outside people stop at commenting. Can publish adds new artifacts, and only managers
-        change someone else's.
+        Reviewers and outside people stop at commenting.
+        {wiki ? " Can edit changes this wiki's pages in the browser." : ""} Can publish adds new artifacts,
+        and only managers change someone else's.
       </p>
       {action.sheet}
     </Sheet>

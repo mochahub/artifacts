@@ -7,6 +7,7 @@ import { api, post } from "../api.ts";
 import { LoadFailed } from "../components/placeholder.tsx";
 import { Sheet } from "../components/sheet.tsx";
 import { PageCapsule } from "../components/shell.tsx";
+import { useEditing } from "../editing/entry.tsx";
 import { capitalize, plural } from "../format.ts";
 import { articleUrl, artifactHref, renderUrl } from "../paths.ts";
 import type { Remote } from "../poll.ts";
@@ -114,6 +115,22 @@ export function ArticleView({
     if (first) requestAnimationFrame(() => first.scrollIntoView({ block: "center", behavior: "smooth" }));
   };
   const canComment = artifact.permissions.comment && latest;
+  const editing = useEditing({
+    artifact,
+    pageKey: page.key,
+    version,
+    latest,
+    body,
+    loaded: loaded.value,
+    links: links.value,
+    onComment(ask) {
+      if (ask) draft.value = { pageKey: page.key, anchor: null, where: page.title ?? page.key };
+      else picking.value = true;
+    },
+    onRead() {
+      attempt.value += 1;
+    },
+  });
   const where = (key: string) =>
     `${page.title ?? page.key} / ${page.outline?.find((o) => o.id === key.split("/")[0])?.title ?? key}`;
 
@@ -264,6 +281,7 @@ export function ArticleView({
             )}
           </div>
         )}
+        {editing.banner}
         <div class="meta">
           <span>{page.title ?? page.key}</span>
           <span>{page.readingMinutes} min read</span>
@@ -391,7 +409,10 @@ export function ArticleView({
           </div>
         </div>
       )}
-      <div ref={bar} class={`vbar glass liquid${draft.value ? " hidden" : ""}`}>
+      <div
+        ref={bar}
+        class={`vbar glass liquid${draft.value ? " hidden" : ""}${editing.key ? " can-edit" : ""}`}
+      >
         <i ref={pool} class="pool" />
         <button
           type="button"
@@ -411,7 +432,7 @@ export function ArticleView({
         {canComment && (
           <button
             type="button"
-            class="vb"
+            class="vb comment-key"
             aria-pressed={picking.value}
             onClick={() => {
               picking.value = !picking.value;
@@ -432,7 +453,9 @@ export function ArticleView({
           <span class="l">Comments</span>
           {review.openCount > 0 && <b class="count">{review.openCount}</b>}
         </button>
+        {editing.key}
       </div>
+      {editing.overlay}
       {picking.value && <div class="hint glass liquid thick">Tap a paragraph</div>}
       {selection.value && !draft.value && (
         <button
