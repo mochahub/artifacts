@@ -143,6 +143,10 @@ export function Editor({ artifact, pageKey, state: initial, sources, onClose }: 
       () => {
         suggestions.value = suggestions.value.filter((s) => s.id !== id);
         if (view.current) setSuggestions(view.current, suggestions.value);
+        // The card's button is gone and took the focus with it; a keyboard's ⌘S and ⌘K need the editor back.
+        // A phone's would raise the keyboard, so only a pointer that hovers gets it.
+        if (view.current && document.activeElement === document.body && matchMedia("(pointer: fine)").matches)
+          view.current.focus();
         notice.value = verb === "accept" ? "Accepted" : "Rejected";
         refreshAuthors();
       },
