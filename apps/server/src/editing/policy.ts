@@ -161,4 +161,20 @@ export async function agentPolicy(
   return decide(await basePolicy(deps, caller, artifact));
 }
 
+/**
+ * Steps 2 and 3 again, under the page's lock, for a policy read before it. A switch to Write or Pair is
+ * saved under the same lock, so an operation never lands after one has been.
+ */
+export async function presenceAgain(deps: Deps, artifactId: string, policy: Policy): Promise<Policy> {
+  if (policy.edits === "refused") return policy;
+  const present = await freshPresence(deps, artifactId);
+  const heldBlocks = new Set(present.flatMap((row) => row.blocks));
+  const held = (blockId: string) => heldBlocks.has(blockId);
+  if (present.some((row) => row.mode === "write"))
+    return { edits: "refused", reason: "writing", text: POLICY_TEXT.writing, held };
+  if (present.some((row) => row.mode === "pair"))
+    return { edits: "suggestion", reason: "pair", text: POLICY_TEXT.pair, held };
+  return { ...policy, held };
+}
+
 export { ownsRun };

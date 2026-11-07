@@ -326,7 +326,7 @@ authorRuns(node: ProseMirrorJSON): { s: number; e: number; a: string; t: number 
 
 **`edit_presence`**, `(artifact_id, connection_id)`:
 - `person_id`, `mode`, `blocks` (the caret's block, then the pending blocks), `replica` and `seen_at`.
-- It is written when a connection opens, when its mode or caret block changes (at most once a second), and every `EDIT_HEARTBEAT_MS`. It is deleted on close.
+- It is written when a connection opens, when its mode changes (at once), when its caret block changes (at most once a second), and every `EDIT_HEARTBEAT_MS`. It is deleted on close.
 - The jobs sweep deletes rows older than 5 × `PRESENCE_TTL_MS`.
 
 **`edit_atoms`**, `(artifact_id, hash)`: `kind`, `source` and `svg`.
@@ -572,6 +572,7 @@ These refine the rules above. The code is in `apps/server/src/realtime/sync.ts`,
 - **Epoch 0** is what `DocState` reports before the first seed. A client that connects with it gets the draft just seeded, not `reset`.
 - **Limits** are per replica: `EDIT_SOCKETS_PER_PERSON` and `EDIT_EDITORS_MAX` count this replica's connections. Bun's own payload limit is twice `EDIT_UPDATE_MAX`, so the handler can close with 4413 instead of Bun's 1009.
 - **Presence** starts in mode `write` until the client's `control mode` arrives. The provider sends it right after `hello`.
+- **Modes and agents.** The opening row and a switch to Write or Pair are written under the page's `content` lock, which an agent's operation holds while it applies. The operation reads presence again under that lock, so none lands after the switch is saved. Writes to one connection's row go in order. An agent sees the new mode once it is saved, so a test waits for `agents` in a page read, never for a fixed time.
 - **Checking authors.** Every inserted text range must carry an `author` mark, with a `t` no more than 10 minutes ahead. The check is on the authorship that results, not on which ops set it. A change to the author of existing text is allowed when it sets a known key, and it may never remove the author. y-prosemirror diffs text by characters, so typing a letter equal to the one after the caret marks the old letter as the typist's and inserts the new one with the old author. Text may carry another author's key only up to the most characters that key has had in the document. So a forged key that gains words is still refused with 4400. A writer can claim existing words as their own; that costs no one their words. A move, a change of block type and an undo re-insert others' words, so "only the connection's own key" would refuse them. Pastes carry no authors: `authorPlugin` strips them, so a paste is the paster's.
 - **Shadow document.** Each client update is applied first to a copy of the document. Only an update that passes all checks reaches the document editors see. A refused one closes with 4400, and the copy is rebuilt.
 - **Nothing unsaved is shown.** A checked update waits in the shadow until it is persisted. Only then does it reach the document other editors and new connections see, along with any id fix it needs. If the write fails, the shadow forgets it, and the socket closes with 1011. The client still has the change and sends it again on reconnect.

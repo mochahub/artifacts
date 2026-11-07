@@ -37,7 +37,7 @@ import {
   validate,
   yToDoc,
 } from "./model.ts";
-import { agentPolicy, type Policy } from "./policy.ts";
+import { agentPolicy, type Policy, presenceAgain } from "./policy.ts";
 import {
   type Actor,
   authorKey,
@@ -462,7 +462,7 @@ export async function applyOps(
     policy = await agentPolicy(deps, caller, artifact, { run: request.run, suggest: request.suggest });
     actor = editActor(caller, request.agent ?? null);
   }
-  const agents: AgentPolicy = { edits: policy.edits, reason: policy.reason, text: policy.text };
+  let agents: AgentPolicy = { edits: policy.edits, reason: policy.reason, text: policy.text };
 
   if (policy.edits === "refused") {
     const reason: Reason = policy.reason === "writing" ? "writing" : "invalid";
@@ -477,9 +477,23 @@ export async function applyOps(
       agents,
     };
   }
-  const runId = policy.reason === "run" ? (request.run ?? null) : null;
+  let runId = policy.reason === "run" ? (request.run ?? null) : null;
 
   const outcome = await withDocLock(deps, artifact.id, async (lock) => {
+    if (!accept) {
+      policy = await presenceAgain(deps, artifact.id, policy);
+      agents = { edits: policy.edits, reason: policy.reason, text: policy.text };
+      if (policy.reason !== "run") runId = null;
+      if (policy.edits === "refused") {
+        const text = policy.text;
+        return {
+          results: request.ops.map((_, index) => refused(index, "writing", text)),
+          seq: lock.row?.seq ?? 0,
+          last: null,
+          refused: true,
+        };
+      }
+    }
     const { ydoc, row } = await loadDoc(deps, artifact.id, lock);
     const key = accept?.authorKey ?? (await authorKey(deps, artifact.id, actor, request.sources ?? [], lock));
     const mark: Mark = {
@@ -841,10 +855,10 @@ export async function applyOps(
       if (suggested) await log("suggested", { count: suggested, ...(runId ? { run: runId } : {}) });
     }
     const last = [...results].reverse().find((r) => r.block)?.block ?? null;
-    return { results, seq, last };
+    return { results, seq, last, refused: false };
   });
 
-  if (!accept && deps.docs && "agentPresence" in deps.docs) {
+  if (!accept && !outcome.refused && deps.docs && "agentPresence" in deps.docs) {
     (
       deps.docs as {
         agentPresence(artifactId: string, author: unknown, block: string | null, run: string | null): void;
