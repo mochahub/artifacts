@@ -43,11 +43,19 @@ export function WikiHome({ slug }: { slug: string }) {
             </span>
           )}
         </div>
-        <div class="ss">
-          {page.role === "source"
-            ? host(page.origin)
-            : `${plural(page.backlinks, "backlink")}, ${page.open} open comments`}
-        </div>
+        {/* Only what's there: a row of zeros on every page is noise on a phone. */}
+        {(page.role === "source" ? page.origin : page.backlinks || page.open) ? (
+          <div class="ss">
+            {page.role === "source"
+              ? host(page.origin)
+              : [
+                  page.backlinks > 0 && `Linked from ${plural(page.backlinks, "page")}`,
+                  page.open > 0 && plural(page.open, "open comment"),
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+          </div>
+        ) : null}
         {page.untrusted && (
           <span class="word">
             <ShieldAlert />

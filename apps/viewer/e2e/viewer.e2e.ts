@@ -86,10 +86,9 @@ test("the artifact shows what changed, with the page switcher and version histor
   await expect(page.getByText("9 pages")).toBeVisible();
   // The detail page lives in the shell: tabs on a phone, the rail on a desktop, and the project by name.
   await expect(page.getByRole("navigation", { name: "Main" }).first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "Camera Buddy", exact: true })).toHaveAttribute(
-    "href",
-    "/camerabuddy",
-  );
+  await expect(
+    page.getByRole("main").getByRole("link", { name: "Camera Buddy", exact: true }).first(),
+  ).toHaveAttribute("href", "/camerabuddy");
   await expect(page.getByRole("button", { name: "More" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Approve or request changes" })).toHaveText(
     "Approve or request changes",
