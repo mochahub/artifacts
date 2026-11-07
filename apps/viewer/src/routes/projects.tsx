@@ -62,14 +62,12 @@ function List() {
               {projects.map((project) => (
                 <a class="li" href={projectHref(project.slug)} key={project.id}>
                   <ProjectTile name={project.name} />
-                  <div class="grow">
+                  <div class="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                     <div class="tt">{project.name}</div>
                     <div class="ss">
                       {plural(project.artifactCount, "artifact")}, {ago(project.updatedAt)}
                       {project.kind === "wiki"
-                        ? project.restricted
-                          ? ", Personal wiki"
-                          : ", Wiki"
+                        ? `, Wiki, ${project.audience?.label ?? ""}`
                         : project.restricted && ", restricted"}
                     </div>
                   </div>

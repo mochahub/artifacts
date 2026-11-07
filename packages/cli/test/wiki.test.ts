@@ -27,7 +27,14 @@ test("wiki help lists each operation and bad arguments stop before sign-in", asy
 
 test("wiki output shows summaries, trust and actionable findings", () => {
   const space = WikiSpace.parse({
-    project: { slug: "brain", name: "Brain", personal: true, canPublish: true, canShare: true },
+    project: {
+      slug: "brain",
+      name: "Brain",
+      audience: { kind: "me", label: "Only you" },
+      guidance: { edits: "direct", text: "" },
+      canPublish: true,
+      canShare: true,
+    },
     rules: null,
     pages: [],
     sources: [
@@ -39,7 +46,7 @@ test("wiki output shows summaries, trust and actionable findings", () => {
         role: "source",
         untrusted: true,
         sources: [],
-        origin: null,
+        origin: "https://example.com/clip",
         version: 1,
         updatedAt: new Date().toISOString(),
         publishedBy: "Person",
@@ -52,9 +59,9 @@ test("wiki output shows summaries, trust and actionable findings", () => {
     garden: [{ kind: "wanted", slug: "topic", message: "Write this page.", refs: [] }],
   });
   const output = wikiSummary(space).join("\n");
-  expect(output).toContain("Brain (personal)");
+  expect(output).toContain("Brain (Only you)");
   expect(output).toContain("No rules page yet.");
-  expect(output).toContain("clip  Clip [untrusted]: A web source");
+  expect(output).toContain("clip  Clip [untrusted]: A web source (https://example.com/clip)");
   expect(output).toContain("wanted topic: Write this page.");
   expect(
     linksSummary({
@@ -79,7 +86,14 @@ test("wiki guide ships in the skill and hosted guide registry", () => {
 test("empty wiki sections say none", () => {
   expect(
     wikiSummary({
-      project: { slug: "brain", name: "Brain", personal: false, canPublish: true, canShare: true },
+      project: {
+        slug: "brain",
+        name: "Brain",
+        audience: { kind: "org", label: "Everyone in Mochahub" },
+        guidance: { edits: "suggestion", text: "" },
+        canPublish: true,
+        canShare: true,
+      },
       rules: null,
       pages: [],
       sources: [],
@@ -87,7 +101,7 @@ test("empty wiki sections say none", () => {
       log: [],
     }),
   ).toEqual([
-    "Brain",
+    "Brain (Everyone in Mochahub)",
     "Rules",
     "  No rules page yet.",
     "Pages",
