@@ -29,6 +29,7 @@ import { notifyPublished } from "../push/notify.ts";
 import { reanchorThreads } from "../review/reanchor.ts";
 import { writeContent } from "../versions/content.ts";
 import { blockHashes, type Changes, changes, frameHashes, hashesOf, NOTHING } from "../versions/diff.ts";
+import { validateWikiSources } from "../wiki/service.ts";
 import { IMMUTABLE, knownBlobs, putBlob, verifyBlobs } from "./blobs.ts";
 
 const UPLOAD_INFO = "upload";
@@ -303,6 +304,8 @@ export function createPublisher(deps: Deps) {
         throw nameTaken();
       }
       if (!project) throw new Error("no project row");
+      if (project.kind === "wiki" && body.wiki)
+        await validateWikiSources(deps, org.id, caller, project.id, ticket.slug, body.wiki);
       // Projects made before the CLI sent a remote learn it from their next publish.
       if (!project.repo && ticket.repo) {
         await tx.update(projects).set({ repo: ticket.repo }).where(eq(projects.id, project.id));

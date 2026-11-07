@@ -186,7 +186,12 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
     if (!object) throw new ToolError("The payload isn't there. Upload it again.");
     try {
       return Payload.parse(JSON.parse(new TextDecoder().decode(object.body)));
-    } catch {
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const issues = error.issues.filter((issue) => issue.path[0] === "wiki");
+        if (issues.length)
+          throw new ToolError(issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("\n"));
+      }
       throw new ToolError("The payload isn't one artifacts pack made.");
     }
   }
@@ -451,7 +456,10 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
             .map((k) => [k, input[k]]),
         );
         const wiki = Object.keys(wikiFields).length ? WikiMeta.safeParse(wikiFields) : null;
-        if (wiki && !wiki.success) throw new ToolError("The wiki metadata isn't valid.");
+        if (wiki && !wiki.success)
+          throw new ToolError(
+            wiki.error.issues.map((issue) => `wiki.${issue.path.join(".")}: ${issue.message}`).join("\n"),
+          );
         const wikiMeta = wiki?.success ? wiki.data : undefined;
         const { project, slug, title } = fields.data;
         // Before anything is stored: the permission check, and the same one prepare and commit run.
