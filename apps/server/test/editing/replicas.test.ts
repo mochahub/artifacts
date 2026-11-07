@@ -5,6 +5,7 @@ import { FRAGMENT, topBlocks } from "@artifacts/doc/ydoc";
 import {
   CLI_SCOPES,
   DocState,
+  EDIT_BLOCKS_MAX,
   EDIT_MESSAGES_PER_SECOND,
   EDIT_UPDATE_MAX,
   SYNC_MESSAGE,
@@ -635,5 +636,30 @@ describe("sync across replicas", () => {
       await Bun.sleep(400);
     }
     await until(() => big.codes.includes(4413), 10_000);
+  }, 30_000);
+
+  test("a page past EDIT_BLOCKS_MAX refuses growth with a too_large error before the close", async () => {
+    const fat = await ready(await open(a));
+    fat.provider.setMode("delegate");
+    const errors: string[] = [];
+    (fat.provider as unknown as { on(e: "control", l: (c: { t: string; code?: string }) => void): void }).on(
+      "control",
+      (c) => {
+        if (c.t === "error" && c.code) errors.push(c.code);
+      },
+    );
+    const fragment = fat.ydoc.getXmlFragment(FRAGMENT);
+    fat.ydoc.transact(() => {
+      fragment.insert(
+        fragment.length,
+        Array.from({ length: EDIT_BLOCKS_MAX }, (_, i) => {
+          const el = new Y.XmlElement("paragraph");
+          el.setAttribute("id", `~fill${String(i).padStart(5, "0")}`);
+          return el;
+        }),
+      );
+    });
+    await until(() => fat.codes.includes(4413), 10_000);
+    expect(errors).toEqual(["too_large"]);
   }, 30_000);
 });

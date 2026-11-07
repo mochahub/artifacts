@@ -10,13 +10,13 @@ import {
   editDocs,
   editPresence,
   pages,
-  people,
   threads,
   tokens,
   versions,
 } from "../../src/db/schema.ts";
 import { sweepDrafts } from "../../src/jobs/editing.ts";
 import { claim, json, mcp, OWNER, orgToken, signIn, startTestServer, type TestServer } from "../helpers.ts";
+import { makePerson } from "../publish-helper.ts";
 
 /** 13, "Checkpoints": agent and quiet ones, fixes, legacy threads, restore and publish over a draft, carry-over. */
 describe("checkpoints", () => {
@@ -160,8 +160,11 @@ describe("checkpoints", () => {
     expect(await version(6)).toMatchObject({ checkpoint: null, restoredFrom: 1 });
   });
 
-  test("an organization token's fix is replied to as the person who made the token", async () => {
+  test("an organization token's fix is replied to as the person who made the token, not the publisher", async () => {
     const made = await orgToken(t, owner, { scopes: ["read", "comment", "edit"] });
+    // Made by someone other than the page's publisher, so the publisher can't be the fallback.
+    const maker = await makePerson(t, orgId, "admin");
+    await t.server.db.update(tokens).set({ createdBy: maker.id }).where(eq(tokens.id, made.id));
     const thread = await json<{ n: number }>(
       await t.api(`/api/artifacts/${id}/threads`, {
         method: "POST",
@@ -190,11 +193,7 @@ describe("checkpoints", () => {
       .select({ author: comments.authorPersonId, marksFixed: comments.marksFixed })
       .from(comments)
       .where(and(eq(comments.threadId, row?.id as string), eq(comments.marksFixed, true)));
-    const [me] = await t.server.db
-      .select({ id: people.id })
-      .from(people)
-      .where(eq(people.email, OWNER.email));
-    expect(reply?.author).toBe(me?.id);
+    expect(reply?.author).toBe(maker.id);
   });
 
   test("a draft that can't be saved refuses a restore, discardDraft drops it and logs the loss, and the sweep backs off", async () => {

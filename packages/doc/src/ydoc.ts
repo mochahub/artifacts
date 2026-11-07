@@ -103,6 +103,9 @@ function checkShape(node: ProseMirrorJSON, path: string): string | null {
   return null;
 }
 
+/** The reason `validate` gives for a page over `EDIT_BLOCKS_MAX`. */
+export const TOO_MANY_BLOCKS = "too many blocks";
+
 /**
  * Whether a draft is one the server can keep (13, "Writing an update"): every top-level block (or the
  * `touched` ones) is valid in the schema, with no unknown attribute or mark, atoms are of a known kind
@@ -115,7 +118,7 @@ export function validate(
   opts: { atoms?: (hash: string) => boolean } = {},
 ): { ok: true } | { ok: false; reason: string } {
   const fragment = ydoc.getXmlFragment(FRAGMENT);
-  if (fragment.length > EDIT_BLOCKS_MAX) return { ok: false, reason: "too many blocks" };
+  if (fragment.length > EDIT_BLOCKS_MAX) return { ok: false, reason: TOO_MANY_BLOCKS };
   if (fragment.length === 0) return { ok: false, reason: "an empty document" };
   for (const [index, el] of fragment.toArray().entries()) {
     if (!(el instanceof Y.XmlElement)) return { ok: false, reason: `block ${index} isn't an element` };

@@ -757,7 +757,11 @@ export async function applyOps(
     }
     // Threads a direct edit addresses are marked fixed by the checkpoint that carries it (13, "Checkpoints").
     if (!accept && request.fixes?.length && results.some((r) => r.outcome === "applied")) {
-      await queueFixes(lock, request.fixes, { personId: actor.personId, agent: actor.agent });
+      await queueFixes(lock, request.fixes, {
+        personId: actor.personId,
+        agent: actor.agent,
+        tokenId: actor.tokenId,
+      });
     }
     if (meta) {
       const merged = { ...(lock.row?.meta ?? {}), ...meta };

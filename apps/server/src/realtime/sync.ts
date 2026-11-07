@@ -15,7 +15,7 @@ import {
   syncStep2,
   syncUpdate,
 } from "@artifacts/doc/sync";
-import { FRAGMENT, fixIds, SERVER_ORIGIN, validate } from "@artifacts/doc/ydoc";
+import { FRAGMENT, fixIds, SERVER_ORIGIN, TOO_MANY_BLOCKS, validate } from "@artifacts/doc/ydoc";
 import {
   AGENT_PRESENCE_MS,
   EDIT_COALESCE_MS,
@@ -758,9 +758,13 @@ export class DocHub {
         held.collect = null;
       }
       let problem = collect.problem;
+      let overBlocks = false;
       if (!problem && collect.touched.size > 0) {
         const result = validate(held.shadow, collect.touched, { atoms: (hash) => held.atoms.has(hash) });
-        if (!result.ok) problem = result.reason;
+        if (!result.ok) {
+          problem = result.reason;
+          overBlocks = result.reason === TOO_MANY_BLOCKS;
+        }
       }
       let counts: Map<string, number> | null = null;
       if (!problem && collect.foreign) {
@@ -774,6 +778,7 @@ export class DocHub {
         held.size = Y.encodeStateAsUpdate(held.shadow).length;
         tooLarge = held.size > EDIT_DOC_MAX;
       }
+      if (overBlocks) tooLarge = true;
       if (problem || tooLarge) {
         // The shadow took the bad update: start it again from the document everyone sees.
         held.shadow.destroy();
@@ -782,7 +787,11 @@ export class DocHub {
         if (tooLarge) {
           this.write(
             conn,
-            controlMessage({ t: "error", code: "too_large", message: "This page is too large to grow." }),
+            controlMessage({
+              t: "error",
+              code: "too_large",
+              message: overBlocks ? "This page has too many blocks." : "This page is too large to grow.",
+            }),
           );
           return this.close(conn, SYNC_CLOSE.tooLarge, "too large");
         }
