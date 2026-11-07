@@ -12,22 +12,27 @@ export function wikiSummary(space: WikiSpace): string[] {
     "Rules",
     ...(space.rules ? [page(space.rules)] : ["  No rules page yet."]),
     "Pages",
-    ...space.pages.map(page),
+    ...(space.pages.length ? space.pages.map(page) : ["  none"]),
     "Sources",
-    ...space.sources.map(page),
+    ...(space.sources.length ? space.sources.map(page) : ["  none"]),
     "Garden",
-    ...space.garden.map((f) => `${f.kind} ${f.slug}: ${f.message}`),
+    ...(space.garden.length ? space.garden.map((f) => `${f.kind} ${f.slug}: ${f.message}`) : ["  none"]),
   ];
 }
 
 export function linksSummary(links: ArtifactLinks): string[] {
-  return (["outgoing", "backlinks", "sources"] as const).flatMap((kind) => [
-    kind === "outgoing" ? "Links" : kind === "backlinks" ? "Linked from" : "Sources",
-    ...links[kind].map(
-      (p) =>
-        `  ${p.project}/${p.slug}${p.title ? `  ${p.title}` : ""}${!p.exists ? " [wanted]" : ""}${p.untrusted ? " [untrusted]" : ""}${p.summary ? `: ${p.summary}` : ""}`,
-    ),
-  ]);
+  return [
+    `Role: ${links.role}${links.untrusted ? " [untrusted]" : ""}${links.origin ? ` (${links.origin})` : ""}`,
+    ...(["outgoing", "backlinks", "sources"] as const).flatMap((kind) => [
+      kind === "outgoing" ? "Links" : kind === "backlinks" ? "Linked from" : "Sources",
+      ...(links[kind].length
+        ? links[kind].map(
+            (p) =>
+              `  ${p.project}/${p.slug}${p.title ? `  ${p.title}` : ""}${!p.exists ? " [wanted]" : ""}${p.untrusted ? " [untrusted]" : ""}${p.summary ? `: ${p.summary}` : ""}${p.origin ? ` (${p.origin})` : ""}`,
+          )
+        : ["  none"]),
+    ]),
+  ];
 }
 
 export async function wikiCommand(

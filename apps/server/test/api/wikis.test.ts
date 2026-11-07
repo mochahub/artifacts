@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ArtifactLinks, PublishPrepared, PublishResult, WikiSpace } from "@artifacts/schema";
 import { articleRecords, buildArticle } from "@artifacts/schema/article";
 import { and, eq } from "drizzle-orm";
+import { GUIDES } from "../../../../skill/index.ts";
 import { artifacts, tokens, versions } from "../../src/db/schema.ts";
 import { claim, mcp, startTestServer, type TestServer } from "../helpers.ts";
 import { file, makePerson, publish } from "../publish-helper.ts";
@@ -95,6 +96,77 @@ describe("wikis", () => {
     expect(clean.garden.some((f: { kind: string }) => f.kind === "untrusted" || f.kind === "stale")).toBe(
       false,
     );
+  });
+  test("wiki list counts match detail pages, excluding rules and sources", async () => {
+    await create("counts");
+    await article("rules", "# Rules", { project: "counts" });
+    for (const count of [0, 1]) {
+      if (count) {
+        await article("topic", "# Topic", { project: "counts" });
+        await article("notes", "# Notes", { project: "counts", role: "source" });
+      }
+      const detail = WikiSpace.parse(
+        JSON.parse((await call("artifacts_wiki", { wiki: "counts" })).content[1]?.text ?? "null"),
+      );
+      expect(detail.rules?.slug).toBe("rules");
+      expect(detail.pages).toHaveLength(count);
+      expect(detail.sources).toHaveLength(count);
+      const listed = JSON.parse((await call("artifacts_wiki", {})).content[1]?.text ?? "null");
+      expect(listed).toContainEqual({
+        slug: "counts",
+        name: "counts",
+        personal: false,
+        pages: detail.pages.length,
+        sources: detail.sources.length,
+      });
+    }
+  });
+  test("the hosted starter rules publish without wanted findings", async () => {
+    const resource = (await (
+      await mcp(t, token, "resources/read", { uri: "artifacts://guides/wiki" })
+    ).json()) as { result: { contents: { text: string }[] } };
+    const guide = resource.result.contents[0]?.text;
+    expect(guide).toBe(GUIDES.wiki);
+    const starter = /```markdown\n([\s\S]*?)\n```/.exec(guide ?? "")?.[1];
+    expect(starter).toContain("# Wiki rules");
+    await create("starter");
+    expect((await article("rules", starter ?? "", { project: "starter" })).isError).not.toBe(true);
+    await article("notes", "# Notes", { project: "starter", role: "source" });
+    const space = WikiSpace.parse(await (await t.api("/api/wikis/starter", { bearer: token })).json());
+    expect(space.rules?.slug).toBe("rules");
+    expect(space.garden).toEqual([]);
+    const links = JSON.parse(
+      (await call("artifacts_wiki_links", { artifact: "starter/rules" })).content[1]?.text ?? "null",
+    );
+    expect(links.outgoing).toEqual([]);
+  });
+  test("reserved and inaccessible cross-wiki targets create no local wanted finding", async () => {
+    await create("link-scope");
+    await create("hidden-links", { personal: true });
+    await article("secret", "# Secret", { project: "hidden-links" });
+    await article("topic", "[[Settings]] [[hidden-links/Secret]]", { project: "link-scope" });
+    const other = await makePerson(t, orgId, "member");
+    const links = ArtifactLinks.parse(
+      JSON.parse(
+        (await call("artifacts_wiki_links", { artifact: "link-scope/topic" }, other.token)).content[1]
+          ?.text ?? "null",
+      ),
+    );
+    expect(links.outgoing).toEqual([
+      {
+        project: "hidden-links",
+        slug: "secret",
+        exists: false,
+        title: null,
+        summary: null,
+        untrusted: false,
+        origin: null,
+      },
+    ]);
+    const space = WikiSpace.parse(
+      await (await t.api("/api/wikis/link-scope", { bearer: other.token })).json(),
+    );
+    expect(space.garden.filter((f) => f.kind === "wanted")).toEqual([]);
   });
   test("API article links survive restore and hidden backlinks never count", async () => {
     const built = buildArticle({

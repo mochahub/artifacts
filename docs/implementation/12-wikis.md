@@ -113,14 +113,16 @@ These are in `apps/server/src/mcp/routes.ts`, and their specs are in `packages/s
 | `artifacts_comment` | comment | `artifact`, `message`, `page?` | Opens a page-level thread (no anchor) on the latest version, as agent "Connector", and answers `{ id }` with the thread's number. For findings from a garden pass |
 | `artifacts_publish_article` | publish | Adds `role?`, `sources?`, `origin?`, `untrusted?` | As before. The fields are checked with `WikiMeta`, written to the manifest's `wiki` and the commit's `wiki`, and wiki links resolve against `project` |
 
+The list's `pages` count excludes `rules`, matching `WikiSpace.pages`; `sources` counts `WikiSpace.sources`.
+
 The server instructions add one sentence: in a wiki, call `artifacts_wiki` first and follow its rules page.
 
 ## CLI
 
 - `artifacts publish` and `artifacts pack` pass `project` to `buildArticle`, and `wiki` (from the manifest) in the commit body.
 - `artifacts wiki create <slug> [--name <name>] [--personal]` calls `POST /api/wikis`.
-- `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources and the findings.
-- `artifacts wiki links <project/slug> [--json]` prints the links, backlinks and sources.
+- `artifacts wiki show <slug> [--json]` prints the rules page's summary, the pages, the sources and the findings. Empty Pages, Sources and Garden sections say `none`.
+- `artifacts wiki links <project/slug> [--json]` prints the artifact's role, untrusted mark and origin, then the links, backlinks and sources with origins when present. Empty sections say `none`.
 - The skill's `references/wiki.md` holds the agent's workflows: ingest, ask, garden, and a starter rules page. The hosted MCP serves it as `artifacts://guides/wiki`.
 
 ## Viewer

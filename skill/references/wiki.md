@@ -6,6 +6,8 @@ Use a wiki for knowledge that grows across sources and conversations. A wiki is 
 
 Call `artifacts_wiki` with the wiki slug, or run `artifacts wiki show <slug>`. Read the `rules` page before writing. Follow its purpose, page types and citation rules. If none exists, publish the starter below as an article with slug `rules`, adapted to the person's purpose. The server derives the index and change log; do not maintain copies as pages.
 
+MCP tool names appear with a connector prefix. If they are not directly listed, find them with ToolSearch "artifacts".
+
 Create a company wiki with `artifacts wiki create brain --name "Company brain"`, or a personal one with `artifacts wiki create my-notes --personal`. A personal wiki is restricted to its creator and admins initially. Never move personal content into a company wiki unless the person asks.
 
 ## INGEST
@@ -16,19 +18,19 @@ Then write or update the pages it touches: a summary page and relevant entity or
 
 ## ASK
 
-Search the wiki, then read the matching pages and their sources. Answer with links to the pages that support the answer. File a useful, reusable answer back as a page, citing its sources and linking related pages. Follow the rules page's scope; do not store a passing chat remark as knowledge.
+Search the wiki with a few keywords, or quote a phrase to keep its words together (for example, `"pricing plans"`). Then read the matching pages and their sources. Answer with links to the pages that support the answer. File a useful, reusable answer back as a page, citing its sources and linking related pages. Follow the rules page's scope; do not store a passing chat remark as knowledge.
 
 ## GARDEN
 
 Read the garden in `artifacts_wiki` or `artifacts wiki show`. Findings mean:
 
-- `untrusted`: a page cites outside material. Check claims and preserve the source's trust mark.
+- `untrusted`: a page cites an untrusted source. Check claims and preserve the source's trust mark. The finding stays while the citation does; it is a reminder, not a task to clear.
 - `stale`: a cited source has a newer version. Read it and update the page.
-- `wanted`: a link names a page that is not visible. Write it if there is evidence; otherwise correct the link.
+- `wanted`: a link names a page that is not visible. Write what the evidence supports, say what is unknown, and open a page thread for a missing decision. Correct the link if it is wrong.
 - `orphan`: nothing visible links to the page. Connect it where useful.
 - `unsourced`: a page cites no sources although this wiki has sources. Add the sources that support it.
 
-Fix what you can by republishing. For a decision or missing evidence that needs a person, use `artifacts_comment` on the artifact to open a page-level thread. Include the finding and the question. Never resolve threads; people resolve them.
+The `rules` page is exempt from `orphan` and `unsourced`. Republishing creates a new version even if nothing changed and clears `stale`; only republish after reading the changed source and updating the page as needed. For a decision or missing evidence that needs a person, use `artifacts_comment` on the artifact to open a page-level thread. Include the finding and the question. Never resolve threads; people resolve them.
 
 ## Metadata and links
 
@@ -55,9 +57,11 @@ For a raw source:
 }
 ```
 
-Role defaults to `page`. Sources are up to 50 slugs in this wiki. Origin is an HTTP or HTTPS URL. The metadata has meaning only inside a wiki. With MCP, `artifacts_publish_article` accepts `role`, `sources`, `origin` and `untrusted` directly.
+Role defaults to `page`. Sources are up to 50 slugs naming existing, readable artifacts with role `source` in this wiki; page targets and self-citations are refused. Origin is an HTTP or HTTPS URL. The metadata has meaning only inside a wiki. With MCP, `artifacts_publish_article` accepts `role`, `sources`, `origin` and `untrusted` directly.
 
 `[[Pricing & Plans]]` links to `/<wiki>/pricing-plans`. `[[Pricing & Plans|pricing]]` uses a label. `[[other-wiki/Team]]` links across wikis, subject to access. Targets become lowercase ASCII slugs, with punctuation replaced by hyphens, capped at 40 characters. Code spans and existing Markdown links stay intact. Use `artifacts wiki links <project/slug>` to see outgoing links, backlinks and sources.
+
+A reserved target such as `[[Settings]]` stays plain text and creates no link or finding. A link to a wiki you cannot see, such as `[[other-wiki/Page]]`, shows as not existing and creates no wanted finding in this wiki.
 
 ## Starter rules page
 

@@ -223,7 +223,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
             slug: s.project.slug,
             name: s.project.name,
             personal: s.project.personal,
-            pages: s.pages.length + (s.rules ? 1 : 0),
+            pages: s.pages.length,
             sources: s.sources.length,
           }));
         const space = spaces[0];
