@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { artifacts, teams } from "../../../apps/server/src/db/schema.ts";
 import { mcp, type TestServer } from "../../../apps/server/test/helpers.ts";
 import { makePerson } from "../../../apps/server/test/publish-helper.ts";
-import { cliJson, hostedServer, sandbox } from "./sandbox.ts";
+import { cli, cliJson, hostedServer, sandbox } from "./sandbox.ts";
 
 describe("wiki search", () => {
   let t: TestServer;
@@ -97,6 +97,52 @@ describe("wiki search", () => {
     );
     expect(shared.audience.kind).toBe("team");
     expect(shared.audience.teams).toEqual([{ slug: "settings", name: "CLI team" }]);
+  });
+  test("CLI explains refusals, repeats, lists wikis and drops the deprecated field", async () => {
+    const env = { ...box.env, ARTIFACTS_TOKEN: token };
+    const run = (...args: string[]) => cli(["wiki", ...args, "--server", url], env);
+    const org = await cliJson(["wiki", "create", "cli-org", "--server", url], env);
+    expect(org.created).toBe(true);
+    expect("personal" in org).toBe(false);
+    const again = await run("create", "cli-org");
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain("Already exists: cli-org");
+    expect((await run("create", "cli-fresh")).stdout).not.toContain("Already exists");
+    const narrower = await run("create", "cli-org", "--only-me");
+    expect(narrower.code).toBe(1);
+    expect(narrower.stderr).toContain("already exists with audience");
+    expect(narrower.stderr).toContain("Share sheet");
+    for (const [args, problem] of [
+      [["create", "settings", "--only-me"], 'Wiki name "settings": this word is reserved.'],
+      [["create", "Bad_Slug"], 'Wiki name "Bad_Slug": use 1–40 characters of a-z, 0-9 and -.'],
+      [["create", "x".repeat(68)], "use 1–40 characters"],
+      [["create", "cli-bad", "--team", ""], '--team "": use 1–40 characters'],
+      [["create", "cli-bad", "--only-me", "--team", "design"], "Choose --only-me or --team, not both."],
+    ] as const) {
+      const refused = await run(...args);
+      expect(refused.code).toBe(2);
+      expect(refused.stderr).toContain(problem);
+      expect(refused.stderr).toContain("artifacts wiki create <slug>");
+    }
+    const list = await cliJson(["wiki", "list", "--server", url], env);
+    expect(list).toContainEqual({
+      slug: "wiki-qa",
+      name: "Wiki QA",
+      audience: { kind: "org", label: expect.stringContaining("Everyone in") },
+      pages: (await space()).pages.length,
+      sources: (await space()).sources.length,
+    });
+    expect(list.map((w: { slug: string }) => w.slug)).not.toContain("ordinary");
+    const text = await run("list");
+    expect(text.stdout).toContain("wiki-qa  Wiki QA (Everyone in");
+    expect((await run("list", "extra")).code).toBe(2);
+    const shown = await cliJson(["wiki", "show", "wiki-qa", "--server", url], env);
+    expect("personal" in shown.project).toBe(false);
+    const log = await run("show", "wiki-qa");
+    expect(log.stdout).toContain("\nLog\n  ");
+    const plain = await run("show", "ordinary");
+    expect(plain.code).toBe(1);
+    expect(plain.stderr).toContain("ordinary isn't a wiki. Make it one with artifacts wiki create ordinary.");
   });
   test("natural-language queries rank distinct matching terms across fields before source weights", async () => {
     const expected = ["split", "all", "three", "two", "one"];

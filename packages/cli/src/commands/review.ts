@@ -47,6 +47,12 @@ function threadJson(thread: Thread) {
 type Server = { server?: string };
 type Target = Input<"target", Server>;
 
+/** "Only you" reads as "Visible only to you"; a name that ends in a full stop doesn't get a second one. */
+export function visibleLine(audience: string) {
+  const label = audience.replace(/\.$/, "");
+  return label.startsWith("Only ") ? `Visible only to ${label.slice(5)}.` : `Visible to ${label}.`;
+}
+
 export async function statusCommand({ args: { target }, flags }: Target, out: Output) {
   const client = await signedIn(flags.server);
   const artifact = await resolveArtifact(client, target);
@@ -64,7 +70,7 @@ export async function statusCommand({ args: { target }, flags }: Target, out: Ou
     },
     () => {
       out.say(`${artifact.title}, v${status.version}`);
-      if (status.audience) out.say(`Visible to ${status.audience}.`);
+      if (status.audience) out.say(visibleLine(status.audience));
       if (status.decision === "approved")
         out.say(`Approved v${status.decisionVersion} by ${artifact.decision?.by}.`);
       if (status.decision === "changes_requested") {

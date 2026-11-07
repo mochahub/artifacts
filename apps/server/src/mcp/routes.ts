@@ -74,7 +74,7 @@ import type { Publisher } from "../publish/publisher.ts";
 import type { Review } from "../review/service.ts";
 import { VERSION } from "../version.ts";
 import { listVersions } from "../versions/list.ts";
-import { artifactLinks, createWiki, wikiSpace } from "../wiki/service.ts";
+import { artifactLinks, createWiki, notWiki, wikiSpace } from "../wiki/service.ts";
 
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 const MAX_REQUEST = 4 * 1024 * 1024;
@@ -487,7 +487,15 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
             sources: s.sources.length,
           }));
         const space = spaces[0];
-        if (!space) throw new ApiError("not_found", "Not found.");
+        if (!space) {
+          const [plain] = await deps.db
+            .select()
+            .from(projects)
+            .where(and(eq(projects.orgId, orgId), eq(projects.slug, slug ?? "")));
+          if (plain && can(caller, "project.read", await toProject(deps, plain)))
+            throw new ApiError("not_found", notWiki(plain.slug));
+          throw new ApiError("not_found", "Not found.");
+        }
         const rulesText = space.rules
           ? await readArtifact(deps, await loadArtifact(deps, orgId, caller, slug, space.rules.slug), {})
           : null;
@@ -506,7 +514,12 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
       scope: "publish",
       async run({ caller, orgId, input }) {
         const parsed = CreateWiki.safeParse(input);
-        if (!parsed.success) throw new ToolError("The wiki details aren't valid.");
+        if (!parsed.success)
+          throw new ToolError(
+            parsed.error.issues
+              .map((issue) => `${issue.path.join(".") || "wiki"}: ${issue.message}`)
+              .join("\n"),
+          );
         return (await createWiki(deps, orgId, caller, parsed.data)).body;
       },
     },

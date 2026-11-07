@@ -52,7 +52,7 @@ export async function createWiki(
           .where(and(eq(teams.orgId, orgId), eq(teams.slug, body.team)))
       : [];
     if (body.team && (!team || !can(caller, "team.read", { type: "team", id: team.id, leadIds: [] })))
-      throw new ApiError("invalid", "Choose a team you can see.");
+      throw new ApiError("invalid", "Choose a team you can see. Run artifacts teams to list them.");
   }
   const made = existing
     ? undefined
@@ -107,6 +107,16 @@ export async function createWiki(
         place.grants.some((g) => g.personId === caller.person.id && g.level === "manage"));
     if (!seesProject(caller, place) || (row.kind !== "wiki" && !manages))
       throw new ApiError("conflict", "That name is taken.");
+    // An existing audience is never narrowed or widened here, so refuse a narrower request out loud.
+    const actual = await wikiAudience(deps, caller, place);
+    const asked = onlyMe ? "me" : body.team ? "team" : "org";
+    if (AUDIENCE_RANK[asked] < AUDIENCE_RANK[actual.audience.kind])
+      throw new ApiError(
+        "conflict",
+        `${row.slug} already exists with audience "${actual.audience.label.replace(/\.$/, "")}". ` +
+          `You asked for ${asked === "me" ? "only you" : "a team"}. The audience was not changed; ` +
+          "change who can read it in the viewer's Share sheet.",
+      );
     if (row.kind !== "wiki")
       await deps.db.update(projects).set({ kind: "wiki" }).where(eq(projects.id, row.id));
   }
@@ -117,9 +127,16 @@ export async function createWiki(
       name: row.name,
       ...(await wikiAudience(deps, caller, await toProject(deps, row))),
       url: `${deps.env.publicUrl}/${row.slug}`,
+      created: !!made,
     },
   };
 }
+
+/** Said only to a caller who can read the project, so it reveals nothing. */
+export const notWiki = (slug: string) =>
+  `${slug} isn't a wiki. Make it one with artifacts wiki create ${slug}.`;
+
+const AUDIENCE_RANK = { me: 0, team: 1, org: 2 } as const;
 
 /** Audience uses actual grants; directory visibility controls which team names leave the server. */
 export async function wikiAudience(deps: Deps, caller: Caller, place: LoadedProject) {
@@ -174,9 +191,31 @@ export async function wikiAudience(deps: Deps, caller: Caller, place: LoadedProj
     },
     guidance: {
       edits: direct ? ("direct" as const) : ("suggestion" as const),
-      text: "Agent edits apply directly where only the editor can read, or on pages an owner marked agent-maintained; elsewhere they arrive as suggestions. Someone writing keeps agents out; someone pairing turns agent edits into suggestions.",
+      text: guidanceText(kind, isSelf, visibleTeams, home?.name),
     },
   };
+}
+
+/** Step 5 of the editing policy (13) in words, with the presence steps that come before it. */
+function guidanceText(
+  kind: "me" | "team" | "org",
+  isSelf: boolean,
+  teams: { name: string }[],
+  orgName = "the organization",
+) {
+  const presence =
+    "A Delegate run follows the same rule. Someone writing keeps agents out; someone pairing turns agent edits into suggestions.";
+  if (kind === "me" && isSelf)
+    return `Only you can read this wiki: agent edits apply directly, except on pages you share, where they arrive as suggestions. ${presence}`;
+  const readers =
+    kind === "me"
+      ? "Only the owner can read this wiki"
+      : kind === "org"
+        ? `Everyone in ${orgName} can read this wiki`
+        : teams.length
+          ? `${teams.map((t) => `${t.name} team`).join(", ")} can read this wiki`
+          : "Others can read this wiki";
+  return `${readers}: agent edits arrive as suggestions, except on pages an owner marked agent-maintained. ${presence}`;
 }
 
 // One latest-version join for the visible library keeps every derived count and reference private.
@@ -323,7 +362,7 @@ export async function wikiSpace(
   place: LoadedProject,
 ): Promise<WikiSpace> {
   requireCan(caller, "project.read", place);
-  if (place.row.kind !== "wiki") throw new ApiError("not_found", "Not found.");
+  if (place.row.kind !== "wiki") throw new ApiError("not_found", notWiki(place.row.slug));
   const all = await library(deps, orgId, caller);
   const visibleProject = all.filter((a) => a.project.id === place.id);
   const own = visibleProject.filter((a) => !a.row.archivedAt);

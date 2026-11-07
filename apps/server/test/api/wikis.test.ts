@@ -78,9 +78,10 @@ describe("wikis", () => {
       teams: [{ slug: "design", name: "Design" }],
     });
     expect(shared.guidance.edits).toBe("suggestion");
-    expect(WikiCreated.parse(await (await createAs("team-wiki", { onlyMe: true })).json()).audience).toEqual(
-      shared.audience,
-    );
+    expect((await createAs("team-wiki", { onlyMe: true })).status).toBe(409);
+    expect(
+      WikiCreated.parse(await (await createAs("team-wiki", { team: "design" })).json()).audience,
+    ).toEqual(shared.audience);
     expect((await createAs("conflicting", { onlyMe: true, team: "design" })).status).toBe(400);
     expect((await createAs("bad-team", { team: "absent" })).status).toBe(400);
     const reviewer = await makePerson(t, orgId, "reviewer");
@@ -237,6 +238,143 @@ describe("wikis", () => {
     expect(clean.sources).toHaveLength(0);
     expect(clean.garden.some((f: { kind: string }) => f.kind === "untrusted" || f.kind === "stale")).toBe(
       false,
+    );
+  });
+  test("a narrower audience on an existing wiki or project is refused, not ignored", async () => {
+    const owner = await makePerson(t, orgId, "member");
+    const first = await create("aud-org", {}, owner.token);
+    expect(first.status).toBe(201);
+    expect(WikiCreated.parse(await first.json()).created).toBe(true);
+    {
+      const again = await create("aud-org", {}, owner.token);
+      expect(again.status).toBe(200);
+      expect(WikiCreated.parse(await again.json()).created).toBe(false);
+    }
+    const refused = await create("aud-org", { onlyMe: true }, owner.token);
+    expect(refused.status).toBe(409);
+    const message = ((await refused.json()) as { error: { code: string; message: string } }).error;
+    expect(message.code).toBe("conflict");
+    expect(message.message).toContain("aud-org already exists with audience");
+    expect(message.message).toContain("Everyone in Mochahub");
+    expect(message.message).toContain("not changed");
+    expect(message.message).toContain("Share sheet");
+    expect(message.message).not.toContain("..");
+    expect((await create("aud-org", { personal: true }, owner.token)).status).toBe(409);
+    await t.server.db.insert(teams).values({
+      id: Bun.randomUUIDv7(),
+      orgId,
+      slug: "aud-team",
+      name: "Aud",
+      createdBy: owner.id,
+    });
+    expect((await create("aud-org", { team: "aud-team" }, owner.token)).status).toBe(409);
+    const mcpRefused = await call(
+      "artifacts_wiki_create",
+      { slug: "aud-org", name: "x", onlyMe: true },
+      owner.token,
+    );
+    expect(mcpRefused.isError).toBe(true);
+    expect(JSON.stringify(mcpRefused)).toContain("Share sheet");
+    const mcpSame = await call("artifacts_wiki_create", { slug: "aud-org", name: "x" }, owner.token);
+    expect(mcpSame.isError).not.toBe(true);
+    expect(JSON.parse(mcpSame.content[1]?.text ?? "null").created).toBe(false);
+
+    // Narrowing from a team wiki to only-me is refused too; asking wider stays idempotent.
+    await create("aud-team-wiki", { team: "aud-team" }, owner.token);
+    expect((await create("aud-team-wiki", { onlyMe: true }, owner.token)).status).toBe(409);
+    expect((await create("aud-team-wiki", { team: "aud-team" }, owner.token)).status).toBe(200);
+    expect((await create("aud-team-wiki", {}, owner.token)).status).toBe(200);
+
+    // An ordinary org-visible project is not converted by a refused only-me request.
+    await publish(t, token, { project: "aud-plain" });
+    const kindOf = async () =>
+      (await t.server.db.select().from(projects).where(eq(projects.slug, "aud-plain")))[0]?.kind;
+    expect(await kindOf()).not.toBe("wiki");
+    const plainRefused = await create("aud-plain", { onlyMe: true });
+    expect(plainRefused.status).toBe(409);
+    expect(await kindOf()).not.toBe("wiki");
+    const plain = await create("aud-plain");
+    expect(plain.status).toBe(200);
+    expect(WikiCreated.parse(await plain.json()).created).toBe(false);
+    expect(await kindOf()).toBe("wiki");
+  });
+  test("guidance text follows the audience and never names a hidden team", async () => {
+    const member = await makePerson(t, orgId, "member");
+    const text = async (slug: string, extra: object) =>
+      WikiCreated.parse(await (await create(slug, extra, member.token)).json()).guidance.text;
+    const presence =
+      "A Delegate run follows the same rule. Someone writing keeps agents out; someone pairing turns agent edits into suggestions.";
+    const suggest = `agent edits arrive as suggestions, except on pages an owner marked agent-maintained. ${presence}`;
+    expect(await text("g-me", { onlyMe: true })).toBe(
+      `Only you can read this wiki: agent edits apply directly, except on pages you share, where they arrive as suggestions. ${presence}`,
+    );
+    expect(await text("g-org", {})).toBe(`Everyone in Mochahub can read this wiki: ${suggest}`);
+    await t.server.db
+      .insert(teams)
+      .values({ id: Bun.randomUUIDv7(), orgId, slug: "g-team", name: "Guide", createdBy: member.id });
+    expect(await text("g-team-wiki", { team: "g-team" })).toBe(`Guide team can read this wiki: ${suggest}`);
+    const reviewer = await makePerson(t, orgId, "reviewer");
+    const [project] = await t.server.db.select().from(projects).where(eq(projects.slug, "g-team-wiki"));
+    if (!project) throw new Error("Missing wiki");
+    await t.server.db.insert(projectAccess).values({
+      id: Bun.randomUUIDv7(),
+      orgId,
+      projectId: project.id,
+      personId: reviewer.id,
+      permission: "view",
+      grantedBy: member.id,
+    });
+    const hidden = WikiSpace.parse(
+      await (await t.api("/api/wikis/g-team-wiki", { bearer: reviewer.token })).json(),
+    );
+    expect(hidden.project.guidance.text).toBe(`Others can read this wiki: ${suggest}`);
+    expect(JSON.stringify(hidden)).not.toContain("Guide");
+    const adminView = WikiSpace.parse(await (await t.api("/api/wikis/g-me", { bearer: token })).json());
+    expect(adminView.project.guidance).toEqual({
+      edits: "suggestion",
+      text: `Only the owner can read this wiki: ${suggest}`,
+    });
+  });
+  test("refusals say why", async () => {
+    const owner = await makePerson(t, orgId, "member");
+    const mcpError = async (args: object) => {
+      const r = await call("artifacts_wiki_create", args, owner.token);
+      expect(r.isError).toBe(true);
+      return JSON.stringify(r);
+    };
+    expect(await mcpError({ slug: "settings", name: "x" })).toContain("slug: this word is reserved");
+    expect(await mcpError({ slug: "okay", name: "x", onlyMe: true, team: "design" })).toContain(
+      "team: Choose onlyMe or team, not both.",
+    );
+    expect(await mcpError({ slug: "okay", name: "" })).toContain("name:");
+    const unknown = await create("okay", { team: "no-such-team" }, owner.token);
+    expect(unknown.status).toBe(400);
+    expect(JSON.stringify(await unknown.json())).toContain("Run artifacts teams");
+    expect(await mcpError({ slug: "okay", name: "x", team: "no-such-team" })).toContain(
+      "Run artifacts teams",
+    );
+  });
+  test("showing an ordinary project says it isn't a wiki, without revealing hidden ones", async () => {
+    const owner = await makePerson(t, orgId, "member");
+    await publish(t, owner.token, { project: "not-a-wiki" });
+    const stranger = await makePerson(t, orgId, "member");
+    const message = async (r: Response) => ((await r.json()) as { error: { message: string } }).error.message;
+    const shown = await t.api("/api/wikis/not-a-wiki", { bearer: owner.token });
+    expect(shown.status).toBe(404);
+    expect(await message(shown)).toBe(
+      "not-a-wiki isn't a wiki. Make it one with artifacts wiki create not-a-wiki.",
+    );
+    const mcpShown = await call("artifacts_wiki", { wiki: "not-a-wiki" }, owner.token);
+    expect(mcpShown.isError).toBe(true);
+    expect(JSON.stringify(mcpShown)).toContain("isn't a wiki. Make it one with artifacts wiki create");
+    await create("hidden-plain", { onlyMe: true }, owner.token);
+    await t.server.db.update(projects).set({ kind: "project" }).where(eq(projects.slug, "hidden-plain"));
+    const hidden = await call("artifacts_wiki", { wiki: "hidden-plain" }, stranger.token);
+    expect(hidden.isError).toBe(true);
+    expect(JSON.stringify(hidden)).toContain("Not found.");
+    expect(JSON.stringify(hidden)).not.toContain("isn't a wiki");
+    expect(JSON.stringify(await call("artifacts_wiki", { wiki: "no-such" }, owner.token))).toContain(
+      "Not found.",
     );
   });
   test("wiki list counts match detail pages, excluding rules and sources", async () => {
