@@ -61,7 +61,7 @@ Role defaults to `page`. Sources are up to 50 slugs in this wiki. Origin is an H
 
 ## Starter rules page
 
-Publish this as an article with slug `rules` after adapting the purpose:
+Publish this as an article with slug `rules` after adapting the purpose. Keep link syntax in code formatting, as below: a bare `[[Page title]]` becomes a real link to a page that doesn't exist, and the garden reports it as wanted.
 
 ```markdown
 # Wiki rules
@@ -78,7 +78,7 @@ concept pages collect supported knowledge across sources.
 ## Naming
 
 Use short, specific titles and stable lowercase hyphenated slugs. Link related
-pages with [[Page title]]. Update an existing page before making a duplicate.
+pages with `[[Page title]]`. Update an existing page before making a duplicate.
 
 ## Evidence
 
