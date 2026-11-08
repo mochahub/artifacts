@@ -16,6 +16,7 @@ import { CliError, type Output, UsageError } from "../output.ts";
 import { signedIn } from "../session.ts";
 import { namedArtifact, resolveArtifact } from "../target.ts";
 import { isEmpty, writeFiles } from "./library.ts";
+import { addSourceCommand, type SourceFlags } from "./wiki-source.ts";
 
 export function wikiSummary(space: WikiSpace): string[] {
   const page = (p: WikiSpace["pages"][number]) =>
@@ -205,10 +206,28 @@ export async function wikiCommand(
     usage,
   }: Input<
     "sub" | "target" | "dir",
-    { name?: string; personal?: boolean; "only-me"?: boolean; team?: string; server?: string }
+    SourceFlags & { name?: string; personal?: boolean; "only-me"?: boolean; team?: string; server?: string }
   >,
   out: Output,
 ) {
+  if (sub === "add") {
+    if (
+      rest.length !== 2 ||
+      !target ||
+      flags.name !== undefined ||
+      flags.personal !== undefined ||
+      flags["only-me"] !== undefined ||
+      flags.team !== undefined
+    )
+      throw usage();
+    return addSourceCommand(target, flags, out);
+  }
+  if (
+    [flags.file, flags["text-file"], flags.url, flags.title, flags.note, flags["request-id"]].some(
+      (v) => v !== undefined,
+    )
+  )
+    throw usage();
   const operation = ["create", "show", "links", "list", "export"].includes(sub ?? "");
   const words = sub === "list" ? 1 : sub === "export" ? 3 : 2;
   if (!operation || rest.length !== words || (sub !== "list" && !target) || (sub === "export" && !dir))

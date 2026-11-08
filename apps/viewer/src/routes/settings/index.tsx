@@ -1,7 +1,7 @@
 import { PURGE_DAYS } from "@artifacts/schema/constants";
 import { ChevronRight } from "lucide-preact";
 import type { JSX } from "preact";
-import { useRoute } from "preact-iso";
+import { lazy, useRoute } from "preact-iso";
 import { post } from "../../api.ts";
 import { SignedIn } from "../../components/guard.tsx";
 import { useAction } from "../../components/reauth.tsx";
@@ -19,6 +19,8 @@ import { SignInSettings } from "./sign-in.tsx";
 import { TeamDetail, Teams } from "./teams.tsx";
 import { Tokens } from "./tokens.tsx";
 
+const LibrarianSettings = lazy(() => import("../../librarian/settings.tsx").then((m) => m.LibrarianSettings));
+
 function Index() {
   const action = useAction();
   const rows = [
@@ -28,6 +30,7 @@ function Index() {
     ...(isAdmin()
       ? [
           ["/settings/people", "People", "Members, outside people and invites"],
+          ["/settings/librarian", "Librarian", "Wiki scope, provider key and spending caps"],
           ["/settings/tokens", "Tokens", "For CI and headless agents"],
           ["/settings/domains", "Domains", "Where this deployment answers"],
           ["/settings/org", "Organization", "Name, defaults and link sharing"],
@@ -81,6 +84,7 @@ const PAGES: Record<string, () => JSX.Element | null> = {
   org: OrgSettings,
   brand: BrandSettings,
   tokens: Tokens,
+  librarian: LibrarianSettings,
 };
 
 export function Settings() {
