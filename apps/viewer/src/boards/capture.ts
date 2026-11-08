@@ -282,6 +282,7 @@ export async function captureVersion(
   artifactId: string,
   version: number,
   urls: Parameters<typeof capturePictures>[3],
+  existing: BoardRenders | null = null,
 ) {
   const base = `/api/artifacts/${artifactId}/board`;
   const ticket = await post<{ ticket: string; snapshot: BoardSnapshot; threads: BoardCaptureThread[] }>(
@@ -290,6 +291,8 @@ export async function captureVersion(
       target: { kind: "version", version },
     },
   );
+  if (existing && ticket.threads.length === 0) return;
   const renders = await capturePictures(artifactId, ticket.snapshot, ticket.threads, urls);
+  if (existing) renders.thumbnail = existing.thumbnail;
   return api(`${base}/captures/commit`, { method: "POST", json: { ticket: ticket.ticket, renders } });
 }

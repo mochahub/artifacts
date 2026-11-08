@@ -16,17 +16,10 @@ import type { Remote } from "../poll.ts";
 import type { Draft } from "../review/sheets.tsx";
 import { useReview } from "../review/use-review.tsx";
 import { me } from "../session.ts";
+import { commentAnchor, threadPoint } from "./anchors.ts";
+import { captureVersion } from "./capture.ts";
 import type { EditorProps } from "./editor.tsx";
-import {
-  anchorPoint,
-  hitTest,
-  localUV,
-  objectBounds,
-  objectName,
-  sceneBounds,
-  sceneOf,
-  worldPose,
-} from "./geometry.ts";
+import { hitTest, localUV, objectBounds, objectName, sceneBounds, sceneOf, worldPose } from "./geometry.ts";
 import { Outline } from "./outline.tsx";
 import { type AuthorInfo, BoardLayer } from "./render.ts";
 
@@ -35,12 +28,6 @@ import { type AuthorInfo, BoardLayer } from "./render.ts";
  * into the canvas engine, with the Objects outline and object comment pins. The editor (tools, Yjs,
  * sync) is its own chunk, fetched only on Edit.
  */
-type ObjectAnchor = { type: "object"; object: string; u: number; v: number; checkpoint: number };
-const objectAnchor = (thread: Thread) => {
-  const anchor = thread.anchor as unknown as ObjectAnchor | null;
-  return anchor?.type === "object" ? anchor : null;
-};
-
 export const assetUrl = (artifactId: string, hash: string, version?: number) =>
   `/api/artifacts/${artifactId}/board/assets/${hash}${version ? `?version=${version}` : ""}`;
 
@@ -194,7 +181,7 @@ export function BoardReader({
   sceneRef.current = scene;
 
   useEffect(() => {
-    if (!root.current || !world.current || !overlay.current || !snapshot) return;
+    if (editing.value || !root.current || !world.current || !overlay.current || !snapshot) return;
     const look = {
       assetUrl: (hash: string) => assetUrl(artifact.id, hash, version),
       renderUrl: (hash: string) => renderUrl(artifact.id, hash),
@@ -213,7 +200,7 @@ export function BoardReader({
           commenting.value = false;
           draft.value = {
             pageKey: page.key,
-            anchor: { type: "object", object: hit.id, u: cu, v: cv, checkpoint: version } as never,
+            anchor: commentAnchor(hit, cu, cv, version),
             where: objectName(hit),
             pin: { id: "draft", n: 0, frameKey: "", x: 0, y: 0, draft: true, world: at },
           };
@@ -259,7 +246,7 @@ export function BoardReader({
       engine.current = null;
       layer.current = null;
     };
-  }, [snapshot]);
+  }, [snapshot, editing.value]);
 
   useEffect(() => {
     layer.current?.setLook({ eye: eye.value });
@@ -277,13 +264,11 @@ export function BoardReader({
     threads,
     openPosted: true,
     where: (thread) => {
-      const anchor = objectAnchor(thread);
-      const object = anchor && scene.objects.get(anchor.object);
+      const object = threadPoint(scene, thread)?.object;
       return object ? objectName(object) : (page.title ?? page.key);
     },
     onShow(thread) {
-      const anchor = objectAnchor(thread);
-      const object = anchor && scene.objects.get(anchor.object);
+      const object = threadPoint(scene, thread)?.object;
       if (object && thread.anchorState !== "orphaned") engine.current?.focusRect(objectBounds(scene, object));
     },
   });
@@ -291,18 +276,16 @@ export function BoardReader({
 
   // Pins follow their object: placed from its pose in this checkpoint, never from a picture.
   const pins: Pin[] = all.flatMap((thread) => {
-    const anchor = objectAnchor(thread);
-    if (!anchor || thread.anchorState === "orphaned") return [];
-    const at = anchorPoint(scene, anchor.object, anchor.u, anchor.v);
-    const object = scene.objects.get(anchor.object);
-    if (!at || !object) return [];
+    const point = threadPoint(scene, thread);
+    if (!point) return [];
+    const { object, at, u, v } = point;
     return [
       {
         id: thread.id,
         n: thread.n,
         frameKey: "",
-        x: anchor.u,
-        y: anchor.v,
+        x: u,
+        y: v,
         world: at,
         label: objectName(object),
         done: thread.status === "resolved",
@@ -318,6 +301,41 @@ export function BoardReader({
   const canEdit = !!board?.canEdit && board.editable && latest;
   const canAsk = !!board?.editable && !board.canEdit && latest && !!me.value && artifact.permissions.comment;
   const canComment = artifact.permissions.comment && latest;
+
+  const captureKey = JSON.stringify([
+    artifact.id,
+    version,
+    view.value?.hash,
+    (threads.data.value ?? [])
+      .filter((thread) => thread.pageKey === page.key && thread.status === "open")
+      .map((thread) => [thread.n, thread.anchor, thread.anchorState]),
+  ]);
+  useEffect(() => {
+    if (!board?.canEdit || !view.value || editing.value) return;
+    let live = true;
+    captureVersion(
+      artifact.id,
+      version,
+      {
+        asset: (hash) => assetUrl(artifact.id, hash, version),
+        render: (hash) => renderUrl(artifact.id, hash),
+      },
+      view.value.renders,
+    ).then(
+      async () => {
+        if (!live) return;
+        threads.refresh();
+        const value = await api<BoardVersionView>(`${base}/board/snapshot?version=${version}`).catch(
+          () => null,
+        );
+        if (live && value) view.value = value;
+      },
+      () => {},
+    ); // Derived pictures are best effort; immutable JSON remains readable.
+    return () => {
+      live = false;
+    };
+  }, [captureKey, board?.canEdit, editing.value]);
 
   const startEdit = () => {
     if (editor.value) {
@@ -353,6 +371,12 @@ export function BoardReader({
         onClose={() => {
           editing.value = false;
           refreshState();
+          api<BoardVersionView>(`${base}/board/snapshot?version=${version}`).then(
+            (value) => {
+              view.value = value;
+            },
+            () => {},
+          );
         }}
       />
     );

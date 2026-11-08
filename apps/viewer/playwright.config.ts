@@ -11,9 +11,13 @@ import {
 
 export default defineConfig({
   testDir: "e2e",
+  outputDir: process.env.E2E_OUTPUT_DIR ?? "test-results",
   // Boards (14): the reader, editor and pointer specs; the iPad project runs only the pointer one.
-  testMatch: ["*.e2e.ts", "boards*.spec.ts"],
+  testMatch: "*.e2e.ts",
   fullyParallel: true,
+  // Board fixtures share the signed-in owner and its production edit quota.
+  // Keep independent repetitions from consuming that identity concurrently.
+  workers: process.env.E2E_BOARDS_ONLY ? 1 : undefined,
   forbidOnly: !!process.env.CI,
   reporter: "line",
   use: {
@@ -26,22 +30,33 @@ export default defineConfig({
   // Viewports from 10, "Test layers".
   // `claim` sees the server in setup mode, then claims it for every other test.
   projects: [
-    { name: "claim", testMatch: "claim.setup.ts", use: iphone },
-    { name: "iphone", use: { ...iphone, storageState: "e2e/.auth.json" }, dependencies: ["claim"] },
+    {
+      name: "claim",
+      testMatch: process.env.E2E_BOARDS_ONLY ? "boards.setup.ts" : "claim.setup.ts",
+      use: iphone,
+    },
+    {
+      name: "iphone",
+      use: { ...iphone, storageState: process.env.E2E_AUTH_FILE ?? "e2e/.auth.json" },
+      dependencies: ["claim"],
+    },
     {
       name: "desktop",
-      use: { viewport: { width: 1440, height: 900 }, storageState: "e2e/.auth.json" },
+      use: {
+        viewport: { width: 1440, height: 900 },
+        storageState: process.env.E2E_AUTH_FILE ?? "e2e/.auth.json",
+      },
       dependencies: ["claim"],
     },
     {
       name: "ipad",
-      testMatch: "boards-pointers.spec.ts",
+      testMatch: "boards-pointers.e2e.ts",
       use: {
         viewport: { width: 820, height: 1180 },
         deviceScaleFactor: 2,
         isMobile: true,
         hasTouch: true,
-        storageState: "e2e/.auth.json",
+        storageState: process.env.E2E_AUTH_FILE ?? "e2e/.auth.json",
       },
       dependencies: ["claim"],
     },
@@ -54,29 +69,31 @@ export default defineConfig({
     },
   ],
   // Runs the real server against docker-compose.test.yml (or the stack e2e/stack.ts is pointed at), serving the built viewer. `bun run e2e` sets both up.
-  webServer: {
-    command: "bun ../server/src/index.ts",
-    url: `${BASE_URL}/api/health`,
-    reuseExistingServer: false,
-    // The server's warnings belong next to a test that failed because of them.
-    stdout: "pipe",
-    stderr: "pipe",
-    env: {
-      DATABASE_URL,
-      S3_ENDPOINT,
-      S3_REGION: "auto",
-      S3_BUCKET: "artifacts-e2e",
-      S3_ACCESS_KEY_ID: "devaccesskey",
-      S3_SECRET_ACCESS_KEY: "devsecretkey",
-      PUBLIC_URL: BASE_URL,
-      CONTENT_URL,
-      SETUP_TOKEN: SECRET,
-      SESSION_SECRET: SECRET,
-      OPS_SECRET: SECRET,
-      PORT: String(PORTS.app),
-      CONTENT_PORT: String(PORTS.content),
-      INTERNAL_PORT: String(PORTS.internal),
-      LOG_LEVEL: "warn",
-    },
-  },
+  webServer: process.env.E2E_EXTERNAL_SERVER
+    ? undefined
+    : {
+        command: "bun ../server/src/index.ts",
+        url: `${BASE_URL}/api/health`,
+        reuseExistingServer: false,
+        // The server's warnings belong next to a test that failed because of them.
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          DATABASE_URL,
+          S3_ENDPOINT,
+          S3_REGION: "auto",
+          S3_BUCKET: "artifacts-e2e",
+          S3_ACCESS_KEY_ID: "devaccesskey",
+          S3_SECRET_ACCESS_KEY: "devsecretkey",
+          PUBLIC_URL: BASE_URL,
+          CONTENT_URL,
+          SETUP_TOKEN: SECRET,
+          SESSION_SECRET: SECRET,
+          OPS_SECRET: SECRET,
+          PORT: String(PORTS.app),
+          CONTENT_PORT: String(PORTS.content),
+          INTERNAL_PORT: String(PORTS.internal),
+          LOG_LEVEL: "warn",
+        },
+      },
 });

@@ -87,6 +87,13 @@ describe("geometry", () => {
     expect(back.u).toBeCloseTo(1);
     expect(back.v).toBeCloseTo(0.5);
   });
+  test("fit includes canonical and proposed poses of the same object", () => {
+    const scene = sceneOf(snapshot([sticky("~sticky0001", 0, 0)]));
+    const ghosts = sceneOf(snapshot([sticky("~sticky0001", 900, 300)]));
+    expect(sceneBounds(scene, ghosts)).toEqual({ x: 0, y: 0, w: 1000, h: 350 });
+    expect(sceneBounds(scene)).toEqual({ x: 0, y: 0, w: 100, h: 50 });
+  });
+
   test("an empty board fits 800 by 600, not infinity", () => {
     expect(sceneBounds(sceneOf(snapshot([])))).toEqual({ x: 0, y: 0, w: 800, h: 600 });
   });

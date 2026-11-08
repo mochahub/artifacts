@@ -53,7 +53,7 @@ export function worldPose(scene: Scene, id: string): BoardPose | null {
   let parent = object.parent;
   for (let depth = 0; parent && depth < DEPTH_MAX; depth++) {
     const up = scene.objects.get(parent);
-    if (!up || up.kind !== "frame") break;
+    if (up?.kind !== "frame") break;
     x += up.pose.x;
     y += up.pose.y;
     parent = up.parent;
@@ -135,8 +135,16 @@ export function union(rects: Rect[]): Rect | null {
 }
 
 /** Whole-board bounds, never infinite: an empty board fits 800 by 600. */
-export function sceneBounds(scene: Scene): Rect {
-  return union(scene.order.map((object) => objectBounds(scene, object))) ?? EMPTY_BOUNDS;
+export function sceneBounds(scene: Scene, ghosts?: Scene): Rect {
+  const bounds = scene.order.map((object) => objectBounds(scene, object));
+  if (ghosts?.order.length) {
+    // Resolve ghost bindings/parents in the proposed scene, while retaining the canonical poses too.
+    const proposed = sceneOf({
+      objects: [...scene.order.filter((object) => !ghosts.objects.has(object.id)), ...ghosts.order],
+    });
+    bounds.push(...ghosts.order.map((object) => objectBounds(proposed, object)));
+  }
+  return union(bounds) ?? EMPTY_BOUNDS;
 }
 
 function distanceToSegment(p: Point, a: Point, b: Point) {

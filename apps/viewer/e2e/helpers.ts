@@ -38,7 +38,7 @@ export async function signIn(page: Page, email = OWNER.email, password = OWNER.p
 }
 
 /** The owner's API token, which claim.setup.ts left for the rest of the run. */
-export const token = () => readFileSync("e2e/.token", "utf8").trim();
+export const token = () => readFileSync(process.env.E2E_TOKEN_FILE ?? "e2e/.token", "utf8").trim();
 export const auth = () => ({ Authorization: `Bearer ${token()}` });
 
 /**

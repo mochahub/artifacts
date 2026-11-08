@@ -102,6 +102,7 @@ describe("board commands against a server", () => {
       (({ untrusted, requestId, ...rest }) => rest)(JSON.parse(done.stdout)),
     );
     expect(result.outcome).toBe("applied");
+    expect(result.epoch).toBe(empty.epoch);
     expect(Object.keys(result.ids).sort()).toEqual(["$arrow", "$card", "$ok"]);
 
     const after = await read("mine/map", "--draft");
@@ -201,6 +202,8 @@ describe("board commands against a server", () => {
     expect(login?.placement).toBe("placed");
     const mock = after.objects.find((o) => o.object.id === login?.object)?.object;
     expect(mock?.kind).toBe("rendered_frame");
+    const checkpoint = await read("mine/map", "--version", String(JSON.parse(placed.stdout).version));
+    expect(checkpoint.objects.find((o) => o.object.id === mock?.id)?.object).toEqual(mock);
     // Beside the sketch, below it with the gap, and not on top of it.
     const near = sketch?.object.pose as { x: number; y: number; w: number; h: number };
     expect(mock?.pose.y).toBeGreaterThanOrEqual(near.y + near.h + 60);

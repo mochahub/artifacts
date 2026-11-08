@@ -42,7 +42,7 @@ import { ApiFailure, api, message, post } from "../api.ts";
 import { CanvasEngine } from "../canvas/engine.ts";
 import { Avatar } from "../components/cards.tsx";
 import { Sheet } from "../components/sheet.tsx";
-import { connect, type Hello, type Provider, type Status } from "../editing/sync.ts";
+import type { Hello, Status } from "../editing/sync.ts";
 import { agentShort, plural } from "../format.ts";
 import { renderUrl } from "../paths.ts";
 import { me } from "../session.ts";
@@ -66,6 +66,9 @@ import { BoardWriter, yToBoard } from "./model.ts";
 import { Outline } from "./outline.tsx";
 import { assetUrl, authorLookup } from "./reader.tsx";
 import { BoardLayer, strokePath } from "./render.ts";
+import { connect } from "./sync.ts";
+
+type Provider = ReturnType<typeof connect>;
 
 /**
  * The board editor (14, "Viewer, gestures and accessibility"; the hosted design's phone, desktop and
@@ -893,7 +896,7 @@ export function BoardEditor({
       onPin() {},
       onFocus() {},
       native: {
-        bounds: () => sceneBounds(sceneRef.current),
+        bounds: () => sceneBounds(sceneRef.current, ghostRef.current),
         onView: () => {
           placeChrome();
           if (editingText.value) placeText();
@@ -965,9 +968,11 @@ export function BoardEditor({
         if (control.t === "suggestion") refreshSuggestions();
         else if (control.t === "run") {
           refreshDoc();
+          refreshAuthors();
           refreshSuggestions();
         } else if (control.t === "checkpoint") {
           refreshDoc();
+          refreshAuthors();
           notice.value = `Saved v${control.version}`;
         } else if (control.t === "error") error.value = control.message;
       }),
@@ -1718,6 +1723,10 @@ export function BoardEditor({
         <SaveSheet
           artifact={artifact}
           version={state.version}
+          awaitSaved={() => {
+            if (!provider.current) throw new Error("The editor is not connected.");
+            return provider.current.awaitSaved();
+          }}
           onClose={() => (sheet.value = null)}
           onSaved={(result) => {
             sheet.value = null;
@@ -1918,7 +1927,7 @@ function DelegateSheet({ base, onClose, onStarted }: { base: string; onClose(): 
           busy.value = true;
           post<Run>(`${base}/doc/runs`, { goal: goal.value.trim() }).then(onStarted, (f) => {
             busy.value = false;
-            failed.value = message(f);
+            failed.value = f instanceof Error ? f.message : message(f);
           });
         }}
       >
@@ -1934,6 +1943,7 @@ function DelegateSheet({ base, onClose, onStarted }: { base: string; onClose(): 
  * its pictures are pending, never an old image passed off as new.
  */
 function SaveSheet({
+  awaitSaved,
   artifact,
   version,
   onClose,
@@ -1943,6 +1953,7 @@ function SaveSheet({
   version: number;
   onClose(): void;
   onSaved(result: CheckpointResult): void;
+  awaitSaved(): Promise<void>;
 }) {
   const name = useSignal("");
   const busy = useSignal(false);
@@ -1955,6 +1966,7 @@ function SaveSheet({
   const save = async (): Promise<CheckpointResult> => {
     const body = { name: name.value.trim() || null };
     for (let attempt = 0; attempt < 2; attempt++) {
+      await awaitSaved();
       const state = await api<BoardState>(`/api/artifacts/${artifact.id}/board`);
       let capture: { ticket: string; renders: unknown } | undefined;
       try {
@@ -1968,6 +1980,7 @@ function SaveSheet({
       } catch {
         capture = undefined;
       }
+      await awaitSaved();
       try {
         return await post<CheckpointResult>(`${base}/checkpoint`, {
           epoch: state.epoch,
@@ -2000,11 +2013,11 @@ function SaveSheet({
           busy.value = true;
           save().then(onSaved, (f) => {
             busy.value = false;
-            failed.value = message(f);
+            failed.value = f instanceof Error ? f.message : message(f);
           });
         }}
       >
-        {busy.value ? "Saving" : "Save version"}
+        {busy.value ? "Syncing and saving" : "Save version"}
       </button>
     </Sheet>
   );

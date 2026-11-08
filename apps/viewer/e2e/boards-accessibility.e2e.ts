@@ -1,18 +1,18 @@
 import { expect, type Page, test } from "@playwright/test";
-import { checkout, IDS, mockBoard, Relay } from "./boards-mock.ts";
+import { BoardFixture, checkout, IDS, seedBoard } from "./boards-real.ts";
 
 /** Keyboard, outline, labels and 44pt hit areas (14, "Viewer, gestures and accessibility"). */
 test.use({ serviceWorkers: "block" });
 
-async function editor(page: Page, relay: Relay) {
-  await mockBoard(page, { relay });
-  await page.goto("/camerabuddy/roadmap/mocks");
+async function editor(page: Page, relay: BoardFixture) {
+  await seedBoard(page, { relay });
+  await page.goto(relay.url);
   await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await expect(page.locator(".bed .cv.board[data-ready='1']")).toBeVisible();
+  await expect(page.locator(".bed .cv.board[data-ready='1']")).toBeVisible({ timeout: 15_000 });
 }
 
 test("the keyboard and the Objects list do everything a drag does", async ({ page }) => {
-  const relay = new Relay(checkout());
+  const relay = new BoardFixture(checkout());
   await editor(page, relay);
   await expect(page.getByRole("application", { name: /Edit .* board/ })).toBeVisible();
   // Select from the outline, without a drag.
@@ -26,25 +26,25 @@ test("the keyboard and the Objects list do everything a drag does", async ({ pag
   const x = page.getByRole("spinbutton", { name: "X" });
   await x.fill("12");
   await x.press("Enter");
-  await expect.poll(() => relay.object(IDS.guests)?.pose.x).toBe(12);
+  await expect.poll(async () => (await relay.object(IDS.guests))?.pose.x).toBe(12);
   await page.keyboard.press("Escape");
   await page.locator(".bed .cv").focus();
   // Arrows nudge by 1, Shift+arrows by 10.
   await page.keyboard.press("ArrowRight");
-  await expect.poll(() => relay.object(IDS.guests)?.pose.x).toBe(13);
+  await expect.poll(async () => (await relay.object(IDS.guests))?.pose.x).toBe(13);
   await page.keyboard.press("Shift+ArrowDown");
-  await expect.poll(() => relay.object(IDS.guests)?.pose.y).toBe(70);
+  await expect.poll(async () => (await relay.object(IDS.guests))?.pose.y).toBe(70);
   // Delete removes it; undo brings back the same object.
   await page.keyboard.press("Delete");
-  await expect.poll(() => relay.object(IDS.guests)).toBeNull();
+  await expect.poll(async () => await relay.object(IDS.guests)).toBeNull();
   await page.keyboard.press("ControlOrMeta+z");
-  await expect.poll(() => relay.object(IDS.guests)?.id).toBe(IDS.guests);
+  await expect.poll(async () => (await relay.object(IDS.guests))?.id).toBe(relay.ids.get(IDS.guests));
 });
 
 test("every tool, handle and selection control has a 44pt hit area; tools are labelled and the current one is marked", async ({
   page,
 }) => {
-  await editor(page, new Relay(checkout()));
+  await editor(page, new BoardFixture(checkout()));
   const tools = page.getByRole("toolbar", { name: "Tools" }).getByRole("button");
   await expect(tools).toHaveCount(7);
   for (const name of ["Select", "Pen", "Sticky", "Shape", "Text", "Arrow", "More tools"])
@@ -73,15 +73,17 @@ test("every tool, handle and selection control has a 44pt hit area; tools are la
   );
   expect(sizes.length).toBeGreaterThan(7 + 4);
   for (const size of sizes) {
-    expect(size.w, size.label ?? "").toBeGreaterThanOrEqual(44);
-    expect(size.h, size.label ?? "").toBeGreaterThanOrEqual(44);
+    // WebKit can return 43.999992 for a 44 CSS-pixel box.
+    expect(Math.round(size.w * 1000) / 1000, size.label ?? "").toBeGreaterThanOrEqual(44);
+    expect(Math.round(size.h * 1000) / 1000, size.label ?? "").toBeGreaterThanOrEqual(44);
   }
 });
 
 test("reduced motion: fitting jumps instead of flying", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await mockBoard(page, { relay: new Relay(checkout()) });
-  await page.goto("/camerabuddy/roadmap/mocks");
+  const relay = new BoardFixture(checkout());
+  await seedBoard(page, { relay });
+  await page.goto(relay.url);
   await expect(page.locator(".cv.board .bo").first()).toBeVisible();
   const world = page.locator(".cv .world");
   const before = await world.getAttribute("data-s");
