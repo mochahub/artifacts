@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { ArtifactAccess } from "@artifacts/schema";
 import { OWNER, signIn, type TestServer } from "../../../apps/server/test/helpers.ts";
-import { artifactAt, camerabuddy, cli, cliJson, copyFixture, hostedServer, sandbox } from "./sandbox.ts";
+import { artifactAt, cli, cliJson, copyFixture, fixture, hostedServer, sandbox } from "./sandbox.ts";
 
 /** What an agent can do about teams: read them, and share its own work with one, up to comment. */
 describe("teams from the CLI", () => {
@@ -10,6 +12,7 @@ describe("teams from the CLI", () => {
   let token: string;
   let cookie: string;
   let ownerId: string;
+  let fixtureDir: string | undefined;
   const box = sandbox();
   const agent = () => ({ ...box.env, ARTIFACTS_URL: url, ARTIFACTS_TOKEN: token });
 
@@ -19,7 +22,10 @@ describe("teams from the CLI", () => {
     ownerId = person.id;
     cookie = await signIn(t, OWNER.email, OWNER.password);
   });
-  afterAll(() => t.stop());
+  afterAll(async () => {
+    await t.stop();
+    if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
+  });
 
   test("list teams, share with one, and be refused what a person must do", async () => {
     const empty = await cli(["teams"], agent());
@@ -38,7 +44,13 @@ describe("teams from the CLI", () => {
     expect(listed.teams).toEqual([expect.objectContaining({ slug: "design", members: 1, role: "lead" })]);
     expect((await cli(["teams"], agent())).stdout).toContain("you lead it");
 
-    const dir = copyFixture(camerabuddy);
+    // Team grants and audience output do not depend on the 26 CameraBuddy frames.
+    // Keep real CLI/server publish boundaries with one frame and an article instead.
+    const dir = copyFixture(fixture("small"));
+    fixtureDir = dir;
+    const path = join(dir, "artifact.json");
+    const manifest = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...manifest, project: "camerabuddy", slug: "roadmap" }));
     expect((await cli(["publish", "-m", "First"], agent(), dir)).code).toBe(0);
     const { id } = await artifactAt(t, token, "camerabuddy/roadmap");
 

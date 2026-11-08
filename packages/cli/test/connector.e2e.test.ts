@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNTRUSTED_NOTICE } from "@artifacts/schema";
 import { mcp, OWNER, signIn, type TestServer } from "../../../apps/server/test/helpers.ts";
@@ -14,6 +14,14 @@ describe("a box with no login, through the hosted MCP", () => {
   let token: string;
   let orgId: string;
   let cookie: string;
+  let packedDir: string;
+  let packed: Awaited<ReturnType<typeof cliJson>>;
+  const copies: string[] = [];
+  const freshPack = () => {
+    const dir = copyFixture(packedDir);
+    copies.push(dir);
+    return { dir, pack: structuredClone(packed) };
+  };
   // No ARTIFACTS_TOKEN, no ARTIFACTS_URL and no config: the connector is the only sign-in here.
   const box = sandbox();
   const rpc = async (method: string, params: object, bearer = token) => {
@@ -33,12 +41,19 @@ describe("a box with no login, through the hosted MCP", () => {
   beforeAll(async () => {
     ({ t, token, orgId } = await hostedServer());
     cookie = await signIn(t, OWNER.email, OWNER.password);
+    // Immutable render/pack bytes are unrelated to ticket binding and permission checks.
+    // Keep each upload plan and artifact independent while rendering only once.
+    packedDir = copyFixture(artStyles);
+    copies.push(packedDir);
+    packed = await run(["pack", "-m", "From a remote box"], packedDir);
   }, 60_000);
-  afterAll(() => t.stop());
+  afterAll(async () => {
+    await t.stop();
+    for (const dir of copies) rmSync(dir, { recursive: true, force: true });
+  });
 
   test("search, pack, upload, commit, read comments and reply", async () => {
-    const dir = copyFixture(artStyles);
-    const pack = await run(["pack", "-m", "From a remote box"], dir);
+    const { dir, pack } = freshPack();
     expect(pack.payload.sha256).toMatch(/^[0-9a-f]{64}$/);
 
     // The payload goes first, then the files, each by a plan the server wrote to the bucket.
@@ -93,6 +108,7 @@ describe("a box with no login, through the hosted MCP", () => {
 
   test("a tampered payload or file fails exactly as the API's commit does", async () => {
     const dir = copyFixture(artStyles);
+    copies.push(dir);
     const path = join(dir, "artifact.json");
     const manifest = JSON.parse(readFileSync(path, "utf8"));
     writeFileSync(path, JSON.stringify({ ...manifest, slug: "tampered", title: "Tampered one" }));
@@ -115,8 +131,8 @@ describe("a box with no login, through the hosted MCP", () => {
   }, 60_000);
 
   test("a ticket commits only its own payload, and a plan can't point elsewhere", async () => {
-    const dir = copyFixture(artStyles);
-    const pack = await run(["pack"], dir);
+    const { dir, pack } = freshPack();
+    pack.slug = "ticket-binding";
     await run(["pack", "--upload", (await json("artifacts_publish_prepare", pack)).plan], dir);
     const second = await json("artifacts_publish_prepare", pack);
     expect(second.step).toBe("upload_files");
@@ -141,8 +157,7 @@ describe("a box with no login, through the hosted MCP", () => {
   }, 60_000);
 
   test("a reviewer's token gets no upload URL", async () => {
-    const dir = copyFixture(artStyles);
-    const pack = await run(["pack"], dir);
+    const { pack } = freshPack();
     const reviewer = (await makePerson(t, orgId, "reviewer")).token;
     const body = await rpc(
       "tools/call",

@@ -14,11 +14,15 @@ const TARGETS = [
 ] as const;
 
 // Puts the built viewer inside the binary, for `artifacts dev`.
-const build = Bun.spawnSync(["bun", "run", "--filter", "@artifacts/viewer", "build"], {
-  stdout: "ignore",
-  stderr: "inherit",
-});
-if (!build.success) process.exit(build.exitCode ?? 1);
+if (process.env.ARTIFACTS_PREBUILT_VIEWER === "1") {
+  if (!(await Bun.file("apps/viewer/dist/index.html").exists())) throw new Error("Missing prebuilt viewer");
+} else {
+  const build = Bun.spawnSync(["bun", "run", "--filter", "@artifacts/viewer", "build"], {
+    stdout: "ignore",
+    stderr: "inherit",
+  });
+  if (!build.success) process.exit(build.exitCode ?? 1);
+}
 const assets: Record<string, string> = {};
 for (const path of new Bun.Glob("**/*").scanSync("apps/viewer/dist")) {
   assets[`/${path}`] = readFileSync(join("apps/viewer/dist", path)).toString("base64");
