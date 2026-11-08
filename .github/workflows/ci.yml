@@ -15,7 +15,7 @@ jobs:
     outputs:
       full: ${{ steps.paths.outputs.full }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
@@ -34,7 +34,7 @@ jobs:
     env:
       ARTIFACTS_PREBUILT_VIEWER: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-ci
       - run: bun run lint
       - name: Migrations match the schema
@@ -65,7 +65,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-ci
         with:
           browsers: "true"
@@ -80,7 +80,7 @@ jobs:
     env:
       ARTIFACTS_PREBUILT_VIEWER: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-ci
         with:
           browsers: "true"
