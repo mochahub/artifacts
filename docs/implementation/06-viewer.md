@@ -237,3 +237,37 @@ See [08-micro-apps.md](08-micro-apps.md#try-it). Phase 2.
 - **Accessible names:** pins and frames have them ("Comment 3 on Live view"); sheets trap focus and close with Escape; the canvas has a "Frames" list as its keyboard and screen-reader route.
 - **Safari's bar:** pages can sit under Safari's bottom bar, so fixed bottom UI uses `env(safe-area-inset-bottom)` and is checked on a real iPhone (user-only acceptance, see 10).
 - **Contrast:** WCAG AA for text in both themes. Yellow text on white isn't used; light theme uses `#8a6a00` for yellow words.
+
+## Native board integration
+
+Native checkpoint scenes use the lightweight board reader; Edit lazily loads the board editor,
+Yjs provider and drawing controls. Fit includes canonical objects and suggestion ghosts, including
+both poses when a suggestion moves an existing object. Ghost parent and connector bindings resolve
+against the proposed scene. Captures still use only the canonical snapshot fenced by the server.
+Run and checkpoint socket messages refresh author records as well as board state.
+
+Board acceptance tests create a separate wiki and board for each test through the real API, seed
+objects with board operations, checkpoint them, and use the real WebSocket transport. They do not
+intercept HTTP or WebSocket responses. Coverage includes checkpoint reading without eager editor
+loads, bound arrows, concurrent writers, keyboard movement/deletion/undo, tool hit areas, reduced
+motion, pen/palm ownership, touch drawing/pinching, Pair acceptance, attribution, object comment
+pins after checkpointing a move, and a signed-in commenter without draft access.
+
+For an isolated board run, set `E2E_BOARDS_ONLY=1` and invoke Playwright directly with `boards`.
+Start private storage first and supply `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT` and `E2E_PORT`.
+A Linux Playwright container can use an independently started server with
+`E2E_EXTERNAL_SERVER=1` and `E2E_HOST`. `E2E_AUTH_FILE`, `E2E_TOKEN_FILE` and `E2E_OUTPUT_DIR`
+isolate credentials and traces from another runner. Claim once, then use `--no-deps` for focused
+checks. Long runs using `--repeat-each=10` can exhaust the real per-caller rate limits; provision
+fresh private server instances per repetition rather than disabling the rate checks. A shared-server
+repetition attempt also found intermittent editor startup timeouts, so Linux stability is not signed
+off. The normal acceptance suite retains its legacy fixture setup.
+
+`bun apps/viewer/scripts/board-size.ts` checks the reader entry plus CSS against 80 KB gzip and
+cold board Edit's additional static import closure, including CSS and the shared sync provider,
+against 160 KB gzip. The November 2026 integration build measures 46.84 KB and 54.10 KB respectively.
+
+The real Delegate regression intentionally requires a finished run in board state. The board state
+route currently supplies only active runs, so the finished review card cannot render after returning
+to the board; the server must expose the permitted finished review data before that test can pass.
+Synthetic pointer tests do not replace physical Pencil pressure, latency, palm rejection or Scribble QA.

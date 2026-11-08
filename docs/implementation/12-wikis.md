@@ -147,4 +147,4 @@ Responses retain deprecated `personal` (true only for audience me) because relea
 
 ### Native boards (Phase 3)
 
-Eligible single-canvas wiki pages also hold native board objects. Their checkpoint text supplies wiki links, search, cards and the garden under the same visibility/source rules as articles. Drafts and ghost suggestions never enter these derived results. [14 Boards](14-boards.md) owns object operations, anchors, frame republish merge and browser-made checkpoint pictures; [13 Editing](13-editing.md) still owns the audience and mode policy.
+Eligible single-canvas wiki pages also hold native board objects. Their checkpoint text supplies wiki links, search, cards and the garden under the same visibility/source rules as articles. Drafts and ghost suggestions never enter these derived results. Native checkpoint thumbnails supply library and wiki card covers when available; pending captures fall back to the published rendered frames or title. [14 Boards](14-boards.md) owns object operations, anchors, frame republish merge and browser-made checkpoint pictures; [13 Editing](13-editing.md) still owns the audience and mode policy.

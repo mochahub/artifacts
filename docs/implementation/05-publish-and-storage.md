@@ -189,3 +189,7 @@ A job in the app (`apps/server/src/jobs/`) runs daily, guarded by `pg_try_adviso
 Steps 1 and 2 are named `purge` and `gc`.
 
 A manual trigger exists for testing and operators: `POST /internal/jobs/:name` on the internal port, with `OPS_SECRET`.
+
+## Native board checkpoints
+
+[14 Boards](14-boards.md) defines immutable `__boards/<page>.json` checkpoint files and their canonical hashes. Checkpoints index native text for search and wiki links; draft and suggested text remain excluded. Browser captures attach only to their exact checkpoint hash and never create a content version. Checkpoint compaction purges deleted object maps while preserving retired identities. Board snapshots, validated assets and captures participate in blob garbage collection; expired capture tickets and staged uploads are swept. Republish preserves native objects and rendered-frame identities through the board merge.
