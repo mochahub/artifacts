@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PublishResult } from "@artifacts/schema";
+import { CLI_SCOPES, PublishResult } from "@artifacts/schema";
 import { BoardEditResult, BoardRead, BoardSuggestionList } from "@artifacts/schema/boards";
 import sharp from "sharp";
+import { tokens } from "../../../apps/server/src/db/schema.ts";
 import type { TestServer } from "../../../apps/server/test/helpers.ts";
+import { sha256 } from "../src/hash.ts";
 import { artifactAt, cli, cliJson, copyFixture, hostedServer, sandbox } from "./sandbox.ts";
 
 /**
@@ -71,6 +73,93 @@ describe("board commands against a server", () => {
     }
   }, 120_000);
   afterAll(() => t.stop());
+
+  test("fresh checkpoint sentinel and first draft epochs cross the real CLI boundaries", async () => {
+    for (const action of ["edit", "suggest", "save"]) {
+      const target = `mine/first-${action}`;
+      expect(
+        (await cli(["board", "create", target, "--title", action, "--summary", "Epoch fixture"], agent()))
+          .code,
+      ).toBe(0);
+      expect((await read(target)).epoch).toBe(0);
+      const draft = await read(target, "--draft");
+      expect(draft.epoch).toBe(1);
+      const batch = file(`first-${action}.json`, {
+        epoch: draft.epoch,
+        ops: [{ op: "add", ref: "$first", object: sticky("First", 0, 0) }],
+      });
+      const args =
+        action === "save"
+          ? ["board", "save", target, "--epoch", String(draft.epoch), "--json"]
+          : [
+              "board",
+              action,
+              target,
+              "--ops",
+              batch,
+              ...(action === "edit" ? ["--checkpoint"] : []),
+              "--json",
+            ];
+      const done = await cli(args, agent());
+      expect(done.stderr).toBe("");
+      expect(done.code).toBe(action === "suggest" ? 2 : 0);
+      const result = JSON.parse(done.stdout);
+      if (action === "edit") {
+        expect(result.outcome).toBe("applied");
+        expect(result.version).toBe(2);
+        expect((await read(target)).objects).toHaveLength(1);
+      } else if (action === "suggest") expect(result.outcome).toBe("suggested");
+      else expect(result.version).toBe(1);
+    }
+  }, 120_000);
+
+  test("implicit save seeds an authorized fresh draft instead of reporting no draft", async () => {
+    const target = "mine/implicit-save";
+    expect(
+      (await cli(["board", "create", target, "--title", "Fresh", "--summary", "Save fixture"], agent())).code,
+    ).toBe(0);
+    expect((await read(target)).epoch).toBe(0);
+    const saved = await cli(["board", "save", target, "--json"], agent());
+    expect(saved.code).toBe(0);
+    expect(JSON.parse(saved.stdout)).toMatchObject({ version: 1, created: false });
+    expect((await read(target, "--draft")).epoch).toBe(1);
+  }, 60_000);
+
+  test("old tokens retain structured missing-scope diagnostics across board commands", async () => {
+    const [owner] = await t.server.db.select().from(tokens).limit(1);
+    if (!owner) throw new Error("Missing fixture owner");
+    const old = "art_phase3_old_token";
+    await t.server.db.insert(tokens).values({
+      id: Bun.randomUUIDv7(),
+      orgId: owner.orgId,
+      kind: "cli",
+      personId: owner.personId,
+      name: "old",
+      tokenHash: sha256(old),
+      createdBy: owner.createdBy,
+      scopes: CLI_SCOPES.filter((scope) => scope !== "edit"),
+    });
+    const env = { ...agent(), ARTIFACTS_TOKEN: old };
+    for (const args of [
+      ["read", "--draft"],
+      ["save"],
+      ["save", "--epoch", "1"],
+      ["place-frame", "--frame", "missing", "--region", "0,0,640,480"],
+      ["suggestions"],
+      ["delegate", "--goal", "Scope probe"],
+    ]) {
+      const [command, ...flags] = args;
+      const done = await cli(["board", command as string, "mine/map", ...flags, "--json"], env);
+      expect(done.code).toBe(1);
+      expect(JSON.parse(done.stderr)).toMatchObject({
+        error: {
+          code: "forbidden",
+          details: { scope: "edit" },
+          message: expect.stringContaining("again"),
+        },
+      });
+    }
+  }, 120_000);
 
   test("an agent reads the draft, adds objects by one batch and gets their lasting ids back", async () => {
     const empty = await read("mine/map", "--draft");

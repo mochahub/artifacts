@@ -333,6 +333,19 @@ describe("board edit and suggest", () => {
     expect(seen).toHaveLength(0);
   });
 
+  test("checkpoint epoch zero explains the draft recovery before mutation", async () => {
+    const path = file("checkpoint-epoch.json", JSON.stringify({ ...fixture("edit.json"), epoch: 0 }));
+    for (const command of ["edit", "suggest"]) {
+      const refused = await board(command, "brain/pricing", "--ops", path);
+      expect(refused.code).toBe(2);
+      expect(refused.stderr).toContain("board read --draft");
+    }
+    const save = await board("save", "brain/pricing", "--epoch", "0");
+    expect(save.code).toBe(2);
+    expect(save.stderr).toContain("board read --draft");
+    expect(seen).toHaveLength(1); // Explicit save resolves the artifact before validating its flag.
+  });
+
   test("a stale epoch and an old token say what to do next", async () => {
     answers[`POST /api/artifacts/${ID}/board/ops`] = () =>
       failure(409, "conflict", "That epoch ended.", { reason: "stale_epoch" });
@@ -416,9 +429,13 @@ describe("board place-frame", () => {
     expect(sent("POST", /board\/ops$/)).toHaveLength(0);
   });
 
-  test("a board that can't be edited stops at the state", async () => {
+  test("a board without edit rights keeps the authoritative structured refusal", async () => {
     answers[`GET /api/artifacts/${ID}/board`] = () => Response.json(state({ canEdit: false }));
-    expect((await place("--frame", "cart", "--near", SKETCH)).stderr).toContain("You can't edit this board");
+    answers[`GET /api/artifacts/${ID}/board/objects`] = () =>
+      failure(403, "forbidden", "Reading the draft needs the edit right.");
+    const denied = await place("--frame", "cart", "--near", SKETCH, "--json");
+    expect(JSON.parse(denied.stderr)).toMatchObject({ error: { code: "forbidden", details: {} } });
+    delete answers[`GET /api/artifacts/${ID}/board/objects`];
     answers[`GET /api/artifacts/${ID}/board`] = () =>
       Response.json(state({ editable: false, reason: "has_backend" }));
     expect((await place("--frame", "cart", "--near", SKETCH)).stderr).toContain("has_backend");
@@ -466,7 +483,7 @@ describe("board save, suggestions, delegate and create", () => {
       "Nothing new to save. v7 is the latest.",
     );
     answers[`GET /api/artifacts/${ID}/board`] = () => Response.json(state({ epoch: 0 }));
-    expect((await board("save", "brain/pricing")).stderr).toContain("no draft to save");
+    expect((await board("save", "brain/pricing")).code).toBe(0);
     const json = await board("save", "brain/pricing", "--epoch", "2", "--json");
     expect(JSON.parse(json.stdout)).toMatchObject({ version: 7, created: false, pictures: "pending" });
   });
