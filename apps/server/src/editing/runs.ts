@@ -1,5 +1,5 @@
 import { RUN_MAX_MS, type Run, SUGGESTIONS_OPEN_MAX } from "@artifacts/schema";
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import { actorOf, agentOf, type Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
@@ -251,14 +251,14 @@ export async function acceptRun(
   force: boolean,
 ): Promise<Run> {
   if (row.edits !== "suggestion") throw notActive();
-  // Claimed first, so an accept and a reject at once can't both decide it.
-  await claim(deps, row, "accepted", caller.person.id);
+
   const [doc] = await deps.db
     .select({ kind: editDocs.kind })
     .from(editDocs)
     .where(eq(editDocs.artifactId, artifact.id))
     .limit(1);
   if (doc?.kind === "board") return acceptBoardRun(deps, caller, artifact, row, force);
+  await claim(deps, row, "accepted", caller.person.id);
   // Each applies through the page's lock as its own author, so this stays one call per suggestion; a run
   // holds at most SUGGESTIONS_OPEN_MAX open ones.
   let count = 0;
@@ -304,7 +304,8 @@ async function acceptBoardRun(
   force: boolean,
 ): Promise<Run> {
   let count = 0;
-  const made = await withDocLock(deps, artifact.id, async (lock) => {
+  const done = await withDocLock(deps, artifact.id, async (lock) => {
+    await claim({ ...deps, db: lock.tx } as unknown as Deps, row, "accepted", caller.person.id);
     const open = await lock.tx
       .select({ id: boardSuggestions.id })
       .from(boardSuggestions)
@@ -317,29 +318,34 @@ async function acceptBoardRun(
         const done = await lock.tx.transaction((sp) =>
           acceptBoardLocked(deps, caller, artifact, id, force, { ...lock, tx: sp }),
         );
-        if (done.status === "accepted") count += 1;
+        if (done.status === "accepted") {
+          count += 1;
+          const [current] = await lock.tx.select().from(editDocs).where(eq(editDocs.artifactId, artifact.id));
+          lock.row = current ?? null;
+        }
       } catch (error) {
         lock.row = kept;
         if (!(error instanceof ApiError) || error.code !== "conflict") throw error;
       }
     }
-    return checkpointLocked(
+    const made = await checkpointLocked(
       deps,
       lock,
       { row: artifact.row, project: artifact.project },
       { kind: "delegate", personId: caller.person.id, agent: row.agent, message: row.goal },
     );
+    const [done] = await lock.tx
+      .update(editRuns)
+      .set({
+        status: "accepted",
+        finishedAt: row.finishedAt ?? deps.clock.now(),
+        decidedBy: caller.person.id,
+        version: made.version,
+      })
+      .where(and(eq(editRuns.id, row.id), eq(editRuns.status, "accepted")))
+      .returning();
+    return done as RunRow;
   });
-  const [done] = await deps.db
-    .update(editRuns)
-    .set({
-      status: "accepted",
-      finishedAt: row.finishedAt ?? deps.clock.now(),
-      decidedBy: caller.person.id,
-      version: made.version,
-    })
-    .where(and(eq(editRuns.id, row.id), eq(editRuns.status, "accepted")))
-    .returning();
   await logDecision(deps, artifact, caller.person.id, "suggestion_accepted", {
     run: row.id,
     count,
@@ -406,4 +412,45 @@ export async function activeRuns(deps: Deps, artifactId: string) {
     .where(and(eq(editRuns.artifactId, artifactId), eq(editRuns.status, "active")))
     .limit(5);
   return toRuns(deps, rows);
+}
+
+/** Runs an authorized board editor can review; goals remain hidden from readers. */
+export async function boardRuns(deps: Deps, caller: Caller, artifact: LoadedArtifact) {
+  const rows = await deps.db
+    .select()
+    .from(editRuns)
+    .where(and(eq(editRuns.artifactId, artifact.id), inArray(editRuns.status, ["active", "finished"])))
+    .orderBy(desc(editRuns.startedAt))
+    .limit(100);
+  return toRuns(
+    deps,
+    rows.filter(
+      (row) => row.status === "active" || ownsRun(caller, row) || can(caller, "artifact.accept", artifact),
+    ),
+  );
+}
+
+/** Draft event kinds and frequency are private, just like their content. */
+export async function visibleActivity(
+  deps: Deps,
+  caller: Caller,
+  artifact: LoadedArtifact,
+  event: { kind: string; payload: Record<string, unknown> },
+) {
+  if (can(caller, "artifact.edit", artifact)) return true;
+  if (
+    ["edited", "suggested", "suggestion_accepted", "suggestion_rejected", "suggestion_withdrawn"].includes(
+      event.kind,
+    )
+  )
+    return false;
+  if (event.kind !== "run_started" && event.kind !== "run_finished") return true;
+  const id = event.payload.run;
+  if (typeof id !== "string") return false;
+  const run = await findRun(deps, artifact.row.orgId, id);
+  return Boolean(
+    run &&
+      run.artifactId === artifact.id &&
+      (ownsRun(caller, run) || (event.kind === "run_finished" && run.status === "accepted")),
+  );
 }

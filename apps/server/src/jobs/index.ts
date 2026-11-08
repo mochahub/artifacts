@@ -69,6 +69,10 @@ async function referencedHashes(deps: Deps) {
     union select renders -> 'thumbnail' ->> 'hash' from board_versions where renders is not null
     union select c -> 'image' ->> 'hash'
       from board_versions, jsonb_array_elements(coalesce(renders -> 'crops', '[]'::jsonb)) c
+    union select r.value #>> '{}' from board_versions,
+      jsonb_array_elements(snapshot -> 'objects') o,
+      jsonb_each(coalesce(o -> 'data' -> 'renders', '{}'::jsonb)) r
+      where o ->> 'kind' = 'rendered_frame'
     union select hash from board_assets`);
   for (const row of boardRows as unknown as { hash: string | null }[]) add(row.hash);
   return referenced;

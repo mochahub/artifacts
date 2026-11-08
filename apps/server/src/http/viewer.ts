@@ -12,7 +12,8 @@ export function viewerHeaders(env: Env, bucket: string): MiddlewareHandler {
     ...(env.contentUrl ? [`frame-src ${env.contentUrl}`] : []),
     `img-src 'self' data: blob: ${bucket}`,
     `media-src 'self' ${bucket}`,
-    "connect-src 'self'",
+    // bucketOrigin derives this from trusted S3 configuration, never a request/upload payload.
+    `connect-src 'self' ${bucket}`,
     "style-src 'self' 'unsafe-inline'",
     "base-uri 'none'",
     "object-src 'none'",

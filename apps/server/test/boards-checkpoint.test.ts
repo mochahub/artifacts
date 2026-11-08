@@ -7,18 +7,22 @@ import type { BoardObject, BoardSnapshot } from "@artifacts/schema/boards";
 import { and, eq } from "drizzle-orm";
 import * as Y from "yjs";
 import { isAnimatedPng } from "../src/boards/assets.ts";
+import { attachThreadCrops } from "../src/boards/captures.ts";
 import { canonicalJson } from "../src/boards/checkpoint.ts";
 import {
   artifacts,
   blocks,
+  boardCaptures,
   boardSuggestions,
   boardVersions,
   editDocs,
   frames,
   pages,
+  threads,
   tokens,
   versions,
 } from "../src/db/schema.ts";
+import { collectGarbage } from "../src/jobs/index.ts";
 import { blobKey } from "../src/layout.ts";
 import { claim, json, OWNER, signIn, solidImage, startTestServer, type TestServer } from "./helpers.ts";
 import { file } from "./publish-helper.ts";
@@ -295,6 +299,22 @@ describe("boards server", () => {
       await t.api(`/api/artifacts/${id}/board/snapshot?version=2`, { cookie: owner }),
     );
     expect(view.renders?.thumbnail.hash).toBe(sha(thumb));
+    expect(
+      (
+        await t.api(`/api/artifacts/${id}/r/${sha(thumb)}`, {
+          cookie: owner,
+          redirect: "manual",
+        })
+      ).status,
+    ).toBe(302);
+    const listing = await json<{ artifacts: { id: string; cover: unknown }[] }>(
+      await t.api("/api/projects/brain/artifacts", { cookie: owner }),
+    );
+    expect(listing.artifacts.find((card) => card.id === id)?.cover).toEqual({
+      renderHash: sha(thumb),
+      w: 1200,
+      h: 630,
+    });
     // The version is the same: capture changed no content, number or authorship.
     const [row] = await t.server.db
       .select({ latest: artifacts.latestVersion })
@@ -421,5 +441,94 @@ describe("boards server", () => {
     expect(
       await t.server.db.select().from(boardSuggestions).where(eq(boardSuggestions.artifactId, id)),
     ).toHaveLength(0);
+  });
+  test("crop attachment uses frozen anchor provenance across checkpoints and rejects moved pins", async () => {
+    const [artifact] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
+    const [board] = await t.server.db
+      .select({ snapshot: boardVersions.snapshot })
+      .from(boardVersions)
+      .innerJoin(versions, eq(versions.id, boardVersions.versionId))
+      .where(and(eq(versions.artifactId, id), eq(versions.n, artifact!.latestVersion)));
+    const [tokenRow] = await t.server.db.select().from(tokens);
+    const anchor = {
+      type: "object" as const,
+      object: board!.snapshot.objects[0]!.id,
+      u: 0.5,
+      v: 0.5,
+      checkpoint: artifact!.latestVersion - 1,
+    };
+    const [thread] = await t.server.db
+      .insert(threads)
+      .values({
+        id: Bun.randomUUIDv7(),
+        orgId: artifact!.orgId,
+        artifactId: id,
+        n: 99,
+        pageKey: board!.snapshot.page,
+        anchor,
+        createdVersion: anchor.checkpoint,
+        authorPersonId: tokenRow!.personId,
+        authorName: "Reviewer",
+      })
+      .returning();
+    const response = await t.api(`/api/artifacts/${id}/board/captures`, {
+      method: "POST",
+      cookie: owner,
+      json: { target: { kind: "version", version: artifact!.latestVersion } },
+    });
+    expect(response.status).toBe(200);
+    const capture = await json<{ ticket: string; threads: unknown[] }>(response);
+    expect(capture.threads).toContainEqual({ n: 99, anchor });
+    await t.server.db
+      .update(boardCaptures)
+      .set({ consumedAt: t.clock.now() })
+      .where(eq(boardCaptures.id, capture.ticket));
+    const hash = sha("crop-provenance");
+    await t.server.deps.bucket.put(blobKey(hash), new TextEncoder().encode("crop-provenance"), {
+      contentType: "image/webp",
+    });
+    const crops = [
+      { thread: 99, image: { hash, type: "image/webp" as const, bytes: 15, width: 480, height: 320 } },
+    ];
+    await attachThreadCrops(t.server.deps, id, artifact!.latestVersion, crops, capture.ticket);
+    expect(
+      (await t.server.db.select().from(threads).where(eq(threads.id, thread!.id)))[0]!.cropKey,
+    ).not.toBeNull();
+    await t.server.db
+      .update(threads)
+      .set({ cropKey: null, anchor: { ...anchor, u: 0.25 } })
+      .where(eq(threads.id, thread!.id));
+    await attachThreadCrops(t.server.deps, id, artifact!.latestVersion, crops, capture.ticket);
+    expect(
+      (await t.server.db.select().from(threads).where(eq(threads.id, thread!.id)))[0]!.cropKey,
+    ).toBeNull();
+  });
+
+  test("retained rendered-frame pixels stay authorized and rooted without frame rows", async () => {
+    const [latest] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
+    const [version] = await t.server.db
+      .select()
+      .from(versions)
+      .where(and(eq(versions.artifactId, id), eq(versions.n, latest!.latestVersion)));
+    const [board] = await t.server.db
+      .select()
+      .from(boardVersions)
+      .where(eq(boardVersions.versionId, version!.id));
+    const hash = sha("retained-only-in-snapshot");
+    await t.server.deps.bucket.put(blobKey(hash), new TextEncoder().encode("retained-only-in-snapshot"), {
+      contentType: "image/webp",
+    });
+    const snapshot = structuredClone(board!.snapshot);
+    const object = snapshot.objects.find((object) => object.kind === "rendered_frame");
+    if (!object || object.kind !== "rendered_frame") throw new Error("missing frame fixture");
+    object.data.renders = { "1x": hash, "2x": hash, "3x": hash, thumb: hash };
+    object.data.missing = true;
+    await t.server.db.update(boardVersions).set({ snapshot }).where(eq(boardVersions.versionId, version!.id));
+    expect(
+      (await t.api(`/api/artifacts/${id}/r/${hash}`, { cookie: owner, redirect: "manual" })).status,
+    ).toBe(302);
+    t.clock.advance(8 * 24 * 60 * 60 * 1000);
+    await collectGarbage(t.server.deps);
+    expect(await t.server.deps.bucket.head(blobKey(hash))).not.toBeNull();
   });
 });

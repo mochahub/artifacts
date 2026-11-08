@@ -13,6 +13,8 @@ import {
   deletedMap,
   newObject,
   objectsMap,
+  purgeDeleted,
+  rebalanceBoard,
   repairBoard,
   restoreBoardObject,
   setBoardText,
@@ -395,5 +397,34 @@ describe("two writers", () => {
     sync(one, two);
     expect(yToBoard(one)).toEqual(yToBoard(two));
     expect(boardObjects(one).size).toBe(10);
+  });
+});
+
+describe("server board compaction", () => {
+  test("purge removes hidden maps, keeps retired ids and replays to another replica", () => {
+    const doc = boardToY(everyKind());
+    const other = fork(doc);
+    const target = yToBoard(doc).objects.find((o) => o.kind === "sticky");
+    if (!target) throw new Error("Missing fixture sticky");
+    deleteBoardObject(doc, target.id, A1);
+    expect(objectsMap(doc).has(target.id)).toBe(true);
+    expect(purgeDeleted(doc)).not.toBeNull();
+    sync(doc, other);
+    expect(objectsMap(other).has(target.id)).toBe(false);
+    expect(deletedMap(other).has(target.id)).toBe(true);
+    expect(purgeDeleted(doc)).toBeNull();
+  });
+  test("rebalance preserves sibling order and field authorship", () => {
+    const doc = boardToY(everyKind());
+    const before = yToBoard(doc);
+    const expected = [...before.objects].sort(compareSiblings).map((o) => o.id);
+    expect(rebalanceBoard(doc, 0)).not.toBeNull();
+    const after = yToBoard(doc);
+    expect([...after.objects].sort(compareSiblings).map((o) => o.id)).toEqual(expected);
+    for (const object of after.objects) {
+      const original = before.objects.find((o) => o.id === object.id);
+      if (!original) throw new Error("Missing original object");
+      expect(object.attribution.fields.order).toEqual(original.attribution.fields.order);
+    }
   });
 });

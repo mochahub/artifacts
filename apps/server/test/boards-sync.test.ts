@@ -13,6 +13,7 @@ import {
   setRegister,
   yToBoard,
 } from "@artifacts/doc/board";
+import { boardBase } from "@artifacts/doc/board-hash";
 import { connect, type Provider, type UnsentStore } from "@artifacts/doc/client";
 import { Awareness } from "@artifacts/doc/sync";
 import { CLI_SCOPES, MANIFEST, PublishPrepared, SYNC_CLOSE } from "@artifacts/schema";
@@ -401,11 +402,40 @@ describe("board sync", () => {
     expect(client.codes).toEqual([]);
   });
 
-  test("object holds reach edit_presence.objects, from either replica", async () => {
+  test("Delegate to Write bypasses the one-second presence throttle", async () => {
+    for (const previous of clients) previous.provider.destroy();
+    await until(
+      async () =>
+        (await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id))).length === 0,
+    );
     const client = await open(b);
+    client.provider.setMode("delegate");
+    await until(async () =>
+      (await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id))).every(
+        (row) => row.mode === "delegate",
+      ),
+    );
+    client.provider.setMode("write");
+    await until(
+      async () =>
+        (await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id))).some(
+          (row) => row.mode === "write",
+        ),
+      300,
+    );
+  });
+
+  test("object holds reach edit_presence.objects, from either replica", async () => {
+    for (const previous of clients) previous.provider.destroy();
+    await until(
+      async () =>
+        (await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id))).length === 0,
+    );
+    const client = await open(b);
+    client.provider.setMode("delegate");
     client.awareness.setLocalState({
       user: { author: "", name: "", kind: "person", color: "#123456" },
-      mode: "write",
+      mode: "delegate",
       objects: ["~sticky0001"],
       pending: [],
       cursor: { x: 1, y: 2 },
@@ -415,8 +445,36 @@ describe("board sync", () => {
         .select({ objects: editPresence.objects })
         .from(editPresence)
         .where(and(eq(editPresence.artifactId, id)));
-      return rows.some((row) => row.objects.includes("~sticky0001"));
+      return (
+        rows.some((row) => row.objects.includes("~sticky0001")) &&
+        (await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id))).every(
+          (row) => row.mode === "delegate",
+        )
+      );
     });
+    expect(
+      (
+        await a.api(`/api/artifacts/${id}/doc/maintained`, {
+          method: "PUT",
+          cookie,
+          json: { agentMaintained: true },
+        })
+      ).status,
+    ).toBe(200);
+    const before = yToBoard(await persisted()).objects.find((o) => o.id === "~sticky0001");
+    const response = await a.api(`/api/artifacts/${id}/board/ops`, {
+      method: "POST",
+      bearer: token,
+      json: {
+        epoch: 1,
+        requestId: Bun.randomUUIDv7(),
+        bases: { "~sticky0001": boardBase(before as BoardObject) },
+        ops: [{ op: "delete", object: "~sticky0001" }],
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ outcome: "suggested", reason: "held" });
+    expect(yToBoard(await persisted()).objects.find((o) => o.id === "~sticky0001")).toEqual(before);
     client.provider.destroy();
     await until(async () => {
       const rows = await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id));

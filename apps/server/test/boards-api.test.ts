@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { deletedMap, objectsMap } from "@artifacts/doc/board";
 import { CLI_SCOPES, MANIFEST, PublishPrepared, PublishResult } from "@artifacts/schema";
 import {
   BoardEditResult,
@@ -8,24 +9,27 @@ import {
   BoardSuggestionPreview,
   BoardVersionView,
 } from "@artifacts/schema/boards";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   activity,
+  artifactAccess,
   artifacts,
   boardRequests,
   boardSuggestions,
   boardVersions,
   editDocs,
   editPresence,
+  editRuns,
   pages,
   people,
   projects,
   tokens,
   versions,
 } from "../src/db/schema.ts";
+import { loadDoc } from "../src/editing/store.ts";
 import { blobKey } from "../src/layout.ts";
 import { claim, code, json, OWNER, orgToken, signIn, startTestServer, type TestServer } from "./helpers.ts";
-import { file } from "./publish-helper.ts";
+import { file, makePerson } from "./publish-helper.ts";
 
 /** 14, "HTTP API": every board route end to end, on one server and one database. */
 const style = {
@@ -345,6 +349,80 @@ describe("board routes", () => {
     expect(await json(withdrawn)).toMatchObject({ status: "withdrawn" });
   });
 
+  test("dependent run previews reserve ids without applying ghosts; run activity names the board", async () => {
+    await t.api(`/api/artifacts/${id}/doc/maintained`, {
+      method: "PUT",
+      cookie: owner,
+      json: { agentMaintained: false },
+    });
+    const started = await t.api(`/api/artifacts/${id}/doc/runs`, {
+      method: "POST",
+      bearer: token,
+      json: { goal: "Sketch a proposal" },
+    });
+    expect(started.status).toBe(201);
+    const run = (await json(started)).id as string;
+    const first = BoardEditResult.parse(
+      await json(
+        await ops({
+          epoch: 1,
+          requestId: Bun.randomUUIDv7(),
+          bases: {},
+          run,
+          suggest: true,
+          ops: [sticky("$parent", "Reserved proposal")],
+        }),
+      ),
+    );
+    const reserved = first.ids.$parent as string;
+    const firstPreview = BoardSuggestionPreview.parse(
+      await json(await t.api(`/api/board-suggestions/${first.suggestion}/preview`, { cookie: owner })),
+    );
+    const second = BoardEditResult.parse(
+      await json(
+        await ops({
+          epoch: 1,
+          requestId: Bun.randomUUIDv7(),
+          bases: { [reserved]: firstPreview.objects[0]?.base },
+          run,
+          suggest: true,
+          ops: [{ op: "move", object: reserved, pose: { x: 777, y: 33, w: 200, h: 200, angle: 0 } }],
+        }),
+      ),
+    );
+    expect(second.outcome).toBe("suggested");
+    const preview = BoardSuggestionPreview.parse(
+      await json(await t.api(`/api/board-suggestions/${second.suggestion}/preview`, { cookie: owner })),
+    );
+    expect(preview.objects).toHaveLength(1);
+    expect(preview.objects[0]?.object).toMatchObject({ id: reserved, pose: { x: 777, y: 33 } });
+    expect((await read()).objects.some((o) => o.object.id === reserved)).toBe(false);
+    expect(
+      (
+        await t.api(`/api/runs/${run}/finish`, {
+          method: "POST",
+          bearer: token,
+          json: {},
+        })
+      ).status,
+    ).toBe(200);
+    await t.api(`/api/artifacts/${id}/doc/maintained`, {
+      method: "PUT",
+      cookie: owner,
+      json: { agentMaintained: true },
+    });
+    const state = await json(await t.api(`/api/artifacts/${id}/board`, { cookie: owner }));
+    expect(state.runs).toContainEqual(expect.objectContaining({ id: run, status: "finished" }));
+    expect(state.present).not.toContainEqual(expect.objectContaining({ run }));
+    const logs = await t.server.db.select().from(activity).where(eq(activity.artifactId, id));
+    for (const kind of ["run_started", "run_finished"]) {
+      expect(logs.find((log) => log.kind === kind && log.payload.run === run)?.payload).toMatchObject({
+        document: "board",
+        page: "board",
+      });
+    }
+  });
+
   test("the 200-open-suggestion limit counts board batches", async () => {
     const [art] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
     const now = t.clock.now();
@@ -423,6 +501,8 @@ describe("board routes", () => {
 
   test("read scope, hidden pages and edit scope", async () => {
     const reader = (await orgToken(t, owner, { scopes: ["read"] })).token;
+    const state = await json(await t.api(`/api/artifacts/${id}/board`, { bearer: reader }));
+    expect(state).toMatchObject({ canEdit: false, runs: [], present: [], openSuggestions: 0 });
     const draft = await t.api(`/api/artifacts/${id}/board/objects?draft=1`, { bearer: reader });
     expect(draft.status).toBe(403);
     const edit = await ops(
@@ -453,5 +533,255 @@ describe("board routes", () => {
       expect(response.status).toBe(404);
       expect(await code(response)).toBe("not_found");
     }
+  });
+  test("a wiki reader cannot preview or accept a hidden page; a page grant counts as audience", async () => {
+    const [page] = await t.server.db.select().from(artifacts).where(eq(artifacts.id, id));
+    if (!page) throw new Error("Missing board");
+    const reader = await makePerson(t, page.orgId, "member");
+    await t.server.db
+      .update(tokens)
+      .set({ scopes: [...CLI_SCOPES] })
+      .where(eq(tokens.personId, reader.id));
+    const epoch = (await read()).epoch;
+    const proposal = BoardEditResult.parse(
+      await json(
+        await ops({
+          epoch,
+          requestId: Bun.randomUUIDv7(),
+          bases: {},
+          suggest: true,
+          ops: [sticky("$hidden", "Private proposal")],
+        }),
+      ),
+    );
+    await t.server.db
+      .update(artifacts)
+      .set({ visibility: "me", agentMaintained: false })
+      .where(eq(artifacts.id, id));
+    expect((await t.api("/api/wikis/brain", { bearer: reader.token })).status).toBe(200);
+    for (const [path, method] of [
+      [`/api/artifacts/${id}/board/objects`, "GET"],
+      [`/api/board-suggestions/${proposal.suggestion}/preview`, "GET"],
+      [`/api/board-suggestions/${proposal.suggestion}/accept`, "POST"],
+    ]) {
+      expect(
+        (
+          await t.api(path as string, {
+            method,
+            bearer: reader.token,
+            ...(method === "POST" ? { json: {} } : {}),
+          })
+        ).status,
+      ).toBe(404);
+    }
+    await t.server.db.insert(artifactAccess).values({
+      artifactId: id,
+      orgId: page.orgId,
+      personId: reader.id,
+      permission: "view",
+      grantedBy: page.publisherId,
+    });
+    expect(
+      BoardEditResult.parse(
+        await json(
+          await ops({
+            epoch,
+            requestId: Bun.randomUUIDv7(),
+            bases: {},
+            ops: [sticky("$shared", "Shared proposal")],
+          }),
+        ),
+      ).outcome,
+    ).toBe("suggested");
+    await t.server.db
+      .update(artifacts)
+      .set({ visibility: page.visibility, agentMaintained: true })
+      .where(eq(artifacts.id, id));
+  });
+
+  test("native text enters search only at a checkpoint", async () => {
+    const epoch = (await read()).epoch;
+    await t.api(`/api/artifacts/${id}/doc/maintained`, {
+      method: "PUT",
+      cookie: owner,
+      json: { agentMaintained: true },
+    });
+    const q = "Quasarcheckpoint";
+    const search = async () =>
+      json<{ cards: { slug: string }[] }>(await t.api(`/api/library/search?q=${q}`, { bearer: token }));
+    expect((await search()).cards.some((c) => c.slug === "plan")).toBe(false);
+    expect(
+      BoardEditResult.parse(
+        await json(
+          await ops({
+            epoch,
+            requestId: Bun.randomUUIDv7(),
+            bases: {},
+            ops: [sticky("$search", q)],
+          }),
+        ),
+      ).outcome,
+    ).toBe("applied");
+    expect((await search()).cards.some((c) => c.slug === "plan")).toBe(false);
+    expect(
+      (
+        await t.api(`/api/artifacts/${id}/board/checkpoint`, {
+          method: "POST",
+          cookie: owner,
+          json: { epoch },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await search()).cards.some((c) => c.slug === "plan")).toBe(true);
+  });
+  test("checkpoint purges a deleted object's hidden map and retains its tombstone", async () => {
+    const draft = await read();
+    const target = draft.objects.find((entry) => entry.object.kind === "sticky");
+    if (!target) throw new Error("Missing sticky");
+    const removed = await ops(
+      {
+        epoch: draft.epoch,
+        requestId: Bun.randomUUIDv7(),
+        bases: { [target.object.id]: target.base },
+        ops: [{ op: "delete", object: target.object.id }],
+      },
+      { cookie: owner },
+    );
+    expect(BoardEditResult.parse(await json(removed)).outcome).toBe("applied");
+    const before = await loadDoc(t.server.deps, id);
+    expect(objectsMap(before.ydoc).has(target.object.id)).toBe(true);
+    before.ydoc.destroy();
+    expect(
+      (
+        await t.api(`/api/artifacts/${id}/board/checkpoint`, {
+          method: "POST",
+          cookie: owner,
+          json: { epoch: draft.epoch },
+        })
+      ).status,
+    ).toBe(200);
+    const after = await loadDoc(t.server.deps, id);
+    expect(objectsMap(after.ydoc).has(target.object.id)).toBe(false);
+    expect(deletedMap(after.ydoc).has(target.object.id)).toBe(true);
+    after.ydoc.destroy();
+  });
+  test("checkpoint receipts replay without checkpointing subsequent work", async () => {
+    const draft = await read();
+    const body = {
+      epoch: draft.epoch,
+      requestId: Bun.randomUUIDv7(),
+      bases: {},
+      checkpoint: true,
+      ops: [sticky("$receipt", "Receipt checkpoint")],
+    };
+    const first = BoardEditResult.parse(await json(await ops(body)));
+    expect(first.version).not.toBeNull();
+    await ops({
+      epoch: draft.epoch,
+      requestId: Bun.randomUUIDv7(),
+      bases: {},
+      ops: [sticky("$later", "Later work")],
+    });
+    expect(BoardEditResult.parse(await json(await ops(body)))).toEqual(first);
+    const [row] = await t.server.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
+    expect(row!.seq).toBeGreaterThan(row!.checkpointSeq);
+  });
+
+  test("removed checkpoint reads and hidden source slugs stay hidden", async () => {
+    const [version] = await t.server.db
+      .select()
+      .from(versions)
+      .where(and(eq(versions.artifactId, id), eq(versions.n, 1)));
+    await t.server.db.update(versions).set({ deletedAt: new Date() }).where(eq(versions.id, version!.id));
+    try {
+      expect((await t.api(`/api/artifacts/${id}/board/objects?version=1`, { cookie: owner })).status).toBe(
+        404,
+      );
+    } finally {
+      await t.server.db.update(versions).set({ deletedAt: null }).where(eq(versions.id, version!.id));
+    }
+    const latest = (await t.server.db.select().from(artifacts).where(eq(artifacts.id, id)))[0]!.latestVersion;
+    const [current] = await t.server.db
+      .select()
+      .from(versions)
+      .where(and(eq(versions.artifactId, id), eq(versions.n, latest)));
+    await t.server.db
+      .update(versions)
+      .set({ wiki: { ...current!.wiki!, sources: ["hidden-source-slug"] } })
+      .where(eq(versions.id, current!.id));
+    try {
+      expect((await read("")).sources).not.toContain("hidden-source-slug");
+    } finally {
+      await t.server.db.update(versions).set({ wiki: current!.wiki }).where(eq(versions.id, current!.id));
+    }
+  });
+
+  test("board run acceptance rolls back its claim and batches if finalization fails", async () => {
+    await t.api(`/api/artifacts/${id}/doc/maintained`, {
+      method: "PUT",
+      cookie: owner,
+      json: { agentMaintained: false },
+    });
+    const run = await json<{ id: string }>(
+      await t.api(`/api/artifacts/${id}/doc/runs`, {
+        method: "POST",
+        bearer: token,
+        json: { goal: "Private unaccepted goal" },
+      }),
+    );
+    const draft = await read();
+    const proposal = BoardEditResult.parse(
+      await json(
+        await ops({
+          epoch: draft.epoch,
+          requestId: Bun.randomUUIDv7(),
+          bases: {},
+          run: run.id,
+          suggest: true,
+          ops: [sticky("$rollback", "Must roll back")],
+        }),
+      ),
+    );
+    const [before] = await t.server.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
+    await t.server.db.execute(
+      sql`create function fail_board_run() returns trigger language plpgsql as $$ begin if NEW.status = 'accepted' and NEW.version is not null then raise exception 'injected finalization failure'; end if; return NEW; end $$`,
+    );
+    await t.server.db.execute(
+      sql`create trigger fail_board_run before update on edit_runs for each row execute function fail_board_run()`,
+    );
+    try {
+      expect(
+        (await t.api(`/api/runs/${run.id}/accept`, { method: "POST", cookie: owner, json: {} })).status,
+      ).toBe(500);
+      const [after] = await t.server.db.select().from(editRuns).where(eq(editRuns.id, run.id));
+      expect(after!.status).toBe("active");
+      const [batch] = await t.server.db
+        .select()
+        .from(boardSuggestions)
+        .where(eq(boardSuggestions.id, proposal.suggestion!));
+      expect(batch!.status).toBe("open");
+      const [doc] = await t.server.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
+      expect(doc!.seq).toBe(before!.seq);
+    } finally {
+      await t.server.db.execute(sql`drop trigger fail_board_run on edit_runs`);
+      await t.server.db.execute(sql`drop function fail_board_run()`);
+    }
+    const reader = (await orgToken(t, owner, { scopes: ["read"] })).token;
+    const events = await json<{ items: { kind: string }[] }>(
+      await t.api("/api/activity", { bearer: reader }),
+    );
+    expect(JSON.stringify(events)).not.toContain("Private unaccepted goal");
+    expect(
+      events.items.some((event: { kind: string }) =>
+        ["edited", "suggested", "run_started"].includes(event.kind),
+      ),
+    ).toBe(false);
+    const wiki = await json<{ log: { kind: string }[] }>(await t.api("/api/wikis/brain", { bearer: reader }));
+    expect(
+      wiki.log.some((event: { kind: string }) => ["edited", "suggested", "run_started"].includes(event.kind)),
+    ).toBe(false);
+    expect(
+      (await t.api(`/api/runs/${run.id}/accept`, { method: "POST", cookie: owner, json: {} })).status,
+    ).toBe(200);
   });
 });

@@ -102,7 +102,11 @@ export async function prepareCapture(
   const captured = new Set(found.board.renders?.crops.map((crop) => crop.thread) ?? []);
   const threads = (
     await objectThreads(deps.db, artifact.id, found.board.pageKey, { version: target.version })
-  ).filter((entry) => !captured.has(entry.n));
+  ).filter(
+    (entry) =>
+      !captured.has(entry.n) &&
+      found.board.snapshot.objects.some((object) => object.id === entry.anchor.object),
+  );
   if (threads.length > 500) throw new ApiError("too_large", "Too many open pins to picture at once.");
   const ticket = Bun.randomUUIDv7();
   const seq = found.docSeq ?? 0;
@@ -201,7 +205,7 @@ export async function commitCapture(
 /**
  * After a capture is attached: each object-pinned thread made on that version gets its crop as its own
  * crop picture (14, "Object comments"), copied to the thread's crop key so a thread purge never deletes a
- * shared blob. Only threads still anchored to that version, and only ones without a crop. Best effort: a
+ * shared blob. Only pins matching the ticket's frozen anchor, and only ones without a crop. Best effort: a
  * failure is logged and the pictures stay with the version.
  */
 export async function attachThreadCrops(
@@ -209,8 +213,18 @@ export async function attachThreadCrops(
   artifactId: string,
   version: number,
   crops: BoardRenders["crops"],
+  ticketId: string,
 ) {
   if (crops.length === 0) return;
+  // The ticket freezes the exact anchor drawn, including its original checkpoint. An unchanged pin
+  // can be pictured on a later checkpoint; attachment must compare that provenance, not rewrite it.
+  const [ticket] = await deps.db
+    .select()
+    .from(boardCaptures)
+    .where(and(eq(boardCaptures.id, ticketId), eq(boardCaptures.artifactId, artifactId)))
+    .limit(1);
+  if (!ticket?.consumedAt) return;
+  const anchors = new Map(ticket.threads.map((entry) => [entry.n, entry.anchor]));
   const rows = await deps.db
     .select({ id: threads.id, n: threads.n, anchor: threads.anchor, cropKey: threads.cropKey })
     .from(threads)
@@ -228,16 +242,29 @@ export async function attachThreadCrops(
   const byN = new Map(crops.map((crop) => [crop.thread, crop.image.hash]));
   await mapLimit(rows, 4, async (row) => {
     const hash = byN.get(row.n);
-    if (!hash || row.anchor?.type !== "object" || row.anchor.checkpoint !== version) return;
+    if (
+      !hash ||
+      row.anchor?.type !== "object" ||
+      row.anchor.checkpoint > version ||
+      canonicalJson(row.anchor) !== canonicalJson(anchors.get(row.n) ?? null)
+    )
+      return;
     try {
       const object = await deps.bucket.get(blobKey(hash));
       if (!object) return;
-      const key = cropKey(row.id);
-      await deps.bucket.put(key, object.body, { contentType: object.contentType ?? "image/webp" });
-      await deps.db
-        .update(threads)
-        .set({ cropKey: key })
-        .where(and(eq(threads.id, row.id), isNull(threads.cropKey)));
+      await deps.db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ anchor: threads.anchor, cropKey: threads.cropKey })
+          .from(threads)
+          .where(eq(threads.id, row.id))
+          .for("update")
+          .limit(1);
+        if (!current || current.cropKey || canonicalJson(current.anchor) !== canonicalJson(row.anchor))
+          return;
+        const key = cropKey(row.id);
+        await deps.bucket.put(key, object.body, { contentType: object.contentType ?? "image/webp" });
+        await tx.update(threads).set({ cropKey: key }).where(eq(threads.id, row.id));
+      });
     } catch (error) {
       deps.log.warn("couldn't attach a board crop", { thread: row.id, error: String(error) });
     }

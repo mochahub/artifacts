@@ -197,7 +197,7 @@ export async function objectThreads(
         eq(threads.pageKey, pageKey),
         eq(threads.status, "open"),
         sql`${threads.anchor}->>'type' = 'object'`,
-        options.version ? sql`(${threads.anchor}->>'checkpoint')::int = ${options.version}` : undefined,
+        options.version ? sql`(${threads.anchor}->>'checkpoint')::int <= ${options.version}` : undefined,
         options.withoutCrop ? isNull(threads.cropKey) : undefined,
       ),
     )

@@ -25,6 +25,7 @@ import {
   versions,
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
+import { visibleActivity } from "../editing/runs.ts";
 import { ApiError } from "../http/errors.ts";
 import { requireCan } from "../http/routes.ts";
 import { visibleTo } from "../library/visible.ts";
@@ -407,6 +408,12 @@ export async function wikiSpace(
       // Hidden artifacts' rows are dropped after this, so read past the 50 that are shown.
       .limit(500),
   ]);
+  const visibleLog = [];
+  for (const entry of log) {
+    const resource = visibleProject.find((a) => a.id === entry.event.artifactId);
+    if (!entry.event.artifactId || (resource && (await visibleActivity(deps, caller, resource, entry.event))))
+      visibleLog.push(entry);
+  }
   const page = (a: Entry): WikiPage => ({
     slug: a.row.slug,
     title: a.row.title,
@@ -503,7 +510,7 @@ export async function wikiSpace(
       .sort((a, b) => b.version.publishedAt.getTime() - a.version.publishedAt.getTime())
       .map(page),
     garden,
-    log: log
+    log: visibleLog
       .filter(({ event }) => !event.artifactId || visibleProject.some((a) => a.id === event.artifactId))
       .slice(0, 50)
       .map(({ event, by }) => {

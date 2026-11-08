@@ -1527,8 +1527,20 @@ export async function boardEdit(
   request: BoardEditRequest,
 ): Promise<BoardEditResult> {
   return withDocLock(deps, artifact.id, async (lock) => {
+    const [receipt] = await lock.tx
+      .select({ result: boardRequests.result })
+      .from(boardRequests)
+      .where(
+        and(
+          eq(boardRequests.artifactId, artifact.id),
+          eq(boardRequests.callerKey, callerKeyOf(caller) ?? ""),
+          eq(boardRequests.requestId, request.requestId),
+        ),
+      )
+      .limit(1);
     const result = await applyBoardBatchLocked(deps, caller, artifact, request, lock);
-    if (!request.checkpoint || result.outcome !== "applied" || result.version !== null) return result;
+    if (receipt || !request.checkpoint || result.outcome !== "applied" || result.version !== null)
+      return result;
     if (!(caller.kind === "cliToken" || caller.kind === "orgToken" || caller.kind === "person"))
       return result;
     try {
@@ -1543,7 +1555,18 @@ export async function boardEdit(
           message: request.note ?? null,
         },
       );
-      return { ...result, version: made.version };
+      const final = { ...result, version: made.version };
+      await lock.tx
+        .update(boardRequests)
+        .set({ result: final })
+        .where(
+          and(
+            eq(boardRequests.artifactId, artifact.id),
+            eq(boardRequests.callerKey, callerKeyOf(caller) ?? ""),
+            eq(boardRequests.requestId, request.requestId),
+          ),
+        );
+      return final;
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       return result;

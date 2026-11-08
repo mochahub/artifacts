@@ -12,6 +12,7 @@ import { type Caller, viewerId } from "../auth/caller.ts";
 import {
   artifacts,
   blocks,
+  boardVersions,
   comments,
   decisions,
   frames,
@@ -295,6 +296,20 @@ export async function buildCards(
     }
   }
 
+  // Only immutable checkpoint captures can supply a native board cover. A draft capture must never
+  // reveal unpublished objects on the library or wiki cards.
+  const boardCovers = heads.length
+    ? await db
+        .select({ versionId: boardVersions.versionId, renders: boardVersions.renders })
+        .from(boardVersions)
+        .where(
+          inArray(
+            boardVersions.versionId,
+            heads.map((head) => head.id),
+          ),
+        )
+    : [];
+
   return list.flatMap(({ row, project }) => {
     const [latest, previous] = latestByArtifact.get(row.id) ?? [];
     if (!latest) return [];
@@ -318,6 +333,7 @@ export async function buildCards(
     const changedFrames = previous
       ? changes(frameHashes(framesOf(previous.id)), frameHashes(own)).changed.length
       : 0;
+    const thumbnail = boardCovers.find((board) => board.versionId === latest.id)?.renders?.thumbnail;
     const first = [...own].sort((a, b) => a.y - b.y || a.x - b.x)[0];
     return [
       {
@@ -325,7 +341,11 @@ export async function buildCards(
         project: project.slug,
         slug: row.slug,
         title: row.title,
-        cover: first ? { renderHash: first.renders.thumb, w: first.w, h: first.h } : { title: row.title },
+        cover: thumbnail
+          ? { renderHash: thumbnail.hash, w: thumbnail.width, h: thumbnail.height }
+          : first
+            ? { renderHash: first.renders.thumb, w: first.w, h: first.h }
+            : { title: row.title },
         pageCount: pageCounts.find((entry) => entry.versionId === latest.id)?.count ?? 0,
         latestVersion: latest.n,
         status,

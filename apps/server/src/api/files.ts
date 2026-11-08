@@ -3,7 +3,7 @@ import { ContentTokenRequest, HOUR_MS, SHA256_HEX } from "@artifacts/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { can } from "../auth/can.ts";
 import { signContentToken } from "../content/token.ts";
-import { frames, pages, versions } from "../db/schema.ts";
+import { boardVersions, frames, pages, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
@@ -39,6 +39,14 @@ export function fileRoutes(routes: Routes, deps: Deps) {
               select 1 from ${frames}
               where ${frames.versionId} = ${versions.id}
                 and jsonb_path_exists(${frames.renders}, '$.* ? (@ == $h)', ${hashJson}::jsonb)
+            )
+            or exists (
+              select 1 from ${boardVersions}
+              where ${boardVersions.versionId} = ${versions.id}
+                and (
+                  ${boardVersions.renders}->'thumbnail'->>'hash' = ${hash}
+                  or jsonb_path_exists(${boardVersions.snapshot}, '$.objects[*] ? (@.kind == "rendered_frame").data.renders.* ? (@ == $h)', ${hashJson}::jsonb)
+                )
             )
           )`,
         ),

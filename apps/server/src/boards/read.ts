@@ -4,7 +4,7 @@ import { boardBase, boardHash } from "@artifacts/doc/board-hash";
 import { keyBetween } from "@artifacts/doc/board-order";
 import type { AgentPolicy } from "@artifacts/schema";
 import type { BoardObject, BoardRead, BoardSnapshot } from "@artifacts/schema/boards";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { LoadedArtifact } from "../auth/access.ts";
 import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
@@ -93,7 +93,7 @@ async function readVersion(deps: Deps, artifact: LoadedArtifact, n: number): Pro
   const [version] = await deps.db
     .select({ id: versions.id, n: versions.n })
     .from(versions)
-    .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, n)))
+    .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, n), isNull(versions.deletedAt)))
     .limit(1);
   if (!version) throw new ApiError("not_found", "There's no such version.");
   const [native] = await deps.db
@@ -310,13 +310,14 @@ export async function readBoard(
     .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, loaded.version)))
     .limit(1);
   const meta = loaded.meta;
+  const sources = await visibleSources(deps, caller, artifact);
   return {
     artifact: `${artifact.project.slug}/${artifact.row.slug}`,
     page: loaded.snapshot.page,
     title: meta?.title ?? artifact.row.title,
     summary: meta?.summary ?? latest?.summary ?? null,
     tags: meta?.tags ?? latest?.tags ?? [],
-    sources: meta?.sources ?? latest?.wiki?.sources ?? [],
+    sources: (meta?.sources ?? latest?.wiki?.sources ?? []).filter((slug) => sources.has(slug)),
     version: Math.max(1, loaded.version),
     draft: loaded.draft,
     epoch: loaded.epoch,

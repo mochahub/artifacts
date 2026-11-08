@@ -27,6 +27,7 @@ import {
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { outsideDraft } from "../editing/checkpoint.ts";
+import { visibleActivity } from "../editing/runs.ts";
 import { ApiError } from "../http/errors.ts";
 import { etagJson } from "../http/etag.ts";
 import { artifactParam } from "../http/resources.ts";
@@ -496,7 +497,12 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
       }
       const resource = seen.get(id);
       // Deletion hides the artifact, not its history: SPEC §5.5 wants the line in Activity.
-      if (resource && seesArtifact(caller, resource)) visible.push(entry);
+      if (
+        resource &&
+        seesArtifact(caller, resource) &&
+        (await visibleActivity(deps, caller, resource, entry.row))
+      )
+        visible.push(entry);
       if (visible.length === 50) break;
     }
     return etagJson(c, {

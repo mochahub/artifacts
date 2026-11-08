@@ -27,6 +27,7 @@ import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../layout.ts";
 import { validateWikiSources } from "../wiki/service.ts";
 import { checkpoint, queueFixes } from "./checkpoint.ts";
+import { legacyBlockIds } from "./legacy-ids.ts";
 import {
   blockMarkdown,
   contentHash,
@@ -462,7 +463,7 @@ export async function applyOps(
     policy = await agentPolicy(deps, caller, artifact, { run: request.run, suggest: request.suggest });
     actor = editActor(caller, request.agent ?? null);
   }
-  const agents: AgentPolicy = { edits: policy.edits, reason: policy.reason, text: policy.text };
+  let agents: AgentPolicy = { edits: policy.edits, reason: policy.reason, text: policy.text };
 
   if (policy.edits === "refused") {
     const reason: Reason = policy.reason === "writing" ? "writing" : "invalid";
@@ -477,9 +478,27 @@ export async function applyOps(
       agents,
     };
   }
-  const runId = policy.reason === "run" ? (request.run ?? null) : null;
+  let runId = policy.reason === "run" ? (request.run ?? null) : null;
 
   const outcome = await withDocLock(deps, artifact.id, async (lock) => {
+    if (!accept) {
+      policy = await agentPolicy({ ...deps, db: lock.tx } as unknown as Deps, caller, artifact, {
+        run: request.run,
+        suggest: request.suggest,
+      });
+      agents = { edits: policy.edits, reason: policy.reason, text: policy.text };
+      runId = policy.reason === "run" ? (request.run ?? null) : null;
+      if (policy.edits === "refused")
+        return {
+          results: request.ops.map((_, index) =>
+            refused(index, policy.reason === "writing" ? "writing" : "invalid", policy.text),
+          ),
+          seq: lock.row?.seq ?? 0,
+          last: null,
+          refused: true,
+        };
+    }
+
     const { ydoc, row } = await loadDoc(deps, artifact.id, lock);
     const key = accept?.authorKey ?? (await authorKey(deps, artifact.id, actor, request.sources ?? [], lock));
     const mark: Mark = {
@@ -841,10 +860,10 @@ export async function applyOps(
       if (suggested) await log("suggested", { count: suggested, ...(runId ? { run: runId } : {}) });
     }
     const last = [...results].reverse().find((r) => r.block)?.block ?? null;
-    return { results, seq, last };
+    return { results, seq, last, refused: false };
   });
 
-  if (!accept && deps.docs && "agentPresence" in deps.docs) {
+  if (!accept && !outcome.refused && deps.docs && "agentPresence" in deps.docs) {
     (
       deps.docs as {
         agentPresence(artifactId: string, author: unknown, block: string | null, run: string | null): void;
@@ -1038,7 +1057,11 @@ async function versionBlocks(deps: Deps, artifact: LoadedArtifact) {
     return hash;
   };
   if (!found) return { nodes: [] as Json[], atoms: (hash: string) => sources.get(hash) ?? "" };
-  const { doc } = markdownToDoc(found.markdown, { ids: found.blockIds, mint: mintBlockId, atom });
+  const { doc } = markdownToDoc(found.markdown, {
+    ids: found.blockIds,
+    mint: legacyBlockIds(found.versionId, found.key),
+    atom,
+  });
   return { nodes: ((doc as Json).content ?? []) as Json[], atoms: (hash: string) => sources.get(hash) ?? "" };
 }
 
@@ -1051,7 +1074,13 @@ async function blobText(deps: Deps, hash: string | undefined) {
 /** The latest version's article Markdown (the manifest page's `src`), and the ids a checkpoint gave it. */
 async function versionMarkdown(deps: Deps, artifact: LoadedArtifact) {
   const [found] = await deps.db
-    .select({ files: versions.files, key: pages.pageKey, kind: pages.kind, meta: pages.meta })
+    .select({
+      versionId: versions.id,
+      files: versions.files,
+      key: pages.pageKey,
+      kind: pages.kind,
+      meta: pages.meta,
+    })
     .from(versions)
     .innerJoin(pages, eq(pages.versionId, versions.id))
     .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, artifact.row.latestVersion)))
@@ -1063,7 +1092,9 @@ async function versionMarkdown(deps: Deps, artifact: LoadedArtifact) {
   };
   const src = manifest.pages?.find((entry) => entry.id === found.key)?.src;
   const markdown = src ? await blobText(deps, found.files[src]?.hash) : null;
-  return markdown === null ? null : { markdown, blockIds: found.meta.blockIds };
+  return markdown === null
+    ? null
+    : { markdown, blockIds: found.meta.blockIds, versionId: found.versionId, key: found.key };
 }
 
 /** Open threads by the block they anchor to. */

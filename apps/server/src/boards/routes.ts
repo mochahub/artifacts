@@ -28,7 +28,7 @@ import {
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { agentPolicy, freshPresence } from "../editing/policy.ts";
-import { activeRuns } from "../editing/runs.ts";
+import { boardRuns } from "../editing/runs.ts";
 import { withDocLock } from "../editing/store.ts";
 import { authorsFor, visibleSources } from "../editing/suggestions.ts";
 import { parseBody } from "../http/body.ts";
@@ -128,7 +128,7 @@ export async function boardState(deps: Deps, caller: Caller, artifact: LoadedArt
   const [[row], present, runs, [open], audience, policy] = await Promise.all([
     deps.db.select().from(editDocs).where(eq(editDocs.artifactId, artifact.id)).limit(1),
     freshPresence(deps, artifact.id),
-    activeRuns(deps, artifact.id),
+    boardRuns(deps, caller, artifact),
     deps.db
       .select({ n: sql<number>`count(*)::int` })
       .from(boardSuggestions)
@@ -158,14 +158,16 @@ export async function boardState(deps: Deps, caller: Caller, artifact: LoadedArt
       objects: entry.objects.slice(0, 50),
       run: null,
     })),
-    ...runs.map((run) => ({
-      kind: "agent" as const,
-      name: run.agent ?? "agent",
-      for: run.startedBy,
-      mode: null,
-      objects: [],
-      run: run.id,
-    })),
+    ...runs
+      .filter((run) => run.status === "active")
+      .map((run) => ({
+        kind: "agent" as const,
+        name: run.agent ?? "agent",
+        for: run.startedBy,
+        mode: null,
+        objects: [],
+        run: run.id,
+      })),
   ];
   return {
     ...base,
@@ -352,7 +354,7 @@ export function boardRoutes(routes: Routes, deps: Deps) {
         );
       });
       if (capture && result.created)
-        await attachThreadCrops(deps, resource.id, result.version, capture.renders.crops);
+        await attachThreadCrops(deps, resource.id, result.version, capture.renders.crops, capture.ticket);
       return c.json(result);
     },
   );
@@ -409,7 +411,7 @@ export function boardRoutes(routes: Routes, deps: Deps) {
       refuseOversized(c);
       const body = await parseBody(c, BoardCaptureCommit);
       const committed = await commitCapture(deps, person, c.var.resource, body);
-      await attachThreadCrops(deps, c.var.resource.id, committed.version, body.renders.crops);
+      await attachThreadCrops(deps, c.var.resource.id, committed.version, body.renders.crops, body.ticket);
       return c.json(committed);
     },
   );
