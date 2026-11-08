@@ -29,8 +29,43 @@ Call `artifacts_board_edit`, or run `artifacts board edit <wiki/slug> --ops batc
   "requestId": "<a fresh UUID>",
   "bases": { "~k3j9x0a1b2": "9f2c4e1a0b77" },
   "ops": [
-    { "op": "add", "ref": "$q", "object": { "kind": "sticky", "pose": { "x": 640, "y": 80, "w": 200, "h": 160, "angle": 0 }, "parent": null, "label": "", "style": { "fill": "#fff2a8", "stroke": "#242424", "strokeWidth": 2, "opacity": 1, "fontSize": 20, "align": "left" }, "text": "Who signs off on this?" } },
-    { "op": "connect", "ref": "$arrow", "label": "", "style": { "fill": "transparent", "stroke": "#242424", "strokeWidth": 2, "opacity": 1, "fontSize": 20, "align": "left" }, "start": { "point": { "x": 0, "y": 0 }, "binding": { "object": "~k3j9x0a1b2", "u": 1, "v": 0.5 } }, "end": { "point": { "x": 0, "y": 0 }, "binding": { "object": "$q", "u": 0, "v": 0.5 } }, "route": "straight", "startArrow": false, "endArrow": true }
+    {
+      "op": "add",
+      "ref": "$q",
+      "object": {
+        "kind": "sticky",
+        "pose": { "x": 640, "y": 80, "w": 200, "h": 160, "angle": 0 },
+        "parent": null,
+        "label": "",
+        "style": {
+          "fill": "#fff2a8",
+          "stroke": "#242424",
+          "strokeWidth": 2,
+          "opacity": 1,
+          "fontSize": 20,
+          "align": "left"
+        },
+        "text": "Who signs off on this?"
+      }
+    },
+    {
+      "op": "connect",
+      "ref": "$arrow",
+      "label": "",
+      "style": {
+        "fill": "transparent",
+        "stroke": "#242424",
+        "strokeWidth": 2,
+        "opacity": 1,
+        "fontSize": 20,
+        "align": "left"
+      },
+      "start": { "point": { "x": 0, "y": 0 }, "binding": { "object": "~k3j9x0a1b2", "u": 1, "v": 0.5 } },
+      "end": { "point": { "x": 0, "y": 0 }, "binding": { "object": "$q", "u": 0, "v": 0.5 } },
+      "route": "straight",
+      "startArrow": false,
+      "endArrow": true
+    }
   ],
   "sources": ["meeting-notes"],
   "note": "Adds the open question from the meeting."

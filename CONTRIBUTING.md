@@ -99,17 +99,17 @@ Don't edit version numbers. They are stamped at build time, and `package.json` s
 
 [docs/implementation/](docs/implementation/README.md) holds the documents the code is built from. Ten of them are contracts, which own names and shapes:
 
-| Document                                                                     | Owns                                                                 |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [02 Data model](docs/implementation/02-data-model.md)                        | Tables, columns, enums, bucket prefixes                              |
-| [03 HTTP API](docs/implementation/03-api.md)                                 | Ports, paths, shapes, headers, error codes                           |
-| [04 Sign-in and permissions](docs/implementation/04-auth-and-permissions.md) | Callers, cookies, tokens, scopes, the permission matrix, rate limits |
-| [05 Publishing and storage](docs/implementation/05-publish-and-storage.md)   | The manifest, renders, block ids, re-anchoring, clean-up             |
-| [07 The CLI and the skill](docs/implementation/07-cli-and-skill.md)          | Commands, flags, config, lint rule ids                               |
-| [08 Micro apps](docs/implementation/08-micro-apps.md)                        | Bridge messages, data store limits, the sandbox                      |
-| [09 Deploying](docs/implementation/09-deploy.md)                             | Images, environment variables, the template, releases                |
-| [12 Wikis](docs/implementation/12-wikis.md)                                  | Wiki projects, roles, wiki links, the wiki API and tools             |
-| [13 Editing](docs/implementation/13-editing.md)                              | Drafts, checkpoints, block ids, sync, agent operations, suggestions  |
+| Document                                                                     | Owns                                                                                    |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [02 Data model](docs/implementation/02-data-model.md)                        | Tables, columns, enums, bucket prefixes                                                 |
+| [03 HTTP API](docs/implementation/03-api.md)                                 | Ports, paths, shapes, headers, error codes                                              |
+| [04 Sign-in and permissions](docs/implementation/04-auth-and-permissions.md) | Callers, cookies, tokens, scopes, the permission matrix, rate limits                    |
+| [05 Publishing and storage](docs/implementation/05-publish-and-storage.md)   | The manifest, renders, block ids, re-anchoring, clean-up                                |
+| [07 The CLI and the skill](docs/implementation/07-cli-and-skill.md)          | Commands, flags, config, lint rule ids                                                  |
+| [08 Micro apps](docs/implementation/08-micro-apps.md)                        | Bridge messages, data store limits, the sandbox                                         |
+| [09 Deploying](docs/implementation/09-deploy.md)                             | Images, environment variables, the template, releases                                   |
+| [12 Wikis](docs/implementation/12-wikis.md)                                  | Wiki projects, roles, wiki links, the wiki API and tools                                |
+| [13 Editing](docs/implementation/13-editing.md)                              | Drafts, checkpoints, block ids, sync, agent operations, suggestions                     |
 | [14 Boards](docs/implementation/14-boards.md)                                | Native objects, Yjs mapping, frame merge, browser captures, board operations and limits |
 
 **A change to code that a contract describes changes the contract in the same commit.** That covers a route, a flag, an environment variable, a table or a column, a lint rule id or a limit. If the two disagree, a reader can't tell which is right. [SPEC.md](docs/SPEC.md) wins on behaviour, and the contract wins on names. If you need to change behaviour that the spec states, say so in the pull request.

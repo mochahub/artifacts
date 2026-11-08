@@ -43,7 +43,7 @@ import { wikiAudience } from "../wiki/service.ts";
 import { checkpoint } from "./checkpoint.ts";
 import { authorRuns, docToMarkdown, yToDoc } from "./model.ts";
 import { applyOps, pageRead } from "./ops.ts";
-import { agentPolicy, freshPresence } from "./policy.ts";
+import { agentPolicy, freshPresence, missingEditScope } from "./policy.ts";
 import {
   acceptRun,
   activeRuns,
@@ -301,6 +301,8 @@ async function exportMarkdown(
   }
   const front = [
     `title: ${yamlValue(meta.title ?? manifest.title ?? artifact.row.title)}`,
+    `version: ${n}`,
+    `draft: ${query.draft}`,
     `summary: ${yamlValue(meta.summary ?? version.summary)}`,
     `tags: ${yamlValue(meta.tags ?? version.tags ?? [])}`,
     `role: ${yamlValue(version.wiki?.role ?? null)}`,
@@ -347,7 +349,13 @@ const numberQuery = (value: string | undefined) => {
 const draftQuery = (value: string | undefined) => value === "1" || value === "true";
 const requireEdit = (caller: Caller, artifact: LoadedArtifact) => {
   if (!can(caller, "artifact.edit", artifact))
-    throw new ApiError("forbidden", "Reading the draft needs the edit right.");
+    throw new ApiError(
+      "forbidden",
+      missingEditScope(caller, artifact)
+        ? "Run artifacts login again or reconnect the Artifacts connector to edit pages."
+        : "Reading the draft needs the edit right.",
+      missingEditScope(caller, artifact) ? { scope: "edit" } : {},
+    );
 };
 
 /** The editing routes in 13, "HTTP API". The sync socket is the realtime layer's. */

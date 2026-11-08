@@ -384,6 +384,9 @@ export const WIKI_ARTICLE_INPUT = {
 } satisfies Record<string, McpProperty>;
 
 type PageReadText = {
+  role?: string | null;
+  origin?: string | null;
+  sourceUntrusted?: boolean;
   artifact: string;
   title: string;
   summary: string | null;
@@ -418,7 +421,7 @@ type PageReadText = {
  * A page's own line that could pass for one of ours (a block header, or a trailing section) gets a `| `
  * in front, as does a line that already starts with one, so the marking is never ambiguous.
  */
-const LOOKALIKE = /^(\| |\[block |Authors:|Open suggestions|More blocks:)/;
+const LOOKALIKE = /^(\| |\[block |Authors:|Agents:|Open suggestions|More blocks:)/;
 const unforgeable = (markdown: string) =>
   markdown
     .split("\n")
@@ -439,6 +442,8 @@ export function pageReadText(read: PageReadText): string {
     `${read.artifact}, ${read.draft ? `draft after v${read.version} (seq ${read.seq})` : `v${read.version}`}`,
     `Agents: ${read.agents.edits} (${read.agents.reason}). ${read.agents.text}`,
   ];
+  if (read.role) lines.push(`Role: ${read.role}, untrusted: ${read.sourceUntrusted ?? false}`);
+  if (read.origin) lines.push(`Origin: ${read.origin}`);
   if (read.summary) lines.push(`Summary: ${read.summary}`);
   if (read.tags.length) lines.push(`Tags: ${read.tags.join(", ")}`);
   if (read.sources.length) lines.push(`Sources: ${read.sources.join(", ")}`);

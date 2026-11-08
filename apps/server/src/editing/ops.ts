@@ -38,7 +38,7 @@ import {
   validate,
   yToDoc,
 } from "./model.ts";
-import { agentPolicy, type Policy } from "./policy.ts";
+import { agentPolicy, missingEditScope, type Policy } from "./policy.ts";
 import {
   type Actor,
   authorKey,
@@ -963,7 +963,13 @@ export async function pageRead(
 ): Promise<PageRead> {
   const canEdit = can(caller, "artifact.edit", artifact);
   if (input.draft && !canEdit)
-    throw new ApiError("forbidden", "Reading the draft needs the edit right and scope.");
+    throw new ApiError(
+      "forbidden",
+      missingEditScope(caller, artifact)
+        ? "Run artifacts login again or reconnect the Artifacts connector to edit pages."
+        : "Reading the draft needs the edit right.",
+      missingEditScope(caller, artifact) ? { scope: "edit" } : {},
+    );
   const state = await editability(deps, artifact);
   const draft = (input.draft ?? canEdit) && state.editable;
   const policy = await agentPolicy(deps, caller, artifact);
@@ -1019,6 +1025,9 @@ export async function pageRead(
     .limit(1);
   return {
     artifact: `${artifact.project.slug}/${artifact.row.slug}`,
+    role: latest?.wiki?.role ?? null,
+    origin: latest?.wiki?.origin ?? null,
+    sourceUntrusted: latest?.wiki?.untrusted ?? false,
     title: meta?.title ?? artifact.row.title,
     summary: meta?.summary ?? latest?.summary ?? null,
     tags: meta?.tags ?? latest?.tags ?? [],
@@ -1086,7 +1095,7 @@ async function versionMarkdown(deps: Deps, artifact: LoadedArtifact) {
     .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, artifact.row.latestVersion)))
     .orderBy(asc(pages.position))
     .limit(1);
-  if (!found || found.kind !== "article") return null;
+  if (found?.kind !== "article") return null;
   const manifest = JSON.parse((await blobText(deps, found.files[MANIFEST]?.hash)) ?? "{}") as {
     pages?: { id: string; src?: string }[];
   };

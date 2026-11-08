@@ -394,3 +394,5 @@ See [12-wikis.md](12-wikis.md) for the wiki contract.
 ## Native board API
 
 [14 Boards](14-boards.md#http-api) defines board read, operations, suggestions, assets, capture and checkpoint routes. `POST /api/boards` creates an eligible wiki canvas page. Object reads default to checkpoints; `draft=1` requires edit access. Suggestion previews and decisions enforce the page visibility before returning batch data. Board runs use the existing document run endpoints.
+
+`GET /api/me` includes `scopes` for token callers. People sessions omit it. This lets clients diagnose a missing `edit` scope before attempting an edit.

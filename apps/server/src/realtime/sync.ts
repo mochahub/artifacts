@@ -844,19 +844,24 @@ export class DocHub {
       held.conns.add(conn);
       conn.author = await authorKey(deps, artifactId, editActor(caller, null), []);
       if (conn.closed || this.held.get(artifactId) !== held) return this.leave(held, conn);
-      await deps.db
-        .insert(editPresence)
-        .values({
-          artifactId,
-          connectionId: conn.id,
-          orgId: held.orgId,
-          personId: conn.personId,
-          mode: conn.mode,
-          blocks: [],
-          replica: this.replica,
-          seenAt: deps.clock.now(),
-        })
-        .onConflictDoNothing();
+      // In Write until the client says otherwise, and saved under the page's lock before `hello`: no agent's
+      // op lands once this person is in the editor (13, "Policy").
+      await deps.db.transaction(async (tx) => {
+        await lockArtifact(tx, artifactId, "content");
+        await tx
+          .insert(editPresence)
+          .values({
+            artifactId,
+            connectionId: conn.id,
+            orgId: held.orgId,
+            personId: conn.personId,
+            mode: conn.mode,
+            blocks: [],
+            replica: this.replica,
+            seenAt: deps.clock.now(),
+          })
+          .onConflictDoNothing();
+      });
       // Closed or reset while the row was written: leave() deletes it again.
       if (conn.closed || this.held.get(artifactId) !== held) return this.leave(held, conn);
       this.write(

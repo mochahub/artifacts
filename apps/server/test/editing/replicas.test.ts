@@ -92,9 +92,9 @@ const memoryStore = (): UnsentStore => {
   };
 };
 
-const until = async (check: () => boolean, ms = 5000) => {
+const until = async (check: () => boolean | Promise<boolean>, ms = 5000) => {
   const end = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > end) throw new Error("timed out");
     await Bun.sleep(25);
   }
@@ -188,9 +188,22 @@ describe("sync across replicas", () => {
       json: { agent: "Claude Code", ...body },
     });
   const read = async (r: Replica) =>
-    json<{ blocks: { id: string; base: string; markdown: string }[] }>(
-      await r.api(`/api/artifacts/${id}/doc/markdown?draft=1`, { bearer: token }),
-    );
+    json<{
+      blocks: { id: string; base: string; markdown: string }[];
+      agents: { edits: string; reason: string };
+    }>(await r.api(`/api/artifacts/${id}/doc/markdown?draft=1`, { bearer: token }));
+  /** Until the policy an agent gets on another replica says so: modes arrive over the socket. */
+  const agentsGet = (edits: string, reason?: string) =>
+    until(async () => {
+      const { agents } = await read(c);
+      return agents.edits === edits && (reason === undefined || agents.reason === reason);
+    });
+  /** Until presence, on any replica, shows someone's caret in this block, or nobody's. */
+  const caretIn = (block: string, there = true) =>
+    until(async () => {
+      const state = DocState.parse(await json(await c.api(`/api/artifacts/${id}/doc`, { cookie })));
+      return state.present.some((entry) => entry.block === block) === there;
+    });
 
   beforeAll(async () => {
     database = await createDatabase();
@@ -297,14 +310,14 @@ describe("sync across replicas", () => {
     one.awareness.setLocalStateField("mode", "delegate");
     one.awareness.setLocalStateField("pending", []);
     one.awareness.setLocalStateField("block", target.id);
-    await Bun.sleep(1500);
+    await caretIn(target.id);
     const held = await json<{ results: { outcome: string; reason: string | null }[] }>(
       await ops(c, { ops: [{ op: "replace", block: target.id, base: target.base, markdown: "Rewritten." }] }),
     );
     expect(held.results[0]).toMatchObject({ outcome: "suggested", reason: "held" });
     // Not held any more: the replace applies as a diff inside the block, which keeps its id.
     one.awareness.setLocalStateField("block", null);
-    await Bun.sleep(1500);
+    await caretIn(target.id, false);
     const fresh = (await read(c)).blocks[1] as { id: string; base: string };
     const applied = await json<{ results: { outcome: string }[] }>(
       await ops(c, { ops: [{ op: "replace", block: fresh.id, base: fresh.base, markdown: "Rewritten." }] }),
@@ -337,7 +350,7 @@ describe("sync across replicas", () => {
       const refused = await json<{ results: { outcome: string; reason: string | null }[] }>(
         await ops(c, { ops: [{ op: "insert", after: page.blocks[0]?.id ?? null, markdown: "Sneaky." }] }),
       );
-      expect(refused.results[0]?.outcome).toBe("refused");
+      expect(refused.results[0]).toMatchObject({ outcome: "refused", reason: "writing" });
     } finally {
       one.provider.setMode("delegate");
       two.provider.setMode("delegate");
@@ -370,7 +383,7 @@ describe("sync across replicas", () => {
   test("concurrent checkpoints from two replicas make one version", async () => {
     const [one] = clients.slice(-3, -2) as [Client];
     type(one, 0, 0, "Saved. ");
-    await Bun.sleep(400);
+    await until(() => plain(a.hub.heldDoc(id) as Y.Doc).includes("Saved. "));
     const results = await Promise.all(
       [a, b].map(async (r) =>
         json<{ version: number; created: boolean }>(
@@ -385,7 +398,7 @@ describe("sync across replicas", () => {
   test("three writers and an agent converge", async () => {
     const writers = [await ready(await open(a)), await ready(await open(b)), await ready(await open(a))];
     for (const writer of writers) writer.provider.setMode("delegate");
-    await Bun.sleep(300);
+    await agentsGet("direct");
     const ids = topBlocks(writers[0]?.ydoc as Y.Doc).map((block) => block.id);
     let seed = 7;
     const random = () => {
@@ -399,7 +412,9 @@ describe("sync across replicas", () => {
       type(writer, Math.floor(random() * 3), Math.floor(random() * 20), String.fromCharCode(97 + (i % 26)));
       if (i % 10 === 0) await Bun.sleep(30);
     }
-    expect((await agent).status).toBe(200);
+    const landed = await agent;
+    expect(landed.status).toBe(200);
+    expect((await json<{ results: { outcome: string }[] }>(landed)).results[0]?.outcome).toBe("applied");
     await until(
       () =>
         writers.every((w) => text(w.ydoc) === text(writers[0]?.ydoc as Y.Doc)) &&
@@ -458,7 +473,7 @@ describe("sync across replicas", () => {
     const two = await ready(await open(b));
     one.provider.setMode("delegate");
     two.provider.setMode("delegate");
-    await Bun.sleep(300);
+    await agentsGet("direct");
     return [one, two] as const;
   };
 
@@ -471,7 +486,9 @@ describe("sync across replicas", () => {
       });
       await Bun.sleep(round * 7);
       type(one, 0, 0, "Racing flush. ");
-      expect((await agent).status).toBe(200);
+      const landed = await agent;
+      expect(landed.status).toBe(200);
+      expect((await json<{ results: { outcome: string }[] }>(landed)).results[0]?.outcome).toBe("applied");
     }
     await until(
       () => plain(two.ydoc).includes("Racing flush.") && plain(two.ydoc).includes("Raced by an agent"),

@@ -328,7 +328,7 @@ authorRuns(node: ProseMirrorJSON): { s: number; e: number; a: string; t: number 
 
 **`edit_presence`**, `(artifact_id, connection_id)`:
 - `person_id`, `mode`, `blocks` (the caret's block, then the pending blocks), `replica` and `seen_at`.
-- It is written when a connection opens, when its mode or caret block changes (at most once a second), and every `EDIT_HEARTBEAT_MS`. It is deleted on close.
+- It is written when a connection opens, when its mode changes (at once), when its caret block changes (at most once a second), and every `EDIT_HEARTBEAT_MS`. It is deleted on close.
 - The jobs sweep deletes rows older than 5 × `PRESENCE_TTL_MS`.
 
 **`edit_atoms`**, `(artifact_id, hash)`: `kind`, `source` and `svg`.
@@ -574,6 +574,7 @@ These refine the rules above. The code is in `apps/server/src/realtime/sync.ts`,
 - **Epoch 0** is what `DocState` reports before the first seed. A client that connects with it gets the draft just seeded, not `reset`.
 - **Limits** are per replica: `EDIT_SOCKETS_PER_PERSON` and `EDIT_EDITORS_MAX` count this replica's connections. Bun's own payload limit is twice `EDIT_UPDATE_MAX`, so the handler can close with 4413 instead of Bun's 1009.
 - **Presence** starts in mode `write` until the client's `control mode` arrives. The provider sends it right after `hello`.
+- **Modes and agents.** The opening row and a switch to Write or Pair are written under the page's `content` lock, which an agent's operation holds while it applies. The operation reads presence again under that lock, so none lands after the switch is saved. Writes to one connection's row go in order. An agent sees the new mode once it is saved, so a test waits for `agents` in a page read, never for a fixed time.
 - **Checking authors.** Every inserted text range must carry an `author` mark, with a `t` no more than 10 minutes ahead. The check is on the authorship that results, not on which ops set it. A change to the author of existing text is allowed when it sets a known key, and it may never remove the author. y-prosemirror diffs text by characters, so typing a letter equal to the one after the caret marks the old letter as the typist's and inserts the new one with the old author. Text may carry another author's key only up to the most characters that key has had in the document. So a forged key that gains words is still refused with 4400. A writer can claim existing words as their own; that costs no one their words. A move, a change of block type and an undo re-insert others' words, so "only the connection's own key" would refuse them. Pastes carry no authors: `authorPlugin` strips them, so a paste is the paster's.
 - **Shadow document.** Each client update is applied first to a copy of the document. Only an update that passes all checks reaches the document editors see. A refused one closes with 4400, and the copy is rebuilt.
 - **Nothing unsaved is shown.** A checked update waits in the shadow until it is persisted. Only then does it reach the document other editors and new connections see, along with any id fix it needs. If the write fails, the shadow forgets it, and the socket closes with 1011. The client still has the change and sends it again on reconnect.
@@ -685,7 +686,7 @@ The commands and flags are in [07](07-cli-and-skill.md#editing-wiki-pages). This
   - A page whose export is refused (a canvas) is skipped and reported, and the rest are written. A folder that isn't empty is refused.
 - Where the CLI takes a permission (`share --invite`, `share --team`), it accepts `--edit` and sends `edit`. The server refuses it from a token, and the CLI exits 1 with "Only a person can give edit access. Use the Share sheet." (with `--json`, the server's own error) A link never carries it.
 - **Every request sends `Artifacts-Features: editing`.**
-- **A token without the `edit` scope.** The server answers `forbidden` with `details: { scope: "edit" }` (to be added in `denial()` in `apps/server/src/http/routes.ts`; a plain `forbidden` is all there is today), so the CLI can tell it from a person who may only comment. Only then does it say "Run artifacts login again to edit pages." Any other `forbidden` keeps the server's words.
+- **A token without the `edit` scope.** The server answers `forbidden` with `details: { scope: "edit" }` (to be added in `denial()` in `apps/server/src/http/routes.ts`; a plain `forbidden` is all there is today), so the CLI can tell it from a person who may only comment. This detail is present only when adding the scope would grant permission. Only then does it say "Run artifacts login again to edit pages." Any other `forbidden` keeps the server's words.
 - **The local `artifacts mcp`** runs these commands for the six tools. `artifacts_page_read` runs without `--json`, so a model gets the text form. A refused edit exits 1 but is returned as an ordinary result with the untrusted notice, as the hosted tool returns it, because the refusal's message can hold a block's current text. A model's operations and Markdown go to the command on standard input (`--ops=-`, `--file=-`), validated with `EditRequest` first, and no other argument can become a flag.
 
 ## Viewer
@@ -931,3 +932,5 @@ Five workers build on this branch's base, which compiles with the shapes, enums,
 ## Open questions
 
 1. **Members in an open wiki.** Should members get `edit` by default in a wiki open to the whole organization, as in Notion, or keep `comment` until someone shares "Can edit"? This contract keeps `comment`, because widening later is additive and narrowing later takes access away.
+
+QA closeout clarifications: legacy version blocks derive their initial ids deterministically from version id, page key and block position on both reads and first draft seeding. Checkpoints persist those ids as before. Page reads expose `role`, `origin` and `sourceUntrusted` (the latter is distinct from the CLI JSON envelope’s generic `untrusted` notice). A missing edit scope keeps the wire-compatible `agents.reason: "no_edit"` and supplies login or reconnect guidance in `agents.text` only when adding the scope would permit editing; draft refusals include `details.scope: "edit"` in that case. Export front matter records `version` and `draft` for provenance.

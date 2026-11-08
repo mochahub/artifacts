@@ -177,6 +177,14 @@ describe("setup and operations on Railway, against a fake railway binary", () =>
     }
   });
 
+  test("upgrade without --server leaves an older hosted service alone", async () => {
+    const { env: e, log } = env();
+    const result = await cli(["upgrade", "--to", "99.0.0", "--json"], e);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ cli: "99.0.0", server: null });
+    expect(readFileSync(log, "utf8")).not.toContain("service source connect");
+  });
+
   test("upgrade --server moves the service to the release's image", async () => {
     const { env: e, log } = env();
     const result = await cli(["upgrade", "--server", "--to", VERSION, "--json"], {

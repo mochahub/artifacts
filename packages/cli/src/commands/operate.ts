@@ -9,7 +9,7 @@ import { CliError, type Output, UsageError } from "../output.ts";
 import { confirm } from "../prompt.ts";
 import { railway, railwayDir, railwayJson, railwaySettings, SERVICE, variables } from "../railway/cli.ts";
 import { installSkill } from "../skill/install.ts";
-import { olderThan, VERSION } from "../version.ts";
+import { VERSION } from "../version.ts";
 
 /** The hash for `name` in a SHA256SUMS file: the whole file name has to match, not just its end. */
 export function checksumFor(sums: string, name: string): string | undefined {
@@ -109,11 +109,8 @@ export async function upgradeCommand(
   const cli = flags.server ? VERSION : version;
   const entry = url ? readConfig().servers.find((server) => server.url === url) : undefined;
   if (!entry || !url) return out.result({ cli, server: null }, () => {});
+  if (!flags.server) return out.result({ cli, server: null }, () => {});
   const running = await meta(url);
-  // Without --server, only ever move an older server forward (07).
-  if (!flags.server && !olderThan(running.version, version)) {
-    return out.result({ cli, server: running.version }, () => {});
-  }
   if (entry.railway) upgradeRailway(entry, version, out);
   else if (entry.docker) upgradeDocker(entry, version, out);
   else {

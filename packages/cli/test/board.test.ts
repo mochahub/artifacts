@@ -240,7 +240,12 @@ describe("board edit and suggest", () => {
 
   test("the receipt names the epoch the server checked, so the next batch can send it", async () => {
     answers[`POST /api/artifacts/${ID}/board/ops`] = () => Response.json(result("applied", { epoch: 3 }));
-    const done = await board("edit", "brain/pricing", "--ops", file("edit.json", JSON.stringify(fixture("edit.json"))));
+    const done = await board(
+      "edit",
+      "brain/pricing",
+      "--ops",
+      file("edit.json", JSON.stringify(fixture("edit.json"))),
+    );
     expect(done.code).toBe(0);
     expect(done.stdout).toContain("seq 42, epoch 3");
     expect(done.stdout).toContain("send epoch 3 next");

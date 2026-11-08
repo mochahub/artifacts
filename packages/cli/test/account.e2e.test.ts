@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { GoogleSettings } from "@artifacts/schema";
+import { eq } from "drizzle-orm";
+import { tokens } from "../../../apps/server/src/db/schema.ts";
 import {
   OWNER,
   SETUP_TOKEN,
@@ -97,6 +99,28 @@ describe("the account commands against a real server", () => {
     expect((await cli(["skill", "install"], box.env)).code).toBe(0);
     const result = await cli(["doctor", "--json"], box.env);
     expect(JSON.parse(result.stdout).ok).toBe(true);
+  });
+
+  test("doctor and whoami identify a token issued before edit scope", async () => {
+    const [saved] = await t.server.db.select().from(tokens).limit(1);
+    if (!saved) throw new Error("missing CLI token");
+    await t.server.db
+      .update(tokens)
+      .set({ scopes: ["read", "comment", "publish"] })
+      .where(eq(tokens.id, saved.id));
+    try {
+      const doctor = await cli(["doctor", "--json"], box.env);
+      expect(doctor.code).toBe(1);
+      expect(JSON.parse(doctor.stdout).checks).toContainEqual({
+        name: "edit scope",
+        ok: false,
+        detail: "Run artifacts login again to edit pages.",
+      });
+      const who = await cli(["whoami", "--json"], box.env);
+      expect(JSON.parse(who.stdout).scopes).toEqual(["read", "comment", "publish"]);
+    } finally {
+      await t.server.db.update(tokens).set({ scopes: saved.scopes }).where(eq(tokens.id, saved.id));
+    }
   });
 
   test("logout revokes the token; whoami then fails", async () => {

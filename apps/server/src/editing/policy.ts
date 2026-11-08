@@ -7,7 +7,14 @@ import { artifactAccess, artifactTeamAccess, editPresence, editRuns, shareLinks 
 import type { Deps } from "../deps.ts";
 import { wikiAudience } from "../wiki/service.ts";
 
+/** Report scope only when granting it would actually permit editing. */
+export const missingEditScope = (caller: Caller, artifact: LoadedArtifact) =>
+  (caller.kind === "cliToken" || caller.kind === "orgToken") &&
+  !caller.scopes.includes("edit") &&
+  can({ ...caller, scopes: [...caller.scopes, "edit"] }, "artifact.edit", artifact);
+
 export const POLICY_TEXT = {
+  scope: "Run artifacts login again or reconnect the Artifacts connector to edit pages.",
   no_edit: "You can read this page, not edit it.",
   writing: "Someone is writing this page. Agents stay out until they switch to Pair or Delegate.",
   pair: "Someone is pairing on this page, so agent edits arrive as suggestions.",
@@ -121,6 +128,8 @@ export async function agentPolicy(
     }
     return { edits: "direct", reason: "person", text: POLICY_TEXT.person, held: () => false };
   }
+  if (missingEditScope(caller, artifact))
+    return { edits: "refused", reason: "no_edit", text: POLICY_TEXT.scope, held: () => false };
   const present = await freshPresence(deps, artifact.id);
   const heldBlocks = new Set(present.flatMap((row) => [...row.blocks, ...row.objects]));
   const held = (blockId: string) => heldBlocks.has(blockId);
@@ -160,6 +169,22 @@ export async function agentPolicy(
     }
   }
   return decide(await basePolicy(deps, caller, artifact));
+}
+
+/**
+ * Steps 2 and 3 again, under the page's lock, for a policy read before it. A switch to Write or Pair is
+ * saved under the same lock, so an operation never lands after one has been.
+ */
+export async function presenceAgain(deps: Deps, artifactId: string, policy: Policy): Promise<Policy> {
+  if (policy.edits === "refused") return policy;
+  const present = await freshPresence(deps, artifactId);
+  const heldBlocks = new Set(present.flatMap((row) => row.blocks));
+  const held = (blockId: string) => heldBlocks.has(blockId);
+  if (present.some((row) => row.mode === "write"))
+    return { edits: "refused", reason: "writing", text: POLICY_TEXT.writing, held };
+  if (present.some((row) => row.mode === "pair"))
+    return { edits: "suggestion", reason: "pair", text: POLICY_TEXT.pair, held };
+  return { ...policy, held };
 }
 
 export { ownsRun };

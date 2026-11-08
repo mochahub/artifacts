@@ -20,7 +20,9 @@ export async function whoami({ flags }: Input<never, { server?: string }>, out: 
   const client = await signedIn(flags.server);
   const me = Me.parse(await client.get("/api/me"));
   out.result({ ...me, server: client.url }, () =>
-    out.say(`${me.person.name} (${me.person.email}), ${me.person.role} of ${me.org.name}, on ${client.url}`),
+    out.say(
+      `${me.person.name} (${me.person.email}), ${me.person.role} of ${me.org.name}, on ${client.url}${me.scopes ? `, scopes: ${me.scopes.join(", ")}` : ""}`,
+    ),
   );
 }
 

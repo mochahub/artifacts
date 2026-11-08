@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { BoardFixture, checkout, firePointer, screenOf, seedBoard } from "./boards-real.ts";
+import { BASE_URL } from "./stack.ts";
 
 declare global {
   interface Window {
@@ -35,6 +36,7 @@ test("reader completes agent checkpoint pictures and a newly posted object crop"
   const object = (await relay.board()).objects[0];
   if (!object) throw new Error("Fixture has no objects");
   const response = await page.request.post(`/api/artifacts/${relay.id}/threads`, {
+    headers: { Origin: BASE_URL },
     data: {
       pageKey: "board",
       version: 2,
