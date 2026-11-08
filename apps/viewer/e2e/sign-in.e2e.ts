@@ -3,7 +3,7 @@ import { OWNER, shot, signIn, watchErrors } from "./helpers.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-test("sign in, and stay signed in across a reload", async ({ page }) => {
+test("sign in, and stay signed in across a reload", { tag: "@smoke" }, async ({ page }) => {
   const errors = watchErrors(page);
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in\?next=/);

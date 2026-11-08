@@ -175,7 +175,7 @@ async function typeAtEnd(page: Page, text: string) {
   await page.keyboard.type(text);
 }
 
-test("Edit loads the editor chunk on tap; typing, modes, a suggestion accepted, Save version", async ({
+test("@smoke Edit loads the editor chunk on tap; typing, modes, a suggestion accepted, Save version", async ({
   page,
 }, info) => {
   const errors = watchErrors(page);

@@ -50,6 +50,10 @@ export function seedFixture(token: string) {
 
 /** The fixture again under another slug, for tests that change an artifact's lifecycle. */
 export function publishCopy(slug: string, token: string, twice = false, project = "camerabuddy") {
+  // These tests change identity, permissions or comments, not source pixels. Claim already
+  // rendered both immutable versions with the real CLI; each copy still prepares/uploads/commits
+  // through the real API and receives fresh artifact IDs. Custom projects keep the CLI path.
+  if (project === "camerabuddy") return publishPreparedCopy(slug, token, twice);
   const dir = mkdtempSync(join(tmpdir(), "artifacts-e2e-"));
   cpSync(fixture, dir, { recursive: true });
   const manifest = join(dir, "artifact.json");

@@ -68,7 +68,9 @@ test("projects and a project list the fixture", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("the artifact shows what changed, with the page switcher and version history", async ({ page }) => {
+test("the artifact shows what changed, with the page switcher and version history", {
+  tag: "@smoke",
+}, async ({ page }) => {
   const errors = watchErrors(page);
   // A cold load shows the page's shape, never a blank screen, until the artifact arrives.
   await page.route(
@@ -109,6 +111,18 @@ test("the artifact shows what changed, with the page switcher and version histor
   await shot(page, "01-5-switcher", desktop);
   await page.getByRole("dialog").getByRole("link", { name: /Mocks/ }).click();
   await expect(page).toHaveURL(/\/roadmap\/mocks$/);
+  await expect(page.getByRole("img")).toHaveCount(26);
+  await expect
+    .poll(() =>
+      page
+        .getByRole("img")
+        .evaluateAll((images) =>
+          images.every(
+            (image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0,
+          ),
+        ),
+    )
+    .toBe(true);
   expect(errors).toEqual([]);
 });
 

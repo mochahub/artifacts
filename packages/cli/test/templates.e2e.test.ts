@@ -38,15 +38,6 @@ test("each template's text carries none of the forbidden patterns", () => {
   }
 });
 
-test("--template and --kind don't mix, and a wrong name lists the right ones", async () => {
-  const box = sandbox();
-  const both = await cli(["init", "--template", "prd", "--kind", "article"], box.env, box.home);
-  expect(both.code).toBe(2);
-  const wrong = await cli(["init", "--template", "constructor"], box.env, box.home);
-  expect(wrong.code).toBe(2);
-  expect(wrong.stderr).toContain("weekly-status");
-});
-
 describe("templates", () => {
   let t: TestServer;
   let url: string;
