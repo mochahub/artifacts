@@ -18,6 +18,8 @@ A wiki is a project of articles that agents and people keep together. Pages link
 
 ## Boards
 
+Queue wiki sources with `artifacts wiki add my-wiki --file notes.md`, `--text-file notes.txt --title "Notes"`, or `--url https://example.test/notes`. Local and hosted MCP also expose `artifacts_source_add`. Submissions require a selected wiki and current publish rights. The optional Librarian ships off: “Saved to inbox. Librarian is off.” means queued, not completed. See [the CLI contract](docs/implementation/07-cli-and-skill.md#source-inbox-submissions-phase-4) for validation and retry details.
+
 A canvas is also a board people can draw on: stickies, shapes, text, arrows, pictures and freehand ink next to the screens an agent rendered. Tap Edit and sketch with a finger or an Apple Pencil, or let an agent read the sketch as objects with `artifacts board read --draft` and answer it. The loop for "turn this sketch into mocks" is `artifacts publish` for the screens, then `artifacts board place-frame --frame login --near <object>` to put each beside the sketch, then `artifacts board save`. Edits follow the same rules as wiki pages: an agent's batch applies or becomes a ghost for a person to accept, by who can read the board and who is drawing now, and every save is an ordinary version. `artifacts board export <project/slug> <dir>` writes a checkpoint out as JSON, a text outline and its pictures.
 
 ## Connect an agent from anywhere

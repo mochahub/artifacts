@@ -3,6 +3,7 @@ export * from "./boards.ts";
 export * from "./bundle.ts";
 export * from "./constants.ts";
 export * from "./editing.ts";
+export * from "./librarian.ts";
 export * from "./manifest.ts";
 export * from "./messages.ts";
 export * from "./repo.ts";

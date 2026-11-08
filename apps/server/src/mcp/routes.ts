@@ -85,6 +85,7 @@ import type { Review } from "../review/service.ts";
 import { VERSION } from "../version.ts";
 import { listVersions } from "../versions/list.ts";
 import { artifactLinks, createWiki, notWiki, wikiSpace } from "../wiki/service.ts";
+import { sourceAddTool } from "./source-add.ts";
 
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 const MAX_REQUEST = 4 * 1024 * 1024;
@@ -870,6 +871,7 @@ function tools(deps: Deps, { publisher, review }: Services): Tool[] {
         }));
       },
     },
+    sourceAddTool(deps),
     publishArticle,
     {
       name: "artifacts_publish_prepare",
@@ -1127,7 +1129,23 @@ export function mcpRoutes(routes: Routes, deps: Deps, services: Services) {
             return c.json(rpcError(id, -32001, error.message), 403);
           }
           if (error instanceof ToolError || error instanceof ApiError) {
-            return ok({ isError: true, content: [{ type: "text", text: error.message }] });
+            return ok({
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text:
+                    params.name === "artifacts_source_add"
+                      ? JSON.stringify({
+                          error: {
+                            code: error instanceof ApiError ? error.code : "invalid",
+                            message: error.message,
+                          },
+                        })
+                      : error.message,
+                },
+              ],
+            });
           }
           throw error;
         }

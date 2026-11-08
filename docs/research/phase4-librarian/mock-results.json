@@ -1,0 +1,16 @@
+{
+  "kind": "mock-only",
+  "paidRequests": 0,
+  "passed": 9,
+  "tests": [
+    "off performs zero dispatches/reservations",
+    "org token only-me remains suggestion; Pair overrides maintained; Write refuses",
+    "scope and injected forbidden actions fail at host",
+    "replay once and changed payload conflicts",
+    "kill between response and tools fences mutation while recording billable usage",
+    "uncertain request retains ceiling and blocks overspend",
+    "complete assistant blocks preserved and tool-use IDs round trip",
+    "truncated output never executes pending tools",
+    "shared reservation counter rejects competing claim"
+  ]
+}

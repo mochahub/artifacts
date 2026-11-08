@@ -101,6 +101,7 @@ export function WikiHome({ slug }: { slug: string }) {
                   {wiki.project.audience.label}
                 </div>
               </div>
+              <a href={`/wikis/${encodeURIComponent(slug)}/inbox`}>Sources and inbox</a>
               <section class="wiki-section">
                 <h2 class="t3">Rules</h2>
                 {wiki.rules ? (

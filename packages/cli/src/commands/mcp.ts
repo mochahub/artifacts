@@ -16,10 +16,13 @@ import {
   REPLY_INPUT,
   REVIEW_TOOLS,
 } from "@artifacts/schema/mcp";
+import { z } from "zod";
+import { ApiCallError } from "../client.ts";
 import { gitRepo, repoRoot } from "../git.ts";
 import { findClient } from "../session.ts";
 import { VERSION } from "../version.ts";
 import { commandNamed } from "./table.ts";
+import { SourceSubmission, submitSource } from "./wiki-source.ts";
 
 /** `--name=<value>`, for a flag the command declares in the table, and only in the expected form. */
 type Flag = (name: string, value: unknown, form: RegExp, label: string) => string[];
@@ -158,6 +161,25 @@ const csv = (flag: Flag, name: string, value: unknown, form: RegExp, label: stri
 
 /** Each tool is one CLI command with --json, so tools without a shell behave the same as those with one. */
 const TOOLS: Tool[] = [
+  {
+    name: "artifacts_source_add",
+    description:
+      "Queue an untrusted wiki source. Does not enable Librarian or complete processing. Files require an owned wiki-bound quarantine uploadId; never a filesystem path.",
+    command: "wiki",
+    properties: {
+      wiki: { type: "string", description: "Wiki slug" },
+      source: {
+        type: "object",
+        description: "SourceInput: text (text,title), url (url,title?), or file (uploadId,title?) with kind",
+      },
+      idempotencyKey: { type: "string", description: "Stable UUID; reuse for retries with identical input" },
+      note: { type: "string", description: "Optional plain text note, at most 2000 characters" },
+    },
+    required: ["wiki", "source", "idempotencyKey"],
+    args: () => {
+      throw new BadArguments("Source submissions use the authenticated ingestion adapter.");
+    },
+  },
   {
     ...library.search,
     command: "search",
@@ -561,6 +583,61 @@ async function answer(request: { id?: unknown; method: string; params?: Record<s
     case "tools/call": {
       try {
         const input = (request.params?.arguments ?? {}) as Record<string, unknown>;
+        if (request.params?.name === "artifacts_source_add") {
+          const parsedInput = SourceSubmission.omit({ requestId: true })
+            .extend({ idempotencyKey: z.uuid() })
+            .strict()
+            .safeParse(input);
+          const parsed = parsedInput.success
+            ? SourceSubmission.safeParse({
+                wiki: parsedInput.data.wiki,
+                source: parsedInput.data.source,
+                note: parsedInput.data.note,
+                requestId: parsedInput.data.idempotencyKey,
+              })
+            : parsedInput;
+          if (!parsed.success)
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    error: {
+                      code: "invalid",
+                      message: "Invalid source submission.",
+                      details: parsed.error.issues,
+                    },
+                  }),
+                },
+              ],
+            };
+          try {
+            const client = await findClient();
+            if (!client) throw new Error("Sign in first.");
+            return {
+              content: [{ type: "text", text: JSON.stringify(await submitSource(client, parsed.data)) }],
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    error:
+                      error instanceof ApiCallError
+                        ? error.failure
+                        : {
+                            code: "source_add_failed",
+                            message: "Could not queue source. Check authentication and server availability.",
+                          },
+                  }),
+                },
+              ],
+            };
+          }
+        }
         const args = toolCommand(String(request.params?.name), input);
         if (!args) throw Object.assign(new Error("No such tool."), { code: -32602 });
         return await callTool(

@@ -26,7 +26,7 @@ import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../layout.ts";
 import { validateWikiSources } from "../wiki/service.ts";
-import { checkpoint, queueFixes } from "./checkpoint.ts";
+import { checkpoint, checkpointLocked, queueFixes } from "./checkpoint.ts";
 import { legacyBlockIds } from "./legacy-ids.ts";
 import {
   blockMarkdown,
@@ -79,6 +79,8 @@ export type AcceptActor = {
   /** An accepted insert's block takes the id its suggestion promised, so a run's later ops still find it. */
   newBlockId?: string | null;
 };
+
+import { preparedId } from "./transaction.ts";
 
 const AUTHOR = "author";
 const tooManyBlocks = `A page holds at most ${EDIT_BLOCKS_MAX} blocks. Split it into more pages.`;
@@ -366,7 +368,7 @@ function parseBlocks(
   let parsed: { doc: unknown; ids: string[] };
   try {
     parsed = markdownToDoc(markdown, {
-      mint: mintBlockId,
+      mint: () => preparedId(mintBlockId),
       atom(kind) {
         atom ??= kind;
         return "0".repeat(64);
@@ -432,6 +434,8 @@ export async function applyOps(
   artifact: LoadedArtifact,
   request: EditRequest,
   accept?: AcceptActor,
+  suppliedLock?: DocLock,
+  librarianRun?: string,
 ): Promise<EditResult> {
   const bytes = request.ops.reduce(
     (sum, op) => sum + ("markdown" in op ? Buffer.byteLength(op.markdown) : 0),
@@ -480,7 +484,7 @@ export async function applyOps(
   }
   let runId = policy.reason === "run" ? (request.run ?? null) : null;
 
-  const outcome = await withDocLock(deps, artifact.id, async (lock) => {
+  const mutate = async (lock: DocLock) => {
     if (!accept) {
       policy = await agentPolicy({ ...deps, db: lock.tx } as unknown as Deps, caller, artifact, {
         run: request.run,
@@ -555,7 +559,7 @@ export async function applyOps(
               } as WikiMeta,
             );
           } catch (error) {
-            if (!(error instanceof ApiError)) throw error;
+            if (suppliedLock || !(error instanceof ApiError)) throw error;
             results.push(refused(index, "invalid", error.message));
             continue;
           }
@@ -603,7 +607,7 @@ export async function applyOps(
             index,
             op: "insert",
             blockId: op.after,
-            newBlockId: mintBlockId(),
+            newBlockId: preparedId(mintBlockId),
             base: null,
             markdown: op.markdown,
             meta: null,
@@ -847,7 +851,12 @@ export async function applyOps(
           actorPersonId: actor.personId,
           agent: actor.agent,
           kind,
-          payload,
+          payload: {
+            ...payload,
+            ...(librarianRun
+              ? { librarianRun, suggestions: results.flatMap((r) => (r.suggestion ? [r.suggestion] : [])) }
+              : {}),
+          },
           createdAt: now,
         });
       if (applied.length) {
@@ -861,9 +870,10 @@ export async function applyOps(
     }
     const last = [...results].reverse().find((r) => r.block)?.block ?? null;
     return { results, seq, last, refused: false };
-  });
+  };
+  const outcome = suppliedLock ? await mutate(suppliedLock) : await withDocLock(deps, artifact.id, mutate);
 
-  if (!accept && !outcome.refused && deps.docs && "agentPresence" in deps.docs) {
+  if (!suppliedLock && !accept && !outcome.refused && deps.docs && "agentPresence" in deps.docs) {
     (
       deps.docs as {
         agentPresence(artifactId: string, author: unknown, block: string | null, run: string | null): void;
@@ -886,15 +896,23 @@ export async function applyOps(
   ) {
     // The ops are already kept: a checkpoint that fails says so with no version, never as a failed edit.
     try {
-      const made = await checkpoint(deps, artifact.id, {
-        kind: caller.kind === "person" ? "saved" : "agent",
+      const options = {
+        kind: caller.kind === "person" ? ("saved" as const) : ("agent" as const),
         personId: actor.personId ?? (caller.kind === "orgToken" ? caller.createdBy : null),
         agent: actor.agent,
         message: request.note ?? null,
-      });
+      };
+      const made = suppliedLock
+        ? await checkpointLocked(
+            deps,
+            suppliedLock,
+            { row: artifact.row, project: artifact.project },
+            options,
+          )
+        : await checkpoint(deps, artifact.id, options);
       version = made.version;
     } catch (error) {
-      if (!(error instanceof ApiError)) throw error;
+      if (suppliedLock || !(error instanceof ApiError)) throw error;
     }
   }
   return { results: outcome.results, seq: outcome.seq, version, agents };
@@ -910,7 +928,15 @@ function runInsertAfter(open: { id: string; blockId: string | null }[], id: stri
  * read-only snapshot of the row, its updates and its atoms, so a compaction between them can't drop any.
  * Only a page with no draft yet is seeded, under the lock as seeding always is.
  */
-async function readDraft(deps: Deps, artifact: LoadedArtifact) {
+async function readDraft(deps: Deps, artifact: LoadedArtifact, suppliedLock?: DocLock) {
+  if (suppliedLock) {
+    const { ydoc, row } = await loadDoc(deps, artifact.id, suppliedLock);
+    try {
+      return { doc: yToDoc(ydoc) as Json, row, atoms: await atomSources(suppliedLock, artifact.id) };
+    } finally {
+      ydoc.destroy();
+    }
+  }
   for (let attempt = 0; ; attempt++) {
     await ensureDoc(deps, artifact);
     const read = await deps.db.transaction(
@@ -960,6 +986,7 @@ export async function pageRead(
   caller: Caller,
   artifact: LoadedArtifact,
   input: { draft?: boolean; cursor?: string },
+  suppliedLock?: DocLock,
 ): Promise<PageRead> {
   const canEdit = can(caller, "artifact.edit", artifact);
   if (input.draft && !canEdit)
@@ -982,7 +1009,7 @@ export async function pageRead(
   let seq = 0;
   let meta: { title?: string; summary?: string; tags?: string[]; sources?: string[] } | null = null;
   if (draft) {
-    const loaded = await readDraft(deps, artifact);
+    const loaded = await readDraft(deps, artifact, suppliedLock);
     nodes = loaded.doc.content ?? [];
     atoms = loaded.atoms;
     seq = loaded.row.seq;

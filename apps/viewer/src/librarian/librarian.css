@@ -1,0 +1,91 @@
+.librarian {
+  gap: 20px;
+}
+.librarian section,
+.librarian form,
+.librarian fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.librarian fieldset {
+  border: 1px solid var(--sep);
+  padding: 12px;
+}
+.librarian label {
+  font-weight: 600;
+}
+.librarian input:not([type="checkbox"]),
+.librarian textarea,
+.librarian select {
+  width: 100%;
+  font-size: 16px;
+  min-height: 44px;
+}
+.librarian textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+.librarian .wiki-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+}
+.librarian .wiki-choice input {
+  width: 20px;
+  height: 20px;
+}
+.librarian .columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+}
+.librarian .entry {
+  border-top: 1px solid var(--sep);
+  padding: 16px 0;
+  overflow-wrap: anywhere;
+}
+.librarian .agent-output {
+  color: var(--no-light, #17658a) var(--no-dark, #82c7ee);
+}
+.librarian pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.librarian .human {
+  background: var(--yellow, #ffd84d);
+  color: #121418;
+}
+.librarian button,
+.librarian a.btn {
+  min-height: 44px;
+}
+.librarian [role="alert"] {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .librarian .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+.librarian {
+  display: flex;
+  flex-direction: column;
+}
+.librarian .h2 {
+  margin: 0;
+  font: 700 24px / 1.2 var(--serif);
+}
+.main:has(> .librarian) {
+  max-width: 1100px;
+}
+.librarian > form {
+  max-width: 680px;
+}
+.librarian .btn {
+  white-space: normal;
+}

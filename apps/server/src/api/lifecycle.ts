@@ -81,6 +81,15 @@ export function lifecycleRoutes(routes: Routes, deps: Deps) {
     const { resource, caller } = c.var;
     await db.transaction(async (tx) => {
       await lockArtifact(tx, resource.id, "content");
+      if (!archived) {
+        const imported = await tx
+          .select({ files: versions.files })
+          .from(versions)
+          .where(eq(versions.artifactId, resource.id));
+        if (imported.some((version) => version.files["__librarian_source.json"]))
+          throw new ApiError("read_only", "Imported sources are immutable.");
+      }
+
       await tx
         .update(artifacts)
         .set(

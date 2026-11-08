@@ -1,7 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { render } from "preact";
 import { useEffect } from "preact/hooks";
-import { ErrorBoundary, LocationProvider, Route, Router, useLocation } from "preact-iso";
+import { ErrorBoundary, LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { InstallSheet } from "./components/install.tsx";
 import { NotFound } from "./components/loaded.tsx";
 import { SearchBox } from "./components/search-box.tsx";
@@ -26,6 +26,10 @@ import { Settings } from "./routes/settings/index.tsx";
 import { SignIn } from "./routes/sign-in.tsx";
 import { boot, bootFailed, me, meta, ready } from "./session.ts";
 import "./styles/index.css";
+
+const Inbox = lazy(() => import("./librarian/inbox.tsx").then((m) => m.Inbox));
+const RunLogs = lazy(() => import("./librarian/runs.tsx").then((m) => m.RunLogs));
+const Proposal = lazy(() => import("./librarian/proposal.tsx").then((m) => m.Proposal));
 
 /** ⌘K, anywhere for anyone signed in (board 04). */
 function QuickSearch() {
@@ -115,6 +119,11 @@ function App() {
           <Route path="/settings/deleted" component={RecentlyDeleted} />
           <Route path="/settings/:section" component={Settings} />
           <Route path="/settings/teams/:slug" component={Settings} />
+          <Route path="/inbox/share" component={Inbox} />
+          <Route path="/wikis/:wiki/inbox" component={Inbox} />
+          <Route path="/wikis/:wiki/proposals/:id" component={Proposal} />
+          <Route path="/settings/librarian/runs" component={RunLogs} />
+          <Route path="/settings/librarian/runs/:id" component={RunLogs} />
           <Route path="/:project" component={ProjectPage} />
           <Route path="/:project/:artifact" component={ArtifactPage} />
           <Route path="/:project/:artifact/compare" component={ComparePage} />

@@ -11,7 +11,7 @@ const MAX_API = 300;
 // tokens, invites and who an artifact is shared with are never kept: they name other people, and a
 // worker's answer isn't tied to whoever asked.
 const NEVER =
-  /^\/api\/(?:events|auth|me\/|push|health|search|tokens|people|teams|shares|org|invites|reset|device|recover|setup|publish|deleted|projects\/[^/]+\/access|artifacts\/[^/]+\/(?:access|teams|data|data-export|files|logs|content-token)(?:\/|$))/;
+  /^\/api\/(?:librarian|wikis\/[^/]+\/(?:inbox|proposals)|events|auth|me\/|push|health|search|tokens|people|teams|shares|org|invites|reset|device|recover|setup|publish|deleted|projects\/[^/]+\/access|artifacts\/[^/]+\/(?:access|teams|data|data-export|files|logs|content-token)(?:\/|$))/;
 const ASSETS = /^\/assets\//;
 const RENDER = /^\/api\/artifacts\/[^/]+\/r\/[0-9a-f]{64}$/;
 const ARTICLE = /^\/api\/artifacts\/[^/]+\/v\/\d+\//;
@@ -77,10 +77,45 @@ const page = async (request) => {
   }
 };
 
+// Shares stay only in worker memory for five minutes and are consumed once. Never cache raw input.
+const pendingShares = new Map();
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
-  if (request.method !== "GET" || url.origin !== location.origin) return;
+  if (url.origin !== location.origin) return;
+  if (request.method === "POST" && url.pathname === "/inbox/share") {
+    event.respondWith(
+      (async () => {
+        for (const [id, entry] of pendingShares) if (entry.expires < Date.now()) pendingShares.delete(id);
+        if (pendingShares.size >= 32) return new Response("Too many pending shares.", { status: 429 });
+        const form = await request.formData();
+        const file = form.get("files");
+        if (
+          (file instanceof File && file.size > 10485760) ||
+          new TextEncoder().encode(String(form.get("text") ?? "")).byteLength > 1048576
+        )
+          return new Response("Shared source exceeds the size limit.", { status: 413 });
+        const id = crypto.randomUUID();
+        pendingShares.set(id, { form, expires: Date.now() + 300000 });
+        return Response.redirect(`${url.origin}/inbox/share?share=${id}`, 303);
+      })(),
+    );
+    return;
+  }
+  if (request.method === "GET" && url.pathname.startsWith("/_librarian-share/")) {
+    const id = url.pathname.split("/").pop();
+    const entry = pendingShares.get(id);
+    pendingShares.delete(id);
+    event.respondWith(
+      Promise.resolve(
+        entry && entry.expires > Date.now()
+          ? new Response(entry.form, { headers: { "Cache-Control": "no-store" } })
+          : new Response(null, { status: 410 }),
+      ),
+    );
+    return;
+  }
+  if (request.method !== "GET") return;
   // Video and audio ask for ranges, which a whole-file cache can't answer.
   if (request.headers.has("range") || NEVER.test(url.pathname)) return;
   if (request.mode === "navigate") event.respondWith(page(request));

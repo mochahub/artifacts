@@ -465,6 +465,7 @@ function expected(
     case "data.read":
       return live && seen && !readOnly; // A token needs the data scope.
     case "artifact.comment":
+      return unarchived && seen && (commenters.includes(name) || name === "orgToken (allowed project)");
     case "data.write":
       return unarchived && seen && commenters.includes(name);
     case "thread.resolve":
@@ -498,6 +499,8 @@ function expected(
     case "org.read":
     case "people.read":
       return ADMINS.includes(name) || tokenAdmins.includes(name);
+    case "librarian.manage":
+    case "librarian.logs":
     case "org.manage":
     case "people.manage":
     case "tokens.manage":

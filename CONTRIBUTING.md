@@ -50,6 +50,21 @@ bun run e2e --grep "comment sheet"
 
 Files that end in `.e2e.ts` are Playwright tests. `bun test` skips them.
 
+For private Linux unit/API/CLI acceptance, run `bun scripts/test-linux.ts` with
+the Bun test paths or filters, for example:
+
+```sh
+bun scripts/test-linux.ts packages/cli/test/brand.e2e.test.ts packages/cli/test/connector.e2e.test.ts
+```
+
+This force-recreates a unique stack without published ports and retains logs in
+the printed results directory before cleaning up its containers, volumes and
+runner image. The runner shares SeaweedFS's network namespace so presigned S3
+plans use loopback, satisfying the CLI's existing HTTPS-or-loopback requirement.
+Files run serially by default to avoid competing browser rendering workloads;
+test deadlines and assertions are unchanged. Pass `--parallel=4` explicitly only
+when the runner has enough resources for concurrent fixtures.
+
 ## Layout
 
 ```

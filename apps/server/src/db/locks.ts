@@ -29,3 +29,7 @@ export async function tryLockJobs(tx: Tx): Promise<boolean> {
   }[];
   return row?.locked ?? false;
 }
+
+/** Serializes librarian config, ledger and fences, independently of daily jobs. */
+export const lockLibrarian = (tx: Tx, orgId: string) =>
+  tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${orgId}, 7316005))`);

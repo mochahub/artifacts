@@ -57,6 +57,13 @@ function authorOf(caller: Caller, artifactId: string, agent: string | null | und
       agent: agentOf(caller, agent),
     };
   }
+  if (caller.kind === "orgToken")
+    return {
+      authorPersonId: caller.createdBy,
+      authorGuestId: null,
+      authorName: "Agent",
+      agent: agentOf(caller, agent),
+    };
   if (caller.kind === "guest") {
     const link = caller.links.find((entry) => entry.artifactId === artifactId && entry.active);
     if (link)

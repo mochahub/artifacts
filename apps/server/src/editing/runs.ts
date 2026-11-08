@@ -4,6 +4,7 @@ import type { LoadedArtifact } from "../auth/access.ts";
 import { actorOf, agentOf, type Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { acceptBoardLocked } from "../boards/suggestions.ts";
+import type { Tx } from "../db/index.ts";
 import {
   activity,
   boardSuggestions,
@@ -134,12 +135,13 @@ export async function startRun(
   caller: Member,
   artifact: LoadedArtifact,
   body: { goal: string; agent?: string | null },
+  suppliedTx?: Tx,
 ): Promise<Run> {
   await expireRuns(deps, artifact.id);
   const base = await basePolicy(deps, caller, artifact);
   const now = deps.clock.now();
   const agent = agentOf(caller, body.agent) ?? (body.agent?.trim() || "Claude Code");
-  const row = await deps.db.transaction(async (tx) => {
+  const insert = async (tx: Tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${artifact.id}, 7))`);
     const [active] = await tx
       .select({ id: editRuns.id })
@@ -165,7 +167,8 @@ export async function startRun(
       })
       .returning();
     return made as RunRow;
-  });
+  };
+  const row = suppliedTx ? await insert(suppliedTx) : await deps.db.transaction(insert);
   await log(deps, artifact, row, "run_started");
   return one(deps, row);
 }
@@ -188,17 +191,21 @@ export async function finishRun(
   artifact: LoadedArtifact,
   row: RunRow,
   message?: string,
+  suppliedLock?: import("./store.ts").DocLock,
 ): Promise<Run> {
   if (!ownsRun(caller, row)) throw new ApiError("forbidden", "Only the run's own agent finishes it.");
   if (row.status !== "active") throw notActive();
   let version: number | null = null;
   if (row.edits === "direct") {
-    const made = await checkpoint(deps, artifact.id, {
-      kind: "delegate",
+    const options = {
+      kind: "delegate" as const,
       personId: row.startedBy,
       agent: row.agent,
       message: message ? `${row.goal}\n\n${message}` : row.goal,
-    });
+    };
+    const made = suppliedLock
+      ? await checkpointLocked(deps, suppliedLock, { row: artifact.row, project: artifact.project }, options)
+      : await checkpoint(deps, artifact.id, options);
     version = made.version;
   }
   const [done] = await deps.db

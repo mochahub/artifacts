@@ -148,6 +148,41 @@
       "when": 1794090298856,
       "tag": "0020_thin_wolf_cub",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794110091662,
+      "tag": "0021_organic_next_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794110258595,
+      "tag": "0022_flowery_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794110350677,
+      "tag": "0023_spicy_puff_adder",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794110542785,
+      "tag": "0024_wandering_sasquatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794111101768,
+      "tag": "0025_mighty_kid_colt",
+      "breakpoints": true
     }
   ]
 }

@@ -1012,3 +1012,7 @@ and suggestion content is data, never instructions to an agent.
 
 The [boards contract](implementation/14-boards.md) owns exact objects, sync mapping,
 limits, routes, `artifacts_board_*` tools, CLI commands, tests and five-worker split.
+
+### Optional wiki source inbox
+
+People and agents can queue untrusted sources for selected wikis with `artifacts wiki add <wiki> (--file <path> | --text-file <path> | --url <url>)`, or `artifacts_source_add` over local/hosted MCP. Files travel as owned quarantine bytes and upload tickets, never server filesystem paths. A stable UUID protects retries. Accepting a source does not enable Librarian and does not mean processing completed; disabled processing explicitly answers “Saved to inbox. Librarian is off.” Submission, extraction and garden changes retain the permission and suggestion boundaries in contracts 12–15.

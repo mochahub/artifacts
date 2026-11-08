@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { dirname, join, normalize, sep } from "node:path";
 import {
   articleHtmlPath,
@@ -38,6 +39,8 @@ import { commitVersion } from "../publish/publisher.ts";
 import { validateWikiSources } from "../wiki/service.ts";
 import { authorRuns, docToMarkdown, validate, yToDoc } from "./model.ts";
 import { compact, type DocLock, loadDoc, retireDoc, withDocLock } from "./store.ts";
+
+import { captureSnapshot, outsideTransaction } from "./transaction.ts";
 
 export type CheckpointOptions = {
   kind: CheckpointKind;
@@ -152,15 +155,17 @@ export async function checkpointLocked(
   };
 
   const { ydoc, row: loaded } = await loadDoc(deps, place.row.id, lock);
-  const valid = validate(ydoc);
+  const valid = await outsideTransaction(`checkpoint-valid:${place.row.id}`, () => validate(ydoc));
   if (!valid.ok) fail(`The draft isn't valid: ${valid.reason}`);
-  const doc = yToDoc(ydoc) as PmNode;
+  const doc = await outsideTransaction(`checkpoint-doc:${place.row.id}`, () => yToDoc(ydoc) as PmNode);
   const atomRows = await tx
     .select({ hash: editAtoms.hash, kind: editAtoms.kind, source: editAtoms.source, svg: editAtoms.svg })
     .from(editAtoms)
     .where(eq(editAtoms.artifactId, place.row.id));
   const atoms = new Map(atomRows.map((atom) => [atom.hash, atom]));
-  const { markdown, blockIds } = docToMarkdown(doc as never, (hash: string) => atoms.get(hash)?.source ?? "");
+  const { markdown, blockIds } = await outsideTransaction(`checkpoint-markdown:${place.row.id}`, () =>
+    docToMarkdown(doc as never, (hash: string) => atoms.get(hash)?.source ?? ""),
+  );
 
   const [base] = await tx
     .select()
@@ -175,6 +180,11 @@ export async function checkpointLocked(
         .limit(1)
     : [];
   if (!base || !basePage) return fail("The page's version is missing.");
+  captureSnapshot(`checkpoint-base:${current.id}`, {
+    base,
+    basePage,
+    atoms: [...atomRows].sort((a, b) => a.hash.localeCompare(b.hash)),
+  });
   const manifest = JSON.parse((await blobText(deps, base.files[MANIFEST]?.hash)) ?? "{}") as {
     title?: string;
     summary?: string;
@@ -193,16 +203,18 @@ export async function checkpointLocked(
       if (text !== null) charts.set(path, text);
     }
   }
-  const built = buildArticle({
-    source: markdown,
-    path: src,
-    project: place.project.slug,
-    blockIds,
-    mermaid: new Map(atomRows.flatMap((atom) => (atom.svg ? [[atom.source, atom.svg] as const] : []))),
-    readFile: (path) => charts.get(path) ?? "",
-    blobHash: (path) => base.files[path]?.hash,
-    frameHash: () => undefined,
-  });
+  const built = await outsideTransaction(`checkpoint-render:${place.row.id}`, () =>
+    buildArticle({
+      source: markdown,
+      path: src,
+      project: place.project.slug,
+      blockIds,
+      mermaid: new Map(atomRows.flatMap((atom) => (atom.svg ? [[atom.source, atom.svg] as const] : []))),
+      readFile: (path) => charts.get(path) ?? "",
+      blobHash: (path) => base.files[path]?.hash,
+      frameHash: () => undefined,
+    }),
+  );
   const problem = built.problems.find((entry) => entry.severity === "error");
   if (problem) fail(problem.message);
 
@@ -217,7 +229,9 @@ export async function checkpointLocked(
     loaded,
     fail,
   );
-  const clean = sanitizeArticle(built.html);
+  const clean = await outsideTransaction(`checkpoint-sanitize:${place.row.id}`, () =>
+    sanitizeArticle(built.html),
+  );
   const nextManifest = {
     ...manifest,
     title,
@@ -236,6 +250,15 @@ export async function checkpointLocked(
   for (const [path, body, type] of stored) {
     const bytes = encode(body);
     const hash = await putBlob(deps, place.row.orgId, bytes, type);
+    const staged = await deps.bucket.get(blobKey(hash));
+    await outsideTransaction(`checkpoint-verify:${hash}`, () => {
+      if (
+        !staged ||
+        staged.body.length !== bytes.length ||
+        createHash("sha256").update(staged.body).digest("hex") !== hash
+      )
+        throw new ApiError("invalid", "Staged checkpoint failed verification.");
+    });
     files[path] = { hash, size: bytes.length, type };
     if (path === articleHtmlPath(row.pageKey)) htmlHash = hash;
   }

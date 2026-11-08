@@ -1,0 +1,24 @@
+[Unit]
+Description=Private isolated extractor
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=extractor
+Group=docker
+WorkingDirectory=/opt/artifacts
+RuntimeDirectory=private-extractor
+EnvironmentFile=/etc/private-extractor/executor.env
+# Lock spans the whole process lifetime. Startup recovery precedes listening.
+ExecStart=/usr/bin/flock -n /run/private-extractor/lock /usr/local/bin/bun deploy/extractor/executor/server.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

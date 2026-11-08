@@ -148,3 +148,7 @@ Responses retain deprecated `personal` (true only for audience me) because relea
 ### Native boards (Phase 3)
 
 Eligible single-canvas wiki pages also hold native board objects. Their checkpoint text supplies wiki links, search, cards and the garden under the same visibility/source rules as articles. Drafts and ghost suggestions never enter these derived results. Native checkpoint thumbnails supply library and wiki card covers when available; pending captures fall back to the published rendered frames or title. [14 Boards](14-boards.md) owns object operations, anchors, frame republish merge and browser-made checkpoint pictures; [13 Editing](13-editing.md) still owns the audience and mode policy.
+
+## Optional source inbox
+
+For an admin-selected wiki, `artifacts wiki add <wiki>` accepts exactly one `--file`, `--text-file` or `--url` input (see [07](07-cli-and-skill.md#source-inbox-submissions-phase-4)). Local and hosted MCP expose `artifacts_source_add({ wiki, source, idempotencyKey, note? })`. Submission requires publish scope, current project publish permission and selected-wiki membership. File inputs refer only to owned, completed quarantine tickets bound to that wiki. Shared SourceInput validation, ingestion authorization and UUID replay checks apply to every surface. Queueing leaves Librarian off and reports “Saved to inbox. Librarian is off.” Acceptance is distinct from extraction, source promotion, proposals and completed processing. No agent tool enables or runs Librarian.

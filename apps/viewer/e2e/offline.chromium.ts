@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { signIn, token } from "./helpers.ts";
-import { publishCopy } from "./seed.ts";
+import { publishPreparedCopy } from "./seed.ts";
 
 test("a version you've opened works with no network", async ({ page, context }) => {
-  publishCopy("offline", token());
+  publishPreparedCopy("offline", token());
   await signIn(page);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review");
   await page.goto("/camerabuddy/offline/mocks");

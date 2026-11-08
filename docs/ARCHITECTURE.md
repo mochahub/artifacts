@@ -580,7 +580,7 @@ Agents reach hosted work three ways, all ending in the same functions in `apps/s
 
 ## Editing wiki pages
 
-A wiki article can be edited in the browser by several people at once, while agents edit it by operation ([13](implementation/13-editing.md)). The server stays the source of truth and never runs a browser or a model.
+A wiki article can be edited in the browser by several people at once, while agents edit it by operation ([13](implementation/13-editing.md)). The server stays the source of truth and never runs a browser. The optional Phase 4 Librarian is the explicit exception for future bounded external model calls; its foundation currently performs no model calls.
 
 ```mermaid
 flowchart LR
@@ -658,3 +658,11 @@ commands for the board tools, passing a batch on standard input.
 Readers see checkpoints, editors see drafts; all derived search/wiki/link metadata
 uses checkpoints. Reading retains the 80 KB budget. The board editor and sync
 dependencies load only on Edit, within a separate 160 KB incremental gzip budget.
+
+## Librarian foundation
+
+`src/librarian` owns config/key/admin routes, AES-GCM envelopes, bigint ledgers and durable lease fences. A dedicated per-org advisory transaction lock serializes configuration, claims, attempt accounting, recovery and mutation fences independently of daily jobs. Provider I/O must occur after commit. withRunFence accepts DB-only callbacks which must acquire existing content locks and recheck can()/agentPolicy(). Calls reserve full run caps and per-attempt ceilings; terminal recovery retains pending attempt ceilings as uncertain and releases only proven unused capacity. Month attribution is immutable across UTC rollover. The internal named job and minute timer only recover leases; ingestion and runner registration remain later slices. See 15 for the intended full release gate.
+
+Librarian root integration supplies an explicit `createLibrarianJob(deps, adapters, owner?)` construction seam. The host must provide provider, current-resource authorization and transactional content tool adapters; there are no production defaults. Claims bind ready inbox work or deduplicate a wiki/UTC date. Terminal ledger, inbox status and sanitized event code commit together. Production jobs currently invoke lease recovery only; no provider job is registered. Ingestion API registration accepts sources while OFF and leaves extraction/source promotion gated. Minimal terminal run tombstones preserve inbox/daily deduplication after 90-day detailed-log retention.
+
+Librarian follow-up adds guarded proposal read/reject endpoints and an immutable-image container extraction adapter. Open proposal creation returns conflict until an atomic article creator exists. The extractor has no production registration, and the production librarian job remains recovery-only. Text/file/URL processing through content tools is still an integration gate; mounted queue routes do not imply processing is enabled.

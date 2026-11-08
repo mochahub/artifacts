@@ -269,3 +269,13 @@ The skill is what makes agents use Artifacts well. It ships with the CLI and is 
 - `references/brand.md`: fitting Artifacts to a brand guide, `brand.json`, and font licensing
 - `references/stageshow.md`: publishing scenes made with Stageshow, a third-party skill, to a canvas
 - `references/templates/<name>.md`: when to use each template, and how to structure it. Structure only, and agents may skip them.
+
+## Source inbox submissions (Phase 4)
+
+`artifacts wiki add <wiki> (--file <path> | --text-file <path> | --url <url>) [--title <text>] [--note <text>] [--request-id <uuid>] [--json]` queues an untrusted source for an admin-selected wiki. Exactly one input is required. `--text-file` reads strict UTF-8, at most 1 MiB, and requires `--title`. `--file` accepts regular, non-symlink files up to 10 MiB: `.txt`, `.md`, `.html`, `.htm`, `.pdf`. The server remains authoritative for MIME/signature checks and extraction. URLs use the shared public HTTPS source schema; the server performs DNS and egress checks. Titles are at most 256 characters; notes at most 2000.
+
+The CLI posts metadata to `/api/wikis/:slug/inbox/uploads`, PUTs the bytes to the returned signed quarantine URL without its bearer token, then posts `{ source, idempotencyKey, note? }` to `/api/wikis/:slug/inbox`. It sends a generic filename, never a local path. `--request-id` maps to the UUID `idempotencyKey`; omitted ids are generated once and printed to stderr with JSON output. Reuse the id with identical input when retrying. Private `source-requests/<digest>.json` receipts under the CLI config directory preserve file upload identity; they contain only an upload UUID and payload digest. Retain the receipt for retries; changed bytes or metadata with the same id are refused. Losing the receipt can prevent replay of a file request.
+
+Acceptance exits 0 and returns the inbox id, actual status, requestId and server message. It does not mean extraction or gardening completed. With Librarian disabled the message is “Saved to inbox. Librarian is off.” Source validation and server refusals exit 1; malformed command syntax exits 2. JSON validation and API errors have an `error` object.
+
+Local and hosted MCP register `artifacts_source_add` with `wiki`, `source`, `idempotencyKey` (required UUID), and optional `note`. `source` is the strict shared `SourceInput` union. File tools accept a previously completed, owned wiki-bound quarantine `uploadId`; they never accept filesystem paths. Local MCP calls the authenticated inbox API; hosted MCP calls the same authoritative ingestion service under `publish` scope and current wiki permission/selection guards. No enable, key or run-now tools are registered.

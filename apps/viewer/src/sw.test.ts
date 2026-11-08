@@ -84,11 +84,25 @@ function load(windows: unknown[] = [], network = async (_: unknown) => new Respo
     });
     await Promise.all(waits);
   };
-  return { handles, push, click, shown, opened, kept, keptIn, deleted, fetched };
+  const request = async (request: Request) => {
+    let answer: Promise<Response> | undefined;
+    handlers.fetch?.({
+      request,
+      respondWith: (response: Promise<Response>) => {
+        answer = response;
+      },
+    });
+    return answer;
+  };
+  return { handles, request, push, click, shown, opened, kept, keptIn, deleted, fetched };
 }
 
 describe("what the worker keeps", () => {
   test.each([
+    "/api/librarian/config",
+    "/api/librarian/runs",
+    "/api/wikis/private/inbox",
+    "/api/wikis/private/proposals/123",
     "/api/people",
     "/api/people/3f1c",
     "/api/tokens",
@@ -230,4 +244,23 @@ describe("what the worker shares with the app", () => {
     expect(await worker.handles(articleUrl(id, 3, "plan"))).toBe(true);
     expect(worker.keptIn).toEqual([CACHES.content]);
   });
+});
+
+test("shared file is held in memory, consumed once, never cached or uploaded", async () => {
+  const worker = load();
+  const form = new FormData();
+  form.set("title", "Private share");
+  form.set("files", new File(["private mock text"], "note.txt", { type: "text/plain" }));
+  const redirect = await worker.request(new Request(`${ORIGIN}/inbox/share`, { method: "POST", body: form }));
+  expect(redirect?.status).toBe(303);
+  const id = new URL(redirect?.headers.get("Location") ?? "").searchParams.get("share");
+  const received = await worker.request(new Request(`${ORIGIN}/_librarian-share/${id}`));
+  expect(received?.status).toBe(200);
+  expect(received?.headers.get("Cache-Control")).toBe("no-store");
+  if (!received) throw new Error("No share response");
+  const shared = await received.formData();
+  expect(await (shared.get("files") as File).text()).toBe("private mock text");
+  expect((await worker.request(new Request(`${ORIGIN}/_librarian-share/${id}`)))?.status).toBe(410);
+  expect(worker.kept).toEqual([]);
+  expect(worker.fetched).toEqual([]);
 });

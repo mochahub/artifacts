@@ -1342,3 +1342,241 @@ export const boardRequests = pgTable(
   },
   (t) => [primaryKey({ columns: [t.artifactId, t.callerKey, t.requestId] })],
 );
+
+// Phase 4 foundation. Every mutable operation takes lockLibrarian(orgId) first.
+export const librarianConfig = pgTable(
+  "librarian_config",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => org.id),
+    enabled: boolean("enabled").notNull().default(false),
+    generation: integer("generation").notNull().default(0),
+    model: text("model").notNull().default("claude-sonnet-5-5"),
+    monthlyLimit: bigint("monthly_limit", { mode: "bigint" }).notNull().default(sql`0`),
+    runLimit: bigint("run_limit", { mode: "bigint" }).notNull().default(sql`0`),
+    tokenId: uuid("token_id").references(() => tokens.id),
+    rateCard: jsonb("rate_card").$type<{ input: string; output: string }>(),
+    updatedBy: uuid("updated_by").references(() => people.id),
+    updatedAt: time("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "librarian_config_money",
+      sql`${t.monthlyLimit} >= 0 and ${t.runLimit} >= 0 and ${t.runLimit} <= ${t.monthlyLimit}`,
+    ),
+  ],
+);
+export const librarianWikis = pgTable(
+  "librarian_wikis",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    selectedBy: uuid("selected_by").references(() => people.id),
+    selectedAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.projectId] })],
+);
+export const librarianKeys = pgTable("librarian_keys", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => org.id),
+  generation: integer("generation").notNull(),
+  envelope: jsonb("envelope")
+    .$type<{
+      kekId: string;
+      ciphertext: string;
+      nonce: string;
+      tag: string;
+      wrappedKey: string;
+      wrapNonce: string;
+      wrapTag: string;
+    }>()
+    .notNull(),
+  updatedBy: uuid("updated_by").references(() => people.id),
+  updatedAt: time("updated_at").notNull().defaultNow(),
+});
+export const librarianMonths = pgTable(
+  "librarian_months",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    month: text("month").notNull(),
+    settled: bigint("settled", { mode: "bigint" }).notNull().default(sql`0`),
+    uncertain: bigint("uncertain", { mode: "bigint" }).notNull().default(sql`0`),
+    reserved: bigint("reserved", { mode: "bigint" }).notNull().default(sql`0`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.month] }),
+    check("librarian_month_money", sql`${t.settled} >= 0 and ${t.uncertain} >= 0 and ${t.reserved} >= 0`),
+  ],
+);
+export const librarianRuns = pgTable(
+  "librarian_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    wikiId: uuid("wiki_id")
+      .notNull()
+      .references(() => projects.id),
+    inboxId: uuid("inbox_id").references((): AnyPgColumn => librarianInbox.id),
+    dailyKey: text("daily_key"),
+    state: text("state").notNull(),
+    model: text("model").notNull(),
+    configGeneration: integer("config_generation").notNull(),
+    rateCard: jsonb("rate_card").$type<{ input: string; output: string }>().notNull(),
+    owner: uuid("owner").notNull(),
+    fence: integer("fence").notNull(),
+    leaseExpiresAt: time("lease_expires_at").notNull(),
+    deadline: time("deadline").notNull(),
+    month: text("month").notNull(),
+    cap: bigint("cap", { mode: "bigint" }).notNull(),
+    settled: bigint("settled", { mode: "bigint" }).notNull().default(sql`0`),
+    uncertain: bigint("uncertain", { mode: "bigint" }).notNull().default(sql`0`),
+    reserved: bigint("reserved", { mode: "bigint" }).notNull(),
+    startedAt: time("started_at").notNull(),
+    finishedAt: time("finished_at"),
+  },
+  (t) => [
+    unique("librarian_daily_wiki").on(t.orgId, t.wikiId, t.dailyKey),
+    unique("librarian_run_inbox").on(t.inboxId),
+    uniqueIndex("librarian_one_active_org").on(t.orgId).where(sql`${t.state} = 'running'`),
+    check(
+      "librarian_run_money",
+      sql`${t.cap} >= 0 and ${t.settled} >= 0 and ${t.uncertain} >= 0 and ${t.reserved} >= 0`,
+    ),
+  ],
+);
+export const librarianAttempts = pgTable(
+  "librarian_attempts",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    id: id(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => librarianRuns.id),
+    requestId: text("request_id").unique(),
+    state: text("state").notNull(),
+    ceiling: bigint("ceiling", { mode: "bigint" }).notNull(),
+    charged: bigint("charged", { mode: "bigint" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("librarian_attempt_money", sql`${t.ceiling} >= 0 and (${t.charged} is null or ${t.charged} >= 0)`),
+  ],
+);
+
+export const librarianInbox = pgTable(
+  "librarian_inbox",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    wikiId: uuid("wiki_id")
+      .notNull()
+      .references(() => projects.id),
+    submittedBy: uuid("submitted_by").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    input: jsonb("input").$type<import("@artifacts/schema").SourceInput>(),
+    quarantineKey: text("quarantine_key"),
+    note: text("note"),
+    sourceHash: text("source_hash"),
+    sourceArtifactId: uuid("source_artifact_id").references(() => artifacts.id),
+    extractionVersion: text("extraction_version"),
+    status: text("status").notNull().default("queued"),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    runId: uuid("run_id").references(() => librarianRuns.id),
+    errorCode: text("error_code"),
+    untrusted: boolean("untrusted").notNull().default(true),
+    submittedAt: time("submitted_at").notNull().defaultNow(),
+    updatedAt: time("updated_at").notNull().defaultNow(),
+    rawExpiresAt: time("raw_expires_at").notNull(),
+  },
+  (t) => [
+    unique("librarian_inbox_submit_key").on(t.orgId, t.submittedBy, t.idempotencyKey),
+    index("librarian_inbox_due").on(t.orgId, t.status, t.submittedAt),
+    check("librarian_inbox_untrusted", sql`${t.untrusted} = true`),
+  ],
+);
+export const librarianReceipts = pgTable(
+  "librarian_receipts",
+  {
+    id: id().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => librarianRuns.id),
+    toolKey: uuid("tool_key").notNull(),
+    inputHash: text("input_hash").notNull(),
+    result: jsonb("result").$type<unknown>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("librarian_receipt_tool").on(t.runId, t.toolKey),
+    check("librarian_receipt_bound", sql`octet_length(${t.result}::text) <= 65536`),
+  ],
+);
+export const librarianProposals = pgTable(
+  "librarian_proposals",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => librarianRuns.id),
+    wikiId: uuid("wiki_id")
+      .notNull()
+      .references(() => projects.id),
+    proposalKey: uuid("proposal_key").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    markdown: text("markdown").notNull(),
+    sources: uuid("sources").array().notNull(),
+    untrusted: boolean("untrusted").notNull().default(true),
+    status: text("status").notNull().default("open"),
+    reviewedBy: uuid("reviewed_by").references(() => people.id),
+    reviewedAt: time("reviewed_at"),
+    createdAt: createdAt(),
+    createdArtifactId: uuid("created_artifact_id").references(() => artifacts.id),
+  },
+  (t) => [
+    unique("librarian_proposal_key").on(t.runId, t.proposalKey),
+    check(
+      "librarian_proposal_bounds",
+      sql`${t.untrusted} = true and octet_length(${t.markdown}) <= 1048576 and char_length(${t.summary}) <= 2000 and char_length(${t.title}) <= 256 and cardinality(${t.sources}) <= 100`,
+    ),
+  ],
+);
+
+/** Admin-only event codes. No provider payload, prompt, source text or error body. */
+export const librarianEvents = pgTable(
+  "librarian_events",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => org.id),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => librarianRuns.id),
+    code: text("code").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("librarian_events_run").on(t.runId, t.createdAt, t.id)],
+);
