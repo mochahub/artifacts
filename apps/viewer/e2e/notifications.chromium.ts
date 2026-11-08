@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { auth, token } from "./helpers.ts";
-import { publishCopy } from "./seed.ts";
+import { publishPreparedCopy } from "./seed.ts";
 
 test.use({ storageState: "e2e/.auth.json" });
 
@@ -18,7 +18,7 @@ const tap = (page: Page, url: string) =>
     }, url);
 
 test("tapping a notification moves an app that's already open", async ({ page, request }) => {
-  publishCopy("tapped", token());
+  publishPreparedCopy("tapped", token());
   const headers = auth();
   const artifact = await (await request.get("/api/artifacts/by-slug/camerabuddy/tapped", { headers })).json();
   const thread = (body: string) =>

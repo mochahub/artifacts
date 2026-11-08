@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { box, shot, token } from "./helpers.ts";
-import { publishCopy } from "./seed.ts";
+import { publishCopy, publishPreparedCopy } from "./seed.ts";
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -59,7 +59,7 @@ test("delete, the deleted link, Recently deleted and restore", async ({ page }, 
 
 test("version history: preview, name, restore and compare", async ({ page }, info) => {
   const slug = `ver-${info.project.name}`;
-  publishCopy(slug, token(), true);
+  publishPreparedCopy(slug, token(), true);
   await page.goto(`/camerabuddy/${slug}`);
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Version history" }).click();
@@ -97,7 +97,7 @@ test("activity lists what happened, and filters", async ({ page }) => {
 
 test("compare: side by side, swipe, and changes with numbered regions", async ({ page }, info) => {
   const slug = `cmp-${info.project.name}`;
-  publishCopy(slug, token(), true);
+  publishPreparedCopy(slug, token(), true);
   await page.goto(`/camerabuddy/${slug}/compare?from=1&to=2`);
   await expect(page.getByRole("button", { name: "Side by side" })).toBeVisible();
   await expect(page.locator(".diff .pair img").first()).toBeVisible();
