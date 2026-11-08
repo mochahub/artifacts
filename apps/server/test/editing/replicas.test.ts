@@ -329,16 +329,33 @@ describe("sync across replicas", () => {
 
   test("someone writing keeps agents out", async () => {
     const [one, two] = clients.slice(-2) as [Client, Client];
-    one.provider.setMode("write");
-    await agentsGet("refused", "writing");
-    const page = await read(c);
-    const refused = await json<{ results: { outcome: string; reason: string | null }[] }>(
-      await ops(c, { ops: [{ op: "insert", after: page.blocks[0]?.id ?? null, markdown: "Sneaky." }] }),
-    );
-    expect(refused.results[0]).toMatchObject({ outcome: "refused", reason: "writing" });
-    one.provider.setMode("delegate");
-    two.provider.setMode("delegate");
-    await agentsGet("direct");
+    const waitForMode = async (mode: "write" | "delegate") => {
+      const deadline = Date.now() + 5000;
+      while (true) {
+        const rows = await a.server.db.select().from(editPresence).where(eq(editPresence.artifactId, id));
+        if (
+          mode === "write"
+            ? rows.some((row) => row.mode === "write")
+            : rows.every((row) => row.mode !== "write")
+        )
+          return;
+        if (Date.now() >= deadline) throw new Error(`timed out waiting for presence mode ${mode}`);
+        await Bun.sleep(25);
+      }
+    };
+    try {
+      one.provider.setMode("write");
+      await waitForMode("write");
+      const page = await read(c);
+      const refused = await json<{ results: { outcome: string; reason: string | null }[] }>(
+        await ops(c, { ops: [{ op: "insert", after: page.blocks[0]?.id ?? null, markdown: "Sneaky." }] }),
+      );
+      expect(refused.results[0]).toMatchObject({ outcome: "refused", reason: "writing" });
+    } finally {
+      one.provider.setMode("delegate");
+      two.provider.setMode("delegate");
+      await waitForMode("delegate");
+    }
   });
 
   test("an update with forged authors is refused and never reaches the others", async () => {

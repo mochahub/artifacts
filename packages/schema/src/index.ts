@@ -1,4 +1,5 @@
 export * from "./api.ts";
+export * from "./boards.ts";
 export * from "./bundle.ts";
 export * from "./constants.ts";
 export * from "./editing.ts";

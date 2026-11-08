@@ -9,7 +9,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 
 - **Preact** with `@preact/signals` and `preact-iso` (router and lazy routes). Built with Vite into `apps/viewer/dist`, which `apps/server` serves.
 - **No CSS framework.** Plain CSS with custom properties, ported from `docs/mocks/kit.css`: tokens, components and the rules below. The mocks' `kit.css` and `kit.js` are the reference implementation of the look; rebuild their components as Preact components with the same class names where practical.
-- **Budget:** the initial route's JS is ≤ 80 KB gzipped; the canvas and article views are lazy chunks. CI fails over budget (`size-limit`).
+- **Budget:** the initial route's JS is ≤ 80 KB gzipped; the canvas and article views are lazy chunks. CI fails over budget (`bun run size`).
 - **Icons:** Lucide icons (MIT), imported per icon. The mocks' inline SVG paths are close to Lucide's.
 
 ## Design rules (keep the look, avoid generic patterns)
@@ -237,3 +237,39 @@ See [08-micro-apps.md](08-micro-apps.md#try-it). Phase 2.
 - **Accessible names:** pins and frames have them ("Comment 3 on Live view"); sheets trap focus and close with Escape; the canvas has a "Frames" list as its keyboard and screen-reader route.
 - **Safari's bar:** pages can sit under Safari's bottom bar, so fixed bottom UI uses `env(safe-area-inset-bottom)` and is checked on a real iPhone (user-only acceptance, see 10).
 - **Contrast:** WCAG AA for text in both themes. Yellow text on white isn't used; light theme uses `#8a6a00` for yellow words.
+
+## Native board integration
+
+Native checkpoint scenes use the lightweight board reader; Edit lazily loads the board editor,
+Yjs provider and drawing controls. Fit includes canonical objects and suggestion ghosts, including
+both poses when a suggestion moves an existing object. Ghost parent and connector bindings resolve
+against the proposed scene. Captures still use only the canonical snapshot fenced by the server.
+Run and checkpoint socket messages refresh author records as well as board state.
+
+Board acceptance tests create a separate wiki and board for each test through the real API, seed
+objects with board operations, checkpoint them, and use the real WebSocket transport. They do not
+intercept HTTP or WebSocket responses. Coverage includes checkpoint reading without eager editor
+loads, bound arrows, concurrent writers, keyboard movement/deletion/undo, tool hit areas, reduced
+motion, pen/palm ownership, touch drawing/pinching, Pair acceptance, attribution, object comment
+pins after checkpointing a move, and a signed-in commenter without draft access.
+
+For an isolated board run, set `E2E_BOARDS_ONLY=1` and invoke Playwright directly with `boards`.
+Start private storage first and supply `E2E_DATABASE_URL`, `E2E_S3_ENDPOINT` and `E2E_PORT`.
+A Linux Playwright container can use an independently started server with
+`E2E_EXTERNAL_SERVER=1` and `E2E_HOST`. `E2E_AUTH_FILE`, `E2E_TOKEN_FILE` and `E2E_OUTPUT_DIR`
+isolate credentials and traces from another runner. Claim once, then use `--no-deps` for focused
+checks. Long runs using `--repeat-each=10` can exhaust the real per-caller rate limits; provision
+fresh private server instances per repetition rather than disabling the rate checks. The intermittent startup stall in the forwarded Linux harness was traced to TCP client-port reuse
+in Docker Desktop's host forwarder. `bun run e2e:linux` keeps the app and browser together on Linux
+loopback and uses a fresh private compose stack per invocation. The normal acceptance suite retains
+its legacy fixture setup.
+
+`bun run size` (also `bun apps/viewer/scripts/board-size.ts`) checks the reader entry's complete static
+import closure plus CSS against 80 KB gzip. Article Edit and board Edit are measured separately,
+including every additional static JS/CSS dependency beyond their respective readers, with the shared
+sync provider included in each cold load. Their limits remain 120 KB and 160 KB. The final November
+2026 build measures 59.81 KB for the entry, 118.42 KB for article Edit and 53.08 KB for board Edit.
+
+The real Delegate regression requires a finished run in board state, including the permitted finished
+review data after returning to the board; it passes in native Linux acceptance.
+Synthetic pointer tests do not replace physical Pencil pressure, latency, palm rejection or Scribble QA.

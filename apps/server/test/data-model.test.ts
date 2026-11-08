@@ -219,6 +219,11 @@ describe("the database matches 02-data-model.md", () => {
       [
         "artifacts",
         "block_aliases",
+        "board_assets",
+        "board_captures",
+        "board_requests",
+        "board_suggestions",
+        "board_versions",
         "device_codes",
         "edit_atoms",
         "edit_authors",

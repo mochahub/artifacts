@@ -96,6 +96,7 @@ export async function freshPresence(deps: Deps, artifactId: string) {
       personId: editPresence.personId,
       mode: editPresence.mode,
       blocks: editPresence.blocks,
+      objects: editPresence.objects,
     })
     .from(editPresence)
     .where(
@@ -130,7 +131,7 @@ export async function agentPolicy(
   if (missingEditScope(caller, artifact))
     return { edits: "refused", reason: "no_edit", text: POLICY_TEXT.scope, held: () => false };
   const present = await freshPresence(deps, artifact.id);
-  const heldBlocks = new Set(present.flatMap((row) => row.blocks));
+  const heldBlocks = new Set(present.flatMap((row) => [...row.blocks, ...row.objects]));
   const held = (blockId: string) => heldBlocks.has(blockId);
   const decide = (policy: AgentPolicy): Policy => ({
     ...(options.suggest && policy.edits === "direct" ? { ...policy, edits: "suggestion" as const } : policy),

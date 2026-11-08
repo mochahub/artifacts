@@ -9,15 +9,37 @@ export type Pin = {
   done?: boolean;
   draft?: boolean;
   active?: boolean;
+  /** A native board pin: where it is in the world now, so it follows its object (14, "Object comments"). */
+  world?: { x: number; y: number };
+  label?: string;
 };
 type Rect = { x: number; y: number; w: number; h: number };
+/** What the pan/pinch code reads from a pointer event, so a board's arbiter can hand pointers on. */
+export type NavEvent = Pick<PointerEvent, "pointerId" | "clientX" | "clientY" | "timeStamp" | "target">;
+/**
+ * A native board's hooks (14, "Viewer"): its whole-scene bounds, and the first look at every pointer.
+ * `input` returns true when it took the event; it hands navigating pointers back through `nav*`.
+ */
+export type Native = {
+  bounds(): Rect;
+  input?: {
+    down(event: PointerEvent): boolean;
+    move(event: PointerEvent): boolean;
+    up(event: PointerEvent, cancel: boolean): boolean;
+  };
+  /** After every pan or zoom: screen-space overlays (handles, ghosts' labels) follow. */
+  onView?(): void;
+};
 type Options = {
   renderUrl(hash: string): string;
   /** A tap on the canvas (no drag), with what's under it. */
   onTap(frame: CanvasFrame | null, at: { x: number; y: number }): void;
   onPin(pin: Pin): void;
   onFocus(frame: CanvasFrame | null): void;
+  native?: Native;
 };
+const reduced = () =>
+  typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const MAX_FULL = 40; // Decoded full-size images at once: this is what bounds memory on an iPhone (06).
 const LABEL_ABOVE = 72; // A board's title sits this far above its first row of frames.
@@ -110,7 +132,10 @@ export class CanvasEngine {
     private readonly options: Options,
   ) {
     const tall = root.clientHeight > root.clientWidth;
-    const { boards, frames } = arrange(allBoards, allFrames, tall ? 2 : Math.max(1, allBoards.length));
+    // An edited board never wraps for a phone: fit and pan change the viewport, not the scene (14).
+    const { boards, frames } = options.native
+      ? { boards: allBoards, frames: allFrames }
+      : arrange(allBoards, allFrames, tall ? 2 : Math.max(1, allBoards.length));
     this.frames = frames;
     this.boards = boards;
     for (const board of boards) {
@@ -167,12 +192,18 @@ export class CanvasEngine {
     return this.frames.find((f) => wx >= f.x && wx <= f.x + f.w && wy >= f.y && wy <= f.y + f.h) ?? null;
   }
 
-  private toWorld(sx: number, sy: number) {
+  toWorld(sx: number, sy: number) {
     const box = this.root.getBoundingClientRect();
     return { x: (sx - box.left - this.x) / this.s, y: (sy - box.top - this.y) / this.s };
   }
 
+  /** A world point on screen, relative to the root. */
+  toScreen(wx: number, wy: number) {
+    return { x: wx * this.s + this.x, y: wy * this.s + this.y };
+  }
+
   bounds(): Rect {
+    if (this.options.native) return this.options.native.bounds();
     const left = Math.min(...this.frames.map((f) => f.x));
     const top = Math.min(...this.frames.map((f) => f.y));
     const right = Math.max(...this.frames.map((f) => f.x + f.w));
@@ -202,7 +233,7 @@ export class CanvasEngine {
   }
 
   fitAll(animate = false) {
-    if (this.frames.length > 0) this.go(this.target(this.bounds()), animate);
+    if (this.frames.length > 0 || this.options.native) this.go(this.target(this.bounds()), animate);
   }
 
   focusFrame(key: string, animate = true) {
@@ -229,6 +260,11 @@ export class CanvasEngine {
     this.zoomAround(s, at.left + box.width / 2, at.top + box.height / 2);
   }
 
+  /** Brings a world rectangle into view: the outline's "show me". */
+  focusRect(rect: Rect, animate = true) {
+    this.go(this.target(rect), animate);
+  }
+
   /** Keeps a world point at a screen point, for the comment sheet (06). */
   showPoint(wx: number, wy: number, screenY: number) {
     const box = this.box();
@@ -237,7 +273,7 @@ export class CanvasEngine {
 
   private go(to: { s: number; x: number; y: number }, animate: boolean) {
     cancelAnimationFrame(this.raf);
-    if (!animate) {
+    if (!animate || reduced()) {
       Object.assign(this, to);
       return this.apply();
     }
@@ -297,7 +333,7 @@ export class CanvasEngine {
       const frame = this.frames.find((f) => f.key === pin.frameKey);
       el.setAttribute(
         "aria-label",
-        pin.draft ? "New comment" : `Comment ${pin.n} on ${frame?.title ?? pin.frameKey}`,
+        pin.draft ? "New comment" : `Comment ${pin.n} on ${pin.label ?? frame?.title ?? pin.frameKey}`,
       );
     }
     this.placePins();
@@ -306,6 +342,10 @@ export class CanvasEngine {
   private placePins() {
     for (const pin of this.pins) {
       const el = this.pinEls.get(pin.id);
+      if (el && pin.world) {
+        el.style.transform = `translate(${pin.world.x * this.s + this.x}px, ${pin.world.y * this.s + this.y}px)`;
+        continue;
+      }
       const frame = this.frames.find((f) => f.key === pin.frameKey);
       if (!el || !frame) continue;
       const px = (frame.x + pin.x * frame.w) * this.s + this.x;
@@ -319,6 +359,7 @@ export class CanvasEngine {
     // The transform as numbers, for tests and tools to read without parsing a matrix.
     Object.assign(this.world.dataset, { x: String(this.x), y: String(this.y), s: String(this.s) });
     this.placePins();
+    this.options.native?.onView?.();
     if (!this.lodTimer) {
       this.lodTimer = setTimeout(() => {
         this.lodTimer = null;
@@ -364,7 +405,23 @@ export class CanvasEngine {
   }
 
   private readonly onDown = (event: PointerEvent) => {
-    if ((event.target as HTMLElement).closest(".pin")) return;
+    if ((event.target as HTMLElement).closest(".pin, .no-pan")) return;
+    if (this.options.native?.input?.down(event)) return;
+    this.navDown(event);
+  };
+
+  private readonly onMove = (event: PointerEvent) => {
+    if (this.options.native?.input?.move(event)) return;
+    this.navMove(event);
+  };
+
+  private readonly onUp = (event: PointerEvent) => {
+    if (this.options.native?.input?.up(event, event.type === "pointercancel")) return;
+    this.navUp(event);
+  };
+
+  /** Starts navigating with a pointer: one pans, two pinch. */
+  navDown(event: NavEvent) {
     cancelAnimationFrame(this.raf);
     try {
       this.root.setPointerCapture(event.pointerId);
@@ -382,9 +439,9 @@ export class CanvasEngine {
       };
       if (this.down) this.down.moved = true;
     }
-  };
+  }
 
-  private readonly onMove = (event: PointerEvent) => {
+  navMove(event: NavEvent) {
     const previous = this.pointers.get(event.pointerId);
     if (!previous) return;
     const point = { x: event.clientX, y: event.clientY };
@@ -414,9 +471,9 @@ export class CanvasEngine {
       this.samples.push({ ...point, t: event.timeStamp });
       this.apply();
     }
-  };
+  }
 
-  private readonly onUp = (event: PointerEvent) => {
+  navUp(event: NavEvent) {
     this.pointers.delete(event.pointerId);
     if (this.pointers.size < 2) this.pinch = null;
     if (this.pointers.size > 0) return;
@@ -442,10 +499,11 @@ export class CanvasEngine {
     }
     this.lastTap = event.timeStamp;
     this.options.onTap(frame, world);
-  };
+  }
 
   /** Inertia from the last 100 ms of velocity (06). */
   private coast(now: number) {
+    if (reduced()) return;
     const recent = this.samples.filter((sample) => now - sample.t < 100);
     if (recent.length < 2) return;
     const first = recent[0] as (typeof recent)[number];

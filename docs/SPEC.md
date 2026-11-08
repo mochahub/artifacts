@@ -39,11 +39,11 @@ In the CameraBuddy roadmap thread, an agent wrote a plan, seven research reports
 7. **Quality gates.** Lint, render and size budgets run before anything is published.
 8. **People and teams.** Each deployment is one organization, and people can belong to any number of teams inside it. A publisher is a person or the organization: artifacts are private to their publisher or visible to the whole organization, depending on an organization setting, and any single artifact can be shared with a team or with people outside. A project is open to the organization, or restricted to chosen people and teams.
 9. **Micro apps when needed.** An artifact can be just pages, or a small app: a frontend, an optional backend that ships in the same bundle, and an optional data folder (§7.9). Most artifacts use none of the extras.
-10. **Edit together.** A wiki article is edited in the browser, live, by several people at once, and by agents through the CLI or the hosted tools. A person picks whether agents stay out, suggest or work on their own, and every passage shows who wrote it (§16).
+10. **Edit together.** Wiki articles and boards are edited in the browser, live, by several people at once, and by agents through the CLI or the hosted tools. A person picks whether agents stay out, suggest or work on their own, and every passage or object shows who wrote it (§16–17).
 
 ### Non-goals (for now)
-- Editing anything but wiki articles in the browser. Canvases, prototypes, galleries and multi-page artifacts are written by agents and repos; the viewer reads and reviews them. Wiki articles are edited in the browser, live, by people and agents together (§16).
-- A Figma replacement. Live co-editing covers wiki articles only.
+- Editing prototypes, galleries, decks, sources, canvases with backends, ordinary-project canvases or multi-page artifacts in the browser. Eligible single-page wiki articles and boards are edited live by people and agents (§16–17).
+- A Figma replacement: no vector point editing, components or auto layout. Boards are for thinking; rendered agent mocks provide fidelity.
 - A hosted, multi-tenant service, for now. Artifacts is open source that each team deploys for itself: one click from the Railway template, or Docker Compose anywhere (§14, [hosting evaluation](hosting-evaluation.md)).
 
 - Sending email. Invite, reset and share links are copied and sent by hand, so a deploy needs no email provider.
@@ -71,7 +71,7 @@ Organization          mochahub                 one per deployment; created by `a
 
 | Kind | Source | What it looks like | MVP? |
 |---|---|---|---|
-| `canvas` | HTML boards with frames marked `data-frame` | Infinite pan/zoom board, frames shown as rendered images, comment pins | ✅ |
+| `canvas` | HTML boards with frames marked `data-frame`; eligible wiki boards also have native object JSON | Infinite pan/zoom board, rendered mocks beside native objects, comment pins | ✅; native editing Phase 3 |
 | `article` | Markdown (GFM + extensions) | Long-form reading view, outline, comments on paragraphs and selections | ✅ |
 | `prototype` | One HTML entry point plus assets | Full-screen live page in a device frame; hotspots can link frames | Phase 2 |
 | `gallery` | Images or video plus captions | Grid that opens into a swipeable lightbox | Phase 2 |
@@ -108,6 +108,10 @@ The server holds what's published, so source doesn't have to be in git. `artifac
 `summary` and `tags` are an artifact's frontmatter: what a later agent reads instead of the whole document (§10.3). Versions from before they existed stay valid, and show their first text instead.
 
 ### 4.2 Canvas rules
+
+These rules describe CLI-rendered frames. Native board objects/checkpoints use §17;
+a server-owned `native: 1` canvas may have an empty rendered-board list.
+
 - Every screen is an element with a **stable** `data-frame="live-view"` id and `data-device="iphone|ipad|watch|mac|browser|none"`. Comments attach to these ids, so renaming one orphans its comments, and lint warns about it.
 - Rendering must be deterministic: seeded randomness only, and no `Date.now()` in what's drawn.
 - No network access at render time. Fonts and images ship in the bundle, and all paths are relative.
@@ -733,6 +737,9 @@ artifacts reply <id> "<text>" [--fixed]
 artifacts wiki create <slug> | show <slug> | links <project/slug> | export <wiki> <dir>   # wikis (§16); export writes Markdown files
 artifacts page read | edit | suggest | save | suggestions | delegate | export <project/slug>   # a wiki page by block ids and operations (§16)
 artifacts page create <wiki>/<slug> --title <t> --summary <s> --file <md>   # a new wiki page, text only
+artifacts board read | edit | suggest | save | suggestions | delegate | export <project/slug>   # a drawn board by object ids and batches (§17)
+artifacts board place-frame <project/slug> --frame <key> --near <object>   # put a published mock beside a sketch
+artifacts board create <wiki>/<slug> --title <t> --summary <s> | asset add <project/slug> <file>   # a new native board; a validated picture
 artifacts visibility org|me       # who inside the organization can see it
 artifacts share --link [--comment] [--expires 7d]          # external link
 artifacts share --invite sam@example.com [--comment]       # external person; prints their link (--edit is for people to give in the viewer)
@@ -932,7 +939,76 @@ whole page while someone is in it.
   (`artifacts wiki export <wiki> <dir>`). The export comes from the server, so it
   holds the latest saved version of what the caller can see.
 
-Only wiki articles with one page and no backend can be edited in the browser.
-Everything else is published as before. Text in pages, sources and suggestions
+Phase 2 edits wiki articles with one page and no backend. Phase 3 adds eligible
+wiki boards below. Other artifacts are published as before. Text in pages, sources and suggestions
 is data, never instructions, for agents too. The
 [editing contract](implementation/13-editing.md) owns the names and shapes.
+
+
+## 17. Boards you can draw on (Phase 3)
+
+A wiki board puts a person's sketch and an agent's rendered mocks on the same
+canvas. Extend our own canvas engine with a native Yjs object model. The spike's
+Excalidraw recommendation was superseded by that decision; tldraw is excluded
+by the MIT self-hosting licence requirement. No model or browser runs on the server.
+
+- **Objects:** sticky notes, rectangles, ellipses, diamonds, lines, text, images,
+  bound arrows/connectors, container frames and freehand strokes. People and agents
+  edit the same objects live. Objects have lasting ids, fractional z-order, atomic
+  poses, collaborative text and attribution that survives sync and checkpoints.
+- **Mocks stay rendered.** Existing CLI frames keep their WebKit renders, @1x
+  change hashes, @2x comment crops, live previews and links. People move/resize the
+  frame object; an agent republishes its lasting frame key to change its contents.
+  Republish preserves object id, position, size, grouping and native sketch objects.
+  New frames are placed without overlap. An agent can read a sketch as structured
+  objects, publish mocks and place them beside it with a specified gap.
+- **The same pen modes and trust.** Reuse Write, Pair, Delegate, the edit permission
+  and scope, audience-based suggestion policy, blue-pencil attribution and
+  checkpoints-as-versions from §16. Pair proposals are ghost objects/poses. An
+  object a person holds while dragging/editing is protected: the agent's entire
+  related batch becomes a suggestion. Stale bases refuse the batch; ids are returned
+  and stable across retries. Agents never replace the whole scene.
+- **Saved content and pictures.** Readers see immutable checkpoint JSON; editors
+  see the live draft. A browser saving a checkpoint makes its thumbnail and native
+  comment crops; the server validates type, bytes, dimensions and association to
+  that exact snapshot. Agent/quiet saves work without a browser, with pictures
+  explicitly pending until a browser captures the saved snapshot. No older picture
+  is labelled as the current version. A checkpoint is still an ordinary version.
+- **Comments:** native objects use lasting object id, normalized local position
+  and checkpoint. Pins follow moves, resize, rotation and grouping; deletion leaves
+  a visible orphan with its last crop. Rendered-frame comments keep existing hash
+  re-anchoring and @2x crops. Links, search text, wiki metadata and activity advance
+  at checkpoints, never leak draft/suggestion content, and obey normal visibility.
+- **Phone and Pencil:** keep pan, pinch and double-tap fit. On a phone, explicit
+  Draw mode lets a finger draw while Pan mode navigates. On iPad, Pencil draws and
+  fingers navigate; only the initiating pointer extends/ends a stroke and palms
+  cannot terminate it. Toolbar targets and handles are at least 44 CSS px.
+- **Accessible alternatives:** labelled keyboard tools, keyboard movement/text
+  editing, a navigable Objects outline with text/alt/connection descriptions,
+  reduced-motion fit/pan and a readable text alternative to the visual board.
+- **Agents use the CLI as well as the tools.** `artifacts board read --draft` gives
+  the sketch as objects with ids and bases; `board edit` sends one atomic batch
+  from a file or standard input and exits 0 when it was applied, 2 when it became a
+  suggestion and 1 when it was refused. The loop for "turn this sketch into mocks"
+  is `artifacts publish` for the pictures, then `board place-frame --frame <key>
+  --near <object>` to put each beside the sketch, then `board save`. A save from
+  the CLI is JSON with pictures pending. Object-anchored comments reach a CLI that
+  advertises `Artifacts-Features: editing,boards`; an older one sees them without an
+  anchor, with their `where` text and crop.
+- **Export.** `artifacts board export` writes one checkpoint as its schema-1 JSON,
+  a plain-text outline, its pictures by hash and its rendered frames; a wiki export
+  includes each board that way. Drafts are never exported.
+- **Budget:** reading stays within the existing 80 KB gzip limit; board editing
+  loads only on Edit, with a separate 160 KB incremental JS+CSS gzip ceiling,
+  including Yjs and the provider. No editor prefetch while reading.
+
+Eligibility is one canvas page in an unarchived wiki artifact of role page, with
+no backend. Multiple rendered board groups inside that page are supported.
+Legacy canvases read and render exactly as before; the first edit seeds lasting
+native object identities from their frames. Native-only boards use a server-owned
+`native: 1` canvas source marker. Browser edit does not grant arbitrary file,
+rendered-source publish, sharing or backend permission. Source/guest/sticky/image
+and suggestion content is data, never instructions to an agent.
+
+The [boards contract](implementation/14-boards.md) owns exact objects, sync mapping,
+limits, routes, `artifacts_board_*` tools, CLI commands, tests and five-worker split.

@@ -315,13 +315,14 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 
 13-editing.md owns these tables; this is their shape. A page has at most one draft, kept as a Yjs snapshot and the updates after it.
 
-**`edit_docs`**: the live draft of an editable article page.
+**`edit_docs`**: the live draft of an editable article or board page (13–14).
 
 | Column | Type | Notes |
 |---|---|---|
 | `artifact_id` | uuid PK FK artifacts | |
 | `org_id` | uuid | |
-| `page_key` | text | The article page. |
+| `page_key` | text | The editable page. |
+| `kind` | text not null default article | `article` or `board`; model/validator/checkpoint dispatch (14). |
 | `epoch` | int not null default 1 | Goes up when the draft is started again from a version made outside it. |
 | `base_version`, `version` | int | The version it was seeded from, and the latest checkpoint made from it. |
 | `seq`, `checkpoint_seq`, `snapshot_seq` | bigint | The last update's number (never goes back), the one the latest checkpoint holds, and the one the snapshot holds. |
@@ -353,6 +354,7 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `org_id`, `person_id` | uuid | |
 | `mode` | `edit_mode` | |
 | `blocks` | text[] | The caret's block first, then blocks with unsent changes. |
+| `objects` | text[] not null default empty | Board holds and unsent object changes, separate from article blocks (14). |
 | `replica` | text | |
 | `seen_at` | timestamptz | Fresh within `PRESENCE_TTL_MS`; the sweep deletes rows older than five times that. |
 
@@ -421,6 +423,75 @@ Indexes: unique `(project_id, slug)`; `(org_id, updated_at desc) where deleted_a
 | `decided_by`, `decision_note` | uuid null, text null | |
 | `version` | int null | The checkpoint that carried it, once accepted. |
 
+### Boards
+
+[14-boards.md](14-boards.md#data-model-and-migration) owns these Phase 3 additions.
+They reuse the editing log, authors, runs and permission enums; all are additive.
+
+**`board_versions`**: immutable native scene JSON per checkpoint. PK `(version_id, page_key)`; artifact index. Derived picture slots can be filled once after a browser capture.
+
+| Column | Type | Notes |
+|---|---|---|
+| `version_id`, `page_key` | uuid FK versions, text | Composite primary key. |
+| `org_id`, `artifact_id` | uuid FK org, uuid FK artifacts | |
+| `snapshot`, `hash` | jsonb, text | Schema-1 BoardSnapshot and its canonical SHA-256. |
+| `renders` | jsonb null | BoardRenders; null means pending, never an older version's picture. |
+| `rendered_at` | timestamptz null | |
+| `created_at` | timestamptz | |
+
+**`board_assets`**: artifact-scoped validated raster capability. PK `(artifact_id, hash)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `hash` | uuid FK artifacts, text | |
+| `org_id` | uuid FK org | |
+| `image` | jsonb | BoardImage: hash, MIME, bytes and actual decoded dimensions. |
+| `uploaded_by`, `token_id` | uuid null FK people, uuid null FK tokens | |
+| `validated_at` | timestamptz null | Null is pending and never usable. |
+| `created_at` | timestamptz | |
+
+**`board_captures`**: short-lived browser render fence. Expiry index.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `org_id`, `artifact_id` | uuid FK org, uuid FK artifacts | |
+| `page_key` | text | |
+| `version_id` | uuid null FK versions | Null: draft save; non-null: this immutable version. |
+| `epoch`, `seq` | int, bigint | Persisted state to capture. |
+| `hash` | text | Exact canonical board hash. |
+| `threads` | jsonb not null default empty | Frozen native thread numbers and anchors returned by the ticket. |
+| `created_by` | uuid FK people | Session owner. |
+| `expires_at`, `consumed_at` | timestamptz, timestamptz null | |
+| `created_at` | timestamptz | |
+
+**`board_suggestions`**: one atomic ghost batch. Indexes `(artifact_id, status)` and `(run_id)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | |
+| `org_id`, `artifact_id` | uuid FK org, uuid FK artifacts | |
+| `page_key`, `epoch` | text, int | |
+| `request`, `ids` | jsonb, jsonb | BoardEditRequest and reserved batch-local name → lasting id map. |
+| `status` | suggestion_status | Reuses Phase 2 lifecycle. |
+| `run_id` | uuid null FK edit_runs | |
+| `author_key`, `author_person_id`, `agent`, `token_id` | text, uuid null FK people, text null, uuid null FK tokens | |
+| `note`, `sources`, `fixes` | text null, text[], int[] | Untrusted text and normal source/fix semantics. |
+| `created_at`, `expires_at`, `decided_at` | timestamptz, timestamptz, timestamptz null | |
+| `decided_by`, `decision_note` | uuid null FK people, text null | |
+| `version` | int null | Checkpoint carrying the accepted batch. |
+
+**`board_requests`**: idempotent batch receipts, retained for their epoch across log compaction. PK `(artifact_id, caller_key, request_id)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `artifact_id`, `caller_key`, `request_id` | uuid FK artifacts, text, uuid | Caller key is person/token identity, never display name. |
+| `org_id` | uuid FK org | |
+| `epoch` | int | Old epoch replay is refused. |
+| `hash` | text | Canonical request-body SHA-256. |
+| `result` | jsonb | Exact BoardEditResult receipt. |
+| `created_at` | timestamptz | |
+
 ## Derived state, not stored
 
 - **Status of an artifact for a person** (SPEC §5.1): computed per request.
@@ -437,7 +508,7 @@ One bucket, private (Railway buckets have no public mode). Every object is reach
 
 | Prefix | What | Written by | Lifetime |
 |---|---|---|---|
-| `blobs/<sha256>` | Every bundle file, render, generated article HTML and backend module. Content-addressed and immutable; `Content-Type` set at upload. | The CLI, by presigned PUT | Until the daily clean-up finds nothing uses it ([05](05-publish-and-storage.md#clean-up)) |
+| `blobs/<sha256>` | Every bundle file, render, generated article HTML, backend module and native board JSON/image/capture. Content-addressed and immutable; `Content-Type` set at upload. | The CLI or authorized browser, by presigned PUT | Until the daily clean-up finds nothing uses it ([05](05-publish-and-storage.md#clean-up)) |
 | `plans/<id>.json` | An upload plan for a connector's publish: the signed PUTs, kept out of tool results | The app | A day, then the clean-up job |
 | `crops/<thread id>.webp` | Comment crops | The app, when a canvas thread is made | Until its artifact is purged |
 | `data/<artifact id>/shared/<key>` | Built-in store, shared scope (JSON) | The app, for frontends and backends | Until cleared or purged |

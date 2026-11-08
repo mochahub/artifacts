@@ -1,4 +1,5 @@
-import { SYNC_MESSAGE, type SyncControl } from "@artifacts/schema/editing";
+import { SYNC_MESSAGE } from "@artifacts/schema/constants";
+import type { SyncControl } from "@artifacts/schema/editing";
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
 import * as syncProtocol from "y-protocols/sync";

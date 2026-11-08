@@ -4,7 +4,7 @@ import { GUEST_COOKIE, SESSION_COOKIE } from "../auth/sessions.ts";
 import { findOrg } from "../db/index.ts";
 import type { Deps } from "../deps.ts";
 import { MIN_CLI_VERSION } from "../version.ts";
-import { olderClient, rewriteForOlderClient } from "./compat.ts";
+import { boardlessClient, olderClient, rewriteBoardAnchors, rewriteForOlderClient } from "./compat.ts";
 import { ApiError } from "./errors.ts";
 import type { ApiVars } from "./routes.ts";
 
@@ -27,9 +27,13 @@ export function apiGuards(deps: Deps): MiddlewareHandler<ApiVars> {
   return async (c, next) => {
     const path = c.req.path;
     if (!path.startsWith("/api/")) return next();
-    if (olderClient(c)) {
+    const older = olderClient(c);
+    const boardless = boardlessClient(c);
+    if (older || boardless) {
       await guard(c, next);
-      return rewriteForOlderClient(c);
+      if (older) await rewriteForOlderClient(c);
+      if (boardless) await rewriteBoardAnchors(c);
+      return;
     }
     return guard(c, next);
   };

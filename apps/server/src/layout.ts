@@ -4,10 +4,17 @@ export const BLOBS = "blobs/";
 export const CROPS = "crops/";
 export const PLANS = "plans/";
 export const DATA = "data/";
+export const UPLOADS = "uploads/";
 
 /** Every bundle file, render, generated article and backend module, by content. */
 export const blobKey = (hash: string) => `${BLOBS}${hash}`;
 export const hashOf = (key: string) => key.slice(BLOBS.length);
+
+/**
+ * A board image upload before validation (14, "Assets"), per artifact, so a hash known elsewhere is never
+ * attached without its bytes and a presigned PUT never reaches a shared blob.
+ */
+export const boardUploadKey = (artifactId: string, hash: string) => `${UPLOADS}boards/${artifactId}/${hash}`;
 
 export const cropKey = (threadId: string) => `${CROPS}${threadId}.webp`;
 

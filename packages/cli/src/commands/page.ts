@@ -74,7 +74,7 @@ export function editFailure(error: unknown, out: Output): unknown {
   return error;
 }
 
-async function editing<T>(out: Output, run: () => Promise<T>): Promise<T> {
+export async function editing<T>(out: Output, run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
@@ -92,20 +92,20 @@ function suggestionLine(s: Suggestion): string {
   return `  ${s.id}  ${s.status}  ${s.op} ${where}, by ${by}${text}${s.note ? ` (${s.note})` : ""}`;
 }
 
-function usageFor(flags: PageFlags, allowed: (keyof PageFlags)[], usage: () => UsageError) {
-  const bad = (Object.keys(flags) as (keyof PageFlags)[]).filter(
+export function usageFor<F extends object>(flags: F, allowed: (keyof F)[], usage: () => UsageError) {
+  const bad = (Object.keys(flags) as (keyof F)[]).filter(
     (key) => key !== "server" && key !== "json" && flags[key] !== undefined && !allowed.includes(key),
   );
   if (bad.length > 0) throw usage();
 }
 
 /** The artifact and, for editing, the signed-in client. Bad arguments stop before this. */
-async function open(flags: Server, target: string) {
+export async function open(flags: Server, target: string) {
   const client = await signedIn(flags.server);
   return { client, artifact: await resolveArtifact(client, target) };
 }
 
-function readStdinOrFile(path: string, what: string): string {
+export function readStdinOrFile(path: string, what: string): string {
   try {
     return path === "-" ? readFileSync(0, "utf8") : readFileSync(resolve(path), "utf8");
   } catch (error) {
@@ -206,7 +206,7 @@ async function readPage(client: Client, artifact: Artifact, flags: PageFlags) {
 }
 
 /** The hosted MCP over HTTP, for the tools that have no route of their own. The token is this CLI's. */
-async function hostedTool(client: Client, name: string, args: object): Promise<string> {
+export async function hostedTool(client: Client, name: string, args: object): Promise<string> {
   const reply = await client.post<{
     result?: { content?: { type: string; text: string }[]; isError?: boolean };
     error?: { message: string };
@@ -215,6 +215,53 @@ async function hostedTool(client: Client, name: string, args: object): Promise<s
   const text = reply.result?.content?.filter((part) => part.type === "text").at(-1)?.text ?? "";
   if (reply.result?.isError) throw new CliError(text || "The server refused that.");
   return text;
+}
+
+/** The run lifecycle of `page delegate` and `board delegate`: start with a goal, then finish or cancel (13). */
+export async function delegate(
+  flags: Pick<PageFlags, "goal" | "finish" | "cancel" | "message" | "server"> & { agent?: string },
+  target: string,
+  out: Output,
+  use: { edit: string; bad: () => UsageError },
+) {
+  const given = [flags.goal, flags.finish, flags.cancel].filter((v) => v !== undefined);
+  if (given.length !== 1) throw use.bad();
+  if (flags.message !== undefined && flags.finish === undefined) throw use.bad();
+  if (flags.agent !== undefined && flags.goal === undefined) throw use.bad();
+  const id = flags.finish ?? flags.cancel;
+  if (id !== undefined && !z.uuid().safeParse(id).success) throw new UsageError("That isn't a run id.");
+  const { client, artifact } = await open(flags, target);
+  if (flags.goal !== undefined) {
+    const run = Run.parse(
+      await editing(out, () =>
+        client.post(`/api/artifacts/${artifact.id}/doc/runs`, {
+          goal: flags.goal,
+          ...(flags.agent === undefined ? {} : { agent: flags.agent }),
+        }),
+      ),
+    );
+    return out.result(run, () => {
+      out.say(run.id);
+      out.warn(
+        `Run started (${run.edits === "direct" ? "edits apply to the page" : "edits wait as suggestions"}). Pass --run ${run.id} to ${use.edit}, then --finish ${run.id}.`,
+      );
+    });
+  }
+  const verb = flags.finish !== undefined ? "finish" : "cancel";
+  const run = Run.parse(
+    await editing(out, () =>
+      client.post(`/api/runs/${id}/${verb}`, verb === "finish" ? { message: flags.message } : {}),
+    ),
+  );
+  return out.result(run, () =>
+    out.say(
+      verb === "cancel"
+        ? "✓ Run cancelled."
+        : run.version !== null
+          ? `✓ Run finished, saved as v${run.version}.`
+          : `✓ Run finished with ${run.suggestions} suggestions waiting for a person.`,
+    ),
+  );
 }
 
 export async function pageCommand(
@@ -320,38 +367,7 @@ export async function pageCommand(
   if (sub === "delegate") {
     usageFor(flags, ["goal", "finish", "cancel", "message"], bad);
     namedArtifact(target);
-    const given = [flags.goal, flags.finish, flags.cancel].filter((v) => v !== undefined);
-    if (given.length !== 1) throw bad();
-    if (flags.message !== undefined && flags.finish === undefined) throw bad();
-    const id = flags.finish ?? flags.cancel;
-    if (id !== undefined && !z.uuid().safeParse(id).success) throw new UsageError("That isn't a run id.");
-    const { client, artifact } = await open(flags, target);
-    if (flags.goal !== undefined) {
-      const run = Run.parse(
-        await editing(out, () => client.post(`/api/artifacts/${artifact.id}/doc/runs`, { goal: flags.goal })),
-      );
-      return out.result(run, () => {
-        out.say(run.id);
-        out.warn(
-          `Run started (${run.edits === "direct" ? "edits apply to the page" : "edits wait as suggestions"}). Pass --run ${run.id} to page edit, then --finish ${run.id}.`,
-        );
-      });
-    }
-    const verb = flags.finish !== undefined ? "finish" : "cancel";
-    const run = Run.parse(
-      await editing(out, () =>
-        client.post(`/api/runs/${id}/${verb}`, verb === "finish" ? { message: flags.message } : {}),
-      ),
-    );
-    return out.result(run, () =>
-      out.say(
-        verb === "cancel"
-          ? "✓ Run cancelled."
-          : run.version !== null
-            ? `✓ Run finished, saved as v${run.version}.`
-            : `✓ Run finished with ${run.suggestions} suggestions waiting for a person.`,
-      ),
-    );
+    return delegate(flags, target, out, { edit: "page edit", bad });
   }
 
   if (sub === "export") {

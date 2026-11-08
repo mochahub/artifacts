@@ -1,5 +1,6 @@
-import { type EditMode, SYNC_CLOSE, SyncControl } from "@artifacts/schema/editing";
+import type { EditMode, SyncControl } from "@artifacts/schema/editing";
 import * as Y from "yjs";
+import { parseControl, SYNC_CLOSE } from "./control.ts";
 import {
   type Awareness,
   applyAwarenessUpdate,
@@ -178,7 +179,7 @@ export function connect(
     }
     switch (incoming.type) {
       case "control": {
-        const parsed = SyncControl.safeParse(incoming.json);
+        const parsed = parseControl(incoming.json);
         if (!parsed.success) return;
         const control = parsed.data;
         if (control.t === "hello") {

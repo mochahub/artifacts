@@ -16,6 +16,10 @@ An agent runs `artifacts publish`. The CLI checks the work, renders each screen 
 
 A wiki is a project of articles that agents and people keep together. Pages link with `[[Target]]`, cite sources, and are edited in the browser: tap Edit, and several people type in the same page at once. Agents edit the same page one block at a time with `artifacts page read` and `artifacts page edit`, or the hosted tools. The server applies an agent's edit or files it as a suggestion, by who can read the page and who is editing now. Every save is an ordinary version, so comments, compare and restore work as before, and `artifacts wiki export <wiki> <dir>` writes the whole wiki out as Markdown.
 
+## Boards
+
+A canvas is also a board people can draw on: stickies, shapes, text, arrows, pictures and freehand ink next to the screens an agent rendered. Tap Edit and sketch with a finger or an Apple Pencil, or let an agent read the sketch as objects with `artifacts board read --draft` and answer it. The loop for "turn this sketch into mocks" is `artifacts publish` for the screens, then `artifacts board place-frame --frame login --near <object>` to put each beside the sketch, then `artifacts board save`. Edits follow the same rules as wiki pages: an agent's batch applies or becomes a ghost for a person to accept, by who can read the board and who is drawing now, and every save is an ordinary version. `artifacts board export <project/slug> <dir>` writes a checkpoint out as JSON, a text outline and its pictures.
+
 ## Connect an agent from anywhere
 
 The skill and the CLI cover agents on a machine with them installed. For remote boxes, Artifacts is also a hosted MCP server at `<your server>/api/mcp`, which signs in with your Artifacts account:

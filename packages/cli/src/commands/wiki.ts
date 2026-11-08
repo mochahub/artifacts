@@ -10,7 +10,7 @@ import {
   WikiCreated,
   WikiSpace,
 } from "@artifacts/schema";
-import type { Client } from "../client.ts";
+import { ApiCallError, type Client } from "../client.ts";
 import type { Input } from "../command.ts";
 import { CliError, type Output, UsageError } from "../output.ts";
 import { signedIn } from "../session.ts";
@@ -136,12 +136,33 @@ async function exportWiki(client: Client, wiki: string, dir: string, out: Output
   const left: string[] = [];
   let files = 0;
   let written = 0;
+  let boards = 0;
   for (const entry of entries) {
     try {
       const artifact = Artifact.parse(await client.get(`/api/artifacts/by-slug/${wiki}/${entry.slug}`));
       // Both read the version the first answer named, so a checkpoint in between can't mix two versions.
       const pin = `?version=${artifact.latestVersion}`;
-      const markdown = await client.text(`/api/artifacts/${artifact.id}/export.md${pin}`);
+      let markdown: string;
+      try {
+        markdown = await client.text(`/api/artifacts/${artifact.id}/export.md${pin}`);
+      } catch (error) {
+        if (!(error instanceof ApiCallError)) throw error;
+        // A drawn board has no Markdown: it goes out as its scene (JSON), a plain outline and its pictures (14).
+        const { exportBoard } = await import("./board.ts");
+        const board = await exportBoard(
+          client,
+          artifact,
+          join(root, `${entry.slug}.board`),
+          String(artifact.latestVersion),
+        ).catch((failure) => {
+          if (failure instanceof ApiCallError) throw error;
+          throw failure;
+        });
+        boards += 1;
+        files += board.assets + board.frames;
+        left.push(...board.skipped.map((item) => `${entry.slug}.board/${item}`));
+        continue;
+      }
       const bundle = VersionBundle.parse(
         await client.get(`/api/library/projects/${wiki}/${entry.slug}/bundle${pin}`),
       );
@@ -166,9 +187,11 @@ async function exportWiki(client: Client, wiki: string, dir: string, out: Output
       skipped.push({ slug: entry.slug, reason: error.message });
     }
   }
-  const result = { wiki, dir: root, pages: written, files, skipped, left };
+  const result = { wiki, dir: root, pages: written, boards, files, skipped, left };
   out.result(result, () => {
-    out.say(`✓ Exported ${written} pages and ${files} files from ${wiki} to ${root}`);
+    out.say(
+      `✓ Exported ${written} pages${boards > 0 ? `, ${boards} boards` : ""} and ${files} files from ${wiki} to ${root}`,
+    );
     for (const item of skipped) out.warn(`! Left out ${item.slug}: ${item.reason}`);
     if (left.length > 0) out.warn(`! Left out files: ${left.join(", ")}`);
   });

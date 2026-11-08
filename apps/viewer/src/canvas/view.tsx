@@ -3,6 +3,7 @@ import { useSignal } from "@preact/signals";
 import { Images, List, MessageCircle, Move } from "lucide-preact";
 import { createPortal } from "preact/compat";
 import { useEffect, useRef } from "preact/hooks";
+import { BoardReader, useBoardEdit } from "../boards/reader.tsx";
 import { Sheet } from "../components/sheet.tsx";
 import { PageCapsule } from "../components/shell.tsx";
 import { LiveFrame, SavedNotice } from "../live/frame.tsx";
@@ -64,7 +65,38 @@ function TryIt({
   );
 }
 
-export function CanvasView({ artifact, page, version, latest, threads, onPages, onVersions }: Props) {
+/**
+ * A canvas page. A version with a native board checkpoint (`meta.board`, 14) is read by the board
+ * reader; everything else, and any version whose snapshot can't be had, keeps the frame canvas exactly.
+ */
+export function CanvasView(props: Props) {
+  const legacy = useSignal(false);
+  // A wiki canvas without a native checkpoint yet: reading stays the frame canvas, and Edit seeds the
+  // board draft from its frames (14, "Read compatibility and first edit").
+  const edit = useBoardEdit(props.artifact, props.page.kind === "canvas" && props.page.key, props.latest);
+  if (props.page.kind === "canvas" && props.page.meta.board && !legacy.value)
+    return (
+      <BoardReader
+        {...props}
+        onLegacy={() => {
+          legacy.value = true;
+        }}
+      />
+    );
+  if (edit.editor) return edit.editor;
+  return <FrameCanvas {...props} editKey={edit.key} />;
+}
+
+function FrameCanvas({
+  artifact,
+  page,
+  version,
+  latest,
+  threads,
+  onPages,
+  onVersions,
+  editKey,
+}: Props & { editKey?: preact.ComponentChildren }) {
   const root = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
@@ -272,6 +304,7 @@ export function CanvasView({ artifact, page, version, latest, threads, onPages, 
           Comments
           {openCount > 0 && <b class="count">{openCount}</b>}
         </button>
+        {editKey}
       </div>
       {commenting.value && <div class="hint glass">Tap a spot to comment</div>}
       {review.sheets}

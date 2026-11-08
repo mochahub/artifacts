@@ -2,6 +2,8 @@
 
 **Contract** for Phase 2 Part B of the company brain: people edit wiki pages in the browser, together and live, and agents edit the same pages by operation. The behaviour is in [SPEC.md §16](../SPEC.md#16-wikis). The plan behind it is the hosted artifact `artifacts/company-brain`, and the editor choice is the spike `artifacts/phase-2b-editor-spike`. This document owns the names, shapes, routes, tools, tables and limits below. Shared shapes are in `packages/schema/src/editing.ts`, and constants are in `packages/schema/src/constants.ts` under "Editing".
 
+Phase 3 extends these mechanisms to eligible wiki boards in [14 Boards](14-boards.md). That contract owns the board object model, board-specific JSON/routes and the compatible frame-publish merge exception; article behaviour below is unchanged.
+
 Settled before this contract, and not reopened here:
 - Agents connect over the MCP or the CLI. The server runs no model.
 - The server is the source of truth, and it never runs a browser. Article HTML is sanitized on the server by the one sanitizer, `@artifacts/schema/sanitize`.
@@ -373,7 +375,7 @@ The migration is `apps/server/drizzle/0018_*.sql`, and it only adds.
 3. **Persist.** In one transaction:
    - `UPDATE edit_docs SET seq = seq + 1, updated_at = now(), dirty_since = coalesce(dirty_since, now()), last_actor_person_id = … RETURNING seq` (the row lock orders writers per page);
    - `INSERT edit_updates`.
-4. **Broadcast after persisting.** Send to the replica's other local connections, then `NOTIFY artifacts_docs`. A failure to persist closes the socket with 1011. The client reconnects and syncs again, and loses nothing, because its own `Y.Doc` still holds the change.
+4. **Broadcast after persisting.** Send to the replica's other local connections, then `NOTIFY artifacts_docs`. A failure to persist closes the socket with 1011. The client reconnects and syncs again, and loses nothing, because its own `Y.Doc` still holds the change. The replica's live document relays only updates from a connection (after persisting), the database catch-up and the server's own repairs. Yjs's own follow-up transactions, such as its author-format tidy-up, are never persisted; every client makes the same ones, so they are not relayed.
 
 ### Epochs and `seq`
 

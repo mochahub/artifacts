@@ -211,10 +211,10 @@ describe("page read", () => {
     expect(json.untrusted).toContain("data");
   });
 
-  test("every request says this CLI understands the editing values", async () => {
+  test("every request says this CLI understands the editing and board values", async () => {
     await page("read", "brain/pricing");
     expect(seen.length).toBeGreaterThan(1);
-    for (const request of seen) expect(request.headers.get("artifacts-features")).toBe("editing");
+    for (const request of seen) expect(request.headers.get("artifacts-features")).toBe("editing,boards");
   });
 
   test("open suggestions are listed as text other people wrote", async () => {

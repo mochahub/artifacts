@@ -2,19 +2,11 @@ import { BLOCK_ID_PATTERN } from "@artifacts/schema/constants";
 import { Fragment, type Node, Slice } from "prosemirror-model";
 import { Plugin, PluginKey, type Transaction } from "prosemirror-state";
 import { ySyncPluginKey } from "y-prosemirror";
-
-const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+import { mintLastingId } from "./board-ids.ts";
 
 /** A lasting block id: `~` and ten base-36 characters (`BLOCK_ID_PATTERN`). */
 export function mintBlockId(): string {
-  let id = "~";
-  while (id.length < 11) {
-    // Bytes of 252 and up are drawn again: 252 is the largest multiple of 36 under 256, so no
-    // character is likelier than another.
-    for (const byte of crypto.getRandomValues(new Uint8Array(16)))
-      if (byte < 252 && id.length < 11) id += ALPHABET[byte % 36];
-  }
-  return id;
+  return mintLastingId();
 }
 
 export const isBlockId = (value: unknown): value is string =>

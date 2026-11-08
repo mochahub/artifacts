@@ -224,3 +224,41 @@ export const PRESENCE_TTL_MS = 30_000;
 export const AGENT_PRESENCE_MS = MINUTE_MS;
 export const RUN_MAX_MS = HOUR_MS;
 export const SUGGESTION_DAYS = 14;
+
+// Boards (14): independent editor budget; the read bundle stays at 80 KB gzip.
+export const BOARD_OBJECTS_MAX = 2000;
+export const BOARD_TEXT_MAX = 16_000;
+export const BOARD_LABEL_MAX = 280;
+export const BOARD_COORD_MAX = 1_000_000;
+export const BOARD_DIMENSION_MAX = 100_000;
+export const BOARD_ORDER_MAX = 64;
+export const BOARD_DEPTH_MAX = 8;
+export const BOARD_STROKE_POINTS_MAX = 2048;
+export const BOARD_ASSET_MAX = 10 * 1024 * 1024;
+export const BOARD_ASSET_PIXELS_MAX = 16_000_000;
+export const BOARD_ASSETS_MAX = 200;
+export const BOARD_ASSETS_BYTES_MAX = 100 * 1024 * 1024;
+export const BOARD_OBJECT_JSON_MAX = 256 * 1024;
+export const BOARD_JSON_MAX = 4 * 1024 * 1024;
+export const BOARD_OPS_MAX = 50;
+export const BOARD_CALL_MAX = 256 * 1024;
+export const BOARD_CAPTURE_TTL_MS = 5 * MINUTE_MS;
+export const BOARD_PLACEMENT_TRIES = 100;
+export const BOARD_EDITOR_GZIP_MAX = 160_000;
+
+/** Clients understanding native-object comment anchors advertise this alongside editing. */
+export const BOARDS_FEATURE = "boards";
+
+/** The message types on the sync socket: y-protocols' sync and awareness, and ours. */
+export const SYNC_MESSAGE = { sync: 0, awareness: 1, auth: 2, queryAwareness: 3, control: 100 } as const;
+/** Close codes. Not found and not editable look the same, so a socket reveals nothing. */
+export const SYNC_CLOSE = {
+  invalidUpdate: 4400,
+  unauthenticated: 4401,
+  lostAccess: 4403,
+  notFound: 4404,
+  reset: 4409,
+  tooLarge: 4413,
+  rateLimited: 4429,
+  restarting: 4000,
+} as const;

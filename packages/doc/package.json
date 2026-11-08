@@ -12,7 +12,13 @@
     "./ids": "./src/ids.ts",
     "./attribution": "./src/attribution.ts",
     "./sync": "./src/sync.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/client.ts",
+    "./board": "./src/board.ts",
+    "./board-ids": "./src/board-ids.ts",
+    "./board-hash": "./src/board-hash.ts",
+    "./board-geometry": "./src/board-geometry.ts",
+    "./board-order": "./src/board-order.ts",
+    "./board-undo": "./src/board-undo.ts"
   },
   "dependencies": {
     "@artifacts/schema": "workspace:*",

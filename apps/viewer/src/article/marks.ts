@@ -46,6 +46,7 @@ export function decorate(root: HTMLElement, threads: Thread[], open: (id: string
     if (
       !anchor ||
       anchor.type === "frame" ||
+      anchor.type === "object" ||
       thread.status === "resolved" ||
       thread.anchorState === "orphaned"
     )

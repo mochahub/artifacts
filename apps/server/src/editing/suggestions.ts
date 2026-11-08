@@ -335,7 +335,7 @@ export async function logDecision(
   artifact: LoadedArtifact,
   personId: string,
   kind: "suggestion_accepted" | "suggestion_rejected",
-  payload: { suggestion?: string; run?: string; count: number },
+  payload: { suggestion?: string; run?: string; count: number; document?: "board"; page?: string },
 ) {
   await deps.db.insert(activity).values({
     id: Bun.randomUUIDv7(),

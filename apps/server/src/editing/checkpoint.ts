@@ -13,6 +13,7 @@ import { sanitizeArticle } from "@artifacts/schema/sanitize";
 import { articleLinks } from "@artifacts/schema/wiki";
 import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { ArtifactRow, ProjectRow } from "../auth/access.ts";
+import { checkpointBoardLocked } from "../boards/checkpoint.ts";
 import type { Tx } from "../db/index.ts";
 import {
   activity,
@@ -69,6 +70,57 @@ function chartPaths(source: string, page: string) {
   );
 }
 
+type VersionRow = typeof versions.$inferSelect;
+type DraftMeta = { title?: string; summary?: string; tags?: string[]; sources?: string[] } | null;
+
+/**
+ * Title, summary, tags and wiki metadata for the next checkpoint, article or board: the draft's meta over
+ * the base version. Sources set since the last version are checked again, as at publish, as its author.
+ */
+export async function resolveVersionMeta(
+  deps: Deps,
+  tx: Tx,
+  current: ArtifactRow,
+  base: VersionRow,
+  manifest: { title?: string },
+  meta: DraftMeta,
+  options: CheckpointOptions,
+  loaded: { lastActorPersonId: string | null },
+  fail: (message: string) => never,
+) {
+  const title = meta?.title ?? manifest.title ?? current.title;
+  const summary = meta?.summary ?? base.summary;
+  const tags = meta?.tags ?? base.tags;
+  const wiki = base.wiki
+    ? { ...base.wiki, ...(meta?.sources ? { sources: meta.sources } : {}) }
+    : meta?.sources
+      ? { role: "page" as const, sources: meta.sources, origin: null, untrusted: false }
+      : null;
+  if (meta?.sources?.length && wiki) {
+    const personId = options.personId ?? loaded.lastActorPersonId ?? current.publisherId;
+    const [person] = await tx
+      .select({ id: people.id, name: people.name, email: people.email, role: people.role })
+      .from(people)
+      .where(eq(people.id, personId))
+      .limit(1);
+    if (!person) return fail("The page's author is gone.");
+    try {
+      await validateWikiSources(
+        deps,
+        current.orgId,
+        { kind: "person", person, sessionId: "checkpoint", recentAuth: false },
+        current.projectId,
+        current.slug,
+        wiki as WikiMeta,
+      );
+    } catch (error) {
+      if (error instanceof ApiError) return fail(error.message);
+      throw error;
+    }
+  }
+  return { title, summary, tags, wiki };
+}
+
 /**
  * Makes a checkpoint inside a lock someone already holds (13, "Checkpoints"), and answers whether it made
  * one. Every trigger was authorized when it was asked for, so this checks no caller. A problem with the
@@ -80,6 +132,8 @@ export async function checkpointLocked(
   place: Place,
   options: CheckpointOptions,
 ): Promise<CheckpointResult> {
+  // One dispatch on the draft's kind, inside this lock: saved, quiet, handoff, run and sweep alike (14).
+  if (lock.row?.kind === "board") return checkpointBoardLocked(deps, lock, place, options);
   const { tx, row } = lock;
   const [current] = await tx.select().from(artifacts).where(eq(artifacts.id, place.row.id)).limit(1);
   if (!current) throw new ApiError("not_found", "No such artifact.");
@@ -152,37 +206,17 @@ export async function checkpointLocked(
   const problem = built.problems.find((entry) => entry.severity === "error");
   if (problem) fail(problem.message);
 
-  const title = meta?.title ?? manifest.title ?? current.title;
-  const summary = meta?.summary ?? base.summary;
-  const tags = meta?.tags ?? base.tags;
-  const wiki = base.wiki
-    ? { ...base.wiki, ...(meta?.sources ? { sources: meta.sources } : {}) }
-    : meta?.sources
-      ? { role: "page" as const, sources: meta.sources, origin: null, untrusted: false }
-      : null;
-  // Step 4: sources set since the last version are checked again, as at publish, as the version's author.
-  if (meta?.sources?.length && wiki) {
-    const personId = options.personId ?? loaded.lastActorPersonId ?? current.publisherId;
-    const [person] = await tx
-      .select({ id: people.id, name: people.name, email: people.email, role: people.role })
-      .from(people)
-      .where(eq(people.id, personId))
-      .limit(1);
-    if (!person) return fail("The page's author is gone.");
-    try {
-      await validateWikiSources(
-        deps,
-        current.orgId,
-        { kind: "person", person, sessionId: "checkpoint", recentAuth: false },
-        current.projectId,
-        current.slug,
-        wiki as WikiMeta,
-      );
-    } catch (error) {
-      if (error instanceof ApiError) return fail(error.message);
-      throw error;
-    }
-  }
+  const { title, summary, tags, wiki } = await resolveVersionMeta(
+    deps,
+    tx,
+    current,
+    base,
+    manifest,
+    meta,
+    options,
+    loaded,
+    fail,
+  );
   const clean = sanitizeArticle(built.html);
   const nextManifest = {
     ...manifest,
@@ -284,8 +318,16 @@ export async function checkpointLocked(
  * Threads that accepted suggestions or direct edits said they fix become fixed at this version, each
  * with a reply from the agent that fixed it (13, "Checkpoints", step 8).
  */
-async function markFixed(deps: Deps, tx: Tx, artifact: ArtifactRow, n: number, direct: Fix[]) {
-  const accepted = await tx
+export async function markFixed(
+  deps: Deps,
+  tx: Tx,
+  artifact: ArtifactRow,
+  n: number,
+  direct: Fix[],
+  /** Accepted board batches this version carries, already stamped with it (14). */
+  boards: (Omit<Fix, "n"> & { fixes: number[]; decidedBy: string | null })[] = [],
+) {
+  const articles = await tx
     .update(suggestions)
     .set({ version: n })
     .where(
@@ -304,7 +346,7 @@ async function markFixed(deps: Deps, tx: Tx, artifact: ArtifactRow, n: number, d
     });
   const wanted = new Map<number, Fix & { acceptedBy: string | null }>();
   for (const fix of direct) wanted.set(fix.n, { ...fix, acceptedBy: null });
-  for (const row of accepted) {
+  for (const row of [...articles, ...boards]) {
     for (const thread of row.fixes) {
       wanted.set(thread, {
         n: thread,

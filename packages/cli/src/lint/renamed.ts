@@ -26,6 +26,7 @@ export async function renamedProblems(
     threads.flatMap((thread) => {
       const anchor = thread.anchor;
       if (!anchor) return [];
+      if ("object" in anchor) return [];
       return [anchor.type === "frame" ? anchor.frameKey : `${thread.pageKey}/${anchor.blockKey}`];
     }),
   );

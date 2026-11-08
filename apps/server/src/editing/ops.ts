@@ -38,7 +38,7 @@ import {
   validate,
   yToDoc,
 } from "./model.ts";
-import { agentPolicy, missingEditScope, type Policy, presenceAgain } from "./policy.ts";
+import { agentPolicy, missingEditScope, type Policy } from "./policy.ts";
 import {
   type Actor,
   authorKey,
@@ -482,19 +482,23 @@ export async function applyOps(
 
   const outcome = await withDocLock(deps, artifact.id, async (lock) => {
     if (!accept) {
-      policy = await presenceAgain(deps, artifact.id, policy);
+      policy = await agentPolicy({ ...deps, db: lock.tx } as unknown as Deps, caller, artifact, {
+        run: request.run,
+        suggest: request.suggest,
+      });
       agents = { edits: policy.edits, reason: policy.reason, text: policy.text };
-      if (policy.reason !== "run") runId = null;
-      if (policy.edits === "refused") {
-        const text = policy.text;
+      runId = policy.reason === "run" ? (request.run ?? null) : null;
+      if (policy.edits === "refused")
         return {
-          results: request.ops.map((_, index) => refused(index, "writing", text)),
+          results: request.ops.map((_, index) =>
+            refused(index, policy.reason === "writing" ? "writing" : "invalid", policy.text),
+          ),
           seq: lock.row?.seq ?? 0,
           last: null,
           refused: true,
         };
-      }
     }
+
     const { ydoc, row } = await loadDoc(deps, artifact.id, lock);
     const key = accept?.authorKey ?? (await authorKey(deps, artifact.id, actor, request.sources ?? [], lock));
     const mark: Mark = {

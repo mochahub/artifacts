@@ -791,4 +791,65 @@ describe("page operations", () => {
       .where(and(eq(artifacts.slug, "pricing")));
     expect(archived.length).toBe(2);
   });
+  test("legacy version ids survive repeated reads and first draft seeding", async () => {
+    expect((await page("mine", "stable-ids", "# Stable\n\nOriginal text.")).isError).toBeFalsy();
+    const id = await artifactId("stable-ids");
+    const read = async (query = "?latest=1") => {
+      const response = await t.api(`/api/artifacts/${id}/doc/markdown${query}`, { bearer: token });
+      expect(response.status).toBe(200);
+      return (await response.json()) as { blocks: { id: string; base: string; markdown: string }[] };
+    };
+    const first = await read();
+    expect((await read()).blocks).toEqual(first.blocks);
+    expect((await read("?draft=1")).blocks.map(({ id, base, markdown }) => ({ id, base, markdown }))).toEqual(
+      first.blocks.map(({ id, base, markdown }) => ({ id, base, markdown })),
+    );
+    const block = first.blocks[1];
+    if (!block) throw new Error("missing test block");
+    const changed = await edit("mine/stable-ids", {
+      ops: [{ op: "replace", block: block.id, base: block.base, markdown: "Changed using the version id." }],
+      checkpoint: true,
+    });
+    expect(changed.results[0]?.outcome).toBe("applied");
+    expect((await read()).blocks[1]?.id).toBe(block.id);
+  });
+
+  test("an operation queued behind Write refreshes policy under the lock", async () => {
+    await page("mine", "queued-mode", "# Queued\n\nOriginal.");
+    const id = await artifactId("queued-mode");
+    let release = () => {};
+    let taken = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      taken = resolve;
+    });
+    const holder = withDocLock(t.server.deps, id, async (lock) => {
+      taken();
+      await gate;
+      await lock.tx.insert(editPresence).values({
+        artifactId: id,
+        connectionId: Bun.randomUUIDv7(),
+        orgId,
+        personId: ownerId,
+        mode: "write",
+        blocks: [],
+        replica: "test",
+        seenAt: t.clock.now(),
+      });
+    });
+    await ready;
+    const pending = edit("mine/queued-mode", {
+      ops: [{ op: "insert", after: null, markdown: "Must refuse." }],
+    });
+    await Bun.sleep(100);
+    release();
+    await holder;
+    try {
+      expect((await pending).results[0]).toMatchObject({ outcome: "refused", reason: "writing" });
+    } finally {
+      await leave("queued-mode");
+    }
+  });
 });

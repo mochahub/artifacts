@@ -276,7 +276,7 @@ A second generated table covers every caller against an open and a restricted pr
 - **CSRF:** non-GET requests carrying a session or guest cookie must have `Origin` ∈ viewer origins, and any non-GET request with a foreign `Origin` is refused, which stops forged sign-ins too. Requests with `Authorization: Bearer …` are exempt, since they carry no cookies and the server ignores cookies for them. Any other `Authorization` header gets no exemption.
 - **Host routing:** the viewer port accepts only viewer hosts, except `GET /api/health`; the content port serves `/t/` only on the content host (03).
 - **Viewer response headers:**
-  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; media-src 'self' <bucket origin>; connect-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'` (`frame-src` is sent only when `CONTENT_URL` is set)
+  - `Content-Security-Policy: default-src 'self'; frame-src <CONTENT_URL>; img-src 'self' data: blob: <bucket origin>; media-src 'self' <bucket origin>; connect-src 'self' <bucket origin>; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'` (`frame-src` is sent only when `CONTENT_URL` is set)
   - `Strict-Transport-Security: max-age=31536000`
   - `X-Frame-Options: DENY`
   - `Cross-Origin-Opener-Policy: same-origin`
@@ -314,3 +314,9 @@ A second generated table covers every caller against an open and a restricted pr
 Each map holds at most 50,000 keys; past that, expired keys go first and then the oldest tenth, so random addresses can't grow memory without bound or wipe every limit at once.
 
 With more than one replica, limits are per replica. That's acceptable for a self-hosted deployment.
+
+## Native board permissions
+
+Boards reuse `artifact.edit`, `artifact.accept`, `artifact.maintain` and the `edit` token scope. Read-only state excludes draft sequence, presence, runs and suggestions. Images require artifact/version authority before a presigned capability is issued; a hash alone grants nothing. Fresh Write presence refuses agent operations; Pair proposes atomic batches, and object holds narrow direct operations to suggestions across replicas. Page grants and active share links count in the audience. [14 Boards](14-boards.md#permissions-audience-and-visibility) owns these board-specific rules.
+
+The viewer allows presigned upload connections only to the configured public S3 bucket origin (including the bucket hostname with virtual-host addressing). This is derived from deployment configuration, not request headers or client-provided URLs; no wildcard upload origins are allowed.

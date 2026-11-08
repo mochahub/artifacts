@@ -35,7 +35,11 @@ bun test --timeout=30000 apps/server/test/permissions.test.ts
 bun test --timeout=30000 -t "purge" apps/server    # by test name
 ```
 
+Several people (or agents) working at once can each run a copy of that file under another project name and other host ports, and point the runner at it with `TEST_DATABASE_URL` and `TEST_S3_ENDPOINT` (the defaults are the ports in that file). The CLI's tests that need a server, such as `packages/cli/test/board.e2e.test.ts`, are `bun test` files and read the same two variables; the ones that don't (`board.test.ts` mocks the server) need no stack.
+
 A full `bun run test` also checks that every API route was reached by a test (`scripts/route-coverage.ts`), which a single file can't.
+
+For Linux WebKit acceptance from a Docker Desktop host, use `bun run e2e:linux` (the same Playwright arguments are accepted). It builds the pinned Linux Bun/Playwright image and runs the app and browser together, with Postgres and S3 on a private compose network. Each invocation force-recreates its own uniquely named stack, publishes no host ports, retains traces and compose logs in the printed temporary results directory, and tears down its containers, volumes and runner image. This avoids per-connection host forwarding: rapid client-port reuse can stall a TCP handshake in Docker Desktop's host forwarder, which otherwise looks like an unfinished lazy stylesheet even though the app never receives its request.
 
 For one e2e file, pass it to the script, which hands its arguments to Playwright:
 
@@ -95,19 +99,20 @@ Don't edit version numbers. They are stamped at build time, and `package.json` s
 
 ## Keep the contract documents in step
 
-[docs/implementation/](docs/implementation/README.md) holds the documents the code is built from. Nine of them are contracts, which own names and shapes:
+[docs/implementation/](docs/implementation/README.md) holds the documents the code is built from. Ten of them are contracts, which own names and shapes:
 
-| Document                                                                     | Owns                                                                 |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [02 Data model](docs/implementation/02-data-model.md)                        | Tables, columns, enums, bucket prefixes                              |
-| [03 HTTP API](docs/implementation/03-api.md)                                 | Ports, paths, shapes, headers, error codes                           |
-| [04 Sign-in and permissions](docs/implementation/04-auth-and-permissions.md) | Callers, cookies, tokens, scopes, the permission matrix, rate limits |
-| [05 Publishing and storage](docs/implementation/05-publish-and-storage.md)   | The manifest, renders, block ids, re-anchoring, clean-up             |
-| [07 The CLI and the skill](docs/implementation/07-cli-and-skill.md)          | Commands, flags, config, lint rule ids                               |
-| [08 Micro apps](docs/implementation/08-micro-apps.md)                        | Bridge messages, data store limits, the sandbox                      |
-| [09 Deploying](docs/implementation/09-deploy.md)                             | Images, environment variables, the template, releases                |
-| [12 Wikis](docs/implementation/12-wikis.md)                                  | Wiki projects, roles, wiki links, the wiki API and tools             |
-| [13 Editing](docs/implementation/13-editing.md)                              | Drafts, checkpoints, block ids, sync, agent operations, suggestions  |
+| Document                                                                     | Owns                                                                                    |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [02 Data model](docs/implementation/02-data-model.md)                        | Tables, columns, enums, bucket prefixes                                                 |
+| [03 HTTP API](docs/implementation/03-api.md)                                 | Ports, paths, shapes, headers, error codes                                              |
+| [04 Sign-in and permissions](docs/implementation/04-auth-and-permissions.md) | Callers, cookies, tokens, scopes, the permission matrix, rate limits                    |
+| [05 Publishing and storage](docs/implementation/05-publish-and-storage.md)   | The manifest, renders, block ids, re-anchoring, clean-up                                |
+| [07 The CLI and the skill](docs/implementation/07-cli-and-skill.md)          | Commands, flags, config, lint rule ids                                                  |
+| [08 Micro apps](docs/implementation/08-micro-apps.md)                        | Bridge messages, data store limits, the sandbox                                         |
+| [09 Deploying](docs/implementation/09-deploy.md)                             | Images, environment variables, the template, releases                                   |
+| [12 Wikis](docs/implementation/12-wikis.md)                                  | Wiki projects, roles, wiki links, the wiki API and tools                                |
+| [13 Editing](docs/implementation/13-editing.md)                              | Drafts, checkpoints, block ids, sync, agent operations, suggestions                     |
+| [14 Boards](docs/implementation/14-boards.md)                                | Native objects, Yjs mapping, frame merge, browser captures, board operations and limits |
 
 **A change to code that a contract describes changes the contract in the same commit.** That covers a route, a flag, an environment variable, a table or a column, a lint rule id or a limit. If the two disagree, a reader can't tell which is right. [SPEC.md](docs/SPEC.md) wins on behaviour, and the contract wins on names. If you need to change behaviour that the spec states, say so in the pull request.
 

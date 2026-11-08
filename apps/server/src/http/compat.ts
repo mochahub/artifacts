@@ -1,4 +1,9 @@
-import { EDITING_ACTIVITY_FALLBACK, EDITING_FEATURE, FEATURES_HEADER } from "@artifacts/schema";
+import {
+  BOARDS_FEATURE,
+  EDITING_ACTIVITY_FALLBACK,
+  EDITING_FEATURE,
+  FEATURES_HEADER,
+} from "@artifacts/schema";
 import type { Context } from "hono";
 
 /**
@@ -16,11 +21,54 @@ const REWRITTEN = [
 const LEVEL_KEYS = new Set(["permission", "level", "projectPermission"]);
 const FALLBACK = EDITING_ACTIVITY_FALLBACK as Record<string, string | null>;
 
+const featuresOf = (c: Context) =>
+  (c.req.header(FEATURES_HEADER) ?? "").split(",").map((word) => word.trim());
+
 export const olderClient = (c: Context) => {
   if (!c.req.header("artifacts-cli")) return false;
-  const features = (c.req.header(FEATURES_HEADER) ?? "").split(",").map((word) => word.trim());
-  return !features.includes(EDITING_FEATURE);
+  return !featuresOf(c).includes(EDITING_FEATURE);
 };
+
+/**
+ * A CLI without the `boards` feature can't parse an object anchor (14, "CLI and skill"): its threads come
+ * back with `anchor: null`, keeping their number, state and crop. The viewer and hosted MCP see them all.
+ */
+export const boardlessClient = (c: Context) =>
+  Boolean(c.req.header("artifacts-cli")) && !featuresOf(c).includes(BOARDS_FEATURE);
+const THREADED = [
+  /^\/api\/artifacts\/[^/]+\/threads$/,
+  /^\/api\/threads\/[^/]+\/[a-z]+$/,
+  /^\/api\/review\//,
+];
+
+/** Object anchors as `null`, anywhere in an answer. Pure, like `downgrade`. */
+export function hideObjectAnchors(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(hideObjectAnchors);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        key === "anchor" && item && typeof item === "object" && (item as { type?: unknown }).type === "object"
+          ? null
+          : hideObjectAnchors(item),
+      ]),
+    );
+  }
+  return value;
+}
+
+/** Rewrites a thread answer in place for a CLI without the boards feature. */
+export async function rewriteBoardAnchors(c: Context) {
+  if (!THREADED.some((pattern) => pattern.test(c.req.path))) return;
+  const res = c.res;
+  if (!res.headers.get("content-type")?.includes("application/json")) return;
+  const text = await res.clone().text();
+  if (!text.includes('"object"')) return;
+  const headers = new Headers(res.headers);
+  headers.delete("etag");
+  headers.delete("content-length");
+  c.res = new Response(JSON.stringify(hideObjectAnchors(JSON.parse(text))), { status: res.status, headers });
+}
 
 /** The answer as a released CLI can parse it. Pure, so the compat test runs it on fixtures. */
 export function downgrade(value: unknown): unknown {

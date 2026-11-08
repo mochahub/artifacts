@@ -1,11 +1,26 @@
 import { createHash } from "node:crypto";
 import {
+  type BoardKind,
+  boardStamp,
+  boardToY,
+  emptyBoard,
+  newObject,
+  validateBoard,
+} from "@artifacts/doc/board";
+import { mintBoardObjectId } from "@artifacts/doc/board-ids";
+import { keysBetween } from "@artifacts/doc/board-order";
+import {
   type AtomKind,
   EDIT_COMPACT_BYTES,
   EDIT_COMPACT_UPDATES,
   MANIFEST,
   type NOT_EDITABLE_REASONS,
 } from "@artifacts/schema";
+import {
+  type BoardObject,
+  type BoardSnapshot,
+  BoardSnapshot as BoardSnapshotSchema,
+} from "@artifacts/schema/boards";
 import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
 import * as Y from "yjs";
 import { findArtifact, type LoadedArtifact } from "../auth/access.ts";
@@ -15,11 +30,14 @@ import { lockArtifact } from "../db/locks.ts";
 import {
   blockAliases,
   blocks,
+  boardSuggestions,
+  boardVersions,
   editAtoms,
   editAuthors,
   editDocs,
   editRuns,
   editUpdates,
+  frames,
   pages,
   suggestions,
   versions,
@@ -87,23 +105,34 @@ export async function withDocLock<T>(
   return result;
 }
 
-/** What the page is, for editing: `DocState.reason` when it can't be (13, "Concepts"). */
-export async function editability(
-  deps: Deps,
-  artifact: LoadedArtifact,
-): Promise<{ editable: true; pageKey: string } | { editable: false; reason: Reason }> {
+/** What a draft holds: an article's ProseMirror fragment or a board's object maps (14). */
+export type DocKind = "article" | "board";
+export type EditableState =
+  | { editable: true; pageKey: string; kind: DocKind }
+  | { editable: false; reason: Reason };
+
+/**
+ * What the page is, for editing: `DocState.reason` when it can't be (13, "Concepts"). One article page
+ * is an article draft; one canvas page of a wiki `page` (not a source) is a board draft (14, "Concepts
+ * and eligibility"). Any other shape keeps the article reason `not_article`; board routes call it
+ * `not_canvas`.
+ */
+export async function editability(deps: Deps, artifact: LoadedArtifact): Promise<EditableState> {
   if (artifact.project.kind !== "wiki") return { editable: false, reason: "not_wiki" };
   if (artifact.row.archivedAt || artifact.row.deletedAt) return { editable: false, reason: "archived" };
   if (artifact.row.hasBackend) return { editable: false, reason: "has_backend" };
   const rows = await deps.db
-    .select({ key: pages.pageKey, kind: pages.kind })
+    .select({ key: pages.pageKey, kind: pages.kind, wiki: versions.wiki })
     .from(pages)
     .innerJoin(versions, eq(versions.id, pages.versionId))
     .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, artifact.row.latestVersion)))
     .limit(2);
   const [page] = rows;
-  if (rows.length !== 1 || page?.kind !== "article") return { editable: false, reason: "not_article" };
-  return { editable: true, pageKey: page.key };
+  if (rows.length !== 1 || !page) return { editable: false, reason: "not_article" };
+  if (page.kind === "article") return { editable: true, pageKey: page.key, kind: "article" };
+  if (page.kind === "canvas" && (page.wiki?.role ?? "page") === "page")
+    return { editable: true, pageKey: page.key, kind: "board" };
+  return { editable: false, reason: "not_article" };
 }
 
 async function blobText(deps: Deps, hash: string | undefined) {
@@ -140,6 +169,7 @@ function markAll(node: PmNode, mark: { type: "author"; attrs: { a: string; t: nu
 async function seed(deps: Deps, lock: DocLock, artifact: LoadedArtifact): Promise<DocRow> {
   const state = await editability(deps, artifact);
   if (!state.editable) throw notEditable(state.reason);
+  if (state.kind === "board") return seedBoard(deps, lock, artifact, state.pageKey);
   const { tx } = lock;
   const [version] = await tx
     .select()
@@ -222,6 +252,7 @@ async function seed(deps: Deps, lock: DocLock, artifact: LoadedArtifact): Promis
       .update(editDocs)
       .set({
         pageKey: state.pageKey,
+        kind: "article",
         baseVersion: version.n,
         version: version.n,
         seq: sql`${editDocs.seq} + 1`,
@@ -241,6 +272,7 @@ async function seed(deps: Deps, lock: DocLock, artifact: LoadedArtifact): Promis
         artifactId: artifact.id,
         orgId,
         pageKey: state.pageKey,
+        kind: "article",
         baseVersion: version.n,
         version: version.n,
         seq: 1,
@@ -304,6 +336,210 @@ async function seed(deps: Deps, lock: DocLock, artifact: LoadedArtifact): Promis
         target: [blockAliases.artifactId, blockAliases.legacyKey],
         set: { blockId: sql`excluded.block_id`, version: sql`excluded.version` },
       });
+  }
+  return { ...row, authorCounter: Math.max(row.authorCounter, 1) };
+}
+
+/**
+ * The board a version holds (14, "Read compatibility and first edit"): its checkpointed native snapshot,
+ * or, for a legacy CLI canvas, each board group as a native container frame and each CLI frame as a
+ * child `rendered_frame` at its exact world position, with the raw `{ page, board, frame }` source tuple.
+ * Ids are minted here once and persisted with the seed. Everything is stamped by `stamp`.
+ */
+export async function versionBoard(
+  tx: Tx,
+  version: { id: string; n: number },
+  pageKey: string,
+  meta: { boards?: { key: string; title: string; x: number; y: number; w: number; h: number }[] },
+  stamp: { a: string; t: string },
+): Promise<BoardSnapshot> {
+  const [native] = await tx
+    .select({ snapshot: boardVersions.snapshot })
+    .from(boardVersions)
+    .where(and(eq(boardVersions.versionId, version.id), eq(boardVersions.pageKey, pageKey)))
+    .limit(1);
+  if (native) return BoardSnapshotSchema.parse(native.snapshot);
+  const rows = await tx
+    .select()
+    .from(frames)
+    .where(and(eq(frames.versionId, version.id), eq(frames.pageKey, pageKey)))
+    .orderBy(asc(frames.boardKey), asc(frames.frameKey));
+  const style = {
+    fill: "transparent" as const,
+    stroke: "#242424",
+    strokeWidth: 2,
+    opacity: 1,
+    fontSize: 20,
+    align: "left" as const,
+  };
+  const size = (n: number) => Math.min(100_000, Math.max(1, n));
+  const objects: BoardObject[] = [];
+  const groups = meta.boards ?? [];
+  const groupOrders = keysBetween(null, null, groups.length);
+  const groupIds = new Map<string, { id: string; x: number; y: number }>();
+  for (const [index, board] of groups.entries()) {
+    const id = mintBoardObjectId();
+    groupIds.set(board.key, { id, x: board.x, y: board.y });
+    const kind: BoardKind = "frame";
+    objects.push(
+      newObject(
+        {
+          id,
+          kind,
+          pose: { x: board.x, y: board.y, w: size(board.w), h: size(board.h), angle: 0 },
+          parent: null,
+          order: groupOrders[index] as string,
+          label: board.title.slice(0, 280),
+          style,
+        },
+        stamp,
+      ),
+    );
+  }
+  const counts = new Map<string | null, number>();
+  for (const frame of rows) {
+    const parent = groupIds.get(frame.boardKey)?.id ?? null;
+    counts.set(parent, (counts.get(parent) ?? 0) + 1);
+  }
+  const orders = new Map([...counts].map(([parent, n]) => [parent, keysBetween(null, null, n)]));
+  const used = new Map<string | null, number>();
+  for (const frame of rows) {
+    const group = groupIds.get(frame.boardKey);
+    const parent = group?.id ?? null;
+    const at = used.get(parent) ?? 0;
+    used.set(parent, at + 1);
+    objects.push(
+      newObject(
+        {
+          id: mintBoardObjectId(),
+          kind: "rendered_frame",
+          pose: {
+            x: frame.x - (group?.x ?? 0),
+            y: frame.y - (group?.y ?? 0),
+            w: size(frame.w),
+            h: size(frame.h),
+            angle: 0,
+          },
+          parent,
+          order: orders.get(parent)?.[at] as string,
+          label: (frame.title ?? "").slice(0, 280),
+          style,
+          data: {
+            source: { page: pageKey, board: frame.boardKey, frame: frame.frameKey },
+            version: version.n,
+            contentHash: frame.contentHash,
+            renders: frame.renders,
+            intrinsic: { w: size(frame.w), h: size(frame.h) },
+            livePath: frame.livePath ?? null,
+            missing: false,
+          },
+        },
+        stamp,
+      ),
+    );
+  }
+  return { ...emptyBoard(pageKey), objects };
+}
+
+async function boardAssetHashes(tx: Tx, artifactId: string): Promise<Set<string>> {
+  const rows = await tx.execute(
+    sql`select hash from board_assets where artifact_id = ${artifactId} and validated_at is not null`,
+  );
+  return new Set((rows as unknown as { hash: string }[]).map((row) => row.hash));
+}
+
+/** Seeds a board draft: the version's board, checked as sync would check it, then the row (14). */
+async function seedBoard(
+  deps: Deps,
+  lock: DocLock,
+  artifact: LoadedArtifact,
+  pageKey: string,
+): Promise<DocRow> {
+  const { tx } = lock;
+  const [version] = await tx
+    .select()
+    .from(versions)
+    .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, artifact.row.latestVersion)))
+    .limit(1);
+  const [page] = version
+    ? await tx
+        .select()
+        .from(pages)
+        .where(and(eq(pages.versionId, version.id), eq(pages.pageKey, pageKey)))
+        .limit(1)
+    : [];
+  if (!version || !page) throw notEditable("not_article");
+  const t = boardStamp("a1", version.publishedAt.getTime()).t;
+  const build = async (a: string) => {
+    const snapshot = await versionBoard(tx, version, pageKey, page.meta, { a, t });
+    const parsed = BoardSnapshotSchema.safeParse(snapshot);
+    const ydoc = boardToY(parsed.success ? parsed.data : snapshot);
+    const check = parsed.success
+      ? validateBoard(ydoc, { assets: await boardAssetHashes(tx, artifact.id) })
+      : { ok: false as const, reason: parsed.error.issues[0]?.message ?? "invalid" };
+    if (!check.ok) {
+      deps.log.warn("couldn't seed a board draft", { artifact: artifact.id, reason: check.reason });
+      throw notEditable("redraw", "Republish this board with the CLI to edit it here.");
+    }
+    const bytes = Y.encodeStateAsUpdate(ydoc);
+    ydoc.destroy();
+    return bytes;
+  };
+  let snapshot = await build("a1");
+  const now = deps.clock.now();
+  let row: DocRow | undefined;
+  if (lock.row) {
+    [row] = await tx
+      .update(editDocs)
+      .set({
+        pageKey,
+        kind: "board",
+        baseVersion: version.n,
+        version: version.n,
+        seq: sql`${editDocs.seq} + 1`,
+        checkpointSeq: sql`${editDocs.seq} + 1`,
+        snapshotSeq: sql`${editDocs.seq} + 1`,
+        snapshot,
+        meta: null,
+        dirtySince: null,
+        updatedAt: now,
+      })
+      .where(eq(editDocs.artifactId, artifact.id))
+      .returning();
+  } else {
+    [row] = await tx
+      .insert(editDocs)
+      .values({
+        artifactId: artifact.id,
+        orgId: artifact.row.orgId,
+        pageKey,
+        kind: "board",
+        baseVersion: version.n,
+        version: version.n,
+        seq: 1,
+        checkpointSeq: 1,
+        snapshotSeq: 1,
+        snapshot,
+        authorCounter: 0,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!row) [row] = await tx.select().from(editDocs).where(eq(editDocs.artifactId, artifact.id));
+  }
+  if (!row) throw new Error("no edit_docs row");
+  const publisher: Actor = {
+    origin: version.agent ? "agent" : "person",
+    personId: version.publishedBy,
+    agent: version.agent,
+    tokenId: null,
+  };
+  // A legacy seed's stamps are the publisher's key; a native snapshot keeps the keys it already has.
+  const key = await authorKeyIn(tx, row, publisher, []);
+  if (key !== "a1") {
+    snapshot = await build(key);
+    await tx.update(editDocs).set({ snapshot }).where(eq(editDocs.artifactId, artifact.id));
+    row = { ...row, snapshot };
   }
   return { ...row, authorCounter: Math.max(row.authorCounter, 1) };
 }
@@ -440,6 +676,12 @@ export async function persistUpdate(
       size: update.length,
     });
     await maybeCompact(tx, artifactId, row);
+    // Compaction may replace the snapshot and remove updates. Keep the lock at the same
+    // database state before a subsequent batch or checkpoint uses it.
+    if (lock) {
+      const [current] = await tx.select().from(editDocs).where(eq(editDocs.artifactId, artifactId));
+      lock.row = current ?? null;
+    }
     after(() => announce(deps, artifactId, row.seq));
     return row.seq;
   };
@@ -537,6 +779,10 @@ export async function retireDoc(deps: Deps, lock: DocLock, version: number) {
     .update(suggestions)
     .set({ status: "stale", decidedAt: now })
     .where(and(eq(suggestions.artifactId, row.artifactId), eq(suggestions.status, "open")));
+  await tx
+    .update(boardSuggestions)
+    .set({ status: "stale", decidedAt: now })
+    .where(and(eq(boardSuggestions.artifactId, row.artifactId), eq(boardSuggestions.status, "open")));
   await tx
     .update(editRuns)
     .set({ status: "cancelled", finishedAt: now })

@@ -333,19 +333,7 @@ export const SyncControl = z.discriminatedUnion("t", [
   }),
 ]);
 export type SyncControl = z.infer<typeof SyncControl>;
-/** The message types on the sync socket: y-protocols' sync and awareness, and ours. */
-export const SYNC_MESSAGE = { sync: 0, awareness: 1, auth: 2, queryAwareness: 3, control: 100 } as const;
-/** Close codes. Not found and not editable look the same, so a socket reveals nothing. */
-export const SYNC_CLOSE = {
-  invalidUpdate: 4400,
-  unauthenticated: 4401,
-  lostAccess: 4403,
-  notFound: 4404,
-  reset: 4409,
-  tooLarge: 4413,
-  rateLimited: 4429,
-  restarting: 4000,
-} as const;
+export { SYNC_CLOSE, SYNC_MESSAGE } from "./constants.ts";
 
 /** What a client puts in its awareness state. The server replaces `user` with its own record of who it is. */
 export const AwarenessState = z.object({
