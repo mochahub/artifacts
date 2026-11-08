@@ -101,7 +101,11 @@ const INSTRUCTIONS = [
 class ToolError extends Error {}
 class InsufficientScope extends Error {
   constructor(readonly scope: string) {
-    super(`This needs the ${scope} scope.`);
+    super(
+      scope === "edit"
+        ? "Reconnect the Artifacts connector to allow editing wiki pages, or run artifacts login again for the CLI (missing edit scope)."
+        : `This needs the ${scope} scope.`,
+    );
   }
 }
 

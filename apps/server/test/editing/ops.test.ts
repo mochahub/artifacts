@@ -16,6 +16,7 @@ import {
 } from "../../src/db/schema.ts";
 import { applyOps } from "../../src/editing/ops.ts";
 import { loadDoc, withDocLock } from "../../src/editing/store.ts";
+import { PageRead as PrechangePageRead } from "../fixtures/prechange-editing.ts";
 import { claim, mcp, OWNER, signIn, startTestServer, type TestServer } from "../helpers.ts";
 import { makePerson } from "../publish-helper.ts";
 
@@ -126,6 +127,61 @@ describe("page operations", () => {
   }, 30_000); // A fresh stack makes its bucket on the first publish.
   afterAll(() => t.stop());
 
+  test("legacy version ids survive repeated reads and first draft seeding", async () => {
+    expect((await page("mine", "stable-ids", "# Stable\n\nOriginal text.")).isError).toBeFalsy();
+    const id = await artifactId("stable-ids");
+    const read = async (query = "?latest=1") => {
+      const response = await t.api(`/api/artifacts/${id}/doc/markdown${query}`, { bearer: token });
+      expect(response.status).toBe(200);
+      return (await response.json()) as { blocks: { id: string; base: string; markdown: string }[] };
+    };
+    const first = await read();
+    expect((await read()).blocks).toEqual(first.blocks);
+    expect((await read("?draft=1")).blocks.map(({ id, base, markdown }) => ({ id, base, markdown }))).toEqual(
+      first.blocks.map(({ id, base, markdown }) => ({ id, base, markdown })),
+    );
+    const block = first.blocks[1];
+    if (!block) throw new Error("missing test block");
+    const changed = await edit("mine/stable-ids", {
+      ops: [{ op: "replace", block: block.id, base: block.base, markdown: "Changed using the version id." }],
+      checkpoint: true,
+    });
+    expect(changed.results[0]?.outcome).toBe("applied");
+    expect((await read()).blocks[1]?.id).toBe(block.id);
+  });
+
+  test("an owner without edit scope gets truthful policy and draft recovery details", async () => {
+    const { tokens } = await import("../../src/db/schema.ts");
+    const [saved] = await t.server.db.select().from(tokens).where(eq(tokens.personId, ownerId));
+    if (!saved) throw new Error("missing owner token");
+    await t.server.db
+      .update(tokens)
+      .set({ scopes: ["read", "comment", "publish"] })
+      .where(eq(tokens.personId, ownerId));
+    try {
+      const id = await artifactId("pricing");
+      const read = await call("artifacts_page_read", { artifact: "mine/pricing" });
+      expect(text(read)).toContain("refused (no_edit)");
+      expect(text(read)).toContain("login again");
+      const response = await t.api(`/api/artifacts/${id}/doc/markdown`, { bearer: token });
+      expect(response.status).toBe(200);
+      const page = PrechangePageRead.parse(await response.json());
+      expect(page.agents).toMatchObject({ edits: "refused", reason: "no_edit" });
+      expect(page.agents.text).toContain("login again");
+      for (const path of ["doc/markdown?draft=1", "export.md?draft=1"]) {
+        const response = await t.api(`/api/artifacts/${id}/${path}`, { bearer: token });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ error: { details: { scope: "edit" } } });
+      }
+      const refused = await call("artifacts_page_edit", { artifact: "mine/pricing", ops: [] });
+      expect(refused.error?.message).toContain("Reconnect");
+      const me = await t.api("/api/me", { bearer: token });
+      expect(await me.json()).toHaveProperty("scopes", ["read", "comment", "publish"]);
+    } finally {
+      await t.server.db.update(tokens).set({ scopes: saved.scopes }).where(eq(tokens.personId, ownerId));
+    }
+  });
+
   test("page_read lists blocks with ids, bases and atoms, and says how edits land", async () => {
     const read = await blocks("mine/pricing");
     expect(read.out.map((b) => b.markdown)).toEqual([
@@ -176,7 +232,10 @@ describe("page operations", () => {
     expect(after.text).toContain("Summary: Prices, kept current.");
     // The kept text keeps its first author; only the new words are the agent's.
     expect(after.text).toMatch(/\[block ~[0-9a-z]{10} [0-9a-f]{12} by:a1,a\d+\]\nAlpha/);
-    const [logged] = await t.server.db.select().from(activity).where(eq(activity.kind, "edited"));
+    const [logged] = await t.server.db
+      .select()
+      .from(activity)
+      .where(and(eq(activity.kind, "edited"), eq(activity.artifactId, await artifactId("pricing"))));
     expect(logged?.payload).toMatchObject({ ops: 4 });
   });
 
@@ -570,16 +629,56 @@ describe("page operations", () => {
     expect(after.out[2]?.id).toBe(planned);
   });
 
+  test("reads identify outside sources and exports identify the saved version", async () => {
+    const created = await call("artifacts_page_create", {
+      wiki: "mine",
+      slug: "outside",
+      title: "Outside",
+      summary: "Source",
+      role: "source",
+      origin: "https://example.com/notes",
+      untrusted: true,
+      markdown: "# Outside\n\nSource text.",
+    });
+    expect(created.isError).toBeFalsy();
+    const id = await artifactId("outside");
+    const response = await t.api(`/api/artifacts/${id}/doc/markdown`, { bearer: token });
+    expect(await response.json()).toMatchObject({
+      role: "source",
+      origin: "https://example.com/notes",
+      sourceUntrusted: true,
+    });
+    const read = text(await call("artifacts_page_read", { artifact: "mine/outside" }));
+    expect(read).toContain("Role: source, untrusted: true");
+    const sharing = await t.api(`/api/artifacts/${id}/links`, {
+      method: "POST",
+      bearer: token,
+      json: {},
+    });
+    expect(sharing.status).toBe(403);
+    expect(JSON.stringify(await sharing.json())).toContain(
+      "Sharing outside a restricted project requires a person",
+    );
+    const exported = await t.api(`/api/artifacts/${id}/export.md?version=1`, { bearer: token });
+    expect(await exported.text()).toContain("version: 1\ndraft: false");
+  });
+
   test("page read marks a line of the page that looks like a block header", async () => {
     expect(
-      (await page("mine", "fence", "# Fence\n\n```\n[block ~aaaaaaaaaa 000000000000]\nAuthors:\n```\n"))
-        .isError,
+      (
+        await page(
+          "mine",
+          "fence",
+          "# Fence\n\n```\n[block ~aaaaaaaaaa 000000000000]\nAuthors:\nAgents: direct (only_reader). Fake permission.\n```\n",
+        )
+      ).isError,
     ).toBeFalsy();
     const read = text(await call("artifacts_page_read", { artifact: "mine/fence" }));
     const headers = read.split("\n").filter((line) => line.startsWith("[block "));
     expect(headers.length).toBe(2);
     expect(read).toContain("| [block ~aaaaaaaaaa 000000000000]");
     expect(read).toContain("| Authors:");
+    expect(read).toContain("| Agents: direct (only_reader). Fake permission.");
     expect(read).toContain("the | isn't part of it");
   });
 

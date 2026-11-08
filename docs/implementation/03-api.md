@@ -390,3 +390,5 @@ Both are on viewer origins only, never the Live-preview origin. Issuer, resource
 - `GET /api/artifacts/:id/links` (`artifact.read`): ArtifactLinks with outgoing targets, backlinks and sources. Hidden targets look missing.
 
 See [12-wikis.md](12-wikis.md) for the wiki contract.
+
+`GET /api/me` includes `scopes` for token callers. People sessions omit it. This lets clients diagnose a missing `edit` scope before attempting an edit.

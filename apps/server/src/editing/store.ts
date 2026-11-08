@@ -27,7 +27,8 @@ import {
 import type { Deps } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../layout.ts";
-import { docToY, markdownToDoc, mintBlockId, contentHash as nodeHash, topBlocks } from "./model.ts";
+import { legacyBlockIds } from "./legacy-ids.ts";
+import { docToY, markdownToDoc, contentHash as nodeHash, topBlocks } from "./model.ts";
 
 export type DocRow = typeof editDocs.$inferSelect;
 type Reason = (typeof NOT_EDITABLE_REASONS)[number];
@@ -164,7 +165,7 @@ async function seed(deps: Deps, lock: DocLock, artifact: LoadedArtifact): Promis
   const lasting = page.meta.blockIds;
   const { doc, ids } = markdownToDoc(markdown, {
     ids: lasting,
-    mint: mintBlockId,
+    mint: legacyBlockIds(version.id, page.pageKey),
     atom(kind: AtomKind, source: string) {
       const hash = sha256(source);
       atoms.set(hash, { kind, source });

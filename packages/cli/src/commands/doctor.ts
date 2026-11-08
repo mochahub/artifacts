@@ -35,7 +35,9 @@ export async function doctor({ flags }: Input<never, { server?: string }>, out: 
       checks.push({ name: "sign-in", ok: false, detail: `Not signed in. Run artifacts login ${url}` });
     } else {
       try {
-        await new Client(url, token).get("/api/me");
+        const me = (await new Client(url, token).get("/api/me")) as { scopes?: string[] };
+        if (me.scopes && !me.scopes.includes("edit"))
+          checks.push({ name: "edit scope", ok: false, detail: "Run artifacts login again to edit pages." });
         checks.push({ name: "sign-in", ok: true, detail: "The token is valid." });
       } catch (error) {
         checks.push({ name: "sign-in", ok: false, detail: `${(error as Error).message}` });

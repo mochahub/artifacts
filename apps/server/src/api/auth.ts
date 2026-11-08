@@ -102,6 +102,7 @@ export function authRoutes(routes: Routes, deps: Deps, passkeys: Passkeys) {
       person: caller.person,
       org: { name: c.var.org.name },
       recentAuth: caller.kind === "person" && caller.recentAuth,
+      ...(caller.kind === "cliToken" ? { scopes: caller.scopes } : {}),
     } satisfies Me);
   });
 
