@@ -349,7 +349,12 @@ test("queued extraction fails closed without config and fences kill during extra
   expect(factories).toBe(0);
 });
 
-test("unseeded edits and checkpoints: verified storage, cancellation, stale generation, replay and direct finish", async () => {
+const stagingCases = (["edit", "finish"] as const).flatMap((branch) =>
+  (["success", "storage", "corrupt", "generation", "fence", "lease", "kill", "human", "slow"] as const).map(
+    (mode) => ({ branch, mode }),
+  ),
+);
+test.each([...stagingCases, null])("unseeded edits and checkpoints: %j", async (scenario) => {
   const { putBlob } = await import("../src/publish/blobs.ts");
   const { MANIFEST } = await import("@artifacts/schema");
   const { librarianReceipts } = await import("../src/db/schema.ts");
@@ -416,195 +421,185 @@ test("unseeded edits and checkpoints: verified storage, cancellation, stale gene
     },
     agentPresence: () => {},
   };
-  for (const branch of ["edit", "finish"] as const) {
-    for (const mode of [
-      "success",
-      "storage",
-      "corrupt",
-      "generation",
-      "fence",
-      "lease",
-      "kill",
-      "human",
-      "slow",
-    ] as const) {
-      await claim();
-      const id = await fixture();
-      const receipt = key();
-      const read = (await invoke("page_read", { page: id })) as {
-        blocks: { id: string; base: string; markdown: string }[];
-      };
-      expect(read.blocks[0]?.markdown).toContain("Seed text.");
-      expect(read.blocks[0]?.id).toMatch(/^~/);
-      const request = {
+  if (scenario) {
+    const { branch, mode } = scenario;
+    await claim();
+    const id = await fixture();
+    const receipt = key();
+    const read = (await invoke("page_read", { page: id })) as {
+      blocks: { id: string; base: string; markdown: string }[];
+    };
+    expect(read.blocks[0]?.markdown).toContain("Seed text.");
+    expect(read.blocks[0]?.id).toMatch(/^~/);
+    const request = {
+      page: id,
+      edit: {
+        ops: [
+          {
+            op: "replace",
+            block: read.blocks[0]!.id,
+            base: read.blocks[0]!.base,
+            markdown: `Prepared ${mode}.`,
+          },
+        ],
+        checkpoint: true,
+      },
+    };
+    let finishRunId: string | undefined;
+    if (branch === "finish") {
+      const run = (await invoke("page_delegate_start", {
         page: id,
-        edit: {
-          ops: [
-            {
-              op: "replace",
-              block: read.blocks[0]!.id,
-              base: read.blocks[0]!.base,
-              markdown: `Prepared ${mode}.`,
-            },
-          ],
-          checkpoint: true,
-        },
-      };
-      let finishRunId: string | undefined;
-      if (branch === "finish") {
+        start: { goal: "Prepare finish" },
+      })) as { id: string };
+      finishRunId = run.id;
+      await invoke("page_edit", {
+        page: id,
+        edit: { ops: [{ op: "insert", after: null, markdown: `Finish ${mode}.` }], run: run.id },
+      });
+    }
+    const toolName = branch === "edit" ? ("page_edit" as const) : ("page_delegate_finish" as const);
+    const toolInput = branch === "edit" ? request : { page: id, run: finishRunId, finish: {} };
+    let beforeDraft = await deps.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
+    const beforeNotices = notices.length;
+    const humanEditDone = Promise.withResolvers<void>();
+    let releaseStorage: (() => void) | undefined;
+    let touched = false;
+    deps.bucket = {
+      ...originalBucket,
+      put: async (...args) => {
+        if (mode === "storage") throw Error("storage unavailable");
+        const stored = await originalBucket.put(...args);
+        if (mode === "corrupt") objects.set(args[0], Buffer.from("corrupted"));
+        if (!touched) {
+          touched = true;
+          if (mode === "generation")
+            await deps.db
+              .update(librarianConfig)
+              .set({ generation: 2 })
+              .where(eq(librarianConfig.orgId, orgId));
+          if (mode === "fence") {
+            const { librarianRuns } = await import("../src/db/schema.ts");
+            await deps.db
+              .update(librarianRuns)
+              .set({ fence: fence.fence + 1 })
+              .where(eq(librarianRuns.id, fence.runId));
+          }
+          if (mode === "lease") clock.advance(100000);
+          if (mode === "kill" || mode === "slow") await cancelRun(deps, orgId, fence.runId);
+          if (mode === "human" || mode === "slow") {
+            const { withDocLock } = await import("../src/editing/store.ts");
+            await withDocLock(deps, id, async (lock) => {
+              await lock.tx
+                .update(artifacts)
+                .set({ title: "Human edit during staging" })
+                .where(eq(artifacts.id, id));
+              if (lock.row) {
+                await lock.tx
+                  .update(editDocs)
+                  .set({ epoch: lock.row.epoch + 1, meta: { title: "Human draft metadata" } })
+                  .where(eq(editDocs.artifactId, id));
+              }
+            });
+            beforeDraft = await deps.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
+            humanEditDone.resolve();
+          }
+          if (mode === "slow")
+            await new Promise<void>((resolve) => {
+              releaseStorage = resolve;
+            });
+        }
+        return stored;
+      },
+    } as Deps["bucket"];
+    try {
+      if (mode === "success") {
+        const result = await invoke(toolName, toolInput, receipt);
+        expect(result).toMatchObject({ version: 2 });
+        expect(await invoke(toolName, toolInput, receipt)).toEqual(result);
         const run = (await invoke("page_delegate_start", {
           page: id,
-          start: { goal: "Prepare finish" },
-        })) as { id: string };
-        finishRunId = run.id;
+          start: { goal: "Finish checkpoint" },
+        })) as { id: string; edits: string };
+        expect(run.edits).toBe("direct");
         await invoke("page_edit", {
           page: id,
-          edit: { ops: [{ op: "insert", after: null, markdown: `Finish ${mode}.` }], run: run.id },
+          edit: { ops: [{ op: "insert", after: null, markdown: "Delegate text." }], run: run.id },
         });
-      }
-      const toolName = branch === "edit" ? ("page_edit" as const) : ("page_delegate_finish" as const);
-      const toolInput = branch === "edit" ? request : { page: id, run: finishRunId, finish: {} };
-      let beforeDraft = await deps.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
-      const beforeNotices = notices.length;
-      const humanEditDone = Promise.withResolvers<void>();
-      let releaseStorage: (() => void) | undefined;
-      let touched = false;
-      deps.bucket = {
-        ...originalBucket,
-        put: async (...args) => {
-          if (mode === "storage") throw Error("storage unavailable");
-          const stored = await originalBucket.put(...args);
-          if (mode === "corrupt") objects.set(args[0], Buffer.from("corrupted"));
-          if (!touched) {
-            touched = true;
-            if (mode === "generation")
-              await deps.db
-                .update(librarianConfig)
-                .set({ generation: 2 })
-                .where(eq(librarianConfig.orgId, orgId));
-            if (mode === "fence") {
-              const { librarianRuns } = await import("../src/db/schema.ts");
-              await deps.db
-                .update(librarianRuns)
-                .set({ fence: fence.fence + 1 })
-                .where(eq(librarianRuns.id, fence.runId));
-            }
-            if (mode === "lease") clock.advance(100000);
-            if (mode === "kill" || mode === "slow") await cancelRun(deps, orgId, fence.runId);
-            if (mode === "human" || mode === "slow") {
-              const { withDocLock } = await import("../src/editing/store.ts");
-              await withDocLock(deps, id, async (lock) => {
-                await lock.tx
-                  .update(artifacts)
-                  .set({ title: "Human edit during staging" })
-                  .where(eq(artifacts.id, id));
-                if (lock.row) {
-                  await lock.tx
-                    .update(editDocs)
-                    .set({ epoch: lock.row.epoch + 1, meta: { title: "Human draft metadata" } })
-                    .where(eq(editDocs.artifactId, id));
-                }
-              });
-              beforeDraft = await deps.db.select().from(editDocs).where(eq(editDocs.artifactId, id));
-              humanEditDone.resolve();
-            }
-            if (mode === "slow")
-              await new Promise<void>((resolve) => {
-                releaseStorage = resolve;
-              });
-          }
-          return stored;
-        },
-      } as Deps["bucket"];
-      try {
-        if (mode === "success") {
-          const result = await invoke(toolName, toolInput, receipt);
-          expect(result).toMatchObject({ version: 2 });
-          expect(await invoke(toolName, toolInput, receipt)).toEqual(result);
-          const run = (await invoke("page_delegate_start", {
-            page: id,
-            start: { goal: "Finish checkpoint" },
-          })) as { id: string; edits: string };
-          expect(run.edits).toBe("direct");
-          await invoke("page_edit", {
-            page: id,
-            edit: { ops: [{ op: "insert", after: null, markdown: "Delegate text." }], run: run.id },
-          });
-          const finishKey = key();
-          const finishInput = { page: id, run: run.id, finish: { message: "Done" } };
-          const finished = await invoke("page_delegate_finish", finishInput, finishKey);
-          expect(finished).toMatchObject({ status: "finished", version: 3 });
-          expect(
-            notices.slice(beforeNotices).some((n) => (n.payload as { t?: string }).t === "checkpoint"),
-          ).toBe(true);
-          expect(notices.slice(beforeNotices).some((n) => (n.payload as { t?: string }).t === "run")).toBe(
-            true,
-          );
-          const suggestionResult = (await invoke("page_edit", {
-            page: id,
-            edit: { suggest: true, ops: [{ op: "insert", after: null, markdown: "Please consider this." }] },
-          })) as { results: { outcome: string }[] };
-          expect(suggestionResult.results[0]?.outcome).toBe("suggested");
-          expect(
-            notices.slice(beforeNotices).some((n) => (n.payload as { t?: string }).t === "suggestion"),
-          ).toBe(true);
-          const latestRead = (await invoke("page_read", { page: id })) as {
-            blocks: { id: string; base: string }[];
-          };
-          const deleted = (await invoke("page_edit", {
-            page: id,
-            edit: {
-              ops: [{ op: "delete", block: latestRead.blocks[0]!.id, base: latestRead.blocks[0]!.base }],
+        const finishKey = key();
+        const finishInput = { page: id, run: run.id, finish: { message: "Done" } };
+        const finished = await invoke("page_delegate_finish", finishInput, finishKey);
+        expect(finished).toMatchObject({ status: "finished", version: 3 });
+        expect(
+          notices.slice(beforeNotices).some((n) => (n.payload as { t?: string }).t === "checkpoint"),
+        ).toBe(true);
+        expect(notices.slice(beforeNotices).some((n) => (n.payload as { t?: string }).t === "run")).toBe(
+          true,
+        );
+        const suggestionResult = (await invoke("page_edit", {
+          page: id,
+          edit: { suggest: true, ops: [{ op: "insert", after: null, markdown: "Please consider this." }] },
+        })) as { results: { outcome: string }[] };
+        expect(suggestionResult.results[0]?.outcome).toBe("suggested");
+        expect(
+          notices.slice(beforeNotices).some((n) => (n.payload as { t?: string }).t === "suggestion"),
+        ).toBe(true);
+        const latestRead = (await invoke("page_read", { page: id })) as {
+          blocks: { id: string; base: string }[];
+        };
+        const deleted = (await invoke("page_edit", {
+          page: id,
+          edit: {
+            ops: [{ op: "delete", block: latestRead.blocks[0]!.id, base: latestRead.blocks[0]!.base }],
+          },
+        })) as { results: { outcome: string }[] };
+        expect(deleted.results[0]?.outcome).toBe("applied");
+        expect(await invoke("page_delegate_finish", finishInput, finishKey)).toEqual(finished);
+      } else {
+        await expect(invoke(toolName, toolInput, receipt)).rejects.toThrow();
+        expect(notices).toHaveLength(beforeNotices);
+        if (mode === "human" || mode === "slow") {
+          await humanEditDone.promise;
+          expect(touched).toBe(true);
+          const [human] = await deps.db.select().from(artifacts).where(eq(artifacts.id, id));
+          expect(human?.title).toBe("Human edit during staging");
+          const { findArtifact } = await import("../src/auth/access.ts");
+          const { pageRead } = await import("../src/editing/ops.ts");
+          const resource = await findArtifact(deps, orgId, id);
+          if (!resource) throw Error("Human page missing");
+          const canonical = await pageRead(
+            deps,
+            {
+              kind: "orgToken",
+              tokenId,
+              createdBy: personId,
+              scopes: ["read", "comment", "edit", "publish"],
+              projectIds: [wikiId],
             },
-          })) as { results: { outcome: string }[] };
-          expect(deleted.results[0]?.outcome).toBe("applied");
-          expect(await invoke("page_delegate_finish", finishInput, finishKey)).toEqual(finished);
-        } else {
-          await expect(invoke(toolName, toolInput, receipt)).rejects.toThrow();
-          expect(notices).toHaveLength(beforeNotices);
-          if (mode === "human" || mode === "slow") {
-            await humanEditDone.promise;
-            expect(touched).toBe(true);
-            const [human] = await deps.db.select().from(artifacts).where(eq(artifacts.id, id));
-            expect(human?.title).toBe("Human edit during staging");
-            const { findArtifact } = await import("../src/auth/access.ts");
-            const { pageRead } = await import("../src/editing/ops.ts");
-            const resource = await findArtifact(deps, orgId, id);
-            if (!resource) throw Error("Human page missing");
-            const canonical = await pageRead(
-              deps,
-              {
-                kind: "orgToken",
-                tokenId,
-                createdBy: personId,
-                scopes: ["read", "comment", "edit", "publish"],
-                projectIds: [wikiId],
-              },
-              resource,
-              { draft: false },
-            );
-            expect(canonical.title).toBe("Human edit during staging");
-            expect(canonical.blocks.map((block) => block.markdown).join("\n")).toContain("Seed text.");
-            expect(canonical.blocks.map((block) => block.markdown).join("\n")).not.toContain(
-              `Prepared ${mode}.`,
-            );
-          }
-          expect(await deps.db.select().from(editDocs).where(eq(editDocs.artifactId, id))).toEqual(
-            beforeDraft,
+            resource,
+            { draft: false },
           );
-          expect(await deps.db.select().from(versions).where(eq(versions.artifactId, id))).toHaveLength(1);
-          expect(
-            await deps.db.select().from(librarianReceipts).where(eq(librarianReceipts.toolKey, receipt.id)),
-          ).toHaveLength(0);
+          expect(canonical.title).toBe("Human edit during staging");
+          expect(canonical.blocks.map((block) => block.markdown).join("\n")).toContain("Seed text.");
+          expect(canonical.blocks.map((block) => block.markdown).join("\n")).not.toContain(
+            `Prepared ${mode}.`,
+          );
         }
-      } finally {
-        releaseStorage?.();
-        deps.bucket = originalBucket;
-        if (mode === "lease" && touched) clock.advance(-100000);
-        await deps.db.update(librarianConfig).set({ generation: 1 }).where(eq(librarianConfig.orgId, orgId));
-        await cancelRun(deps, orgId, fence.runId);
+        expect(await deps.db.select().from(editDocs).where(eq(editDocs.artifactId, id))).toEqual(beforeDraft);
+        expect(await deps.db.select().from(versions).where(eq(versions.artifactId, id))).toHaveLength(1);
+        expect(
+          await deps.db.select().from(librarianReceipts).where(eq(librarianReceipts.toolKey, receipt.id)),
+        ).toHaveLength(0);
       }
+    } catch (error) {
+      throw new Error(`Content staging regression: ${branch}/${mode}`, { cause: error });
+    } finally {
+      releaseStorage?.();
+      deps.bucket = originalBucket;
+      if (mode === "lease" && touched) clock.advance(-100000);
+      await deps.db.update(librarianConfig).set({ generation: 1 }).where(eq(librarianConfig.orgId, orgId));
+      await cancelRun(deps, orgId, fence.runId);
     }
+    return;
   }
   await claim();
   try {

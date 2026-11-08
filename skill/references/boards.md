@@ -15,6 +15,8 @@ Call `artifacts_board_read` with `draft: true`, or run `artifacts board read <wi
 
 A child's `x` and `y` are relative to its parent frame. Add the parents' `x` and `y` to get board coordinates.
 
+Checkpoint reads return epoch `0`, a read-only sentinel that edit, suggest and save must reject. Use `--draft` before editing: an authorized first draft starts at epoch `1`; reuse that returned positive epoch. A missing `edit` scope requires a person to approve a new login or connector grant; page rights alone do not repair the token.
+
 The answer also has the draft's `epoch`, the policy in `agents` (how your edits will land now), `frames` (published mocks and whether each is placed, suggested, unplaced or deleted) and the open `suggestions`. Follow `nextCursor` to the end before you plan. A `stale_read` conflict means the draft moved on while you were paging: start the read again.
 
 Don't repeat a suggestion that's already open. Read it, and leave it for a person to decide.

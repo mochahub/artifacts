@@ -278,6 +278,7 @@ export const BoardOp = z.discriminatedUnion("op", [
 ]);
 export type BoardOp = z.infer<typeof BoardOp>;
 export const BoardEditRequest = z.strictObject({
+  /** Positive draft epoch from a draft read; checkpoint sentinel 0 is never a mutation fence. */
   epoch: z.number().int().positive(),
   /** Idempotency key, scoped to artifact + caller + epoch; same key with different body is a conflict. */
   requestId: Id,
@@ -386,6 +387,7 @@ export const BoardRead = z.strictObject({
   sources: z.array(z.string()),
   version: z.number().int().positive(),
   draft: z.boolean(),
+  /** Checkpoints report 0; authorized draft reads seed and return a positive editing epoch. */
   epoch: z.number().int().nonnegative(),
   seq: z.number().int().nonnegative(),
   hash: Hash,

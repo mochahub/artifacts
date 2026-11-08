@@ -155,3 +155,55 @@ test("file and URL capture use queue endpoints without enabling", async ({ page 
   await expect.poll(() => submissions.length).toBe(2);
   expect(submissions[1]).toMatchObject({ kind: "url", url: "https://example.test/private-mock" });
 });
+
+test("run log and proposal review fit phone and desktop", async ({ page }, info) => {
+  const proposalId = "22222222-2222-4222-8222-222222222222";
+  await page.route("**/api/projects", (r) =>
+    r.fulfill({ json: [{ id: wikiId, slug: "private-wiki", name: "Private wiki", kind: "wiki" }] }),
+  );
+  await page.route(`**/api/librarian/runs/${wikiId}`, (r) =>
+    r.fulfill({
+      json: {
+        id: wikiId,
+        wikiId,
+        state: "waiting_human",
+        model: "mock-private",
+        startedAt: "2026-11-08T12:00:00Z",
+        usage: { settledMicrousd: 800, uncertainMicrousd: 0, reservedMicrousd: 0 },
+        result: { editRunIds: [], proposalIds: [proposalId], questionIds: [] },
+      },
+    }),
+  );
+  await page.route(`**/api/librarian/runs/${wikiId}/events`, (r) =>
+    r.fulfill({
+      json: {
+        events: [{ id: proposalId, code: "waiting_human", createdAt: "2026-11-08T12:00:00Z" }],
+        nextCursor: null,
+      },
+    }),
+  );
+  await page.route(`**/api/wikis/private-wiki/proposals/${proposalId}`, (r) =>
+    r.fulfill({
+      json: {
+        id: proposalId,
+        runId: wikiId,
+        wikiId,
+        title: "Source summary",
+        summary: "Review the source before creating a page.",
+        markdown: "# Source summary\n\nA proposed page from a private mock source.",
+        sources: [],
+        untrusted: true,
+        status: "open",
+      },
+    }),
+  );
+  await page.goto(`/settings/librarian/runs/${wikiId}`);
+  await expect(page.getByRole("link", { name: "Review proposed page" })).toBeVisible();
+  expect(await overflowsSideways(page)).toBe(false);
+  await page.screenshot({ path: info.outputPath("librarian-log.png"), fullPage: true });
+  await page.getByRole("link", { name: "Review proposed page" }).click();
+  await expect(page.getByRole("button", { name: "Create page", exact: true })).toBeVisible();
+  await expect(page.getByText("Librarian proposal. Based on untrusted sources.")).toBeVisible();
+  expect(await overflowsSideways(page)).toBe(false);
+  await page.screenshot({ path: info.outputPath("librarian-proposal.png"), fullPage: true });
+});
