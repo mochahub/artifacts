@@ -140,6 +140,9 @@ export type Author = z.infer<typeof Author>;
 
 /** `artifacts_page_read`, and `GET /api/artifacts/:id/doc/markdown`. */
 export const PageRead = z.object({
+  role: z.enum(["page", "source"]).nullable().default(null),
+  origin: z.string().nullable().default(null),
+  sourceUntrusted: z.boolean().default(false),
   artifact: z.string(),
   title: z.string(),
   summary: z.string().nullable(),

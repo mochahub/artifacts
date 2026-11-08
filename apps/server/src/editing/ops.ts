@@ -27,6 +27,7 @@ import { ApiError } from "../http/errors.ts";
 import { blobKey } from "../layout.ts";
 import { validateWikiSources } from "../wiki/service.ts";
 import { checkpoint, queueFixes } from "./checkpoint.ts";
+import { legacyBlockIds } from "./legacy-ids.ts";
 import {
   blockMarkdown,
   contentHash,
@@ -37,7 +38,7 @@ import {
   validate,
   yToDoc,
 } from "./model.ts";
-import { agentPolicy, type Policy, presenceAgain } from "./policy.ts";
+import { agentPolicy, missingEditScope, type Policy, presenceAgain } from "./policy.ts";
 import {
   type Actor,
   authorKey,
@@ -958,7 +959,13 @@ export async function pageRead(
 ): Promise<PageRead> {
   const canEdit = can(caller, "artifact.edit", artifact);
   if (input.draft && !canEdit)
-    throw new ApiError("forbidden", "Reading the draft needs the edit right and scope.");
+    throw new ApiError(
+      "forbidden",
+      missingEditScope(caller, artifact)
+        ? "Run artifacts login again or reconnect the Artifacts connector to edit pages."
+        : "Reading the draft needs the edit right.",
+      missingEditScope(caller, artifact) ? { scope: "edit" } : {},
+    );
   const state = await editability(deps, artifact);
   const draft = (input.draft ?? canEdit) && state.editable;
   const policy = await agentPolicy(deps, caller, artifact);
@@ -1014,6 +1021,9 @@ export async function pageRead(
     .limit(1);
   return {
     artifact: `${artifact.project.slug}/${artifact.row.slug}`,
+    role: latest?.wiki?.role ?? null,
+    origin: latest?.wiki?.origin ?? null,
+    sourceUntrusted: latest?.wiki?.untrusted ?? false,
     title: meta?.title ?? artifact.row.title,
     summary: meta?.summary ?? latest?.summary ?? null,
     tags: meta?.tags ?? latest?.tags ?? [],
@@ -1052,7 +1062,11 @@ async function versionBlocks(deps: Deps, artifact: LoadedArtifact) {
     return hash;
   };
   if (!found) return { nodes: [] as Json[], atoms: (hash: string) => sources.get(hash) ?? "" };
-  const { doc } = markdownToDoc(found.markdown, { ids: found.blockIds, mint: mintBlockId, atom });
+  const { doc } = markdownToDoc(found.markdown, {
+    ids: found.blockIds,
+    mint: legacyBlockIds(found.versionId, found.key),
+    atom,
+  });
   return { nodes: ((doc as Json).content ?? []) as Json[], atoms: (hash: string) => sources.get(hash) ?? "" };
 }
 
@@ -1065,19 +1079,27 @@ async function blobText(deps: Deps, hash: string | undefined) {
 /** The latest version's article Markdown (the manifest page's `src`), and the ids a checkpoint gave it. */
 async function versionMarkdown(deps: Deps, artifact: LoadedArtifact) {
   const [found] = await deps.db
-    .select({ files: versions.files, key: pages.pageKey, kind: pages.kind, meta: pages.meta })
+    .select({
+      versionId: versions.id,
+      files: versions.files,
+      key: pages.pageKey,
+      kind: pages.kind,
+      meta: pages.meta,
+    })
     .from(versions)
     .innerJoin(pages, eq(pages.versionId, versions.id))
     .where(and(eq(versions.artifactId, artifact.id), eq(versions.n, artifact.row.latestVersion)))
     .orderBy(asc(pages.position))
     .limit(1);
-  if (!found || found.kind !== "article") return null;
+  if (found?.kind !== "article") return null;
   const manifest = JSON.parse((await blobText(deps, found.files[MANIFEST]?.hash)) ?? "{}") as {
     pages?: { id: string; src?: string }[];
   };
   const src = manifest.pages?.find((entry) => entry.id === found.key)?.src;
   const markdown = src ? await blobText(deps, found.files[src]?.hash) : null;
-  return markdown === null ? null : { markdown, blockIds: found.meta.blockIds };
+  return markdown === null
+    ? null
+    : { markdown, blockIds: found.meta.blockIds, versionId: found.versionId, key: found.key };
 }
 
 /** Open threads by the block they anchor to. */

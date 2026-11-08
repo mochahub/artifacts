@@ -84,12 +84,25 @@ function denial(caller: Caller, action: Action, resource: Resource, page = false
   if (
     action === "artifact.edit" &&
     (caller.kind === "cliToken" || caller.kind === "orgToken") &&
-    !caller.scopes.includes("edit")
+    !caller.scopes.includes("edit") &&
+    can({ ...caller, scopes: [...caller.scopes, "edit"] }, action, resource)
   ) {
     return new ApiError("forbidden", "This token can't edit pages. Sign in again to get the edit scope.", {
       scope: "edit",
     });
   }
+  if (
+    (action === "artifact.share" || action === "artifact.share_outside") &&
+    (caller.kind === "cliToken" || caller.kind === "orgToken")
+  )
+    return new ApiError(
+      "forbidden",
+      caller.kind === "orgToken"
+        ? "Organization tokens cannot change sharing or create share links."
+        : action === "artifact.share_outside" && resource.type === "artifact" && resource.restricted
+          ? "Sharing outside a restricted project requires a person with project management rights."
+          : "This token lacks permission for this sharing action. CLI tokens need manage scope and publisher rights.",
+    );
   return new ApiError("forbidden", "You can't do that.");
 }
 

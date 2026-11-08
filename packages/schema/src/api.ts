@@ -134,7 +134,12 @@ export const PersonResponse = z.object({ person: Person });
 export type PersonResponse = z.infer<typeof PersonResponse>;
 export const PasskeyOptions = z.object({ local: z.boolean().optional() });
 export const PasskeyVerify = z.object({ challengeId: Id, response: z.unknown() });
-export const Me = z.object({ person: Person, org: z.object({ name: z.string() }), recentAuth: z.boolean() });
+export const Me = z.object({
+  person: Person,
+  org: z.object({ name: z.string() }),
+  recentAuth: z.boolean(),
+  scopes: z.array(z.enum(TOKEN_SCOPES)).optional(),
+});
 export type Me = z.infer<typeof Me>;
 export const SessionRow = z.object({
   id: Id,
