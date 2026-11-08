@@ -1,0 +1,20 @@
+name: Viewer build
+description: Reuse only an exact source, lockfile and toolchain build
+runs:
+  using: composite
+  steps:
+    - id: source
+      shell: bash
+      run: |
+        digest=$(git ls-files -z apps packages scripts package.json bun.lock .bun-version 'tsconfig*' .github/actions/viewer-build/action.yml | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      id: viewer
+      with:
+        path: apps/viewer/dist
+        key: viewer-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.digest }}
+    - run: bun run --filter @artifacts/viewer build
+      if: steps.viewer.outputs.cache-hit != 'true'
+      shell: bash
+    - run: test -s apps/viewer/dist/index.html
+      shell: bash

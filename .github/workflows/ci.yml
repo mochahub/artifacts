@@ -2,33 +2,47 @@ name: CI
 
 on: [push]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
-    # Blacksmith, as in Perpetua. It only serves organizations, so this repo must live under one.
+  changes:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    outputs:
+      full: ${{ steps.paths.outputs.full }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
-      - name: Typecheck and Biome
-        run: bun run lint
+      - id: paths
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: bun scripts/ci-paths.ts "$BEFORE" >> "$GITHUB_OUTPUT"
+  static-build:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    env:
+      ARTIFACTS_PREBUILT_VIEWER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+      - run: bun run lint
       - name: Migrations match the schema
         run: |
           bun run db:generate
           git diff --exit-code apps/server/drizzle
           test -z "$(git status --porcelain apps/server/drizzle)"
-      # Before the tests: the CLI's render tests drive WebKit too.
-      - name: Install WebKit
-        run: bunx playwright install --with-deps webkit chromium
-        working-directory: apps/viewer
-      # SeaweedFS needs a command and a mounted key file, which `services:` can't give it.
-      - name: Unit, data-model and API tests against Postgres and SeaweedFS
-        run: bun run test
-      - name: Build
-        run: bun run build
+      - uses: ./.github/actions/viewer-build
+      - run: bun run --filter @artifacts/server build
       - name: The compiled CLI builds and runs
         run: |
           bun scripts/build-cli.ts dist/ci linux-x64
@@ -43,11 +57,63 @@ jobs:
         run: docker build -f apps/server/Dockerfile -t artifacts:ci .
       - name: Viewer size budget
         run: bun run size
-      - name: Playwright WebKit at iPhone size and desktop
-        run: bun run e2e
+
+  unit-api:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+        with:
+          browsers: "true"
+      # Unfiltered: scripts/test.ts must still enforce every API route is reached.
+      - run: bun run test
+
+  browser-smoke:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    env:
+      ARTIFACTS_PREBUILT_VIEWER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+        with:
+          browsers: "true"
+      - uses: ./.github/actions/viewer-build
+      # Preflight requires the three tagged desktop flows and all three claim prerequisites.
+      - run: bun scripts/ci-browser-smoke.ts
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-results
+          name: playwright-smoke-results
           path: apps/viewer/test-results
           if-no-files-found: ignore
+
+  check:
+    if: always()
+    needs: [changes, static-build, unit-api, browser-smoke]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Require every selected job
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          FULL: ${{ needs.changes.outputs.full }}
+          STATIC: ${{ needs.static-build.result }}
+          API: ${{ needs.unit-api.result }}
+          BROWSER: ${{ needs.browser-smoke.result }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$FULL" = true ]; then
+            test "$STATIC" = success
+            test "$API" = success
+            test "$BROWSER" = success
+          else
+            test "$FULL" = false
+            test "$STATIC" = skipped
+            test "$API" = skipped
+            test "$BROWSER" = skipped
+          fi

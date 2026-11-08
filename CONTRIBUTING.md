@@ -171,3 +171,9 @@ The viewer's first route must stay at or under 80 KB of gzipped JavaScript (`bun
 ## More
 
 [docs/implementation/README.md](docs/implementation/README.md) lists every guide, says which document wins when two disagree, and has a glossary. [progress.md](docs/implementation/progress.md) records decisions, known gaps and what hasn't been tested on real devices.
+
+CI runs static/build, unit/API (including route coverage), and three tagged desktop
+browser smoke flows independently. The complete browser/device suite remains
+available nightly and through the **Full browser matrix** Actions workflow.
+See [CI execution and performance](docs/ci-performance.md) for gate selection,
+cache scope, release safety, and measured versus estimated timing evidence.

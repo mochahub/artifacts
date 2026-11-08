@@ -1,0 +1,33 @@
+name: Full browser matrix
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-full-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-full:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    env:
+      ARTIFACTS_PREBUILT_VIEWER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-ci
+        with:
+          browsers: "true"
+      - uses: ./.github/actions/viewer-build
+      - run: bun run e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-full-results
+          path: apps/viewer/test-results
+          if-no-files-found: ignore

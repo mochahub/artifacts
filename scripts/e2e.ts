@@ -17,5 +17,9 @@ run([
   "--wait",
   "--force-recreate",
 ]);
-run(["bun", "run", "--filter", "@artifacts/viewer", "build"]);
+if (process.env.ARTIFACTS_PREBUILT_VIEWER === "1") {
+  if (!(await Bun.file("apps/viewer/dist/index.html").exists())) throw new Error("Missing prebuilt viewer");
+} else {
+  run(["bun", "run", "--filter", "@artifacts/viewer", "build"]);
+}
 run(["bunx", "playwright", "test", ...process.argv.slice(2)], "apps/viewer");

@@ -1,0 +1,28 @@
+name: CI dependencies
+description: Pinned Bun and lockfile-scoped package and browser caches
+inputs:
+  browsers:
+    description: Install WebKit and Chromium, including system libraries
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: .bun-version
+    - uses: actions/cache@v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bun-version', 'bun.lock') }}
+    - run: bun install --frozen-lockfile
+      shell: bash
+    - uses: actions/cache@v4
+      if: inputs.browsers == 'true'
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bun-version', 'bun.lock') }}
+    # Always install system dependencies; they are outside the browser cache.
+    - run: bunx playwright install --with-deps webkit chromium
+      if: inputs.browsers == 'true'
+      working-directory: apps/viewer
+      shell: bash
