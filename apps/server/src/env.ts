@@ -18,6 +18,11 @@ const Port = (fallback: number) => z.coerce.number().int().min(0).max(65535).def
 
 // Variables owned by 09-deploy.md.
 const Schema = z.object({
+  LIBRARIAN_EXTRACTOR_ENDPOINT: z.string().url().optional(),
+  LIBRARIAN_EXTRACTOR_KEY: z.string().optional(),
+  LIBRARIAN_ALLOWED: z.enum(["true", "false"]).default("false"),
+  LIBRARIAN_KEK_ID: z.string().optional(),
+  LIBRARIAN_KEK_RING: z.string().optional(),
   DATABASE_URL: z.string().min(1),
   S3_ENDPOINT: Origin,
   S3_REGION: z.string().min(1),
@@ -40,6 +45,11 @@ const Schema = z.object({
 });
 
 export type Env = {
+  librarianExtractorEndpoint?: string;
+  librarianExtractorKey?: string;
+  librarianAllowed: boolean;
+  librarianKekId?: string;
+  librarianKekRing?: string;
   databaseUrl: string;
   s3: {
     endpoint: string;
@@ -146,6 +156,11 @@ export function parseEnv(raw: Record<string, string | undefined>): { env: Env; w
       setupToken: v.SETUP_TOKEN,
       sessionSecret: v.SESSION_SECRET,
       opsSecret: v.OPS_SECRET,
+      librarianExtractorEndpoint: v.LIBRARIAN_EXTRACTOR_ENDPOINT,
+      librarianExtractorKey: v.LIBRARIAN_EXTRACTOR_KEY,
+      librarianAllowed: v.LIBRARIAN_ALLOWED === "true",
+      librarianKekId: v.LIBRARIAN_KEK_ID,
+      librarianKekRing: v.LIBRARIAN_KEK_RING,
       port: v.PORT,
       contentPort: v.CONTENT_PORT,
       internalPort: v.INTERNAL_PORT,

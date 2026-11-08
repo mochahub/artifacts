@@ -48,6 +48,8 @@ import { blobKey } from "../layout.ts";
 import { legacyBlockIds } from "./legacy-ids.ts";
 import { docToY, markdownToDoc, contentHash as nodeHash, topBlocks } from "./model.ts";
 
+import { afterCommit, captureSnapshot } from "./transaction.ts";
+
 export type DocRow = typeof editDocs.$inferSelect;
 type Reason = (typeof NOT_EDITABLE_REASONS)[number];
 
@@ -103,6 +105,14 @@ export async function withDocLock<T>(
   });
   for (const next of queued) next();
   return result;
+}
+
+/** Acquire the normal content lock inside an existing fenced transaction. */
+export async function docLockIn(tx: Tx, artifactId: string): Promise<DocLock> {
+  await lockArtifact(tx, artifactId, "content");
+  const [row] = await tx.select().from(editDocs).where(eq(editDocs.artifactId, artifactId)).for("update");
+  captureSnapshot(`doc:${artifactId}`, row ?? null);
+  return { tx, row: row ?? null, after: (fn) => afterCommit(tx, fn) };
 }
 
 /** What a draft holds: an article's ProseMirror fragment or a board's object maps (14). */

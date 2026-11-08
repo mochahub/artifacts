@@ -62,6 +62,7 @@ import { parseBody } from "../http/body.ts";
 import { ApiError } from "../http/errors.ts";
 import { isUuid } from "../http/params.ts";
 import type { ApiContext, RouteRequest, Routes } from "../http/routes.ts";
+import { purgeSubmittedSources } from "../librarian/retention.ts";
 import { VERSION } from "../version.ts";
 import { releaseCheck } from "./updates.ts";
 
@@ -350,6 +351,7 @@ export function peopleRoutes(routes: Routes, deps: Deps) {
         .set({ revokedAt: now })
         .where(and(eq(shareLinks.createdBy, person.id), isNull(shareLinks.revokedAt)));
     });
+    await purgeSubmittedSources(deps, person.orgId, person.id);
     return c.json({ ok: true });
   });
 

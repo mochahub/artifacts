@@ -9,6 +9,7 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@artifacts/doc": "workspace:*",
     "@artifacts/kit": "workspace:*",
     "@artifacts/sandbox": "workspace:*",

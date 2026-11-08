@@ -1,0 +1,1 @@
+ALTER TABLE "librarian_runs" ADD CONSTRAINT "librarian_runs_inbox_id_librarian_inbox_id_fk" FOREIGN KEY ("inbox_id") REFERENCES "public"."librarian_inbox"("id") ON DELETE no action ON UPDATE no action;

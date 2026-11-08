@@ -195,6 +195,7 @@ export async function toProject(deps: Deps, row: ProjectRow): Promise<LoadedProj
   const grants = await projectGrants(deps, row.orgId, { projectIds: [row.id] });
   return {
     type: "project",
+    kind: row.kind,
     id: row.id,
     restricted: row.restricted,
     tokenId: row.createdByToken,

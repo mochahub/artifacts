@@ -28,6 +28,9 @@ import {
 } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
 import { BLOBS, CROPS, DATA, hashOf, PLANS } from "../layout.ts";
+import { createLibrarianJob } from "../librarian/integration.ts";
+import { reapExpiredRuns } from "../librarian/leases.ts";
+import { retainLibrarian } from "../librarian/retention.ts";
 import { sendDigest } from "../push/notify.ts";
 import { startEditingSweep } from "./editing.ts";
 import { purgeExpired } from "./purge.ts";
@@ -171,6 +174,7 @@ export async function expireLeftovers(deps: Deps) {
   await deps.db.delete(invites).where(lt(invites.expiresAt, old));
   await deps.db.delete(resetLinks).where(lt(resetLinks.expiresAt, old));
   await expireLogs(deps);
+  await retainLibrarian(deps);
   // Boards (14): capture tickets, unattached uploads, suggestions past expiry and receipts of retired epochs.
   await sweepCaptures(deps);
   await sweepBoardUploads(deps);
@@ -192,6 +196,10 @@ export async function recountRecent(deps: Deps) {
 }
 
 export const jobsFor = (deps: Deps): Record<string, () => Promise<unknown>> => ({
+  librarian: async () => {
+    await reapExpiredRuns(deps);
+    return createLibrarianJob(deps).librarian();
+  },
   purge: () => purgeExpired(deps),
   gc: () => collectGarbage(deps),
   expire: () => expireLeftovers(deps),
@@ -202,7 +210,7 @@ export const jobsFor = (deps: Deps): Record<string, () => Promise<unknown>> => (
 /** Once a day, on one replica at a time (05). */
 export function startJobs(deps: Deps) {
   // Sent after the lock's transaction: it waits on push services, and holds nothing shared.
-  const { digest, ...jobs } = jobsFor(deps);
+  const { digest, librarian, ...jobs } = jobsFor(deps);
   const run = async () => {
     const reserved = await deps.db.transaction(async (tx) => {
       if (!(await tryLockJobs(tx))) return false;
@@ -222,8 +230,12 @@ export function startJobs(deps: Deps) {
   // Soon after boot too: a server redeployed daily would otherwise never reach its first run.
   const first = setTimeout(tick, FIRST_RUN_MS);
   const timer = setInterval(tick, DAY_MS);
+  const librarianTimer = setInterval(() => {
+    librarian?.().catch(() => deps.log.error("librarian recovery failed"));
+  }, 60_000);
   const stopSweep = startEditingSweep(deps);
   return () => {
+    clearInterval(librarianTimer);
     clearTimeout(first);
     clearInterval(timer);
     stopSweep();

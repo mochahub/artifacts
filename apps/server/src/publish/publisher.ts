@@ -194,6 +194,40 @@ export async function commitVersion(
   };
 }
 
+/** DB-only new-artifact primitive. Caller stages blobs and authorizes in this transaction. */
+export async function createArtifactLocked(
+  tx: Tx,
+  input: VersionInput & { slug: string; visibility: "me" | "org" },
+  by: { personId: string; agent: string | null },
+) {
+  await lockArtifact(tx, input.artifactId, "content");
+  const [made] = await tx
+    .insert(artifacts)
+    .values({
+      id: input.artifactId,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      slug: input.slug,
+      title: input.title,
+      visibility: input.visibility,
+      publisherId: by.personId,
+      createdAt: input.now,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (!made) throw new ApiError("conflict", "That slug is taken.");
+  const hashes = Object.values(input.files).map((file) => file.hash);
+  const present = hashes.length
+    ? await tx
+        .select()
+        .from(blobs)
+        .where(and(eq(blobs.orgId, input.orgId), inArray(blobs.hash, hashes)))
+    : [];
+  if (new Set(present.map((row) => row.hash)).size !== new Set(hashes).size)
+    throw new ApiError("conflict", "A staged file was cleaned up. Retry creation.");
+  return commitVersion(tx, undefined, input, by);
+}
+
 /** Publishing, for the API and the hosted MCP alike. */
 export function createPublisher(deps: Deps) {
   const { db, env, clock, bucket } = deps;
@@ -498,6 +532,14 @@ export function createPublisher(deps: Deps) {
           .onConflictDoNothing()
           .returning({ id: artifacts.id });
         if (created.length === 0) throw new ApiError("conflict", "That slug was just taken. Publish again.");
+      }
+      if (current) {
+        const [base] = await tx
+          .select()
+          .from(versions)
+          .where(and(eq(versions.artifactId, current.id), eq(versions.n, current.latestVersion)));
+        if (base?.files["__librarian_source.json"])
+          throw new ApiError("read_only", "Imported sources are immutable.");
       }
       // Checked again under the lock: it may have been archived or deleted during the uploads above.
       if (current?.archivedAt)

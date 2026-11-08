@@ -4,7 +4,7 @@ import type { Caller, CallerPerson } from "./caller.ts";
 const SESSION = ["person"] as const;
 const PEOPLE = ["person", "cliToken"] as const;
 const MEMBERS = ["person", "cliToken", "orgToken"] as const;
-const COMMENTERS = ["person", "cliToken", "guest", "content"] as const;
+const COMMENTERS = ["person", "cliToken", "orgToken", "guest", "content"] as const;
 const READERS = ["person", "cliToken", "orgToken", "guest", "content"] as const;
 
 /**
@@ -12,6 +12,8 @@ const READERS = ["person", "cliToken", "orgToken", "guest", "content"] as const;
  * else before anything else, and a route's handler sees its caller narrowed to these.
  */
 const CALLER_KINDS = {
+  "librarian.manage": SESSION,
+  "librarian.logs": SESSION,
   "account.read": PEOPLE,
   "account.manage": SESSION,
   "home.read": MEMBERS,
@@ -167,6 +169,7 @@ export type ArtifactResource = {
 };
 export type TeamResource = { type: "team"; id: string; leadIds: string[] };
 export type ProjectResource = {
+  kind?: "project" | "wiki";
   type: "project";
   id: string;
   restricted: boolean;
@@ -251,6 +254,8 @@ export function seesArtifact(caller: Caller, artifact: ArtifactResource): boolea
 }
 
 function mayComment(caller: Caller, artifact: ArtifactResource): boolean {
+  if (caller.kind === "orgToken")
+    return caller.projectIds?.includes(artifact.projectId) === true && hasScope(caller, "comment");
   if (caller.kind === "guest") return activeLink(caller, artifact.id)?.permission === "comment";
   if (caller.kind === "content") return caller.caller.canComment;
   const person = personOf(caller);
@@ -381,6 +386,7 @@ function canOnArtifact(caller: Caller, action: Action, artifact: ArtifactResourc
       return hasScope(caller, "data") || caller.kind === "guest" || caller.kind === "content";
     case "data.write":
       return (
+        caller.kind !== "orgToken" &&
         writable &&
         (hasScope(caller, "data") || caller.kind === "guest" || caller.kind === "content") &&
         mayComment(caller, artifact)
@@ -427,7 +433,14 @@ function canOnProject(caller: Caller, action: Action, project: ProjectResource):
     case "project.read":
       return seesProject(caller, project);
     case "project.publish":
-      if (caller.kind === "orgToken") return caller.scopes.includes("org") && reaches(caller, project);
+      if (caller.kind === "orgToken")
+        return (
+          reaches(caller, project) &&
+          (caller.scopes.includes("org") ||
+            (project.kind === "wiki" &&
+              caller.projectIds?.includes(project.id) === true &&
+              caller.scopes.includes("publish")))
+        );
       if (!person || !hasScope(caller, "publish")) return false;
       if (isAdmin(person)) return true;
       return (
@@ -480,6 +493,9 @@ function canOnOrg(caller: Caller, action: Action): boolean {
       return admin && hasScope(caller, "read");
     case "people.invite":
       return admin && hasScope(caller, "manage");
+    case "librarian.manage":
+    case "librarian.logs":
+      return caller.kind === "person" && caller.recentAuth && admin;
     case "org.manage":
     case "people.manage":
     case "tokens.manage":

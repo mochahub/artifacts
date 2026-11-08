@@ -3,6 +3,9 @@ import { dataRoutes } from "../data/routes.ts";
 import type { Deps } from "../deps.ts";
 import { editingRoutes } from "../editing/routes.ts";
 import type { Routes } from "../http/routes.ts";
+import { ingestionRoutes } from "../librarian/ingestion/routes.ts";
+import { proposalRoutes } from "../librarian/proposal-routes.ts";
+import { librarianRoutes } from "../librarian/routes.ts";
 import { brandRoutes } from "../library/brand.ts";
 import { libraryRoutes } from "../library/routes.ts";
 import { mcpRoutes } from "../mcp/routes.ts";
@@ -30,6 +33,9 @@ import { versionRoutes } from "./versions.ts";
 
 /** Every /api route on the viewer port. */
 export function mountApi(routes: Routes, deps: Deps) {
+  librarianRoutes(routes, deps);
+  ingestionRoutes(routes, deps);
+  proposalRoutes(routes, deps);
   const passkeys = createPasskeys(deps);
   const publisher = createPublisher(deps);
   const review = createReview(deps);
