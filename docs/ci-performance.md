@@ -30,7 +30,9 @@ traces independently and does not gate `check` or trigger Release. Failures rema
 visible as failed scheduled/manual runs, rather than being swallowed.
 
 A branch push changing only root Markdown and/or Markdown beneath `docs/` may
-skip executable checks. New branches, missing/invalid diff bases, empty diffs and
+skip executable checks only when the cumulative diff from the merge base with
+`origin/main` contains only those paths. A documentation follow-up push cannot
+hide an earlier code change. New branches, missing/invalid diff bases, empty diffs and
 all other paths run everything. Renames inspect both sides. Schema, migrations,
 workflow/config, lockfiles, executable docs, skill Markdown and shipped template
 Markdown always run everything. Main always runs the full default gate, even for
@@ -97,6 +99,6 @@ Blacksmith labels allowed), full lint (82 existing warnings, no errors), changed
 viewer/server builds, Linux CLI cross-compilation, native macOS CLI version smoke,
 size budgets, migration generation with no diff, 21 private temporary-repository
 path cases, and 192 aggregate result combinations. Local Bun was 1.4.2; CI pins
-1.4.4. The three companion smoke tags were absent in this checkout during
-validation: the preflight correctly rejected it. Browser acceptance must be
-validated after integrating those tags; no test stack was reset here.
+1.4.4. The integrated smoke selection is exactly three desktop flows plus three claim
+prerequisites. Companion browser acceptance passed all six tests in 42 seconds;
+the final focused verification does not reset that stack or rerun browsers.

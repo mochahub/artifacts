@@ -21,6 +21,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - run: bun test scripts/ci-paths.test.ts
       - id: paths
         env:
           BEFORE: ${{ github.event.before }}

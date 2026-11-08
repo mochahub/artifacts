@@ -8,8 +8,15 @@ if (
   /^[a-f0-9]{40}$/.test(before) &&
   !/^0+$/.test(before)
 ) {
-  const diff = Bun.spawnSync(["git", "diff", "--name-only", "-z", "--no-renames", before, "HEAD"]);
-  if (diff.success) {
+  // Compare the whole branch, not just the last push: a docs follow-up must
+  // never hide an earlier executable change (including a cancelled/failed run).
+  const base = Bun.spawnSync(["git", "merge-base", "origin/main", "HEAD"]);
+  const sha = base.stdout.toString().trim();
+  const diff =
+    base.success && /^[a-f0-9]{40}$/.test(sha)
+      ? Bun.spawnSync(["git", "diff", "--name-only", "-z", "--no-renames", sha, "HEAD"])
+      : undefined;
+  if (diff?.success) {
     const paths = diff.stdout.toString().split("\0").filter(Boolean);
     full = paths.length === 0 || paths.some((path) => !isDocumentation(path));
   }
