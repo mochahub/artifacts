@@ -1,0 +1,51 @@
+# Private unit/API/CLI acceptance. S3 shares loopback with the runner so presigned
+# upload plans satisfy the CLI's HTTPS-or-loopback guard without exceptions.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: artifacts
+      POSTGRES_PASSWORD: artifacts
+      POSTGRES_DB: artifacts_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artifacts -d artifacts_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.50
+    # Explicit limits: left alone, weed derives the volume count from free disk and small disks get none.
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=64 -volume.max=100
+    volumes:
+      - ./seaweedfs/s3.dev.json:/etc/seaweedfs/s3.json:ro
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/status || nc -z 127.0.0.1 8333"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.e2e-linux
+    network_mode: service:seaweedfs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    command: ["bun", "scripts/test-linux.ts"]
+    environment:
+      TEST_LINUX_RUNNER: "1"
+      TEST_LINUX_ARGS: ${TEST_LINUX_ARGS:-[]}
+      TEST_DATABASE_URL: postgres://artifacts:artifacts@postgres:5432/artifacts_test
+      TEST_S3_ENDPOINT: http://127.0.0.1:8333
+      ARTIFACTS_TEST_PARALLEL: "1"
+      ARTIFACTS_ROUTE_HITS: /results/route-hits
+    volumes:
+      - ${TEST_LINUX_RESULTS_DIR:?Run bun scripts/test-linux.ts}:/results
