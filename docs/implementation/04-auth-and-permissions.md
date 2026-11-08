@@ -230,12 +230,12 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `account.manage` | A person in a browser session, never a token: their sessions, password, passkeys, approving devices |
 | `home.read`, `project.list`, `project.read` | Any person caller; tokens with `read` |
 | `artifact.read` | Visibility rule above |
-| `artifact.comment` | owner, admin, member, reviewer; outside and guests with `comment` permission; cliToken with `comment`. Not on archived artifacts. |
+| `artifact.comment` | owner, admin, member, reviewer; outside and guests with `comment` permission; cliToken with `comment`; orgToken with `comment` and an explicit `project_ids` entry for the visible artifact’s project. Not on archived artifacts. |
 | `thread.resolve`, `artifact.decide` | People only (not guests, not tokens) who can comment, except someone whose only right to comment is access a token granted (`via_token`, below) |
 | `artifact.publish` | The publisher, admins, owner; members the publisher or an admin added with `publish` in `artifact_access`; cliToken (`publish`) as its person, when that person may publish; orgToken (`publish`, project allowed). Reviewers and outside people never. Not on archived artifacts. Publishing a backend can read every person's `me` data, which is why this isn't open to every member. |
 | `project.create` | Members and up; tokens with `publish` (cli) or `org` (org token) |
 | `project.read` | On a project: anyone who can see it, as above. Without one, as `home.read`. |
-| `project.publish` | Add a new artifact to a project: members and up in an open project; `publish` or above in a restricted one, and admins; cliToken with `publish` as its person; orgToken with `org`, where it reaches the project |
+| `project.publish` | Add a new artifact to a project: members and up in an open project; `publish` or above in a restricted one, and admins; cliToken with `publish` as its person; orgToken with `org`, where it reaches the project; for a wiki, `publish` plus an explicit `project_ids` entry also suffices |
 | `project.access.read` | `manage` on the project, admins, owner; a cliToken with `read` as its person, which gets the grants without addresses or who's in each team |
 | `project.access.write`, `project.update` | `manage` on the project, admins, owner, as people. Never a token. |
 | `artifact.manage`, `artifact.share` | The publisher, admins, owner, and members with `manage` on the project as people; cliToken with `manage` as the publisher. `share` also requires `org.settings.linkSharing` for links. Only these callers can add someone with `publish`, and only organization members can receive it. |
@@ -244,7 +244,7 @@ Deleted artifacts (`deleted_at` set) are invisible to everyone except in `GET /a
 | `artifact.purge` | The publisher or an admin, as a **person** with `recentAuth`. Never a token, and not a project manager, who can delete but not erase. |
 | `deleted.read` | People, and cliTokens with `manage`: their own deletions; admins: all. Agents can undelete, so they need to find what they deleted. |
 | `data.read` | Anyone with `artifact.read` (for `me`, only their own key space) |
-| `data.write` | Anyone with `artifact.comment`, on their own `me` space or `shared`. Not on archived artifacts. A backend's `env.DATA` writes follow the same rule for the caller of that request: read-only for viewers and on archived artifacts (08). |
+| `data.write` | Anyone except orgToken with `artifact.comment`, on their own `me` space or `shared`. Not on archived artifacts. A backend's `env.DATA` writes follow the same rule for the caller of that request: read-only for viewers and on archived artifacts (08). |
 | `data.export` | The publisher and admins (people or cliToken with `data`) |
 | `org.read` | Admins, owner |
 | `org.manage`, `people.manage`, `tokens.manage` | Admins, owner (people only) |
@@ -320,3 +320,9 @@ With more than one replica, limits are per replica. That's acceptable for a self
 Boards reuse `artifact.edit`, `artifact.accept`, `artifact.maintain` and the `edit` token scope. Read-only state excludes draft sequence, presence, runs and suggestions. Images require artifact/version authority before a presigned capability is issued; a hash alone grants nothing. Fresh Write presence refuses agent operations; Pair proposes atomic batches, and object holds narrow direct operations to suggestions across replicas. Page grants and active share links count in the audience. [14 Boards](14-boards.md#permissions-audience-and-visibility) owns these board-specific rules.
 
 The viewer allows presigned upload connections only to the configured public S3 bucket origin (including the bucket hostname with virtual-host addressing). This is derived from deployment configuration, not request headers or client-provided URLs; no wildcard upload origins are allowed.
+
+## Librarian foundation
+
+`librarian.manage` and `librarian.logs` allow only recent-auth person sessions whose current role is owner/admin. Both can() and the route recentAuth guard enforce this, including reads. No bearer identity can configure/read keys or inspect administrative logs. Mutation primitives additionally check current org identity, revocation/expiry, explicit token wiki allowlist, current selected wiki, config generation, lease owner/fence/deadline and the deployment ceiling inside the transaction. Content adapters must still call can() and agentPolicy() under their content lock; these primitives do not grant content authority. Ingestion uses existing `project.publish`, selected-wiki membership and owned-inbox checks, not a new `librarian.submit` action. Proposal reads/reviews also use `project.publish` and require a person session plus current visibility of every citation in the bound wiki; tokens are refused. Creation is gated on a transactional article creator.
+
+Librarian provisioning is a recent-auth admin session operation, never a token operation. It creates a dedicated org token with no issued bearer, explicit selected-wiki projectIds and read/comment/edit/publish scopes. Selection changes synchronize this ceiling and increment configuration generation. Every receipt adapter must authorize current resource visibility before replay as well as mutation, inside the fenced transaction. The root receipt helper requires an explicit authorization callback; no prior receipt grants access after revocation.

@@ -516,3 +516,159 @@ One bucket, private (Railway buckets have no public mode). Every object is reach
 | `data/<artifact id>/files/shared/<name>` and `files/me/<caller id>/<name>` | Stored files | The app | Same |
 
 Keys and file names: 1–200 characters of `A-Za-z0-9._/-`, no leading `/`, no `..`.
+
+## Librarian foundation (Phase 4)
+
+Money columns use nonnegative bigint USD microdollars. Config caps default to zero, enabled to false. Month rows have composite `(org_id, month)` primary keys and UTC `YYYY-MM` months. Wiki selections have composite `(org_id, project_id)` primary keys. The unique partial run index allows one running row per organization. Attempt request ids are unique; attempts belong to runs. All writes take the dedicated per-org librarian lock before ledger/run changes. Encrypted envelopes contain ciphertext/nonce/tag, wrappedKey/wrapNonce/wrapTag and kekId; org id, purpose and generation are authenticated. No plaintext provider key is stored. Inbox submitter ids refer to either a person or token identity; ingestion must validate that identity and current wiki access. Receipt/proposal uniqueness is per run and tool/proposal key. Receipts are bounded to 64 KiB JSON. Ingestion and runner services own writes through the fence API.
+
+**`librarian_attempts`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_id` | uuid | Required |
+| `id` | uuid | Required, primary key |
+| `run_id` | uuid | Required |
+| `request_id` | text | Nullable |
+| `state` | text | Required |
+| `ceiling` | bigint | Required |
+| `charged` | bigint | Nullable |
+| `created_at` | timestamp with time zone | Required |
+
+**`librarian_config`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_id` | uuid | Required, primary key |
+| `enabled` | boolean | Required |
+| `generation` | integer | Required |
+| `model` | text | Required |
+| `monthly_limit` | bigint | Required |
+| `run_limit` | bigint | Required |
+| `token_id` | uuid | Nullable |
+| `rate_card` | jsonb | Nullable |
+| `updated_by` | uuid | Nullable |
+| `updated_at` | timestamp with time zone | Required |
+
+**`librarian_inbox`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Required, primary key |
+| `org_id` | uuid | Required |
+| `wiki_id` | uuid | Required |
+| `submitted_by` | uuid | Required |
+| `kind` | text | Required |
+| `title` | text | Required |
+| `input` | jsonb | Nullable |
+| `quarantine_key` | text | Nullable |
+| `note` | text | Nullable |
+| `source_hash` | text | Nullable |
+| `source_artifact_id` | uuid | Nullable |
+| `extraction_version` | text | Nullable |
+| `status` | text | Required |
+| `idempotency_key` | uuid | Required |
+| `payload_hash` | text | Required |
+| `run_id` | uuid | Nullable |
+| `error_code` | text | Nullable |
+| `untrusted` | boolean | Required |
+| `submitted_at` | timestamp with time zone | Required |
+| `updated_at` | timestamp with time zone | Required |
+| `raw_expires_at` | timestamp with time zone | Required |
+
+**`librarian_keys`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_id` | uuid | Required, primary key |
+| `generation` | integer | Required |
+| `envelope` | jsonb | Required |
+| `updated_by` | uuid | Nullable |
+| `updated_at` | timestamp with time zone | Required |
+
+**`librarian_months`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_id` | uuid | Required |
+| `month` | text | Required |
+| `settled` | bigint | Required |
+| `uncertain` | bigint | Required |
+| `reserved` | bigint | Required |
+
+**`librarian_proposals`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Required, primary key |
+| `org_id` | uuid | Required |
+| `run_id` | uuid | Required |
+| `wiki_id` | uuid | Required |
+| `proposal_key` | uuid | Required |
+| `title` | text | Required |
+| `summary` | text | Required |
+| `markdown` | text | Required |
+| `sources` | uuid[] | Required |
+| `untrusted` | boolean | Required |
+| `status` | text | Required |
+| `reviewed_by` | uuid | Nullable |
+| `reviewed_at` | timestamp with time zone | Nullable |
+| `created_at` | timestamp with time zone | Required |
+| `created_artifact_id` | uuid | Nullable |
+
+**`librarian_receipts`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Required, primary key |
+| `org_id` | uuid | Required |
+| `run_id` | uuid | Required |
+| `tool_key` | uuid | Required |
+| `input_hash` | text | Required |
+| `result` | jsonb | Required |
+| `created_at` | timestamp with time zone | Required |
+
+**`librarian_runs`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Required, primary key |
+| `org_id` | uuid | Required |
+| `wiki_id` | uuid | Required |
+| `inbox_id` | uuid | Nullable, unique; inbox binding |
+| `daily_key` | text | Nullable UTC date; unique with org/wiki |
+| `state` | text | Required |
+| `model` | text | Required |
+| `config_generation` | integer | Required |
+| `rate_card` | jsonb | Required |
+| `owner` | uuid | Required |
+| `fence` | integer | Required |
+| `lease_expires_at` | timestamp with time zone | Required |
+| `deadline` | timestamp with time zone | Required |
+| `month` | text | Required |
+| `cap` | bigint | Required |
+| `settled` | bigint | Required |
+| `uncertain` | bigint | Required |
+| `reserved` | bigint | Required |
+| `started_at` | timestamp with time zone | Required |
+| `finished_at` | timestamp with time zone | Nullable |
+
+**`librarian_wikis`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_id` | uuid | Required |
+| `project_id` | uuid | Required |
+| `selected_by` | uuid | Nullable |
+| `created_at` | timestamp with time zone | Required |
+
+**`librarian_events`**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | Required, primary key |
+| `org_id` | uuid | Required |
+| `run_id` | uuid | Required, FK librarian_runs |
+| `code` | text | Required, host terminal/claim code only |
+| `created_at` | timestamp with time zone | Required |
+
+Terminal event codes and claim events share the ledger transaction. Retention removes attempts, receipts and events after 90 days; minimal terminal run rows remain as inbox/daily dedup tombstones and proposal references. Monthly totals retain the current UTC month and previous twelve months. Raw inbox content and quarantine expire after seven days or source promotion; failures retain the reference for retry.

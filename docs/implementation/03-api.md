@@ -396,3 +396,25 @@ See [12-wikis.md](12-wikis.md) for the wiki contract.
 [14 Boards](14-boards.md#http-api) defines board read, operations, suggestions, assets, capture and checkpoint routes. `POST /api/boards` creates an eligible wiki canvas page. Object reads default to checkpoints; `draft=1` requires edit access. Suggestion previews and decisions enforce the page visibility before returning batch data. Board runs use the existing document run endpoints.
 
 `GET /api/me` includes `scopes` for token callers. People sessions omit it. This lets clients diagnose a missing `edit` scope before attempting an edit.
+
+## Librarian foundation (Phase 4 slice 1)
+
+All routes below require an admin/owner browser session authenticated within ten minutes, the normal API version/CSRF chain, and return `Cache-Control: no-store`. CLI, OAuth, organization tokens, guests and content callers are refused.
+
+| Method and path | Action | Body / response |
+|---|---|---|
+| GET `/api/librarian/config` | `librarian.manage` | Safe LibrarianConfig from 15; no key suffix or envelope |
+| PUT `/api/librarian/config` | `librarian.manage` | Full editable config plus expectedGeneration; safe config, 200 |
+| PUT `/api/librarian/key` | `librarian.manage` | key (1–4096 characters), expectedGeneration; 204 |
+| DELETE `/api/librarian/key` | `librarian.manage` | expectedGeneration; 204 |
+| GET `/api/librarian/runs` | `librarian.logs` | `{runs}` latest 50 sanitized runs |
+| GET `/api/librarian/runs/:id` | `librarian.logs` | sanitized run or 404 |
+| POST `/api/librarian/runs/:id/cancel` | `librarian.manage` | idempotent `{ok:true}`, 200 |
+
+Generation mismatches return 409 conflict; invalid settings return 400 invalid. Every config/key change fences and cancels active work transactionally. Key writes always disable. Enabling requires the global ceiling, decryptable key and separately provisioned identity/rate card; this foundation has no provisioning API, scheduler dispatch or provider adapter. Saving settings cannot approve a new model's pricing. Run results have empty resource-id arrays until workers implement permission-filtered results. Cursor pagination and event routes remain deferred; this is explicitly a bounded latest-runs view. `/internal/jobs/librarian` uses the existing OPS guard and only recovers expired leases, with no egress.
+
+Librarian additive integration routes: `PUT /api/librarian/provision` uses the same recent-auth session-only manage/CSRF/no-store guards as key settings. Body is `{expectedGeneration, model, rateCard:{input,output}}`; rates are positive decimal integer strings in microdollars per million tokens. It rotates a credentialless Librarian org-token identity, approves that model/rate pair, fences existing work and stays OFF. No bearer or pricing discovery is returned. Model changes through config invalidate the previous rate card. `GET /api/librarian/runs` uses an opaque UUID `cursor`, returns at most 50 runs and optional `nextCursor`; ordering is started_at/id descending. `GET /api/librarian/runs/:id/events` uses the same cursor convention, 100 events maximum, descending created_at/id, and returns only id/code/createdAt. Proposal result ids require current project.publish individually; no edit/question ids are recorded yet. Run metadata access confers no content permission.
+
+Inbox/upload/list/detail/cancel routes from the ingestion module are registered on the standard API chain. They accept/queue while OFF, but registration does not supply an extractor, immutable-source creator, or provider worker. Ingestion uses authoritative `project.publish` plus selected-wiki and submitter ownership checks; no `librarian.submit` action exists.
+
+Proposal routes use `project.publish` and additionally require a person session and current visibility of every same-wiki citation. All return no-store and use the normal CSRF chain. GET `/api/wikis/:slug/proposals/:id` returns the strict shared LibrarianProposal shape. POST `.../:id/reject` accepts `{expectedStatus:"open"}`, atomically rejects under the proposal row lock, and replays rejection idempotently. POST `.../:id/create` accepts `{expectedStatus:"open",requestId:UUID}` but currently returns 409 for an open proposal because transactional article creation remains unavailable; no artifact is created. A previously created proposal returns its original artifact id after current authorization. Inbox detail returns authorized `proposalIds` and optional `runId`.
