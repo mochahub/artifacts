@@ -9,7 +9,7 @@ The viewer is a website, used mostly in Safari on an iPhone and in desktop brows
 
 - **Preact** with `@preact/signals` and `preact-iso` (router and lazy routes). Built with Vite into `apps/viewer/dist`, which `apps/server` serves.
 - **No CSS framework.** Plain CSS with custom properties, ported from `docs/mocks/kit.css`: tokens, components and the rules below. The mocks' `kit.css` and `kit.js` are the reference implementation of the look; rebuild their components as Preact components with the same class names where practical.
-- **Budget:** the initial route's JS is ≤ 80 KB gzipped; the canvas and article views are lazy chunks. CI fails over budget (`size-limit`).
+- **Budget:** the initial route's JS is ≤ 80 KB gzipped; the canvas and article views are lazy chunks. CI fails over budget (`bun run size`).
 - **Icons:** Lucide icons (MIT), imported per icon. The mocks' inline SVG paths are close to Lucide's.
 
 ## Design rules (keep the look, avoid generic patterns)
@@ -259,15 +259,17 @@ A Linux Playwright container can use an independently started server with
 `E2E_EXTERNAL_SERVER=1` and `E2E_HOST`. `E2E_AUTH_FILE`, `E2E_TOKEN_FILE` and `E2E_OUTPUT_DIR`
 isolate credentials and traces from another runner. Claim once, then use `--no-deps` for focused
 checks. Long runs using `--repeat-each=10` can exhaust the real per-caller rate limits; provision
-fresh private server instances per repetition rather than disabling the rate checks. A shared-server
-repetition attempt also found intermittent editor startup timeouts, so Linux stability is not signed
-off. The normal acceptance suite retains its legacy fixture setup.
+fresh private server instances per repetition rather than disabling the rate checks. The intermittent startup stall in the forwarded Linux harness was traced to TCP client-port reuse
+in Docker Desktop's host forwarder. `bun run e2e:linux` keeps the app and browser together on Linux
+loopback and uses a fresh private compose stack per invocation. The normal acceptance suite retains
+its legacy fixture setup.
 
-`bun apps/viewer/scripts/board-size.ts` checks the reader entry plus CSS against 80 KB gzip and
-cold board Edit's additional static import closure, including CSS and the shared sync provider,
-against 160 KB gzip. The November 2026 integration build measures 46.84 KB and 54.10 KB respectively.
+`bun run size` (also `bun apps/viewer/scripts/board-size.ts`) checks the reader entry's complete static
+import closure plus CSS against 80 KB gzip. Article Edit and board Edit are measured separately,
+including every additional static JS/CSS dependency beyond their respective readers, with the shared
+sync provider included in each cold load. Their limits remain 120 KB and 160 KB. The final November
+2026 build measures 59.81 KB for the entry, 118.42 KB for article Edit and 53.08 KB for board Edit.
 
-The real Delegate regression intentionally requires a finished run in board state. The board state
-route currently supplies only active runs, so the finished review card cannot render after returning
-to the board; the server must expose the permitted finished review data before that test can pass.
+The real Delegate regression requires a finished run in board state, including the permitted finished
+review data after returning to the board; it passes in native Linux acceptance.
 Synthetic pointer tests do not replace physical Pencil pressure, latency, palm rejection or Scribble QA.

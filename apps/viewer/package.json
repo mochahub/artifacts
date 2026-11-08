@@ -6,26 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "size": "size-limit",
+    "size": "bun scripts/board-size.ts",
     "board-size": "bun scripts/board-size.ts"
   },
-  "size-limit": [
-    {
-      "name": "initial route",
-      "path": "dist/assets/index-*.js",
-      "limit": "80 KB",
-      "gzip": true
-    },
-    {
-      "name": "editor (with the sync provider and Yjs)",
-      "path": [
-        "dist/assets/editor-*.js",
-        "dist/assets/provider-*.js"
-      ],
-      "limit": "120 KB",
-      "gzip": true
-    }
-  ],
   "dependencies": {
     "@artifacts/doc": "workspace:*",
     "@artifacts/schema": "workspace:*",

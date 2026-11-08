@@ -1,0 +1,47 @@
+# Private Linux acceptance stack: no published ports and a unique project per invocation.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: artifacts
+      POSTGRES_PASSWORD: artifacts
+      POSTGRES_DB: artifacts_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artifacts -d artifacts_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.50
+    # Explicit limits: left alone, weed derives the volume count from free disk and small disks get none.
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=64 -volume.max=100
+    volumes:
+      - ./seaweedfs/s3.dev.json:/etc/seaweedfs/s3.json:ro
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/status || nc -z 127.0.0.1 8333"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.e2e-linux
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      E2E_DATABASE_URL: postgres://artifacts:artifacts@postgres:5432/artifacts_test
+      E2E_S3_ENDPOINT: http://seaweedfs:8333
+      E2E_BOARDS_ONLY: ${E2E_BOARDS_ONLY:-}
+      E2E_LINUX_ARGS: ${E2E_LINUX_ARGS:-[]}
+      E2E_OUTPUT_DIR: /results
+    volumes:
+      - ${E2E_RESULTS_DIR:?Run bun run e2e:linux}:/results

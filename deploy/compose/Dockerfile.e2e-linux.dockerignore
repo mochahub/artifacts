@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+.git
+.claude
+.t3
+.artifacts
+**/.artifacts
+.env
+.env.*
+!.env.example
+**/.auth.json
+**/.token
+.DS_Store

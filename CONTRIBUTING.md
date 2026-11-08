@@ -39,6 +39,8 @@ Several people (or agents) working at once can each run a copy of that file unde
 
 A full `bun run test` also checks that every API route was reached by a test (`scripts/route-coverage.ts`), which a single file can't.
 
+For Linux WebKit acceptance from a Docker Desktop host, use `bun run e2e:linux` (the same Playwright arguments are accepted). It builds the pinned Linux Bun/Playwright image and runs the app and browser together, with Postgres and S3 on a private compose network. Each invocation force-recreates its own uniquely named stack, publishes no host ports, retains traces and compose logs in the printed temporary results directory, and tears down its containers, volumes and runner image. This avoids per-connection host forwarding: rapid client-port reuse can stall a TCP handshake in Docker Desktop's host forwarder, which otherwise looks like an unfinished lazy stylesheet even though the app never receives its request.
+
 For one e2e file, pass it to the script, which hands its arguments to Playwright:
 
 ```sh

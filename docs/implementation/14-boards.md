@@ -403,6 +403,8 @@ Run focused suites, not the repository-wide `bun run test`/`bun run e2e` wrapper
 
 Contract-author verification (2026-11-07): the 52 focused schema/data-model/migration tests pass, including a populated Phase 2 upgrade preserving draft bytes, seqs, frame geometry/pixels and a legacy anchor. Full `tsc -b`, changed-TypeScript Biome checks, production viewer build and current size gates pass (initial route 37.21 KB gzip; existing doc editor/provider 112.19 KB). `db:generate` reports no further drift. The board editor and its device/convergence suites are implementation work; the 160 KB ceiling is a contract, not a measurement of code that exists yet. The private migration stack is torn down with volumes after verification.
 
+The viewer size command walks Vite static import closures, including CSS and shared dependencies once per cold load. It checks the initial route (80 KB), article Edit beyond its reader (120 KB), and board Edit beyond its canvas reader (160 KB) separately. Dynamic imports are charged when their entry loads, rather than to unrelated editors. The sync client validates control envelopes with a dependency-light parser checked against the canonical schema; wire shapes remain unchanged.
+
 ## Work split
 
 Five parallel implementation workers; **the contract author has already added shared board schemas, constants, DB definitions and migration**. These are the starting interface, not five competing schema designs. Worker 1 owns subsequent shared shape/migration amendments and announces them before landing. Every path below is owned by exactly one worker; ask its owner for an interface change rather than editing their file. New tests belong to their listed owner. Existing unrelated functionality stays with the named file owner.

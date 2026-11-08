@@ -248,3 +248,17 @@ export const BOARD_EDITOR_GZIP_MAX = 160_000;
 
 /** Clients understanding native-object comment anchors advertise this alongside editing. */
 export const BOARDS_FEATURE = "boards";
+
+/** The message types on the sync socket: y-protocols' sync and awareness, and ours. */
+export const SYNC_MESSAGE = { sync: 0, awareness: 1, auth: 2, queryAwareness: 3, control: 100 } as const;
+/** Close codes. Not found and not editable look the same, so a socket reveals nothing. */
+export const SYNC_CLOSE = {
+  invalidUpdate: 4400,
+  unauthenticated: 4401,
+  lostAccess: 4403,
+  notFound: 4404,
+  reset: 4409,
+  tooLarge: 4413,
+  rateLimited: 4429,
+  restarting: 4000,
+} as const;
