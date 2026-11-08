@@ -158,9 +158,13 @@ export function boardEditRequest(flags: BoardFlags, suggest: boolean): BoardEdit
     throw new UsageError("The operations are a JSON object (a board edit request) or a list of operations.");
   const request: Record<string, unknown> = Array.isArray(parsed) ? { ops: parsed } : { ...parsed };
   if (flags.epoch !== undefined)
-    request.epoch = whole(flags.epoch, "--epoch", "the epoch board read printed");
+    request.epoch = whole(flags.epoch, "--epoch", "a positive epoch from board read --draft");
   if (request.epoch === undefined)
     throw new UsageError("Give the epoch: --epoch <n> from board read --draft, or an epoch in the file.");
+  if (request.epoch === 0)
+    throw new UsageError(
+      "Epoch 0 is a checkpoint read, not an editing epoch. Run board read --draft and use its positive epoch.",
+    );
   request.requestId = flags["request-id"] ?? request.requestId ?? randomUUID();
   // An add-only batch has nothing to be stale about.
   request.bases ??= {};
@@ -262,7 +266,11 @@ async function readAll(client: Client, artifact: Artifact, params: { draft?: boo
 /** The board's editing state, or the plain reason this CLI can't edit it. */
 async function editableState(client: Client, artifact: Artifact) {
   const state = BoardState.parse(await client.get(`/api/artifacts/${artifact.id}/board`));
-  if (!state.canEdit) throw new CliError("You can't edit this board. Ask for edit access, or comment on it.");
+  // Ask the authoritative draft boundary for its structured permission failure or initial epoch.
+  if (!state.canEdit || state.epoch === 0) {
+    const draft = BoardRead.parse(await client.get(`/api/artifacts/${artifact.id}/board/objects?draft=1`));
+    state.epoch = draft.epoch;
+  }
   if (!state.editable)
     throw new CliError(
       `This page can't be edited as a board (${state.reason ?? "not editable"}). Publish it again instead.`,
@@ -574,7 +582,8 @@ export async function boardCommand(
     usageFor(flags, ["epoch", "name", "message"], bad);
     const { client, artifact } = await open(flags, target);
     let epoch: number;
-    if (flags.epoch !== undefined) epoch = whole(flags.epoch, "--epoch", "the epoch board read printed");
+    if (flags.epoch !== undefined)
+      epoch = whole(flags.epoch, "--epoch", "a positive epoch from board read --draft");
     else {
       const state = await boards(out, () => editableState(client, artifact));
       if (state.epoch < 1) throw new CliError("There's no draft to save yet. Edit the board first.");

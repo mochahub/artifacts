@@ -10,7 +10,7 @@ import type { Caller } from "../auth/caller.ts";
 import { can } from "../auth/can.ts";
 import { boardSuggestions, boardVersions, editDocs, frames, threads, versions } from "../db/schema.ts";
 import type { Deps } from "../deps.ts";
-import { agentPolicy } from "../editing/policy.ts";
+import { agentPolicy, missingEditScope, POLICY_TEXT } from "../editing/policy.ts";
 import { type DocLock, editability, ensureDoc, loadDoc } from "../editing/store.ts";
 import { authorsFor, visibleSources } from "../editing/suggestions.ts";
 import { ApiError } from "../http/errors.ts";
@@ -229,7 +229,11 @@ export async function readBoard(
   if (options.draft && options.version !== undefined)
     throw new ApiError("invalid", "Read the draft or a version, not both.");
   if (options.draft && !canEdit)
-    throw new ApiError("forbidden", "Reading the draft needs the edit right and scope.");
+    throw new ApiError(
+      "forbidden",
+      missingEditScope(caller, artifact) ? POLICY_TEXT.scope : "Reading the draft needs the edit right.",
+      missingEditScope(caller, artifact) ? { scope: "edit" } : {},
+    );
   if (options.draft) {
     const state = (await editability(deps, artifact)) as Awaited<ReturnType<typeof editability>> & {
       kind?: string;
