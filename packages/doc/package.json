@@ -22,8 +22,8 @@
   },
   "dependencies": {
     "@artifacts/schema": "workspace:*",
-    "lib0": "0.2.119",
-    "prosemirror-model": "1.25.12",
+    "lib0": "0.2.120",
+    "prosemirror-model": "1.25.13",
     "prosemirror-state": "1.4.4",
     "prosemirror-tables": "1.8.5",
     "prosemirror-transform": "1.12.5",
