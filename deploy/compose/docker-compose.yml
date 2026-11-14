@@ -81,7 +81,7 @@ services:
     logging: *logging
 
   seaweedfs:
-    image: chrislusf/seaweedfs:4.50
+    image: chrislusf/seaweedfs:4.53
     restart: unless-stopped
     # weed ignores SIGTERM as PID 1, so a stop waited ten seconds and then killed it mid-write.
     init: true
